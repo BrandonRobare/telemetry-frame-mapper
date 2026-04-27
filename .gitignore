@@ -1,0 +1,45 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+dist/
+build/
+*.egg-info/
+.venv/
+venv/
+
+# Local secrets and machine config
+.env
+.env.*
+.creds.json
+*.key
+*.pem
+
+# Drone media and flight data
+*.MP4
+*.mp4
+*.MOV
+*.mov
+*.SRT
+*.srt
+*.JPG_original
+*.jpg_original
+FlightRecord_*.txt
+extracted*/
+*_geotagged/
+frame_geotags.csv
+exiftool_geotags.args
+
+# WebODM/Desktop install data
+resources/app/data/
+resources/app/logs/
+resources/app/apps/
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
