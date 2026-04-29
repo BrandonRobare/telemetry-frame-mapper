@@ -11,7 +11,6 @@ Open: http://localhost:7000
 """
 import http.server
 import json
-import os
 import queue
 import re
 import threading
@@ -252,7 +251,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         # Send initial state immediately
         try:
             payload = json.dumps(get_status(), ensure_ascii=False)
-            self.wfile.write(f'event: statusUpdate\ndata: {payload}\n\n'.encode('utf-8'))
+            self.wfile.write(f'event: statusUpdate\ndata: {payload}\n\n'.encode())
             self.wfile.flush()
         except Exception:
             with _sub_lock:
@@ -289,10 +288,10 @@ if __name__ == '__main__':
     t.start()
 
     server = http.server.ThreadingHTTPServer(('', PORT), _Handler)
-    print(f'\n  DroneGIS Dev Dashboard')
+    print('\n  DroneGIS Dev Dashboard')
     print(f'  http://localhost:{PORT}')
     print(f'  Plan: {PLAN_PATH}')
-    print(f'  Edit checkboxes in the plan file to see live updates.\n')
+    print('  Edit checkboxes in the plan file to see live updates.\n')
     print('  Press Ctrl-C to stop.\n')
     try:
         server.serve_forever()
