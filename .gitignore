@@ -9,8 +9,8 @@ htmlcov/
 dist/
 build/
 *.egg-info/
-.venv/
-venv/
+.venv*
+venv
 
 # Local secrets and machine config
 .env
@@ -39,6 +39,16 @@ resources/app/data/
 resources/app/logs/
 resources/app/apps/
 *.log
+
+# Local app data
+imports/
+processed/
+exports/
+data/*.db
+
+# Internal planning/workspace files
+.internal/
+internal/
 
 # OS files
 .DS_Store
