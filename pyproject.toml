@@ -32,6 +32,9 @@ dev = [
   "ruff>=0.4"
 ]
 
+[project.scripts]
+drone-video-geotagger = "drone_video_geotagger.cli:main"
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/drone_video_geotagger"]
 
