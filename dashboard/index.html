@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DroneGIS · Dev Dashboard</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<!-- header -->
+<header>
+  <span class="logo">🚁 DroneGIS</span>
+  <span class="logo-sub">Dev Dashboard</span>
+  <div class="live-badge">
+    <div class="live-dot" id="liveDot"></div>
+    <span class="live-label" id="liveLabel">connecting…</span>
+  </div>
+  <div class="header-right">
+    <span class="clock" id="clock"></span>
+  </div>
+</header>
+
+<!-- progress bar -->
+<div class="progress-bar-section">
+  <div class="progress-stats" id="progressStats">
+    <div class="stat"><span class="stat-val" style="color:var(--text-3)">Loading…</span></div>
+  </div>
+  <div class="progress-track">
+    <div class="progress-fill" id="progressFill"></div>
+  </div>
+</div>
+
+<!-- body -->
+<div class="body-area">
+
+  <!-- sidebar -->
+  <nav class="sidebar" id="sidebar">
+    <div class="sidebar-hd">Tasks</div>
+  </nav>
+
+  <!-- main content -->
+  <div class="main">
+    <div class="error-banner" id="errorBanner"></div>
+
+    <div class="tab-bar">
+      <button class="tab-btn active" id="tabProgress" onclick="showTab('progress')">📊 Progress</button>
+      <button class="tab-btn"        id="tabDocs"     onclick="showTab('docs')">📄 Docs</button>
+    </div>
+
+    <!-- progress view -->
+    <div id="viewProgress">
+      <div class="task-grid" id="taskGrid">
+        <div style="color:var(--text-3);padding:20px">Loading tasks…</div>
+      </div>
+    </div>
+
+    <!-- docs view -->
+    <div id="viewDocs" style="display:none">
+      <div class="docs-list" id="docsList">
+        <div class="doc-empty">Loading…</div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- celebration overlay -->
+<div class="celebrate" id="celebrate">
+  <div class="celebrate-msg" id="celebrateMsg"></div>
+</div>
+
+<script>
+// state
+let tasks     = [];
+let summary   = {};
+let expanded  = new Set();
+let prevDone  = {};
+let activeTab = 'progress';
+let activeSidebarNum = null;
+
+// clock
+function updateClock() {
+  document.getElementById('clock').textContent =
+    new Date().toLocaleTimeString('en-US', { hour12: false });
+}
+setInterval(updateClock, 1000);
+updateClock();
+
+// tab switching
+function showTab(tab) {
+  activeTab = tab;
+  document.getElementById('tabProgress').classList.toggle('active', tab === 'progress');
+  document.getElementById('tabDocs').classList.toggle('active',     tab === 'docs');
+  document.getElementById('viewProgress').style.display = tab === 'progress' ? '' : 'none';
+  document.getElementById('viewDocs').style.display     = tab === 'docs'     ? '' : 'none';
+  if (tab === 'docs') renderDocs();
+}
+
+// render
+function applyUpdate(data) {
+  if (data.error) {
+    const b = document.getElementById('errorBanner');
+    b.textContent = data.error;
+    b.classList.add('visible');
+  }
+
+  const flash = detectFlash(data.tasks);
+  checkCelebration(data.tasks);
+
+  tasks   = data.tasks   || [];
+  summary = data.summary || {};
+
+  tasks.forEach(t => { prevDone[t.number] = t.progress.done; });
+
+  renderHeader();
+  renderSidebar();
+  if (activeTab === 'progress') renderGrid(flash);
+  if (activeTab === 'docs')     renderDocs();
+}
+
+// flash detection
+function detectFlash(incoming) {
+  const flash = {};
+  incoming.forEach(t => {
+    const prev = prevDone[t.number];
+    if (prev !== undefined && t.progress.done > prev) {
+      flash[t.number] = t.status;
+    }
+  });
+  return flash;
+}
+
+// celebration
+let celebrated = false;
+function checkCelebration(incoming) {
+  if (celebrated) return;
+  const total    = incoming.length;
+  const complete = incoming.filter(t => t.status === 'complete').length;
+  if (total > 0 && complete === total) {
+    celebrated = true;
+    showCelebration('🎉 All tasks complete! DroneGIS is built.');
+  }
+}
+
+function showCelebration(msg) {
+  const el = document.getElementById('celebrateMsg');
+  el.textContent = msg;
+  el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), 4000);
+}
+
+// header stats
+function renderHeader() {
+  const s = summary;
+  if (!s.total_tasks) return;
+
+  const stepPct = s.total_steps > 0
+    ? (s.done_steps / s.total_steps * 100).toFixed(1)
+    : '0.0';
+
+  document.getElementById('progressFill').style.width = stepPct + '%';
+
+  document.getElementById('progressStats').innerHTML = `
+    <div class="stat">
+      <span>Tasks&nbsp;complete:</span>
+      <span class="stat-val done">${s.complete_tasks}</span>
+      <span>&nbsp;/&nbsp;${s.total_tasks}</span>
+    </div>
+    <div class="stat">
+      <span>In&nbsp;progress:</span>
+      <span class="stat-val prog">${s.in_progress_tasks}</span>
+    </div>
+    <div class="stat">
+      <span>Steps:</span>
+      <span class="stat-val done">${s.done_steps}</span>
+      <span>&nbsp;/&nbsp;${s.total_steps}</span>
+    </div>
+    <div class="stat">
+      <span style="color:var(--cyan)">${stepPct}%</span>
+    </div>
+  `;
+}
+
+// sidebar
+function renderSidebar() {
+  const sb  = document.getElementById('sidebar');
+  const hd  = sb.querySelector('.sidebar-hd').outerHTML;
+  sb.innerHTML = hd + tasks.map(t => {
+    const truncated = t.name.length > 20 ? t.name.slice(0, 19) + '…' : t.name;
+    return `
+      <div class="sidebar-item ${activeSidebarNum === t.number ? 'active' : ''}"
+           data-status="${t.status}"
+           onclick="goToCard('${t.number}')">
+        <div class="s-dot" data-status="${t.status}"></div>
+        <span>#${t.number}&nbsp;${truncated}</span>
+        ${t.codex ? '<span style="color:var(--purple);font-size:9px;margin-left:auto">🤖</span>' : ''}
+      </div>
+    `;
+  }).join('');
+}
+
+function goToCard(num) {
+  activeSidebarNum = num;
+  if (activeTab !== 'progress') showTab('progress');
+  renderSidebar();
+  const el = document.getElementById('card-' + num);
+  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+// task grid
+function renderGrid(flash) {
+  const grid = document.getElementById('taskGrid');
+  grid.innerHTML = tasks.map(t => cardHTML(t)).join('');
+
+  expanded.forEach(num => {
+    const el = document.getElementById('card-' + num);
+    if (el) el.classList.add('expanded');
+  });
+
+  Object.entries(flash).forEach(([num, status]) => {
+    const el = document.getElementById('card-' + num);
+    if (!el) return;
+    const cls = status === 'complete' ? 'flash-done' : 'flash-active';
+    el.classList.add(cls);
+    el.addEventListener('animationend', () => el.classList.remove(cls), { once: true });
+  });
+}
+
+function cardHTML(t) {
+  const pct = t.progress.total > 0
+    ? (t.progress.done / t.progress.total * 100).toFixed(1)
+    : '0';
+
+  const statusLabel = { complete: 'DONE ✓', 'in-progress': '▶ ACTIVE', pending: 'PENDING' }[t.status] || '?';
+  const badgeCls    = { complete: 'badge-complete', 'in-progress': 'badge-in-progress', pending: 'badge-pending' }[t.status];
+
+  const filesToShow  = t.files.slice(0, 5);
+  const fileOverflow = t.files.length > 5 ? t.files.length - 5 : 0;
+  const filesHTML    = filesToShow.length > 0
+    ? `<div class="card-files">
+        ${filesToShow.map(f => `<span class="file-tag" title="${f}">${f.split('/').pop()}</span>`).join('')}
+        ${fileOverflow > 0 ? `<span class="file-tag">+${fileOverflow} more</span>` : ''}
+       </div>`
+    : '';
+
+  const stepsHTML = t.steps.length > 0
+    ? `<div class="card-steps">
+        ${t.steps.map(s => `
+          <div class="step ${s.checked ? 'done' : ''}">
+            <span class="step-icon">${s.checked ? '✅' : '⬜'}</span>
+            <span>${s.label}</span>
+          </div>`).join('')}
+       </div>
+       <div class="expand-hint">${expanded.has(t.number) ? '▲ collapse' : '▼ steps'}</div>`
+    : '';
+
+  return `
+    <div class="card" id="card-${t.number}" data-status="${t.status}"
+         onclick="toggleCard('${t.number}')">
+      <div class="card-hd">
+        <span class="card-num">#${t.number}</span>
+        <span class="card-name">${t.name}</span>
+        <div class="card-badges">
+          ${t.codex ? '<span class="badge badge-codex">🤖 Codex</span>' : ''}
+          <span class="badge ${badgeCls}">${statusLabel}</span>
+        </div>
+      </div>
+      <div class="card-prog">
+        <div class="card-track">
+          <div class="card-fill" style="width:${pct}%"></div>
+        </div>
+        <div class="card-prog-label">${t.progress.done}&nbsp;/&nbsp;${t.progress.total}&nbsp;steps</div>
+      </div>
+      ${filesHTML}
+      ${stepsHTML}
+    </div>
+  `;
+}
+
+function toggleCard(num) {
+  if (expanded.has(num)) {
+    expanded.delete(num);
+  } else {
+    expanded.add(num);
+  }
+  renderGrid({});
+}
+
+// docs view
+function renderDocs() {
+  const visible = tasks.filter(t => t.status !== 'pending');
+  const list    = document.getElementById('docsList');
+
+  if (visible.length === 0) {
+    list.innerHTML = '<div class="doc-empty">No tasks started yet.<br>Check off steps in the plan file to populate docs here.</div>';
+    return;
+  }
+
+  list.innerHTML = visible.map(t => `
+    <div class="doc-card" data-status="${t.status}">
+      <div class="doc-title">
+        #${t.number} — ${t.name}${t.codex ? ' 🤖' : ''}
+      </div>
+      <div class="doc-meta">
+        ${t.progress.done}&nbsp;/&nbsp;${t.progress.total} steps complete
+        &nbsp;·&nbsp;
+        <span style="color:${t.status === 'complete' ? 'var(--emerald)' : 'var(--amber)'}">
+          ${t.status === 'complete' ? '✅ Done' : '▶ In progress'}
+        </span>
+      </div>
+      ${t.files.length > 0
+        ? `<div class="doc-files">
+            ${t.files.map(f => `<span class="file-tag" title="${f}">${f}</span>`).join('')}
+           </div>`
+        : '<div style="color:var(--text-3);font-size:10px">No file paths listed</div>'
+      }
+    </div>
+  `).join('');
+}
+
+// SSE
+let evtSource = null;
+
+function connect() {
+  if (evtSource) { try { evtSource.close(); } catch(_) {} }
+
+  evtSource = new EventSource('/api/events');
+
+  evtSource.addEventListener('statusUpdate', e => {
+    try {
+      applyUpdate(JSON.parse(e.data));
+    } catch (err) {
+      console.error('Dashboard parse error:', err);
+    }
+  });
+
+  evtSource.onopen = () => {
+    document.getElementById('liveDot').className   = 'live-dot connected';
+    document.getElementById('liveLabel').className = 'live-label connected';
+    document.getElementById('liveLabel').textContent = '● LIVE';
+  };
+
+  evtSource.onerror = () => {
+    document.getElementById('liveDot').className   = 'live-dot';
+    document.getElementById('liveLabel').className = 'live-label';
+    document.getElementById('liveLabel').textContent = 'reconnecting…';
+    evtSource.close();
+    setTimeout(connect, 3000);
+  };
+}
+
+connect();
+</script>
+</body>
+</html>
