@@ -54,6 +54,9 @@ data/*.db
 # Frontend
 node_modules/
 
+# Git worktrees
+.worktrees/
+
 # Internal planning/workspace files
 .internal/
 internal/
