@@ -14,7 +14,10 @@ FOV_H, FOV_V = 83, 53
 
 def test_footprint_returns_required_keys():
     result = compute_footprint(LAT, LON, ALT_M, FOV_H, FOV_V, None, TARGET_CRS)
-    for key in ["geom_wkt", "geom_geojson", "ground_width_m", "ground_height_m", "heading_estimated"]:
+    expected_keys = [
+        "geom_wkt", "geom_geojson", "ground_width_m", "ground_height_m", "heading_estimated"
+    ]
+    for key in expected_keys:
         assert key in result
 
 

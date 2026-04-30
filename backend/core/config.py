@@ -47,7 +47,7 @@ class AppConfig:
 
 def load_config(path: str = "config.yaml") -> AppConfig:
     try:
-        with open(path, "r") as f:
+        with open(path) as f:
             data = yaml.safe_load(f) or {}
     except FileNotFoundError:
         data = {}
