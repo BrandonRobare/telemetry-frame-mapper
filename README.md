@@ -4,6 +4,25 @@ Geotags DJI drone video frames with GPS EXIF metadata for WebODM/OpenDroneMap pr
 
 DJI videos can store GPS telemetry in an embedded subtitle track. Extracted still frames do not always keep that location data. This tool reads the DJI telemetry, lines it up with the extracted frame sequence, and writes GPS EXIF tags into the JPG files.
 
+This repository is a monorepo containing two components:
+
+- **CLI** (`src/drone_video_geotagger/`) — standalone command-line geotagging tool
+- **Backend** (`backend/`) — FastAPI REST API for image import, quality analysis, coverage tracking, and mission planning
+
+## Repository layout
+
+```
+backend/          FastAPI app (API server, DB models, services)
+src/              CLI package (drone-video-geotagger command)
+tests/            pytest suite covering both components
+dashboard/        Dev-time status dashboard (stdlib only)
+docs/             Architecture and planning docs
+data/             SQLite database (gitignored)
+imports/          Drop folder for raw images and flight logs (gitignored)
+processed/        Thumbnails and processed outputs (gitignored)
+exports/          KML/GPX mission plan exports (gitignored)
+```
+
 ## Features
 
 - Extracts DJI SRT telemetry from an MP4 with `ffmpeg`, or reads an existing `.srt` file.
@@ -11,20 +30,41 @@ DJI videos can store GPS telemetry in an embedded subtitle track. Extracted stil
 - Writes GPS EXIF tags with `exiftool`.
 - Creates an audit CSV so you can inspect the frame timing and coordinates.
 - Keeps raw videos, flight logs, and generated image folders out of git.
+- REST API for image import, quality scoring, ground footprint computation, coverage analysis, and mission planning (Phase 2).
 
 ## Install
+
+### CLI only
 
 ```bash
 python -m pip install .
 ```
 
-For development:
+For development (adds pytest and ruff):
 
 ```bash
 python -m pip install ".[dev]"
 ```
 
 The CLI expects `ffmpeg` and `exiftool` on your PATH. You can also pass their paths with `--ffmpeg` and `--exiftool`.
+
+### Backend
+
+```bash
+pip install -r backend/requirements.txt
+```
+
+The backend requires no external binaries. It creates a SQLite database at `data/drone_mapping.db` on first run (path overridable via `DATABASE_URL` env var).
+
+To start the API server:
+
+```bash
+uvicorn backend.main:app --reload
+```
+
+The API is then available at `http://localhost:8000`. Interactive docs at `http://localhost:8000/docs`.
+
+Optional: copy `config.yaml.example` to `config.yaml` and adjust mission parameters (altitude, FOV, overlap percentages, target CRS) before starting the server.
 
 ## Usage
 
