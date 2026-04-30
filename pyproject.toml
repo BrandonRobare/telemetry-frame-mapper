@@ -48,3 +48,4 @@ select = ["E", "F", "I", "UP", "B"]
 [tool.pytest.ini_options]
 addopts = "-s"
 testpaths = ["tests"]
+pythonpath = ["."]
