@@ -41,10 +41,18 @@ resources/app/apps/
 *.log
 
 # Local app data
-imports/
-processed/
-exports/
+imports/*
+!imports/.gitkeep
+processed/**
+!processed/thumbs/
+!processed/thumbs/.gitkeep
+exports/*
+!exports/.gitkeep
 data/*.db
+!data/.gitkeep
+
+# Frontend
+node_modules/
 
 # Internal planning/workspace files
 .internal/
