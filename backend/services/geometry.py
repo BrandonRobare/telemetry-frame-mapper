@@ -3,9 +3,9 @@ from __future__ import annotations
 import json
 import math
 
+from pyproj import Transformer
 from shapely.affinity import rotate
 from shapely.geometry import Polygon, mapping
-from pyproj import Transformer
 
 
 def compute_footprint(

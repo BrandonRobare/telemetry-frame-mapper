@@ -20,7 +20,9 @@ class Session(Base):
     notes = Column(Text)
     images = relationship("Image", back_populates="session", cascade="all, delete-orphan")
     flight_logs = relationship("FlightLog", back_populates="session", cascade="all, delete-orphan")
-    log_entries = relationship("SessionLogEntry", back_populates="session", cascade="all, delete-orphan")
+    log_entries = relationship(
+        "SessionLogEntry", back_populates="session", cascade="all, delete-orphan"
+    )
 
 
 class Image(Base):
@@ -46,7 +48,9 @@ class Image(Base):
     usable = Column(Boolean, default=True)
     notes = Column(Text)
     session = relationship("Session", back_populates="images")
-    footprint = relationship("Footprint", back_populates="image", uselist=False, cascade="all, delete-orphan")
+    footprint = relationship(
+        "Footprint", back_populates="image", uselist=False, cascade="all, delete-orphan"
+    )
 
 
 class Footprint(Base):
@@ -71,7 +75,9 @@ class FlightLog(Base):
     point_count = Column(Integer, default=0)
     uploaded_at = Column(DateTime, default=datetime.utcnow)
     session = relationship("Session", back_populates="flight_logs")
-    points = relationship("FlightLogPoint", back_populates="flight_log", cascade="all, delete-orphan")
+    points = relationship(
+        "FlightLogPoint", back_populates="flight_log", cascade="all, delete-orphan"
+    )
 
 
 class FlightLogPoint(Base):
