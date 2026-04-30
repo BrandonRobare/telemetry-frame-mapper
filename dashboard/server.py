@@ -18,7 +18,7 @@ import time
 from pathlib import Path
 
 PORT = 7000
-PLAN_PATH = Path(__file__).parent.parent / "docs/superpowers/plans/2026-04-26-drone-mapping-mvp.md"
+PLAN_PATH = Path(__file__).parent.parent / ".internal/docs/superpowers/plans/2026-04-26-drone-mapping-mvp.md"
 HTML_PATH  = Path(__file__).parent / "index.html"
 
 # markdown parser

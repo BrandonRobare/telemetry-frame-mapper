@@ -11,14 +11,20 @@ BACKEND_PID=$!
 echo "Backend PID: $BACKEND_PID"
 cd ..
 
-echo "Starting frontend..."
-cd frontend
-npm install
-npm run dev &
-FRONTEND_PID=$!
-echo "Frontend PID: $FRONTEND_PID"
-cd ..
-
-echo "Open http://localhost:5173"
-echo "Press Ctrl+C to stop both servers"
-wait $BACKEND_PID $FRONTEND_PID
+if [ -d frontend ]; then
+  echo "Starting frontend..."
+  cd frontend
+  npm install
+  npm run dev &
+  FRONTEND_PID=$!
+  echo "Frontend PID: $FRONTEND_PID"
+  cd ..
+  echo "Open http://localhost:5173"
+  echo "Press Ctrl+C to stop both servers"
+  wait $BACKEND_PID $FRONTEND_PID
+else
+  echo "frontend/ not found — skipping frontend dev server"
+  echo "Backend running at http://localhost:8000"
+  echo "Press Ctrl+C to stop"
+  wait $BACKEND_PID
+fi
