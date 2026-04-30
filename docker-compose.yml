@@ -1,0 +1,20 @@
+# docker-compose.yml — stub, completed in Task 25
+version: "3.9"
+services:
+  backend:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./imports:/app/imports
+      - ./processed:/app/processed
+      - ./exports:/app/exports
+      - ./data:/app/data
+      - ./config.yaml:/app/config.yaml
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "5173:5173"
+    depends_on:
+      - backend

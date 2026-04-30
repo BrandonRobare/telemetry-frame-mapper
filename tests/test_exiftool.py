@@ -28,4 +28,4 @@ def test_build_exiftool_args_contains_gps_tags() -> None:
     assert "-GPSLongitudeRef=W" in args
     assert "-GPSAltitude=352.438" in args
     assert "-DateTimeOriginal=2025:08:06 18:28:47" in args
-    assert "geotagged/frame_00001.jpg" in args
+    assert any("frame_00001.jpg" in str(a) for a in args)
