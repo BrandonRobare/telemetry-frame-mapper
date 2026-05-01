@@ -35,7 +35,7 @@ backend = [
   "pillow==12.2.0",
   "piexif==1.1.3",
   "opencv-python-headless==4.9.0.80",
-  "numpy<2",
+  "numpy<3",
   "shapely==2.0.4",
   "geopandas==1.1.2",
   "pyproj==3.6.1",
