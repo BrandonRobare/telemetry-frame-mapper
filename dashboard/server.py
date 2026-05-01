@@ -209,15 +209,15 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         elif path == '/api/events':
             self._sse_stream()
         else:
-            # Serve other static files from the dashboard directory
-            STATIC_TYPES = {'.css': 'text/css', '.js': 'application/javascript',
-                            '.svg': 'image/svg+xml', '.png': 'image/png'}
+            # Serve static files using an explicit allowlist — user input (path)
+            # only touches a dict key lookup and never reaches the filesystem.
+            STATIC_FILES = {
+                'styles.css': 'text/css',
+            }
             dashboard_dir = Path(__file__).parent.resolve()
-            static_path = (dashboard_dir / path.lstrip('/')).resolve()
-            ext = static_path.suffix.lower()
-            if (static_path.is_relative_to(dashboard_dir)
-                    and static_path.exists() and ext in STATIC_TYPES):
-                self._serve_file(static_path, STATIC_TYPES[ext])
+            filename = Path(path.lstrip('/')).name  # strip any directory components
+            if filename in STATIC_FILES:
+                self._serve_file(dashboard_dir / filename, STATIC_FILES[filename])
             else:
                 self.send_error(404, 'Not found')
 
