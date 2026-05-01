@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import io
 import json
 import socket
 import threading
@@ -9,9 +8,8 @@ from pathlib import Path
 
 import pytest
 
-# ---------------------------------------------------------------------------
-# Helpers to spin up the real _Handler on a random port
-# ---------------------------------------------------------------------------
+from dashboard.server import parse_plan
+
 
 def _free_port() -> int:
     with socket.socket() as s:
@@ -20,8 +18,6 @@ def _free_port() -> int:
 
 
 class _Server(threading.Thread):
-    """Thin wrapper that starts the dashboard HTTP server in a background thread."""
-
     def __init__(self, port: int):
         super().__init__(daemon=True)
         import http.server
@@ -51,13 +47,6 @@ def _get(port: int, path: str):
     return conn.getresponse()
 
 
-# ---------------------------------------------------------------------------
-# parse_plan unit tests
-# ---------------------------------------------------------------------------
-
-from dashboard.server import parse_plan, _finalize
-
-
 PLAN_SAMPLE = """\
 ## Task 1: Setup
 
@@ -78,8 +67,7 @@ PLAN_SAMPLE = """\
 
 
 def test_parse_plan_task_count():
-    tasks = parse_plan(PLAN_SAMPLE)
-    assert len(tasks) == 2
+    assert len(parse_plan(PLAN_SAMPLE)) == 2
 
 
 def test_parse_plan_status_in_progress():
@@ -107,13 +95,7 @@ def test_parse_plan_files():
 
 
 def test_parse_plan_no_duplicate_files():
-    md = """\
-## Task 1: Dup
-
-**Files:** `foo.py`, `foo.py`
-
-- [x] **Step 1**
-"""
+    md = "## Task 1: Dup\n\n**Files:** `foo.py`, `foo.py`\n\n- [x] **Step 1**\n"
     tasks = parse_plan(md)
     assert tasks[0]['files'].count('foo.py') == 1
 
@@ -123,22 +105,15 @@ def test_parse_plan_empty():
 
 
 def test_parse_plan_pending_when_no_steps():
-    md = "## Task 1: Empty\n\n**Files:** `x.py`\n"
-    tasks = parse_plan(md)
+    tasks = parse_plan("## Task 1: Empty\n\n**Files:** `x.py`\n")
     assert tasks[0]['status'] == 'pending'
     assert tasks[0]['progress'] == {'done': 0, 'total': 0}
 
 
-# ---------------------------------------------------------------------------
-# Static file serving — security (path traversal) and happy path
-# ---------------------------------------------------------------------------
-
-def test_styles_css_served(server, tmp_path, monkeypatch):
-    """styles.css in the dashboard dir must be served with correct content-type."""
+def test_styles_css_served(server):
     import dashboard.server as ds
-    css = (Path(ds.__file__).parent / 'styles.css')
     resp = _get(server, '/styles.css')
-    if css.exists():
+    if (Path(ds.__file__).parent / 'styles.css').exists():
         assert resp.status == 200
         assert 'text/css' in resp.getheader('Content-Type', '')
     else:
@@ -146,30 +121,21 @@ def test_styles_css_served(server, tmp_path, monkeypatch):
 
 
 def test_unknown_file_returns_404(server):
-    resp = _get(server, '/nonexistent.js')
-    assert resp.status == 404
+    assert _get(server, '/nonexistent.js').status == 404
 
 
 def test_path_traversal_blocked(server):
-    """Attempts to escape the dashboard directory must return 404, not file contents."""
-    for evil in (
-        '/../../../etc/passwd',
-        '/..%2F..%2Fetc%2Fpasswd',
-        '/styles.css/../../../etc/passwd',
-    ):
-        resp = _get(server, evil)
-        assert resp.status == 404, f"Expected 404 for {evil!r}, got {resp.status}"
+    for path in ('/../../../etc/passwd', '/..%2F..%2Fetc%2Fpasswd', '/styles.css/../../../etc/passwd'):
+        assert _get(server, path).status == 404
 
 
-def test_only_allowlisted_extensions_served(server):
-    """Files with extensions not in the allowlist must 404 even if they exist."""
-    resp = _get(server, '/server.py')
-    assert resp.status == 404
+def test_non_allowlisted_file_blocked(server):
+    assert _get(server, '/server.py').status == 404
 
 
 def test_root_returns_html(server):
-    resp = _get(server, '/')
     import dashboard.server as ds
+    resp = _get(server, '/')
     if ds.HTML_PATH.exists():
         assert resp.status == 200
         assert 'text/html' in resp.getheader('Content-Type', '')
@@ -178,11 +144,10 @@ def test_root_returns_html(server):
 
 
 def test_api_status_returns_json(server, monkeypatch):
-    """GET /api/status returns valid JSON even when the plan file is missing."""
     import dashboard.server as ds
     monkeypatch.setattr(ds, 'PLAN_PATH', Path('/nonexistent/plan.md'))
     resp = _get(server, '/api/status')
     assert resp.status == 200
     body = json.loads(resp.read())
     assert 'tasks' in body
-    assert 'error' in body  # plan file missing → error key present
+    assert 'error' in body
