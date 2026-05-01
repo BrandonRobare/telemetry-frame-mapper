@@ -86,7 +86,7 @@ export function useImportSession() {
       addToast('Import failed', 'error')
       setImportingSessionId(null)
     }
-  }, [progressQuery.data?.status])
+  }, [progressQuery.data?.status, queryClient, addToast])
 
   const mutation = useMutation({
     mutationFn: (body: { folder_path: string; name: string }) =>
