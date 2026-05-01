@@ -71,7 +71,7 @@ def run_coverage_analysis(
     return cov_run
 
 
-@router.get("/results")
+@router.get("/results", response_model=Optional[CoverageRunOut])
 def get_coverage_results(session_id: int, db: DBSession = Depends(get_db)):
     # Find the most recent CoverageRun that includes this session_id
     run = (
