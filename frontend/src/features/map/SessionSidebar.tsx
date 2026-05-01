@@ -37,7 +37,7 @@ export default function SessionSidebar({ session, coverage, frameCount }: Props)
         style={{ width: 20, background: 'var(--surface)', borderLeft: '1px solid var(--border)', color: 'var(--text-muted)' }}
         title="Expand sidebar"
       >
-        ›
+        ‹
       </button>
     )
   }
@@ -68,21 +68,6 @@ export default function SessionSidebar({ session, coverage, frameCount }: Props)
       className="shrink-0 flex flex-col overflow-y-auto"
       style={{ width: 200, background: 'var(--surface)', borderLeft: '1px solid var(--border)' }}
     >
-      {/* Collapse button */}
-      <button
-        onClick={toggleSidebar}
-        className="absolute right-[200px] cursor-pointer border-none rounded-l"
-        style={{
-          top: '50%', transform: 'translateY(-50%)',
-          background: 'var(--surface)', border: '1px solid var(--border)',
-          borderRight: 'none', width: 14, height: 36,
-          color: 'var(--text-muted)', fontSize: 10,
-        }}
-        title="Collapse sidebar"
-      >
-        ›
-      </button>
-
       {/* Session header */}
       <div className="p-3" style={{ borderBottom: '1px solid var(--border)' }}>
         <div className="text-xs uppercase tracking-wide mb-2" style={{ color: 'var(--text-muted)' }}>

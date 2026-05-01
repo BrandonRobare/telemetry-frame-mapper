@@ -14,7 +14,7 @@ export default function LayerControls() {
     <div
       className="absolute top-3 left-3 z-[1000] rounded-lg"
       style={{
-        background: 'rgba(13,17,23,0.92)',
+        background: 'color-mix(in srgb, var(--surface) 92%, transparent)',
         border: '1px solid var(--border)',
         padding: '10px 12px',
         minWidth: 140,

@@ -65,7 +65,7 @@ export default function LeafletMapView({ footprints, coverage, isLoading, error 
   const gapGeoJSON = coverage?.gap_geojson ? JSON.parse(coverage.gap_geojson) : null
 
   return (
-    <div className="relative flex-1">
+    <div className="relative w-full h-full">
       {isLoading && (
         <div
           className="absolute inset-0 z-10 flex items-center justify-center"
