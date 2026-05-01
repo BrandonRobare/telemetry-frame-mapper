@@ -1,22 +1,23 @@
 # Drone Video Geotagger
 
-Geotags DJI drone video frames with GPS EXIF metadata for WebODM/OpenDroneMap processing.
+Geotags DJI drone video frames with GPS EXIF metadata for WebODM/OpenDroneMap processing, with a web UI for visualising coverage and planning missions.
 
 DJI videos can store GPS telemetry in an embedded subtitle track. Extracted still frames do not always keep that location data. This tool reads the DJI telemetry, lines it up with the extracted frame sequence, and writes GPS EXIF tags into the JPG files.
 
-This repository is a monorepo containing two components:
+This repository is a monorepo with three components:
 
 - **CLI** (`src/drone_video_geotagger/`) — standalone command-line geotagging tool
 - **Backend** (`backend/`) — FastAPI REST API for image import, quality analysis, coverage tracking, and mission planning
+- **Frontend** (`frontend/`) — React web app with an interactive map for visualising footprints, coverage, and session stats
 
 ## Repository layout
 
 ```
-backend/          FastAPI app (API server, DB models, services)
 src/              CLI package (drone-video-geotagger command)
-tests/            pytest suite covering both components
-dashboard/        Dev-time status dashboard (stdlib only)
-docs/             Architecture and planning docs
+backend/          FastAPI app (API server, DB models, services)
+frontend/         Vite + React frontend (Map tab + 4 placeholder tabs)
+tests/            pytest suite (tests/cli/ and tests/backend/)
+dashboard/        Dev-time status dashboard (stdlib only, http://localhost:7000)
 data/             SQLite database (gitignored)
 imports/          Drop folder for raw images and flight logs (gitignored)
 processed/        Thumbnails and processed outputs (gitignored)
@@ -25,48 +26,53 @@ exports/          KML/GPX mission plan exports (gitignored)
 
 ## Features
 
+### CLI
 - Extracts DJI SRT telemetry from an MP4 with `ffmpeg`, or reads an existing `.srt` file.
 - Interpolates latitude, longitude, and relative height for each extracted frame.
 - Writes GPS EXIF tags with `exiftool`.
-- Creates an audit CSV so you can inspect the frame timing and coordinates.
-- Keeps raw videos, flight logs, and generated image folders out of git.
-- REST API for image import, quality scoring, ground footprint computation, coverage analysis, and mission planning (Phase 2).
+- Creates an audit CSV for inspecting frame timing and coordinates.
+
+### Backend
+- REST API for image import, quality scoring (sharpness + brightness via OpenCV), and ground footprint computation (Shapely/UTM).
+- SQLite database via SQLAlchemy (swappable for PostgreSQL via `DATABASE_URL`).
+- Coverage analysis and mission planning services (in progress).
+
+### Frontend (Map tab — live)
+- Interactive Leaflet map with ESRI satellite basemap.
+- Footprint polygons (blue) and coverage overlay (green) toggled per-layer.
+- Session sidebar: stats grid, coverage %, quality flags, Run Coverage Analysis button.
+- Dark/light theme with persistence.
+- GPS Sync, Review, Plan, and Export tabs scaffolded (coming soon).
 
 ## Install
 
-### CLI only
+All Python dependencies are managed through `pyproject.toml` optional extras:
 
 ```bash
-python -m pip install .
+# Everything (CLI + backend + dev tools)
+pip install -e ".[backend,dev]"
+
+# CLI + tests only (no backend dependencies)
+pip install -e ".[dev]"
 ```
 
-For development (adds pytest and ruff):
+The CLI requires `ffmpeg` and `exiftool` on your PATH (or pass `--ffmpeg` / `--exiftool`).
+
+The backend creates a SQLite database at `data/drone_mapping.db` on first run.
+
+### Frontend
 
 ```bash
-python -m pip install ".[dev]"
+cd frontend
+npm install
+npm run dev   # http://localhost:5173
 ```
 
-The CLI expects `ffmpeg` and `exiftool` on your PATH. You can also pass their paths with `--ffmpeg` and `--exiftool`.
-
-### Backend
-
-```bash
-pip install -r backend/requirements.txt
-```
-
-The backend requires no external binaries. It creates a SQLite database at `data/drone_mapping.db` on first run (path overridable via `DATABASE_URL` env var).
-
-To start the API server:
-
-```bash
-uvicorn backend.main:app --reload
-```
-
-The API is then available at `http://localhost:8000`. Interactive docs at `http://localhost:8000/docs`.
-
-Optional: copy `config.yaml.example` to `config.yaml` and adjust mission parameters (altitude, FOV, overlap percentages, target CRS) before starting the server.
+Requires Node 18+.
 
 ## Usage
+
+### CLI — geotag frames
 
 Extract frames from the video first:
 
@@ -74,7 +80,7 @@ Extract frames from the video first:
 ffmpeg -i flight.mp4 -vf fps=8 extracted/frame_%05d.jpg
 ```
 
-Then geotag the extracted JPGs:
+Then geotag:
 
 ```bash
 drone-video-geotagger \
@@ -83,9 +89,9 @@ drone-video-geotagger \
   --takeoff-altitude 236.94
 ```
 
-The command writes geotagged copies to `extracted_geotagged/` by default.
+Writes geotagged copies to `extracted_geotagged/` by default.
 
-If you already have the SRT telemetry:
+If you already have the SRT telemetry file:
 
 ```bash
 drone-video-geotagger \
@@ -96,31 +102,50 @@ drone-video-geotagger \
   --frame-rate 8
 ```
 
-## Inputs
+### Backend
 
-- `--video`: Source DJI video.
-- `--frames`: Folder of extracted JPG frames.
-- `--takeoff-altitude`: Takeoff altitude in meters above sea level.
-- `--srt`: Optional DJI SRT file. If you skip it, the CLI extracts the subtitle track from the video.
-- `--frame-rate`: Optional frame extraction rate. If you skip it, the CLI estimates the rate from the frame count and SRT duration.
+```bash
+uvicorn backend.main:app --reload
+# API at http://localhost:8000
+# Interactive docs at http://localhost:8000/docs
+```
 
-## Outputs
+Optional: copy `config.yaml.example` to `config.yaml` and adjust mission parameters (altitude, FOV, overlap, target CRS).
 
-- Geotagged JPG files.
-- `frame_geotags.csv` with frame index, time offset, latitude, longitude, relative height, GPS altitude, and timestamp.
-- `exiftool_geotags.args`, the generated ExifTool argument file.
+### Dev dashboard
 
-Upload the geotagged JPG folder to WebODM. WebODM reads the EXIF GPS tags during import.
+```bash
+python dashboard/server.py
+# http://localhost:7000 — live task progress + Architecture Reference tab
+```
 
-## Privacy Notes
+## CLI inputs
 
-Do not commit real drone videos, FlightRecord files, extracted frames, SRT files, credentials, or generated geotagged images. The `.gitignore` blocks those files by default. Run `git status --short` before pushing.
+| Flag | Description |
+|---|---|
+| `--video` | Source DJI video (MP4) |
+| `--frames` | Folder of extracted JPG frames |
+| `--takeoff-altitude` | Takeoff altitude in metres above sea level |
+| `--srt` | Optional DJI SRT file (extracted from video if omitted) |
+| `--frame-rate` | Optional frame extraction rate (estimated from SRT if omitted) |
+
+## CLI outputs
+
+- Geotagged JPG files in `<frames>_geotagged/`
+- `frame_geotags.csv` — frame index, time offset, lat/lon, relative and GPS altitude, timestamp
+- `exiftool_geotags.args` — generated ExifTool argument file
+
+Upload the geotagged folder to WebODM; it reads GPS EXIF tags on import.
 
 ## Tests
 
 ```bash
-pytest
-ruff check .
+pytest        # 31 tests (CLI + backend)
+ruff check .  # linter
 ```
 
-The tests use inline strings and temporary paths. They do not include real flight data.
+Tests use inline fixture data and temporary paths — no real flight files required.
+
+## Privacy
+
+Do not commit real drone videos, FlightRecord files, extracted frames, SRT files, or geotagged images. The `.gitignore` blocks those by default. Run `git status --short` before pushing.
