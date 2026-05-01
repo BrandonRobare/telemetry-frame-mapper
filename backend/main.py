@@ -9,6 +9,8 @@ from fastapi.staticfiles import StaticFiles
 
 from backend.db.database import init_db
 from .routers import sessions as sessions_router
+from .routers import target_areas as target_areas_router
+from .routers import coverage as coverage_router
 
 
 @asynccontextmanager
@@ -19,6 +21,8 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Drone Mapping API", version="0.1.0", lifespan=lifespan)
 app.include_router(sessions_router.router)
+app.include_router(target_areas_router.router)
+app.include_router(coverage_router.router)
 
 app.add_middleware(
     CORSMiddleware,
