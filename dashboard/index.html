@@ -46,6 +46,7 @@
     <div class="tab-bar">
       <button class="tab-btn active" id="tabProgress" onclick="showTab('progress')">📊 Progress</button>
       <button class="tab-btn"        id="tabDocs"     onclick="showTab('docs')">📄 Docs</button>
+      <button class="tab-btn"        id="tabArch"     onclick="showTab('arch')">🗺 Architecture</button>
     </div>
 
     <!-- progress view -->
@@ -60,6 +61,76 @@
       <div class="docs-list" id="docsList">
         <div class="doc-empty">Loading…</div>
       </div>
+    </div>
+
+    <!-- architecture reference view -->
+    <div id="viewArch" style="display:none;padding:12px 0">
+
+      <div class="arch-section">
+        <div class="arch-title">Component Tree — Map Tab</div>
+        <pre class="arch-tree">App.tsx  (tab router)
+└─ MapTab.tsx
+   ├─ LeafletMap.tsx
+   │  ├─ FootprintLayer  (GeoJSON, blue)
+   │  ├─ CoverageLayer   (GeoJSON, green)
+   │  └─ FitBounds       (auto-zoom)
+   ├─ LayerControls.tsx  (float top-left)
+   └─ SessionSidebar.tsx
+      ├─ SessionHeader   (name + date)
+      ├─ StatsGrid       (2×2 cards)
+      ├─ CoverageBar     (% + progress)
+      ├─ QualityFlags    (good/blurry/no-gps)
+      └─ Button          (Run Coverage Analysis)</pre>
+      </div>
+
+      <div class="arch-section">
+        <div class="arch-title">Data Flow</div>
+        <div class="arch-flow">
+          <div class="arch-box arch-backend">
+            <div class="arch-box-label">FastAPI Backend :8000</div>
+            <div class="arch-box-routes">GET /sessions/{id}</div>
+            <div class="arch-box-routes">GET /images?session_id=…&amp;has_footprint=true</div>
+            <div class="arch-box-routes">GET /coverage/results?session_id=…</div>
+            <div class="arch-box-routes">POST /coverage/run</div>
+          </div>
+          <div class="arch-arrow">↓ fetch (TanStack Query)</div>
+          <div class="arch-box arch-query">
+            <div class="arch-box-label">Query Hooks  (staleTime 30s)</div>
+            <div class="arch-box-routes">useSession(id)</div>
+            <div class="arch-box-routes">useFootprints(sessionId)</div>
+            <div class="arch-box-routes">useCoverageResult(sessionId)</div>
+          </div>
+          <div class="arch-arrow">↓ reads / writes</div>
+          <div class="arch-box arch-store">
+            <div class="arch-box-label">Zustand — mapStore</div>
+            <div class="arch-box-routes">selectedSessionId · activeLayers</div>
+            <div class="arch-box-routes">theme: 'dark'|'light' · sidebarOpen</div>
+          </div>
+          <div class="arch-arrow">↓ props / hooks</div>
+          <div class="arch-box arch-comp">
+            <div class="arch-box-label">Components</div>
+            <div class="arch-box-routes">LeafletMap · LayerControls · SessionSidebar</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="arch-section">
+        <div class="arch-title">Key Files</div>
+        <table class="arch-table">
+          <thead><tr><th>File</th><th>Role</th></tr></thead>
+          <tbody>
+            <tr><td>frontend/src/features/map/MapTab.tsx</td><td>Top-level Map tab layout</td></tr>
+            <tr><td>frontend/src/features/map/LeafletMap.tsx</td><td>Leaflet map + GeoJSON layers</td></tr>
+            <tr><td>frontend/src/features/map/LayerControls.tsx</td><td>Floating layer toggle panel</td></tr>
+            <tr><td>frontend/src/features/map/SessionSidebar.tsx</td><td>Right sidebar (stats, coverage, flags)</td></tr>
+            <tr><td>frontend/src/features/map/hooks/</td><td>TanStack Query hooks (session, footprints, coverage)</td></tr>
+            <tr><td>frontend/src/shared/stores/mapStore.ts</td><td>Zustand store (session, layers, theme, sidebar)</td></tr>
+            <tr><td>frontend/src/shared/api/client.ts</td><td>Base fetch wrapper</td></tr>
+            <tr><td>frontend/src/types/api.ts</td><td>TypeScript interfaces (Session, Image, Footprint…)</td></tr>
+          </tbody>
+        </table>
+      </div>
+
     </div>
   </div>
 
@@ -92,8 +163,10 @@ function showTab(tab) {
   activeTab = tab;
   document.getElementById('tabProgress').classList.toggle('active', tab === 'progress');
   document.getElementById('tabDocs').classList.toggle('active',     tab === 'docs');
+  document.getElementById('tabArch').classList.toggle('active',     tab === 'arch');
   document.getElementById('viewProgress').style.display = tab === 'progress' ? '' : 'none';
   document.getElementById('viewDocs').style.display     = tab === 'docs'     ? '' : 'none';
+  document.getElementById('viewArch').style.display     = tab === 'arch'     ? '' : 'none';
   if (tab === 'docs') renderDocs();
 }
 

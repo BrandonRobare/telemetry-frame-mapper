@@ -476,3 +476,103 @@ header {
   opacity: 1;
   transform: scale(1);
 }
+
+/* architecture reference tab */
+.arch-section {
+  background: var(--bg-primary);
+  border: 1px solid var(--border-2);
+  border-radius: 6px;
+  padding: 14px;
+  margin-bottom: 10px;
+}
+
+.arch-title {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--text-3);
+  margin-bottom: 10px;
+}
+
+.arch-tree {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 11px;
+  color: var(--cyan);
+  line-height: 1.7;
+  margin: 0;
+  white-space: pre;
+}
+
+.arch-flow {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  align-items: flex-start;
+  max-width: 520px;
+}
+
+.arch-box {
+  width: 100%;
+  border-radius: 5px;
+  padding: 8px 12px;
+  border: 1px solid;
+}
+
+.arch-backend { background: #0a1e0a; border-color: #2ea04355; }
+.arch-query   { background: #0a1020; border-color: #58a6ff44; }
+.arch-store   { background: #1a1200; border-color: #f59e0b44; }
+.arch-comp    { background: #100a20; border-color: #a78bfa44; }
+
+.arch-box-label {
+  font-size: 10px;
+  font-weight: bold;
+  margin-bottom: 4px;
+  color: var(--text-2);
+}
+
+.arch-backend .arch-box-label { color: var(--emerald); }
+.arch-query   .arch-box-label { color: var(--cyan); }
+.arch-store   .arch-box-label { color: var(--amber); }
+.arch-comp    .arch-box-label { color: var(--purple); }
+
+.arch-box-routes {
+  font-size: 10px;
+  color: var(--text-3);
+  font-family: 'Courier New', Courier, monospace;
+  line-height: 1.6;
+}
+
+.arch-arrow {
+  font-size: 10px;
+  color: var(--border-1);
+  padding: 4px 12px;
+  align-self: flex-start;
+}
+
+.arch-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 10px;
+}
+
+.arch-table th {
+  text-align: left;
+  color: var(--text-3);
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border-2);
+  font-weight: normal;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.arch-table td {
+  padding: 4px 8px;
+  color: var(--text-2);
+  border-bottom: 1px solid var(--border-3);
+  line-height: 1.6;
+}
+
+.arch-table td:first-child {
+  color: var(--cyan);
+  font-family: 'Courier New', Courier, monospace;
+}
