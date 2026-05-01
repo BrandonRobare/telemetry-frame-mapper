@@ -42,3 +42,8 @@ def test_coverage_run_no_footprints(client):
 def test_coverage_results(client):
     resp = client.get("/coverage/results?session_id=999999")
     assert resp.status_code == 200  # returns null/empty, not 404
+
+
+def test_delete_target_area_not_found(client):
+    resp = client.delete("/target-areas/999999")
+    assert resp.status_code == 404
