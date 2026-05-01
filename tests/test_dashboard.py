@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import http.server
 import json
 import socket
 import threading
@@ -8,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from dashboard.server import parse_plan
+from dashboard.server import _Handler, parse_plan
 
 
 def _free_port() -> int:
@@ -20,8 +21,6 @@ def _free_port() -> int:
 class _Server(threading.Thread):
     def __init__(self, port: int):
         super().__init__(daemon=True)
-        import http.server
-        from dashboard.server import _Handler
         self.server = http.server.HTTPServer(('127.0.0.1', port), _Handler)
         self.port = port
 
@@ -125,7 +124,12 @@ def test_unknown_file_returns_404(server):
 
 
 def test_path_traversal_blocked(server):
-    for path in ('/../../../etc/passwd', '/..%2F..%2Fetc%2Fpasswd', '/styles.css/../../../etc/passwd'):
+    evil_paths = (
+        '/../../../etc/passwd',
+        '/..%2F..%2Fetc%2Fpasswd',
+        '/styles.css/../../../etc/passwd',
+    )
+    for path in evil_paths:
         assert _get(server, path).status == 404
 
 
