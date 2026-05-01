@@ -209,7 +209,17 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         elif path == '/api/events':
             self._sse_stream()
         else:
-            self.send_error(404, 'Not found')
+            # Serve other static files from the dashboard directory
+            STATIC_TYPES = {'.css': 'text/css', '.js': 'application/javascript',
+                            '.svg': 'image/svg+xml', '.png': 'image/png'}
+            dashboard_dir = Path(__file__).parent.resolve()
+            static_path = (dashboard_dir / path.lstrip('/')).resolve()
+            ext = static_path.suffix.lower()
+            if (static_path.is_relative_to(dashboard_dir)
+                    and static_path.exists() and ext in STATIC_TYPES):
+                self._serve_file(static_path, STATIC_TYPES[ext])
+            else:
+                self.send_error(404, 'Not found')
 
     # helpers
 
