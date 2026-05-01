@@ -119,6 +119,10 @@ def test_styles_css_served(server):
         assert resp.status == 404
 
 
+def test_static_file_requires_exact_route(server):
+    assert _get(server, '/nested/styles.css').status == 404
+
+
 def test_unknown_file_returns_404(server):
     assert _get(server, '/nonexistent.js').status == 404
 
