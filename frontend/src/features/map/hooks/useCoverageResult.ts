@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
-import { CoverageResult } from '../../../../types/api'
-import { get } from '../../../../shared/api/client'
+import type { CoverageResult } from '../../../types/api'
+import { get } from '../../../shared/api/client'
 
 export function useCoverageResult(sessionId: number | null) {
   return useQuery<CoverageResult | null>({

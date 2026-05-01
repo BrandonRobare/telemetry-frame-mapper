@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
-import { Footprint } from '../../../../types/api'
-import { get } from '../../../../shared/api/client'
+import type { Footprint } from '../../../types/api'
+import { get } from '../../../shared/api/client'
 
 export function useFootprints(sessionId: number | null) {
   return useQuery<Footprint[]>({

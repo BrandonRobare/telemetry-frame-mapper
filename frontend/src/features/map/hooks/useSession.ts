@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
-import { Session } from '../../../../types/api'
-import { get } from '../../../../shared/api/client'
+import type { Session } from '../../../types/api'
+import { get } from '../../../shared/api/client'
 
 export function useSession(id: number | null) {
   return useQuery<Session>({
