@@ -10,7 +10,7 @@ from shapely.wkt import loads as wkt_loads
 from sqlalchemy.orm import Session as DBSession
 
 from ..db.database import get_db
-from ..db.models import CoverageRun, Footprint, Image, TargetArea
+from ..db.models import CoverageRun, Footprint, Image, Session as SessionModel, TargetArea
 from ..services.coverage import run_coverage
 
 router = APIRouter(prefix="/coverage", tags=["coverage"])
@@ -34,6 +34,9 @@ def run_coverage_analysis(
     target_area_id: int,
     db: DBSession = Depends(get_db),
 ):
+    session = db.query(SessionModel).filter(SessionModel.id == session_id).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
     target = db.query(TargetArea).filter(TargetArea.id == target_area_id).first()
     if not target:
         raise HTTPException(status_code=404, detail="Target area not found")
@@ -56,6 +59,7 @@ def run_coverage_analysis(
 
     result = run_coverage(footprint_geojsons, target.geom_geojson)
 
+    # session_ids stores a single session_id as string; multi-session not yet supported
     cov_run = CoverageRun(
         target_area_id=target_area_id,
         session_ids=str(session_id),
