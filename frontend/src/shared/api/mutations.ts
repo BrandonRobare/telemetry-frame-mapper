@@ -1,5 +1,6 @@
-import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { post, patch } from './client'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useState, useEffect } from 'react'
+import { get, post, patch } from './client'
 import { useToast } from '../hooks/useToast'
 import type { Session, Image } from '../../types/api'
 
@@ -59,15 +60,46 @@ export function useGeneratePlan() {
 }
 
 export function useImportSession() {
-  const qc = useQueryClient()
+  const queryClient = useQueryClient()
   const { addToast } = useToast()
-  return useMutation({
+  const [importingSessionId, setImportingSessionId] = useState<number | null>(null)
+
+  const progressQuery = useQuery({
+    queryKey: ['session-progress', importingSessionId],
+    queryFn: () => get<{ processed: number; total: number; status: 'running' | 'done' | 'error' }>(
+      `/sessions/${importingSessionId}/progress`
+    ),
+    enabled: importingSessionId !== null,
+    refetchInterval: (query) => {
+      const status = query.state.data?.status
+      return status === 'running' ? 1000 : false
+    },
+  })
+
+  useEffect(() => {
+    if (!progressQuery.data) return
+    if (progressQuery.data.status === 'done') {
+      queryClient.invalidateQueries({ queryKey: ['sessions'] })
+      addToast('Session imported successfully', 'success')
+      setImportingSessionId(null)
+    } else if (progressQuery.data.status === 'error') {
+      addToast('Import failed', 'error')
+      setImportingSessionId(null)
+    }
+  }, [progressQuery.data?.status])
+
+  const mutation = useMutation({
     mutationFn: (body: { folder_path: string; name: string }) =>
       post<Session>('/sessions/import', body),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['sessions'] })
-      addToast('Session imported successfully', 'success')
+    onSuccess: (session) => {
+      setImportingSessionId(session.id)
     },
-    onError: (e: Error) => addToast(e.message, 'error'),
+    onError: () => addToast('Failed to start import', 'error'),
   })
+
+  return {
+    ...mutation,
+    progress: progressQuery.data ?? null,
+    isImporting: importingSessionId !== null,
+  }
 }
