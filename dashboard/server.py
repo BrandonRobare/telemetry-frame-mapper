@@ -20,7 +20,11 @@ from pathlib import Path
 PORT = 7000
 _INTERNAL = Path(__file__).parent.parent / ".internal"
 PLAN_PATH = _INTERNAL / "docs/superpowers/plans/2026-04-26-drone-mapping-mvp.md"
-HTML_PATH  = Path(__file__).parent / "index.html"
+_DASHBOARD_DIR = Path(__file__).parent.resolve()
+HTML_PATH = _DASHBOARD_DIR / "index.html"
+_STATIC_FILES: dict[str, tuple[Path, str]] = {
+    "/styles.css": (_DASHBOARD_DIR / "styles.css", "text/css"),
+}
 
 # markdown parser
 
@@ -201,7 +205,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         pass
 
     def do_GET(self):
-        path = self.path.split('?')[0]  # ignore query string
+        path = self.path.split('?', 1)[0]  # ignore query string
         if path in ('/', '/index.html'):
             self._serve_file(HTML_PATH, 'text/html; charset=utf-8')
         elif path == '/api/status':
@@ -209,13 +213,9 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         elif path == '/api/events':
             self._sse_stream()
         else:
-            STATIC_FILES = {
-                'styles.css': 'text/css',
-            }
-            dashboard_dir = Path(__file__).parent.resolve()
-            filename = Path(path.lstrip('/')).name
-            if filename in STATIC_FILES:
-                self._serve_file(dashboard_dir / filename, STATIC_FILES[filename])
+            static_file = _STATIC_FILES.get(path)
+            if static_file is not None:
+                self._serve_file(*static_file)
             else:
                 self.send_error(404, 'Not found')
 
@@ -225,7 +225,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         try:
             data = path.read_bytes()
         except FileNotFoundError:
-            self.send_error(404, f'File not found: {path}')
+            self.send_error(404, 'File not found')
             return
         self.send_response(200)
         self.send_header('Content-Type', content_type)
