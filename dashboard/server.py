@@ -209,7 +209,15 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         elif path == '/api/events':
             self._sse_stream()
         else:
-            self.send_error(404, 'Not found')
+            STATIC_FILES = {
+                'styles.css': 'text/css',
+            }
+            dashboard_dir = Path(__file__).parent.resolve()
+            filename = Path(path.lstrip('/')).name
+            if filename in STATIC_FILES:
+                self._serve_file(dashboard_dir / filename, STATIC_FILES[filename])
+            else:
+                self.send_error(404, 'Not found')
 
     # helpers
 
