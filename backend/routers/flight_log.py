@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
+
+_EPOCH = datetime(1970, 1, 1)
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy.orm import Session as DBSession
@@ -72,7 +74,7 @@ def match_preview(
 
     log_points_dicts = [
         {
-            "timestamp_s": pt.timestamp.timestamp() if pt.timestamp else 0.0,
+            "timestamp_s": (pt.timestamp - _EPOCH).total_seconds() if pt.timestamp else 0.0,
             "latitude": pt.latitude,
             "longitude": pt.longitude,
             "altitude_m": pt.altitude_m,
@@ -106,7 +108,7 @@ def apply_sync(
 
     log_points_dicts = [
         {
-            "timestamp_s": pt.timestamp.timestamp() if pt.timestamp else 0.0,
+            "timestamp_s": (pt.timestamp - _EPOCH).total_seconds() if pt.timestamp else 0.0,
             "latitude": pt.latitude,
             "longitude": pt.longitude,
             "altitude_m": pt.altitude_m,
