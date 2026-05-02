@@ -64,4 +64,4 @@ def test_webodm_export(client):
     assert resp.status_code == 200
     data = resp.json()
     assert "zip_path" in data
-    assert "image_count" in data
+    assert data["image_count"] == 1

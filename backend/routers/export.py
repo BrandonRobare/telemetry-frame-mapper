@@ -28,11 +28,10 @@ def export_webodm(session_id: int, db: DBSession = Depends(get_db)):
     with zipfile.ZipFile(zip_path, "w") as zf:
         csv_rows = "filename,latitude,longitude,altitude\n"
         for img in images:
-            csv_rows += (
-                f"{img.filename},"
-                f"{img.latitude or ''},"
-                f"{img.longitude or ''},"
-                f"{img.altitude_m or ''}\n"
-            )
+            # Use explicit None checks — 0.0 is a valid coordinate value
+            lat = "" if img.latitude is None else img.latitude
+            lon = "" if img.longitude is None else img.longitude
+            alt = "" if img.altitude_m is None else img.altitude_m
+            csv_rows += f"{img.filename},{lat},{lon},{alt}\n"
         zf.writestr("odm_georeferencing.csv", csv_rows)
     return {"zip_path": str(zip_path), "image_count": len(images)}
