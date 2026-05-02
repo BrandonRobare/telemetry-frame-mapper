@@ -3,6 +3,7 @@ import { useMapStore } from './shared/stores/mapStore'
 import MapTab from './features/map/MapTab'
 import GpsSyncTab from './features/gps-sync/GpsSyncTab'
 import ReviewTab from './features/review/ReviewTab'
+import ExportTab from './features/export/ExportTab'
 import { ToastStack } from './shared/components/ToastStack'
 import ImportModal from './features/import/ImportModal'
 import SessionPicker from './features/sessions/SessionPicker'
@@ -110,7 +111,7 @@ export default function App() {
         {activeTab === 'gps-sync' && <GpsSyncTab />}
         {activeTab === 'review' && <ReviewTab />}
         {activeTab === 'plan' && <ComingSoon label="Plan" />}
-        {activeTab === 'export' && <ComingSoon label="Export" />}
+        {activeTab === 'export' && <ExportTab />}
       </div>
       <ToastStack />
       <ImportModal open={showImport} onClose={() => setShowImport(false)} />
