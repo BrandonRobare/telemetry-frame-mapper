@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useMapStore } from './shared/stores/mapStore'
 import MapTab from './features/map/MapTab'
 import { ToastStack } from './shared/components/ToastStack'
+import ImportModal from './features/import/ImportModal'
 
 type Tab = 'map' | 'gps-sync' | 'review' | 'plan' | 'export'
 
@@ -23,6 +24,7 @@ function ComingSoon({ label }: { label: string }) {
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<Tab>('map')
+  const [showImport, setShowImport] = useState(false)
   const { theme, toggleTheme } = useMapStore()
 
   return (
@@ -80,6 +82,7 @@ export default function App() {
             {theme === 'dark' ? '☾ Dark' : '☀ Light'}
           </button>
           <button
+            onClick={() => setShowImport(true)}
             className="text-sm rounded cursor-pointer border-none"
             style={{
               padding: '5px 14px',
@@ -102,6 +105,7 @@ export default function App() {
         {activeTab === 'export' && <ComingSoon label="Export" />}
       </div>
       <ToastStack />
+      <ImportModal open={showImport} onClose={() => setShowImport(false)} />
     </div>
   )
 }
