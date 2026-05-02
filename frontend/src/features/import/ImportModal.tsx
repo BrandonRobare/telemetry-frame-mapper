@@ -1,7 +1,39 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { useImportSession } from '../../shared/api/mutations'
 import { useMapStore } from '../../shared/stores/mapStore'
 import { Button } from '../../shared/components/Button'
+
+const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
+
+type HealthStatus = 'checking' | 'ok' | 'down'
+
+function useBackendHealth(enabled: boolean): HealthStatus {
+  const [status, setStatus] = useState<HealthStatus>('checking')
+
+  const check = useCallback(async (signal: AbortSignal) => {
+    try {
+      const res = await fetch(`${BASE_URL}/health`, { signal })
+      setStatus(res.ok ? 'ok' : 'down')
+    } catch {
+      if (!signal.aborted) setStatus('down')
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!enabled) return
+    setStatus('checking')
+    const controller = new AbortController()
+    check(controller.signal)
+    // Re-poll every 5 s while the modal is open so it auto-recovers
+    const interval = setInterval(() => check(controller.signal), 5_000)
+    return () => {
+      controller.abort()
+      clearInterval(interval)
+    }
+  }, [enabled, check])
+
+  return status
+}
 
 interface ImportModalProps {
   open: boolean
@@ -14,6 +46,7 @@ export default function ImportModal({ open, onClose }: ImportModalProps) {
   const { mutate, isPending, isImporting, progress, data: importedSession, isError, error, reset } = useImportSession()
   const { setSession } = useMapStore()
   const nameRef = useRef<HTMLInputElement>(null)
+  const backendStatus = useBackendHealth(open)
 
   // Auto-focus name input when modal opens
   useEffect(() => {
@@ -64,6 +97,7 @@ export default function ImportModal({ open, onClose }: ImportModalProps) {
       : 0
 
   const isBusy = isPending || isImporting
+  const backendDown = backendStatus === 'down'
   const errorMessage = isError
     ? (error as Error)?.message ?? 'Import failed'
     : progress?.status === 'error'
@@ -116,6 +150,44 @@ export default function ImportModal({ open, onClose }: ImportModalProps) {
             </button>
           )}
         </div>
+
+        {/* Backend health warning */}
+        {backendStatus !== 'ok' && (
+          <div
+            className="text-xs rounded"
+            style={{
+              padding: '8px 12px',
+              marginBottom: 16,
+              background: backendDown
+                ? 'rgba(248,81,73,0.10)'
+                : 'rgba(139,148,158,0.10)',
+              border: `1px solid ${backendDown ? 'rgba(248,81,73,0.35)' : 'rgba(139,148,158,0.3)'}`,
+              color: backendDown ? 'var(--danger, #f85149)' : 'var(--text-muted)',
+            }}
+          >
+            {backendDown ? (
+              <>
+                <strong>Backend is not running.</strong> Start it with:
+                <code
+                  style={{
+                    display: 'block',
+                    marginTop: 5,
+                    padding: '4px 8px',
+                    background: 'rgba(0,0,0,0.25)',
+                    borderRadius: 4,
+                    fontFamily: 'monospace',
+                    fontSize: 11,
+                    userSelect: 'all',
+                  }}
+                >
+                  python -m uvicorn backend.main:app --reload --port 8000
+                </code>
+              </>
+            ) : (
+              'Checking backend…'
+            )}
+          </div>
+        )}
 
         {/* Form */}
         <form onSubmit={handleSubmit}>
@@ -242,7 +314,7 @@ export default function ImportModal({ open, onClose }: ImportModalProps) {
               type="submit"
               variant="primary"
               size="sm"
-              disabled={isBusy || !name.trim() || !folderPath.trim()}
+              disabled={isBusy || backendDown || !name.trim() || !folderPath.trim()}
             >
               {isPending ? 'Creating…' : isImporting ? 'Importing…' : 'Import'}
             </Button>
