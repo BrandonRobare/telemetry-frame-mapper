@@ -19,7 +19,7 @@ async def process_srt(file: UploadFile = File(...)):
     try:
         try:
             points = parse_srt(Path(tmp_path))
-        except (ValueError, Exception) as exc:
+        except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         return [
             {
