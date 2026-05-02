@@ -4,6 +4,7 @@ import MapTab from './features/map/MapTab'
 import GpsSyncTab from './features/gps-sync/GpsSyncTab'
 import ReviewTab from './features/review/ReviewTab'
 import ExportTab from './features/export/ExportTab'
+import PlanTab from './features/plan/PlanTab'
 import SessionLogTab from './features/session-log/SessionLogTab'
 import { ToastStack } from './shared/components/ToastStack'
 import ImportModal from './features/import/ImportModal'
@@ -112,7 +113,7 @@ export default function App() {
         {activeTab === 'map' && <MapTab />}
         {activeTab === 'gps-sync' && <GpsSyncTab />}
         {activeTab === 'review' && <ReviewTab />}
-        {activeTab === 'plan' && <ComingSoon label="Plan" />}
+        {activeTab === 'plan' && <PlanTab />}
         {activeTab === 'export' && <ExportTab />}
         {activeTab === 'session-log' && <SessionLogTab />}
       </div>
