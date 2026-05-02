@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 import threading
 from pathlib import Path
 
@@ -12,18 +11,26 @@ from .geometry import compute_footprint
 from ..db.models import Session as SessionModel, Image, Footprint, SessionLogEntry
 
 _progress: dict[int, dict] = {}
+_progress_lock = threading.Lock()
 
 
 def get_progress(session_id: int) -> dict:
-    return _progress.get(session_id, {"processed": 0, "total": 0, "status": "unknown"})
+    with _progress_lock:
+        return dict(_progress.get(session_id, {"processed": 0, "total": 0, "status": "unknown"}))
 
 
 def _run(session_id: int, folder: Path, db_factory) -> None:
     from ..core.config import load_config  # lazy import to avoid circular
 
-    jpgs = sorted(folder.glob("*.jpg")) + sorted(folder.glob("*.jpeg"))
+    jpgs = (
+        sorted(folder.glob("*.jpg"))
+        + sorted(folder.glob("*.jpeg"))
+        + sorted(folder.glob("*.JPG"))
+        + sorted(folder.glob("*.JPEG"))
+    )
     total = len(jpgs)
-    _progress[session_id] = {"processed": 0, "total": total, "status": "running"}
+    with _progress_lock:
+        _progress[session_id] = {"processed": 0, "total": total, "status": "running"}
 
     db: DBSession = db_factory()
     try:
@@ -103,7 +110,8 @@ def _run(session_id: int, folder: Path, db_factory) -> None:
                 except Exception:
                     pass  # footprint is best-effort
 
-            _progress[session_id]["processed"] = i + 1
+            with _progress_lock:
+                _progress[session_id]["processed"] = i + 1
             db.commit()
 
         session = db.query(SessionModel).filter(SessionModel.id == session_id).first()
@@ -117,10 +125,12 @@ def _run(session_id: int, folder: Path, db_factory) -> None:
                 message=f"Imported {total} images, {usable} usable",
             ))
             db.commit()
-        _progress[session_id]["status"] = "done"
+        with _progress_lock:
+            _progress[session_id]["status"] = "done"
     except Exception as exc:
-        _progress[session_id]["status"] = "error"
-        _progress[session_id]["error"] = str(exc)
+        with _progress_lock:
+            _progress[session_id]["status"] = "error"
+            _progress[session_id]["error"] = str(exc)
         try:
             db.rollback()
         except Exception:
@@ -131,5 +141,7 @@ def _run(session_id: int, folder: Path, db_factory) -> None:
 
 def start_import(session_id: int, folder: Path, db_factory) -> None:
     """Launch import pipeline in a background thread."""
+    with _progress_lock:
+        _progress[session_id] = {"processed": 0, "total": 0, "status": "pending"}
     t = threading.Thread(target=_run, args=(session_id, folder, db_factory), daemon=True)
     t.start()
