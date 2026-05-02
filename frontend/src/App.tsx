@@ -4,11 +4,12 @@ import MapTab from './features/map/MapTab'
 import GpsSyncTab from './features/gps-sync/GpsSyncTab'
 import ReviewTab from './features/review/ReviewTab'
 import ExportTab from './features/export/ExportTab'
+import SessionLogTab from './features/session-log/SessionLogTab'
 import { ToastStack } from './shared/components/ToastStack'
 import ImportModal from './features/import/ImportModal'
 import SessionPicker from './features/sessions/SessionPicker'
 
-type Tab = 'map' | 'gps-sync' | 'review' | 'plan' | 'export'
+type Tab = 'map' | 'gps-sync' | 'review' | 'plan' | 'export' | 'session-log'
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'map', label: 'Map' },
@@ -16,6 +17,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'review', label: 'Review' },
   { id: 'plan', label: 'Plan' },
   { id: 'export', label: 'Export' },
+  { id: 'session-log', label: 'Session Log' },
 ]
 
 function ComingSoon({ label }: { label: string }) {
@@ -112,6 +114,7 @@ export default function App() {
         {activeTab === 'review' && <ReviewTab />}
         {activeTab === 'plan' && <ComingSoon label="Plan" />}
         {activeTab === 'export' && <ExportTab />}
+        {activeTab === 'session-log' && <SessionLogTab />}
       </div>
       <ToastStack />
       <ImportModal open={showImport} onClose={() => setShowImport(false)} />
