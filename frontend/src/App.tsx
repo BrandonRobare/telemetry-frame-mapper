@@ -3,6 +3,7 @@ import { useMapStore } from './shared/stores/mapStore'
 import MapTab from './features/map/MapTab'
 import { ToastStack } from './shared/components/ToastStack'
 import ImportModal from './features/import/ImportModal'
+import SessionPicker from './features/sessions/SessionPicker'
 
 type Tab = 'map' | 'gps-sync' | 'review' | 'plan' | 'export'
 
@@ -63,6 +64,11 @@ export default function App() {
               {tab.label}
             </button>
           ))}
+        </div>
+
+        {/* Session picker */}
+        <div className="flex items-center shrink-0" style={{ padding: '0 8px', borderLeft: '1px solid var(--border)' }}>
+          <SessionPicker onImport={() => setShowImport(true)} />
         </div>
 
         {/* Controls */}
