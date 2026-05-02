@@ -14,6 +14,9 @@ from .routers import coverage as coverage_router
 from .routers import flight_log as flight_log_router
 from .routers import srt as srt_router
 from .routers import plans as plans_router
+from .routers import images as images_router
+from .routers import export as export_router
+from .routers import session_log as session_log_router
 
 
 @asynccontextmanager
@@ -29,6 +32,9 @@ app.include_router(coverage_router.router)
 app.include_router(flight_log_router.router)
 app.include_router(srt_router.router)
 app.include_router(plans_router.router)
+app.include_router(images_router.router)
+app.include_router(export_router.router)
+app.include_router(session_log_router.router)
 
 app.add_middleware(
     CORSMiddleware,
@@ -47,5 +53,3 @@ app.mount("/thumbs", StaticFiles(directory=thumbs_dir), name="thumbs")
 def health():
     return {"status": "ok"}
 
-
-# Routers added in later tasks
