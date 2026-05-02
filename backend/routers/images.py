@@ -1,12 +1,14 @@
 from __future__ import annotations
+import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import RedirectResponse
+from pathlib import Path
 from pydantic import BaseModel
 from sqlalchemy.orm import Session as DBSession
 
 from ..db.database import get_db
-from ..db.models import Image
+from ..db.models import Footprint, Image
 
 router = APIRouter(prefix="/images", tags=["images"])
 
@@ -17,7 +19,7 @@ class ImageOut(BaseModel):
     filename: str
     filepath: str
     thumb_path: str | None
-    timestamp: str | None
+    timestamp: datetime.datetime | None
     latitude: float | None
     longitude: float | None
     altitude_m: float | None
@@ -52,9 +54,13 @@ def list_images(
     if flag is not None:
         q = q.filter(Image.flag == flag)
     if has_footprint is True:
-        q = q.filter(Image.footprint != None)  # noqa: E711
+        # Must have a matching Footprint row
+        q = q.join(Footprint, Footprint.image_id == Image.id)
     elif has_footprint is False:
-        q = q.filter(Image.footprint == None)  # noqa: E711
+        # Must NOT have a matching Footprint row
+        q = q.outerjoin(Footprint, Footprint.image_id == Image.id).filter(
+            Footprint.id.is_(None)
+        )
     return q.all()
 
 
@@ -77,4 +83,8 @@ def get_thumb(image_id: int, db: DBSession = Depends(get_db)):
     img = db.query(Image).filter(Image.id == image_id).first()
     if not img:
         raise HTTPException(status_code=404, detail="Image not found")
-    return RedirectResponse(f"/thumbs/{img.filename}")
+    if img.thumb_path:
+        thumb_filename = Path(img.thumb_path).name
+    else:
+        thumb_filename = img.filename
+    return RedirectResponse(f"/thumbs/{thumb_filename}")
