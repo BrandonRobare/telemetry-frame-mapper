@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useMapStore } from './shared/stores/mapStore'
 import MapTab from './features/map/MapTab'
 import GpsSyncTab from './features/gps-sync/GpsSyncTab'
+import ReviewTab from './features/review/ReviewTab'
 import { ToastStack } from './shared/components/ToastStack'
 import ImportModal from './features/import/ImportModal'
 import SessionPicker from './features/sessions/SessionPicker'
@@ -107,7 +108,7 @@ export default function App() {
       <div className="flex flex-1 overflow-hidden">
         {activeTab === 'map' && <MapTab />}
         {activeTab === 'gps-sync' && <GpsSyncTab />}
-        {activeTab === 'review' && <ComingSoon label="Review" />}
+        {activeTab === 'review' && <ReviewTab />}
         {activeTab === 'plan' && <ComingSoon label="Plan" />}
         {activeTab === 'export' && <ComingSoon label="Export" />}
       </div>
