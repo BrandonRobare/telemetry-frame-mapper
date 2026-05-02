@@ -54,3 +54,37 @@ def test_download_kml(client):
     plan = client.post("/plans/generate", json=body).json()
     resp = client.get(f"/plans/{plan['id']}/kml")
     assert resp.status_code == 200
+    assert "kml" in resp.headers["content-type"]
+    assert b"<kml" in resp.content
+
+
+def test_download_gpx_not_found(client):
+    resp = client.get("/plans/999999/gpx")
+    assert resp.status_code == 404
+
+
+def test_download_gpx(client):
+    area = _make_target_area(client, name="GPX Area")
+    body = {
+        "target_area_id": area["id"],
+        "altitude_ft": 100,
+        "side_overlap_pct": 0.6,
+        "forward_overlap_pct": 0.7,
+    }
+    plan = client.post("/plans/generate", json=body).json()
+    resp = client.get(f"/plans/{plan['id']}/gpx")
+    assert resp.status_code == 200
+    assert "gpx" in resp.headers["content-type"]
+    assert b"<gpx" in resp.content
+
+
+def test_generate_plan_invalid_overlap(client):
+    area = _make_target_area(client, name="Invalid Overlap")
+    body = {
+        "target_area_id": area["id"],
+        "altitude_ft": 200,
+        "side_overlap_pct": 1.0,  # invalid — must be < 1.0
+        "forward_overlap_pct": 0.8,
+    }
+    resp = client.post("/plans/generate", json=body)
+    assert resp.status_code == 422

@@ -10,11 +10,19 @@ def generate_lawnmower(
     target_geojson: str,
     altitude_ft: float,
     side_overlap: float,
-    forward_overlap: float,
+    forward_overlap: float,  # TODO: use for waypoint trigger spacing in a future task
     fov_h_deg: float = 84.0,
     fov_v_deg: float = 64.0,
 ) -> dict:
-    """Returns lanes_geojson, lane_count, total_distance_m."""
+    """Returns lanes_geojson, lane_count, total_distance_m.
+
+    Note: ``forward_overlap`` is accepted for API compatibility but not yet used
+    in the lane generation algorithm. It will control waypoint trigger spacing
+    when per-waypoint output is implemented.
+    """
+    if side_overlap >= 1.0:
+        raise ValueError(f"side_overlap must be < 1.0, got {side_overlap}")
+
     poly = shape(json.loads(target_geojson))
     bounds = poly.bounds  # minx, miny, maxx, maxy
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session as DBSession
@@ -13,7 +13,9 @@ from ..services.mission_planner import generate_lawnmower, write_gpx, write_kml
 
 router = APIRouter(prefix="/plans", tags=["plans"])
 
-EXPORTS_DIR = Path("exports")
+# Anchor exports dir to the package root so it resolves correctly regardless
+# of the working directory at runtime.
+EXPORTS_DIR = Path(__file__).parent.parent / "exports"
 
 
 class PlanIn(BaseModel):
@@ -40,6 +42,9 @@ class PlanOut(BaseModel):
 
 @router.post("/generate", response_model=PlanOut)
 def generate_plan(body: PlanIn, db: DBSession = Depends(get_db)):
+    if body.side_overlap_pct >= 1.0:
+        raise HTTPException(status_code=422, detail="side_overlap_pct must be < 1.0")
+
     area = db.query(TargetArea).filter(TargetArea.id == body.target_area_id).first()
     if not area:
         raise HTTPException(status_code=404, detail="Target area not found")
