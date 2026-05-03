@@ -1,8 +1,16 @@
 import { useState } from 'react'
 import { useMapStore } from './shared/stores/mapStore'
 import MapTab from './features/map/MapTab'
+import GpsSyncTab from './features/gps-sync/GpsSyncTab'
+import ReviewTab from './features/review/ReviewTab'
+import ExportTab from './features/export/ExportTab'
+import PlanTab from './features/plan/PlanTab'
+import SessionLogTab from './features/session-log/SessionLogTab'
+import { ToastStack } from './shared/components/ToastStack'
+import ImportModal from './features/import/ImportModal'
+import SessionPicker from './features/sessions/SessionPicker'
 
-type Tab = 'map' | 'gps-sync' | 'review' | 'plan' | 'export'
+type Tab = 'map' | 'gps-sync' | 'review' | 'plan' | 'export' | 'session-log'
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'map', label: 'Map' },
@@ -10,6 +18,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'review', label: 'Review' },
   { id: 'plan', label: 'Plan' },
   { id: 'export', label: 'Export' },
+  { id: 'session-log', label: 'Session Log' },
 ]
 
 function ComingSoon({ label }: { label: string }) {
@@ -22,6 +31,7 @@ function ComingSoon({ label }: { label: string }) {
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<Tab>('map')
+  const [showImport, setShowImport] = useState(false)
   const { theme, toggleTheme } = useMapStore()
 
   return (
@@ -62,6 +72,11 @@ export default function App() {
           ))}
         </div>
 
+        {/* Session picker */}
+        <div className="flex items-center shrink-0" style={{ padding: '0 8px', borderLeft: '1px solid var(--border)' }}>
+          <SessionPicker onImport={() => setShowImport(true)} />
+        </div>
+
         {/* Controls */}
         <div className="flex items-center gap-2 shrink-0 pr-4">
           <button
@@ -79,6 +94,7 @@ export default function App() {
             {theme === 'dark' ? '☾ Dark' : '☀ Light'}
           </button>
           <button
+            onClick={() => setShowImport(true)}
             className="text-sm rounded cursor-pointer border-none"
             style={{
               padding: '5px 14px',
@@ -95,11 +111,14 @@ export default function App() {
       {/* Tab content */}
       <div className="flex flex-1 overflow-hidden">
         {activeTab === 'map' && <MapTab />}
-        {activeTab === 'gps-sync' && <ComingSoon label="GPS Sync" />}
-        {activeTab === 'review' && <ComingSoon label="Review" />}
-        {activeTab === 'plan' && <ComingSoon label="Plan" />}
-        {activeTab === 'export' && <ComingSoon label="Export" />}
+        {activeTab === 'gps-sync' && <GpsSyncTab />}
+        {activeTab === 'review' && <ReviewTab />}
+        {activeTab === 'plan' && <PlanTab />}
+        {activeTab === 'export' && <ExportTab />}
+        {activeTab === 'session-log' && <SessionLogTab />}
       </div>
+      <ToastStack />
+      <ImportModal open={showImport} onClose={() => setShowImport(false)} />
     </div>
   )
 }
