@@ -48,6 +48,8 @@ processed/**
 !processed/thumbs/.gitkeep
 exports/*
 !exports/.gitkeep
+backend/exports/*
+!backend/exports/.gitkeep
 data/*.db
 data/*/
 !data/.gitkeep

@@ -235,7 +235,7 @@ export default function ImportModal({ open, onClose }: ImportModalProps) {
               type="text"
               value={folderPath}
               onChange={(e) => setFolderPath(e.target.value)}
-              placeholder="e.g. C:\Flights\2026-05-02 or /mnt/flights/field-a"
+              placeholder="e.g. C:\\Flights\\2026-05-02 or /mnt/flights/field-a"
               disabled={isBusy}
               style={{
                 width: '100%', boxSizing: 'border-box',
