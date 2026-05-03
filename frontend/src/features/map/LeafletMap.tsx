@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { MapContainer, TileLayer, GeoJSON, useMap } from 'react-leaflet'
-import type { Map as LeafletMap, LatLngBoundsExpression } from 'leaflet'
+import type { LatLngBoundsExpression } from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import type { Footprint, CoverageResult } from '../../types/api'
 import { useMapStore } from '../../shared/stores/mapStore'
@@ -43,7 +43,6 @@ function FitBounds({ footprints }: { footprints: Footprint[] }) {
 
 export default function LeafletMapView({ footprints, coverage, isLoading, error }: Props) {
   const { activeLayers } = useMapStore()
-  const mapRef = useRef<LeafletMap | null>(null)
 
   if (error) {
     return (
@@ -59,7 +58,14 @@ export default function LeafletMapView({ footprints, coverage, isLoading, error 
   }
 
   const footprintGeoJSON = footprints.length > 0
-    ? { type: 'FeatureCollection' as const, features: footprints.map((fp) => ({ type: 'Feature' as const, geometry: JSON.parse(fp.geom_geojson), properties: { id: fp.id } })) }
+    ? {
+        type: 'FeatureCollection' as const,
+        features: footprints.reduce<{ type: 'Feature'; geometry: unknown; properties: { id: number } }[]>((acc, fp) => {
+          if (!fp.geom_geojson) return acc
+          try { acc.push({ type: 'Feature', geometry: JSON.parse(fp.geom_geojson), properties: { id: fp.id } }) } catch { /* skip malformed */ }
+          return acc
+        }, []),
+      }
     : null
 
   const gapGeoJSON = coverage?.gap_geojson ? JSON.parse(coverage.gap_geojson) : null
@@ -79,7 +85,6 @@ export default function LeafletMapView({ footprints, coverage, isLoading, error 
         center={[39.5, -98.35]}
         zoom={4}
         style={{ height: '100%', width: '100%' }}
-        ref={mapRef}
       >
         <TileLayer
           url={activeLayers.footprints ? ESRI_SATELLITE : OSM}
