@@ -49,6 +49,7 @@ processed/**
 exports/*
 !exports/.gitkeep
 data/*.db
+data/*/
 !data/.gitkeep
 
 # Frontend
