@@ -83,8 +83,6 @@ def get_thumb(image_id: int, db: DBSession = Depends(get_db)):
     img = db.query(Image).filter(Image.id == image_id).first()
     if not img:
         raise HTTPException(status_code=404, detail="Image not found")
-    if img.thumb_path:
-        thumb_filename = Path(img.thumb_path).name
-    else:
-        thumb_filename = img.filename
-    return RedirectResponse(f"/thumbs/{thumb_filename}")
+    if not img.thumb_path:
+        raise HTTPException(status_code=404, detail="Thumbnail not found")
+    return RedirectResponse(f"/{Path(img.thumb_path).as_posix()}")

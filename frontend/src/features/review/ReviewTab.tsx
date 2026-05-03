@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { get, patch } from '../../shared/api/client'
 import { useMapStore } from '../../shared/stores/mapStore'
@@ -34,10 +35,11 @@ const FLAG_BADGE: Record<Image['flag'], { bg: string; text: string; label: strin
 
 // ---- thumb URL helper ----
 function thumbUrl(img: Image): string {
-  const name = img.thumb_path
-    ? img.thumb_path.split(/[/\\]/).at(-1)!
-    : img.filename
-  return `${BASE_URL}/thumbs/${name}`
+  if (img.thumb_path) {
+    // thumb_path is relative to the project root, e.g. "processed\1\thumbs\frame_00001.jpg"
+    return `${BASE_URL}/${img.thumb_path.replace(/\\/g, '/')}`
+  }
+  return ''
 }
 
 // ---- filename initials ----
@@ -46,18 +48,25 @@ function initials(filename: string): string {
 }
 
 // ---- stats bar ----
-function StatsBar({ images }: { images: Image[] }) {
+interface StatsBarProps {
+  images: Image[]
+  activeFlag: Image['flag'] | null
+  onFlagClick: (flag: Image['flag']) => void
+  visibleCount: number
+}
+
+function StatsBar({ images, activeFlag, onFlagClick, visibleCount }: StatsBarProps) {
   const counts: Record<Image['flag'], number> = {
     good: 0, blurry: 0, no_gps: 0, dark: 0, bright: 0,
   }
   for (const img of images) counts[img.flag]++
 
-  const items: { label: string; count: number; color: string }[] = [
-    { label: 'Good',   count: counts.good,   color: '#4ade80' },
-    { label: 'Blurry', count: counts.blurry, color: '#fbbf24' },
-    { label: 'No GPS', count: counts.no_gps, color: '#60a5fa' },
-    { label: 'Dark',   count: counts.dark,   color: '#9ca3af' },
-    { label: 'Bright', count: counts.bright, color: '#9ca3af' },
+  const items: { label: string; flag: Image['flag']; count: number; color: string }[] = [
+    { label: 'Good',   flag: 'good',   count: counts.good,   color: '#4ade80' },
+    { label: 'Blurry', flag: 'blurry', count: counts.blurry, color: '#fbbf24' },
+    { label: 'No GPS', flag: 'no_gps', count: counts.no_gps, color: '#60a5fa' },
+    { label: 'Dark',   flag: 'dark',   count: counts.dark,   color: '#9ca3af' },
+    { label: 'Bright', flag: 'bright', count: counts.bright, color: '#9ca3af' },
   ]
 
   return (
@@ -66,18 +75,53 @@ function StatsBar({ images }: { images: Image[] }) {
       style={{ background: 'var(--surface)', borderBottom: '1px solid var(--border)' }}
     >
       <span style={{ color: 'var(--text-muted)', fontWeight: 500 }}>
-        {images.length} images
+        {activeFlag ? `${visibleCount} / ${images.length}` : `${images.length}`} images
       </span>
-      {items.map(({ label, count, color }) => (
-        <span key={label} className="flex items-center gap-1.5">
-          <span
-            className="inline-block rounded-full"
-            style={{ width: 8, height: 8, background: color }}
-          />
-          <span style={{ color: 'var(--text)' }}>{count}</span>
-          <span style={{ color: 'var(--text-muted)' }}>{label}</span>
-        </span>
-      ))}
+      {items.map(({ label, flag, count, color }) => {
+        const active = activeFlag === flag
+        return (
+          <button
+            key={flag}
+            onClick={() => onFlagClick(flag)}
+            className="flex items-center gap-1.5"
+            style={{
+              background: active ? 'var(--border)' : 'none',
+              border: 'none',
+              borderRadius: 4,
+              padding: active ? '2px 6px' : '2px 0',
+              cursor: 'pointer',
+              fontFamily: 'inherit',
+              fontSize: 'inherit',
+              outline: 'none',
+              opacity: activeFlag && !active ? 0.45 : 1,
+            }}
+          >
+            <span
+              className="inline-block rounded-full shrink-0"
+              style={{ width: 8, height: 8, background: color }}
+            />
+            <span style={{ color: 'var(--text)' }}>{count}</span>
+            <span style={{ color: active ? 'var(--text)' : 'var(--text-muted)' }}>{label}</span>
+          </button>
+        )
+      })}
+      {activeFlag && (
+        <button
+          onClick={() => onFlagClick(activeFlag)}
+          style={{
+            background: 'none',
+            border: 'none',
+            cursor: 'pointer',
+            color: 'var(--text-muted)',
+            fontSize: 11,
+            fontFamily: 'inherit',
+            padding: 0,
+            marginLeft: -8,
+          }}
+        >
+          ✕ clear
+        </button>
+      )}
     </div>
   )
 }
@@ -125,6 +169,7 @@ function ImageCard({ img, sessionId }: CardProps) {
         background: 'var(--surface)',
         border: '1px solid var(--border)',
         position: 'relative',
+        minHeight: 152,
       }}
     >
       {/* thumbnail */}
@@ -200,6 +245,7 @@ function ImageCard({ img, sessionId }: CardProps) {
 export default function ReviewTab() {
   const { selectedSessionId } = useMapStore()
   const { data: images, isLoading } = useImages(selectedSessionId)
+  const [activeFlag, setActiveFlag] = useState<Image['flag'] | null>(null)
 
   if (selectedSessionId === null) {
     return (
@@ -224,10 +270,20 @@ export default function ReviewTab() {
   }
 
   const list = images ?? []
+  const filtered = activeFlag ? list.filter((img) => img.flag === activeFlag) : list
+
+  function handleFlagClick(flag: Image['flag']) {
+    setActiveFlag((prev) => (prev === flag ? null : flag))
+  }
 
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
-      <StatsBar images={list} />
+      <StatsBar
+        images={list}
+        activeFlag={activeFlag}
+        onFlagClick={handleFlagClick}
+        visibleCount={filtered.length}
+      />
       <div
         className="flex-1 overflow-y-auto p-4"
         style={{
@@ -237,10 +293,10 @@ export default function ReviewTab() {
           alignContent: 'start',
         }}
       >
-        {list.map((img) => (
+        {filtered.map((img) => (
           <ImageCard key={img.id} img={img} sessionId={selectedSessionId} />
         ))}
-        {list.length === 0 && (
+        {filtered.length === 0 && (
           <div
             style={{
               gridColumn: '1 / -1',
@@ -249,7 +305,7 @@ export default function ReviewTab() {
               padding: '3rem 0',
             }}
           >
-            No images found for this session.
+            No images match this filter.
           </div>
         )}
       </div>
