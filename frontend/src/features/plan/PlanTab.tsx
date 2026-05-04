@@ -1,0 +1,200 @@
+import { useState } from 'react'
+import { useMutation } from '@tanstack/react-query'
+import { post } from '../../shared/api/client'
+import { useToast } from '../../shared/hooks/useToast'
+import { Button } from '../../shared/components/Button'
+import FlightSettingsPanel, { type FlightSettings } from './FlightSettingsPanel'
+import PlanMap from './PlanMap'
+
+const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
+
+interface TargetAreaOut {
+  id: number
+  name: string
+  geom_geojson: string | null
+}
+
+interface PlanOut {
+  id: number
+  target_area_id: number
+  altitude_ft: number | null
+  side_overlap_pct: number | null
+  forward_overlap_pct: number | null
+  lane_count: number | null
+  total_distance_m: number | null
+  lanes_geojson: string | null
+  kml_path: string | null
+  gpx_path: string | null
+}
+
+const DEFAULT_SETTINGS: FlightSettings = {
+  altitudeFt: 200,
+  sideOverlapPct: 75,
+  forwardOverlapPct: 80,
+}
+
+function fmt(n: number | null | undefined, unit: string, decimals = 0) {
+  if (n == null) return '—'
+  return `${n.toFixed(decimals)} ${unit}`
+}
+
+export default function PlanTab() {
+  const { addToast } = useToast()
+  const [settings, setSettings] = useState<FlightSettings>(DEFAULT_SETTINGS)
+  const [targetAreaId, setTargetAreaId] = useState<number | null>(null)
+  const [plan, setPlan] = useState<PlanOut | null>(null)
+
+  // Step 1: create target area from drawn polygon
+  const createArea = useMutation({
+    mutationFn: (geomGeoJSON: string) =>
+      post<TargetAreaOut>('/target-areas/', {
+        name: `Plan Area ${new Date().toLocaleDateString()}`,
+        geom_geojson: geomGeoJSON,
+      }),
+    onSuccess: (area) => {
+      setTargetAreaId(area.id)
+      setPlan(null)
+      addToast('Target area saved', 'success')
+    },
+    onError: () => addToast('Failed to save target area', 'error'),
+  })
+
+  // Step 2: generate mission plan
+  const generatePlan = useMutation({
+    mutationFn: () => {
+      if (!targetAreaId) throw new Error('No target area')
+      return post<PlanOut>('/plans/generate', {
+        target_area_id: targetAreaId,
+        altitude_ft: settings.altitudeFt,
+        side_overlap_pct: settings.sideOverlapPct / 100,
+        forward_overlap_pct: settings.forwardOverlapPct / 100,
+      })
+    },
+    onSuccess: (result) => {
+      setPlan(result)
+      addToast('Mission plan generated', 'success')
+    },
+    onError: (e: Error) => addToast(e.message || 'Plan generation failed', 'error'),
+  })
+
+  const lanesGeoJSON = plan?.lanes_geojson ? JSON.parse(plan.lanes_geojson) : null
+  const estimatedBatteries = plan?.lane_count ? Math.max(1, Math.ceil(plan.lane_count / 40)) : null
+  const isBusy = createArea.isPending || generatePlan.isPending
+
+  function handlePolygonDrawn(geojsonStr: string) {
+    createArea.mutate(geojsonStr)
+  }
+
+  function downloadFile(url: string) {
+    window.open(url, '_blank')
+  }
+
+  return (
+    <div className="flex flex-1 overflow-hidden">
+      {/* Left panel */}
+      <div
+        className="flex flex-col shrink-0 overflow-y-auto"
+        style={{
+          width: 280,
+          padding: 20,
+          borderRight: '1px solid var(--border)',
+          background: 'var(--surface)',
+          gap: 0,
+        }}
+      >
+        {/* Draw hint */}
+        <div
+          className="text-xs rounded"
+          style={{
+            padding: '8px 12px',
+            marginBottom: 20,
+            background: 'rgba(88,166,255,0.1)',
+            border: '1px solid rgba(88,166,255,0.3)',
+            color: 'var(--text-muted)',
+          }}
+        >
+          {targetAreaId
+            ? '✓ Target area saved. Adjust settings and generate plan.'
+            : 'Use the ✏ polygon tool on the map to draw your target area.'}
+        </div>
+
+        <FlightSettingsPanel settings={settings} onChange={setSettings} disabled={isBusy} />
+
+        <div style={{ marginTop: 8 }}>
+          <Button
+            variant="primary"
+            size="sm"
+            style={{ width: '100%' }}
+            disabled={!targetAreaId || isBusy}
+            onClick={() => generatePlan.mutate()}
+          >
+            {generatePlan.isPending ? 'Generating…' : 'Generate Plan'}
+          </Button>
+        </div>
+
+        {/* Plan summary */}
+        {plan && (
+          <div
+            className="rounded"
+            style={{
+              marginTop: 20,
+              padding: '12px 14px',
+              background: 'var(--bg)',
+              border: '1px solid var(--border)',
+            }}
+          >
+            <h4 className="text-xs font-semibold" style={{ color: 'var(--text)', marginBottom: 10 }}>
+              Plan Summary
+            </h4>
+            {[
+              ['Lanes', plan.lane_count ?? '—'],
+              ['Total distance', fmt(plan.total_distance_m, 'm')],
+              ['Est. batteries', estimatedBatteries ?? '—'],
+              ['Altitude', fmt(plan.altitude_ft, 'ft')],
+              ['Side overlap', plan.side_overlap_pct != null ? `${(plan.side_overlap_pct * 100).toFixed(0)}%` : '—'],
+            ].map(([label, value]) => (
+              <div key={String(label)} className="flex justify-between text-xs" style={{ marginBottom: 6 }}>
+                <span style={{ color: 'var(--text-muted)' }}>{label}</span>
+                <span style={{ color: 'var(--text)', fontVariantNumeric: 'tabular-nums' }}>{String(value)}</span>
+              </div>
+            ))}
+
+            <div className="flex gap-2" style={{ marginTop: 12 }}>
+              <Button
+                variant="ghost"
+                size="sm"
+                style={{ flex: 1 }}
+                disabled={!plan.kml_path}
+                onClick={() => downloadFile(`${BASE_URL}/plans/${plan.id}/kml`)}
+              >
+                KML ↓
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                style={{ flex: 1 }}
+                disabled={!plan.gpx_path}
+                onClick={() => downloadFile(`${BASE_URL}/plans/${plan.id}/gpx`)}
+              >
+                GPX ↓
+              </Button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Map */}
+      <div className="flex-1 relative">
+        <PlanMap lanesGeoJSON={lanesGeoJSON} onPolygonDrawn={handlePolygonDrawn} />
+        {isBusy && (
+          <div
+            className="absolute inset-0 flex items-center justify-center"
+            style={{ background: 'rgba(0,0,0,0.3)', zIndex: 999 }}
+          >
+            <span className="text-sm" style={{ color: '#fff' }}>Working…</span>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
