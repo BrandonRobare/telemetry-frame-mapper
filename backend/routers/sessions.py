@@ -62,14 +62,19 @@ class ImportRequest(BaseModel):
 def import_session(req: ImportRequest, db: DBSession = Depends(get_db)):
     cfg = get_config()
     imports_root = Path(cfg.imports_dir).resolve()
-    user_path = Path(req.folder_path)
+    raw = req.folder_path.strip()
+    if not raw:
+        raise HTTPException(status_code=400, detail="Folder path must not be empty")
+    user_path = Path(raw)
     if user_path.is_absolute():
         raise HTTPException(status_code=400, detail="Folder path must be relative")
+    if any(part in ("", ".", "..") for part in user_path.parts):
+        raise HTTPException(status_code=400, detail="Folder path contains invalid segments")
     folder = (imports_root / user_path).resolve()
     if not folder.is_relative_to(imports_root):
         raise HTTPException(status_code=400, detail="Folder must be inside the imports directory")
     if not folder.is_dir():
-        raise HTTPException(status_code=400, detail=f"Folder not found: {req.folder_path}")
+        raise HTTPException(status_code=400, detail=f"Folder not found: {raw}")
     s = SessionModel(
         name=req.name,
         folder_path=str(folder),
