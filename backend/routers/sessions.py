@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -65,12 +65,12 @@ def import_session(req: ImportRequest, db: DBSession = Depends(get_db)):
     raw = req.folder_path.strip()
     if not raw:
         raise HTTPException(status_code=400, detail="Folder path must not be empty")
-    user_path = Path(raw)
+    user_path = PurePosixPath(raw.replace("\\", "/"))
     if user_path.is_absolute():
         raise HTTPException(status_code=400, detail="Folder path must be relative")
     if any(part in ("", ".", "..") for part in user_path.parts):
         raise HTTPException(status_code=400, detail="Folder path contains invalid segments")
-    folder = (imports_root / user_path).resolve()
+    folder = imports_root.joinpath(*user_path.parts).resolve()
     if not folder.is_relative_to(imports_root):
         raise HTTPException(status_code=400, detail="Folder must be inside the imports directory")
     if not folder.is_dir():
