@@ -1,6 +1,8 @@
 from __future__ import annotations
+
 import json
-from shapely.geometry import shape, mapping
+
+from shapely.geometry import mapping, shape
 from shapely.ops import unary_union
 
 

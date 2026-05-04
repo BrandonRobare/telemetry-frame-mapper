@@ -1,7 +1,7 @@
 from __future__ import annotations
+
 import csv
 import io
-from datetime import datetime
 
 
 def parse_dji_csv(content: bytes) -> list[dict]:
