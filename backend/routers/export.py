@@ -7,7 +7,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session as DBSession
 
 from ..db.database import get_db
-from ..db.models import Image, Session as SessionModel
+from ..db.models import Image
+from ..db.models import Session as SessionModel
 
 router = APIRouter(prefix="/export", tags=["export"])
 EXPORTS_DIR = Path(__file__).parent.parent / "exports"

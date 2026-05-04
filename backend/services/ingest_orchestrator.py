@@ -5,10 +5,11 @@ from pathlib import Path
 
 from sqlalchemy.orm import Session as DBSession
 
-from .ingest import extract_exif, generate_thumbnail
-from .quality import score_sharpness, score_brightness, flag_image
+from ..db.models import Footprint, Image, SessionLogEntry
+from ..db.models import Session as SessionModel
 from .geometry import compute_footprint
-from ..db.models import Session as SessionModel, Image, Footprint, SessionLogEntry
+from .ingest import extract_exif, generate_thumbnail
+from .quality import flag_image, score_brightness, score_sharpness
 
 _progress: dict[int, dict] = {}
 _progress_lock = threading.Lock()

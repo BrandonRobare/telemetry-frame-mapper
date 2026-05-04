@@ -100,8 +100,12 @@ class TargetArea(Base):
     geom_geojson = Column(Text)
     created_at = Column(DateTime, default=datetime.utcnow)
     notes = Column(Text)
-    coverage_runs = relationship("CoverageRun", back_populates="target_area", cascade="all, delete-orphan")
-    mission_plans = relationship("MissionPlan", back_populates="target_area", cascade="all, delete-orphan")
+    coverage_runs = relationship(
+        "CoverageRun", back_populates="target_area", cascade="all, delete-orphan"
+    )
+    mission_plans = relationship(
+        "MissionPlan", back_populates="target_area", cascade="all, delete-orphan"
+    )
 
 
 class CoverageRun(Base):

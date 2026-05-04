@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 import calendar
 from datetime import datetime, timezone
 
@@ -6,7 +7,8 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy.orm import Session as DBSession
 
 from ..db.database import get_db
-from ..db.models import FlightLog, FlightLogPoint, Image, Session as SessionModel
+from ..db.models import FlightLog, FlightLogPoint, Image
+from ..db.models import Session as SessionModel
 from ..services.flight_log_sync import match_images_to_log, parse_dji_csv
 
 router = APIRouter(prefix="/flight-logs", tags=["flight-logs"])

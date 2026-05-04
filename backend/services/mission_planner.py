@@ -1,9 +1,10 @@
 from __future__ import annotations
+
 import json
 import math
 from pathlib import Path
 
-from shapely.geometry import mapping, shape
+from shapely.geometry import shape
 
 
 def generate_lawnmower(
@@ -67,7 +68,8 @@ def write_kml(plan_id: int, lanes_geojson: str, exports_dir: Path) -> Path:
     placemarks = ""
     for geom in geo.get("geometries", []):
         coords = " ".join(f"{c[0]},{c[1]},0" for c in geom["coordinates"])
-        placemarks += f"<Placemark><LineString><coordinates>{coords}</coordinates></LineString></Placemark>\n"
+        inner = f"<coordinates>{coords}</coordinates>"
+        placemarks += f"<Placemark><LineString>{inner}</LineString></Placemark>\n"
     kml_content = f"""<?xml version="1.0" encoding="UTF-8"?>
 <kml xmlns="http://www.opengis.net/kml/2.2">
 <Document>{placemarks}</Document>

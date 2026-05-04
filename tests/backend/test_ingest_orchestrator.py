@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 from pathlib import Path
 from unittest.mock import patch
 
@@ -17,35 +18,46 @@ def test_import_endpoint_bad_folder(client):
         resp = client.post(
             "/sessions/import", json={"folder_path": "/nonexistent/path/xyz", "name": "bad"}
         )
-    assert resp.status_code == 400
+    assert resp.status_code == 400  # rejected: absolute path
     mock_start.assert_not_called()
 
 
 def test_import_endpoint_creates_session(client, tmp_path):
+    from backend.core.config import AppConfig
+
     _make_test_jpg(tmp_path, "frame_001.jpg")
     _make_test_jpg(tmp_path, "frame_002.jpg")
-    with patch("backend.routers.sessions.start_import") as mock_start:
+    mock_cfg = AppConfig(imports_dir=str(tmp_path.parent))
+    with patch("backend.routers.sessions.get_config", return_value=mock_cfg), patch(
+        "backend.routers.sessions.start_import"
+    ) as mock_start:
         resp = client.post(
-            "/sessions/import", json={"folder_path": str(tmp_path), "name": "Test Import"}
+            "/sessions/import",
+            json={"folder_path": tmp_path.name, "name": "Test Import"},
         )
     assert resp.status_code == 200
     data = resp.json()
     assert data["name"] == "Test Import"
     assert "id" in data
     mock_start.assert_called_once()
-    # start_import should have received session id (first arg) and the folder path
+    # start_import should have received session id (first arg) and the resolved folder path
     call_args = mock_start.call_args
     assert call_args.args[0] == data["id"]
-    assert call_args.args[1] == tmp_path
+    assert call_args.args[1] == tmp_path.resolve()
 
 
 def test_progress_endpoint_returns_pending(client, tmp_path):
     """After import is kicked off, progress endpoint returns a known status."""
+    from backend.core.config import AppConfig
+
     _make_test_jpg(tmp_path, "p.jpg")
-    with patch("backend.routers.sessions.start_import"):
+    mock_cfg = AppConfig(imports_dir=str(tmp_path.parent))
+    with patch("backend.routers.sessions.get_config", return_value=mock_cfg), patch(
+        "backend.routers.sessions.start_import"
+    ):
         session_id = client.post(
             "/sessions/import",
-            json={"folder_path": str(tmp_path), "name": "prog"},
+            json={"folder_path": tmp_path.name, "name": "prog"},
         ).json()["id"]
     resp = client.get(f"/sessions/{session_id}/progress")
     assert resp.status_code == 200

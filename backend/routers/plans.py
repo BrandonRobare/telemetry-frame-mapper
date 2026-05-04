@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session as DBSession
@@ -93,7 +93,11 @@ def download_kml(plan_id: int, db: DBSession = Depends(get_db)):
     kml_file = Path(plan.kml_path).resolve()
     if not kml_file.exists():
         raise HTTPException(status_code=404, detail="KML file not found on disk")
-    return FileResponse(str(kml_file), media_type="application/vnd.google-earth.kml+xml", filename=f"plan_{plan_id}.kml")
+    return FileResponse(
+        str(kml_file),
+        media_type="application/vnd.google-earth.kml+xml",
+        filename=f"plan_{plan_id}.kml",
+    )
 
 
 @router.get("/{plan_id}/gpx")
@@ -106,4 +110,8 @@ def download_gpx(plan_id: int, db: DBSession = Depends(get_db)):
     gpx_file = Path(plan.gpx_path).resolve()
     if not gpx_file.exists():
         raise HTTPException(status_code=404, detail="GPX file not found on disk")
-    return FileResponse(str(gpx_file), media_type="application/gpx+xml", filename=f"plan_{plan_id}.gpx")
+    return FileResponse(
+        str(gpx_file),
+        media_type="application/gpx+xml",
+        filename=f"plan_{plan_id}.gpx",
+    )
