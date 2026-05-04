@@ -17,6 +17,7 @@ from .routers import plans as plans_router
 from .routers import images as images_router
 from .routers import export as export_router
 from .routers import session_log as session_log_router
+from .routers import footprints as footprints_router
 
 
 @asynccontextmanager
@@ -35,6 +36,7 @@ app.include_router(plans_router.router)
 app.include_router(images_router.router)
 app.include_router(export_router.router)
 app.include_router(session_log_router.router)
+app.include_router(footprints_router.router)
 
 app.add_middleware(
     CORSMiddleware,
