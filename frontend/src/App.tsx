@@ -2,6 +2,8 @@ import { useState } from 'react'
 import { useMapStore } from './shared/stores/mapStore'
 import MapTab from './features/map/MapTab'
 import { ToastStack } from './shared/components/ToastStack'
+import ImportModal from './features/import/ImportModal'
+import SessionPicker from './features/sessions/SessionPicker'
 
 type Tab = 'map' | 'gps-sync' | 'review' | 'plan' | 'export'
 
@@ -23,6 +25,7 @@ function ComingSoon({ label }: { label: string }) {
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<Tab>('map')
+  const [showImport, setShowImport] = useState(false)
   const { theme, toggleTheme } = useMapStore()
 
   return (
@@ -63,6 +66,11 @@ export default function App() {
           ))}
         </div>
 
+        {/* Session picker */}
+        <div className="flex items-center shrink-0" style={{ padding: '0 8px', borderLeft: '1px solid var(--border)' }}>
+          <SessionPicker onImport={() => setShowImport(true)} />
+        </div>
+
         {/* Controls */}
         <div className="flex items-center gap-2 shrink-0 pr-4">
           <button
@@ -80,6 +88,7 @@ export default function App() {
             {theme === 'dark' ? '☾ Dark' : '☀ Light'}
           </button>
           <button
+            onClick={() => setShowImport(true)}
             className="text-sm rounded cursor-pointer border-none"
             style={{
               padding: '5px 14px',
@@ -102,6 +111,7 @@ export default function App() {
         {activeTab === 'export' && <ComingSoon label="Export" />}
       </div>
       <ToastStack />
+      <ImportModal open={showImport} onClose={() => setShowImport(false)} />
     </div>
   )
 }
