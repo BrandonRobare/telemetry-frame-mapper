@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useMapStore } from './shared/stores/mapStore'
 import MapTab from './features/map/MapTab'
+import { ToastStack } from './shared/components/ToastStack'
 
 type Tab = 'map' | 'gps-sync' | 'review' | 'plan' | 'export'
 
@@ -100,6 +101,7 @@ export default function App() {
         {activeTab === 'plan' && <ComingSoon label="Plan" />}
         {activeTab === 'export' && <ComingSoon label="Export" />}
       </div>
+      <ToastStack />
     </div>
   )
 }
