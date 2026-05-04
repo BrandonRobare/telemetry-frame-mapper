@@ -4,7 +4,10 @@ from __future__ import annotations
 def _make_target_area(client, name="Plan Area"):
     body = {
         "name": name,
-        "geom_geojson": '{"type":"Polygon","coordinates":[[[-80.5,35.0],[-80.4,35.0],[-80.4,35.1],[-80.5,35.1],[-80.5,35.0]]]}',
+        "geom_geojson": (
+            '{"type":"Polygon","coordinates":[[[-80.5,35.0],[-80.4,35.0],'
+            '[-80.4,35.1],[-80.5,35.1],[-80.5,35.0]]]}'
+        ),
     }
     resp = client.post("/target-areas", json=body)
     assert resp.status_code == 200

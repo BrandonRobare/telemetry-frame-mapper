@@ -1,6 +1,4 @@
 from __future__ import annotations
-import datetime
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -15,8 +13,8 @@ CSV_BYTES = (
 
 def _make_session(client):
     from backend.db.database import get_db
-    from backend.main import app
     from backend.db.models import Session as SM
+    from backend.main import app
 
     db = next(app.dependency_overrides[get_db]())
     s = SM(name="fl_test", folder_path="/tmp", photo_count=0, usable_count=0)

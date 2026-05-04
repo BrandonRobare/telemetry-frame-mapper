@@ -1,11 +1,11 @@
 from __future__ import annotations
-import datetime
 
 
 def _insert_session_and_image(client, flag="good"):
     from backend.db.database import get_db
+    from backend.db.models import Image
+    from backend.db.models import Session as SM
     from backend.main import app
-    from backend.db.models import Session as SM, Image
 
     db = next(app.dependency_overrides[get_db]())
     s = SM(name="img_s", folder_path="/tmp", photo_count=1, usable_count=1)

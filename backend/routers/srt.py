@@ -1,9 +1,10 @@
 from __future__ import annotations
+
 import os
 import tempfile
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, UploadFile, File
+from fastapi import APIRouter, File, HTTPException, UploadFile
 
 from src.drone_video_geotagger.telemetry import parse_srt
 

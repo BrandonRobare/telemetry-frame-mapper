@@ -1,9 +1,10 @@
 from __future__ import annotations
+
 import datetime
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import RedirectResponse
-from pathlib import Path
 from pydantic import BaseModel
 from sqlalchemy.orm import Session as DBSession
 

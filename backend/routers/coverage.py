@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -10,7 +9,8 @@ from shapely.wkt import loads as wkt_loads
 from sqlalchemy.orm import Session as DBSession
 
 from ..db.database import get_db
-from ..db.models import CoverageRun, Footprint, Image, Session as SessionModel, TargetArea
+from ..db.models import CoverageRun, Footprint, Image, TargetArea
+from ..db.models import Session as SessionModel
 from ..services.coverage import run_coverage
 
 router = APIRouter(prefix="/coverage", tags=["coverage"])
@@ -75,7 +75,7 @@ def run_coverage_analysis(
     return cov_run
 
 
-@router.get("/results", response_model=Optional[CoverageRunOut])
+@router.get("/results", response_model=CoverageRunOut | None)
 def get_coverage_results(session_id: int, db: DBSession = Depends(get_db)):
     # Find the most recent CoverageRun that includes this session_id
     run = (
