@@ -1,8 +1,6 @@
 from __future__ import annotations
-
-from datetime import datetime, timezone, timedelta
-
-_EPOCH = datetime(1970, 1, 1)
+import calendar
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy.orm import Session as DBSession
@@ -13,6 +11,64 @@ from ..services.flight_log_sync import match_images_to_log, parse_dji_csv
 
 router = APIRouter(prefix="/flight-logs", tags=["flight-logs"])
 
+
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
+
+def _utc_timestamp_to_naive(ts: float) -> datetime:
+    """Convert a Unix epoch float to a naive UTC datetime for DB storage."""
+    return datetime.fromtimestamp(ts, tz=timezone.utc).replace(tzinfo=None)
+
+
+def _naive_utc_to_timestamp(dt: datetime) -> float:
+    """Convert a naive UTC datetime back to a Unix epoch float.
+
+    Uses ``calendar.timegm`` which always interprets the input as UTC,
+    avoiding the platform-dependent behaviour of ``datetime.timestamp()``
+    on naive datetimes (which assumes local time).
+    """
+    return float(calendar.timegm(dt.timetuple())) + dt.microsecond / 1_000_000
+
+
+def _get_log_points_and_images(
+    session_id: int,
+    db: DBSession,
+) -> tuple[FlightLog, list[dict], list[Image]]:
+    """Shared loader for match-preview and apply-sync.
+
+    Returns ``(log, log_points_dicts, images_with_timestamp)`` or raises 404.
+    """
+    log = (
+        db.query(FlightLog)
+        .filter(FlightLog.session_id == session_id)
+        .order_by(FlightLog.uploaded_at.desc())
+        .first()
+    )
+    if not log:
+        raise HTTPException(status_code=404, detail="No flight log found for this session")
+
+    log_points_dicts = [
+        {
+            "timestamp_s": _naive_utc_to_timestamp(pt.timestamp) if pt.timestamp else 0.0,
+            "latitude": pt.latitude,
+            "longitude": pt.longitude,
+            "altitude_m": pt.altitude_m,
+        }
+        for pt in log.points
+    ]
+
+    images = (
+        db.query(Image)
+        .filter(Image.session_id == session_id, Image.timestamp.isnot(None))
+        .all()
+    )
+    return log, log_points_dicts, images
+
+
+# ---------------------------------------------------------------------------
+# Endpoints
+# ---------------------------------------------------------------------------
 
 @router.post("/upload")
 async def upload_flight_log(
@@ -27,6 +83,12 @@ async def upload_flight_log(
     content = await file.read()
     points = parse_dji_csv(content)
 
+    if not points:
+        raise HTTPException(
+            status_code=422,
+            detail="No valid data rows found in flight log CSV",
+        )
+
     log = FlightLog(
         session_id=session_id,
         filename=file.filename,
@@ -36,11 +98,9 @@ async def upload_flight_log(
     db.flush()  # get log.id before adding points
 
     for p in points:
-        # Store timestamp_s as a DateTime using epoch + offset
-        ts = datetime.fromtimestamp(p["timestamp_s"], tz=timezone.utc).replace(tzinfo=None)
         point = FlightLogPoint(
             flight_log_id=log.id,
-            timestamp=ts,
+            timestamp=_utc_timestamp_to_naive(p["timestamp_s"]),
             latitude=p["latitude"],
             longitude=p["longitude"],
             altitude_m=p["altitude_m"],
@@ -59,74 +119,17 @@ async def upload_flight_log(
 
 
 @router.get("/match-preview")
-def match_preview(
-    session_id: int,
-    db: DBSession = Depends(get_db),
-):
-    log = (
-        db.query(FlightLog)
-        .filter(FlightLog.session_id == session_id)
-        .order_by(FlightLog.uploaded_at.desc())
-        .first()
-    )
-    if not log:
-        raise HTTPException(status_code=404, detail="No flight log found for this session")
-
-    log_points_dicts = [
-        {
-            "timestamp_s": (pt.timestamp - _EPOCH).total_seconds() if pt.timestamp else 0.0,
-            "latitude": pt.latitude,
-            "longitude": pt.longitude,
-            "altitude_m": pt.altitude_m,
-        }
-        for pt in log.points
-    ]
-
-    images = (
-        db.query(Image)
-        .filter(Image.session_id == session_id, Image.timestamp.isnot(None))
-        .all()
-    )
-
-    results = match_images_to_log(images, log_points_dicts, tolerance_s=2.0)
-    return results
+def match_preview(session_id: int, db: DBSession = Depends(get_db)):
+    _, log_points_dicts, images = _get_log_points_and_images(session_id, db)
+    return match_images_to_log(images, log_points_dicts, tolerance_s=2.0)
 
 
 @router.post("/apply")
-def apply_sync(
-    session_id: int,
-    db: DBSession = Depends(get_db),
-):
-    log = (
-        db.query(FlightLog)
-        .filter(FlightLog.session_id == session_id)
-        .order_by(FlightLog.uploaded_at.desc())
-        .first()
-    )
-    if not log:
-        raise HTTPException(status_code=404, detail="No flight log found for this session")
-
-    log_points_dicts = [
-        {
-            "timestamp_s": (pt.timestamp - _EPOCH).total_seconds() if pt.timestamp else 0.0,
-            "latitude": pt.latitude,
-            "longitude": pt.longitude,
-            "altitude_m": pt.altitude_m,
-        }
-        for pt in log.points
-    ]
-
-    images = (
-        db.query(Image)
-        .filter(Image.session_id == session_id, Image.timestamp.isnot(None))
-        .all()
-    )
-
+def apply_sync(session_id: int, db: DBSession = Depends(get_db)):
+    _, log_points_dicts, images = _get_log_points_and_images(session_id, db)
     matches = match_images_to_log(images, log_points_dicts, tolerance_s=2.0)
 
-    # Build a lookup from image_id -> match
     match_map = {m["image_id"]: m for m in matches}
-
     applied = 0
     for img in images:
         if img.id in match_map:
