@@ -1,11 +1,14 @@
 from __future__ import annotations
-from pathlib import Path
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session as DBSession
-from pydantic import BaseModel
-import datetime
 
-from ..db.database import get_db, SessionLocal
+import datetime
+from pathlib import Path
+
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
+from sqlalchemy.orm import Session as DBSession
+
+from ..core.config import get_config
+from ..db.database import SessionLocal, get_db
 from ..db.models import Session as SessionModel
 from ..services.ingest_orchestrator import get_progress, start_import
 
@@ -57,12 +60,16 @@ class ImportRequest(BaseModel):
 
 @router.post("/import", response_model=SessionOut)
 def import_session(req: ImportRequest, db: DBSession = Depends(get_db)):
-    folder = Path(req.folder_path)
+    cfg = get_config()
+    imports_root = Path(cfg.imports_dir).resolve()
+    folder = Path(req.folder_path).resolve()
+    if not folder.is_relative_to(imports_root):
+        raise HTTPException(status_code=400, detail="Folder must be inside the imports directory")
     if not folder.is_dir():
         raise HTTPException(status_code=400, detail=f"Folder not found: {req.folder_path}")
     s = SessionModel(
         name=req.name,
-        folder_path=req.folder_path,
+        folder_path=str(folder),
         imported_at=datetime.datetime.utcnow(),
         photo_count=0,
         usable_count=0,
