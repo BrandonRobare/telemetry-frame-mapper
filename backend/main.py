@@ -46,9 +46,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-thumbs_dir = os.path.abspath("./processed/thumbs")
-os.makedirs(thumbs_dir, exist_ok=True)
-app.mount("/thumbs", StaticFiles(directory=thumbs_dir), name="thumbs")
+processed_dir = os.path.abspath("./processed")
+os.makedirs(processed_dir, exist_ok=True)
+app.mount("/processed", StaticFiles(directory=processed_dir), name="processed")
 
 
 @app.get("/health")
