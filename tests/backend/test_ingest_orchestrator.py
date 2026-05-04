@@ -18,7 +18,7 @@ def test_import_endpoint_bad_folder(client):
         resp = client.post(
             "/sessions/import", json={"folder_path": "/nonexistent/path/xyz", "name": "bad"}
         )
-    assert resp.status_code == 400
+    assert resp.status_code == 400  # rejected: absolute path
     mock_start.assert_not_called()
 
 
@@ -32,7 +32,8 @@ def test_import_endpoint_creates_session(client, tmp_path):
         "backend.routers.sessions.start_import"
     ) as mock_start:
         resp = client.post(
-            "/sessions/import", json={"folder_path": str(tmp_path), "name": "Test Import"}
+            "/sessions/import",
+            json={"folder_path": tmp_path.name, "name": "Test Import"},
         )
     assert resp.status_code == 200
     data = resp.json()
@@ -56,7 +57,7 @@ def test_progress_endpoint_returns_pending(client, tmp_path):
     ):
         session_id = client.post(
             "/sessions/import",
-            json={"folder_path": str(tmp_path), "name": "prog"},
+            json={"folder_path": tmp_path.name, "name": "prog"},
         ).json()["id"]
     resp = client.get(f"/sessions/{session_id}/progress")
     assert resp.status_code == 200
