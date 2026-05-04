@@ -12,6 +12,8 @@ from .routers import sessions as sessions_router
 from .routers import target_areas as target_areas_router
 from .routers import coverage as coverage_router
 from .routers import flight_log as flight_log_router
+from .routers import srt as srt_router
+from .routers import plans as plans_router
 
 
 @asynccontextmanager
@@ -25,6 +27,8 @@ app.include_router(sessions_router.router)
 app.include_router(target_areas_router.router)
 app.include_router(coverage_router.router)
 app.include_router(flight_log_router.router)
+app.include_router(srt_router.router)
+app.include_router(plans_router.router)
 
 app.add_middleware(
     CORSMiddleware,
