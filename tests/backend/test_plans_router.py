@@ -91,3 +91,15 @@ def test_generate_plan_invalid_overlap(client):
     }
     resp = client.post("/plans/generate", json=body)
     assert resp.status_code == 422
+
+
+def test_generate_plan_invalid_forward_overlap(client):
+    area = _make_target_area(client, name="Invalid Forward Overlap")
+    body = {
+        "target_area_id": area["id"],
+        "altitude_ft": 200,
+        "side_overlap_pct": 0.7,
+        "forward_overlap_pct": 1.0,
+    }
+    resp = client.post("/plans/generate", json=body)
+    assert resp.status_code == 422

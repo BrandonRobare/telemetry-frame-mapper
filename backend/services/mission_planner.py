@@ -11,27 +11,28 @@ def generate_lawnmower(
     target_geojson: str,
     altitude_ft: float,
     side_overlap: float,
-    forward_overlap: float,  # TODO: use for waypoint trigger spacing in a future task
+    forward_overlap: float,
     fov_h_deg: float = 84.0,
     fov_v_deg: float = 64.0,
 ) -> dict:
-    """Returns lanes_geojson, lane_count, total_distance_m.
-
-    Note: ``forward_overlap`` is accepted for API compatibility but not yet used
-    in the lane generation algorithm. It will control waypoint trigger spacing
-    when per-waypoint output is implemented.
-    """
+    """Returns lanes_geojson, lane_count, total_distance_m, waypoint_spacing_m."""
     if side_overlap >= 1.0:
         raise ValueError(f"side_overlap must be < 1.0, got {side_overlap}")
+    if forward_overlap >= 1.0:
+        raise ValueError(f"forward_overlap must be < 1.0, got {forward_overlap}")
 
     poly = shape(json.loads(target_geojson))
     bounds = poly.bounds  # minx, miny, maxx, maxy
 
     altitude_m = altitude_ft * 0.3048
     gw = 2 * altitude_m * math.tan(math.radians(fov_h_deg / 2))
+    gh = 2 * altitude_m * math.tan(math.radians(fov_v_deg / 2))
     lane_spacing = gw * (1 - side_overlap)
     if lane_spacing <= 0:
         lane_spacing = gw * 0.3  # fallback for degenerate overlap values
+    waypoint_spacing_m = gh * (1 - forward_overlap)
+    if waypoint_spacing_m <= 0:
+        waypoint_spacing_m = gh * 0.2  # fallback for degenerate overlap values
 
     # Convert lane_spacing from meters to degrees (approximate, using 111_000 m/deg)
     lane_spacing_deg = lane_spacing / 111_000
@@ -57,6 +58,7 @@ def generate_lawnmower(
         }),
         "lane_count": len(lanes),
         "total_distance_m": round(total_dist, 1),
+        "waypoint_spacing_m": round(waypoint_spacing_m, 2),
     }
 
 

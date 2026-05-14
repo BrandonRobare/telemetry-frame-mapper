@@ -44,6 +44,8 @@ class PlanOut(BaseModel):
 def generate_plan(body: PlanIn, db: DBSession = Depends(get_db)):
     if body.side_overlap_pct >= 1.0:
         raise HTTPException(status_code=422, detail="side_overlap_pct must be < 1.0")
+    if body.forward_overlap_pct >= 1.0:
+        raise HTTPException(status_code=422, detail="forward_overlap_pct must be < 1.0")
 
     area = db.query(TargetArea).filter(TargetArea.id == body.target_area_id).first()
     if not area:
