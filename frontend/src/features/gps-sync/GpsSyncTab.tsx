@@ -6,6 +6,8 @@ import { useToast } from '../../shared/hooks/useToast'
 import { Button } from '../../shared/components/Button'
 import { get } from '../../shared/api/client'
 
+const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
+
 interface MatchPreviewRow {
   filename: string
   matched_timestamp: string | null
@@ -47,7 +49,7 @@ export default function GpsSyncTab() {
 
     try {
       const res = await fetch(
-        `/api/flight-logs/upload?session_id=${selectedSessionId}`,
+        `${BASE_URL}/flight-logs/upload?session_id=${selectedSessionId}`,
         { method: 'POST', body: formData }
       )
       if (!res.ok) {
