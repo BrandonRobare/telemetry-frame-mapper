@@ -60,6 +60,7 @@ function StatsBar({ images, activeFlag, onFlagClick, visibleCount }: StatsBarPro
     good: 0, blurry: 0, no_gps: 0, dark: 0, bright: 0,
   }
   for (const img of images) counts[img.flag]++
+  const usableCount = images.filter((img) => img.usable).length
 
   const items: { label: string; flag: Image['flag']; count: number; color: string }[] = [
     { label: 'Good',   flag: 'good',   count: counts.good,   color: '#4ade80' },
@@ -122,6 +123,12 @@ function StatsBar({ images, activeFlag, onFlagClick, visibleCount }: StatsBarPro
           ✕ clear
         </button>
       )}
+      <span style={{ marginLeft: 'auto', color: 'var(--text-muted)', fontSize: 12 }}>
+        <span style={{ color: '#86efac', fontWeight: 600 }}>{usableCount}</span>
+        {' / '}
+        {images.length}
+        {' usable'}
+      </span>
     </div>
   )
 }
@@ -138,8 +145,6 @@ function ImageCard({ img, sessionId }: CardProps) {
   const flagMutation = useMutation({
     mutationFn: ({ id, flag }: { id: number; flag: string }) =>
       patch<Image>(`/images/${id}`, { flag }),
-
-    // optimistic update
     onMutate: async ({ id, flag }) => {
       await qc.cancelQueries({ queryKey: ['images', sessionId] })
       const previous = qc.getQueryData<Image[]>(['images', sessionId])
@@ -148,16 +153,27 @@ function ImageCard({ img, sessionId }: CardProps) {
       )
       return { previous }
     },
-
     onError: (_err, _vars, context) => {
-      if (context?.previous) {
-        qc.setQueryData(['images', sessionId], context.previous)
-      }
+      if (context?.previous) qc.setQueryData(['images', sessionId], context.previous)
     },
+    onSettled: () => qc.invalidateQueries({ queryKey: ['images', sessionId] }),
+  })
 
-    onSettled: () => {
-      qc.invalidateQueries({ queryKey: ['images', sessionId] })
+  const usableMutation = useMutation({
+    mutationFn: ({ id, usable }: { id: number; usable: boolean }) =>
+      patch<Image>(`/images/${id}`, { usable }),
+    onMutate: async ({ id, usable }) => {
+      await qc.cancelQueries({ queryKey: ['images', sessionId] })
+      const previous = qc.getQueryData<Image[]>(['images', sessionId])
+      qc.setQueryData<Image[]>(['images', sessionId], (old) =>
+        old?.map((item) => (item.id === id ? { ...item, usable } : item))
+      )
+      return { previous }
     },
+    onError: (_err, _vars, context) => {
+      if (context?.previous) qc.setQueryData(['images', sessionId], context.previous)
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey: ['images', sessionId] }),
   })
 
   const badge = FLAG_BADGE[img.flag]
@@ -167,7 +183,9 @@ function ImageCard({ img, sessionId }: CardProps) {
       className="flex flex-col rounded overflow-hidden"
       style={{
         background: 'var(--surface)',
-        border: '1px solid var(--border)',
+        border: img.usable
+          ? '1px solid var(--border)'
+          : '1px solid #7f1d1d',
         position: 'relative',
         minHeight: 152,
       }}
@@ -181,9 +199,8 @@ function ImageCard({ img, sessionId }: CardProps) {
           <img
             src={thumbUrl(img)}
             alt={img.filename}
-            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+            style={{ width: '100%', height: '100%', objectFit: 'cover', opacity: img.usable ? 1 : 0.4 }}
             onError={(e) => {
-              // fallback to initials on load error
               const target = e.currentTarget
               target.style.display = 'none'
               const parent = target.parentElement
@@ -205,9 +222,7 @@ function ImageCard({ img, sessionId }: CardProps) {
 
       {/* flag badge — top-right, clickable */}
       <button
-        onClick={() =>
-          flagMutation.mutate({ id: img.id, flag: nextFlag(img.flag) })
-        }
+        onClick={() => flagMutation.mutate({ id: img.id, flag: nextFlag(img.flag) })}
         title="Click to cycle flag"
         disabled={flagMutation.isPending}
         style={{
@@ -229,14 +244,45 @@ function ImageCard({ img, sessionId }: CardProps) {
         {badge.label}
       </button>
 
-      {/* filename */}
-      <div
-        className="px-2 py-1.5 text-xs truncate"
-        style={{ color: 'var(--text-muted)' }}
-        title={img.filename}
-      >
-        {img.filename}
+      {/* filename + scores */}
+      <div className="px-2 pt-1.5 text-xs" style={{ color: 'var(--text-muted)' }}>
+        <div className="truncate" title={img.filename}>{img.filename}</div>
+        <div className="flex gap-2 mt-0.5" style={{ fontSize: 10 }}>
+          {img.sharpness_score != null && (
+            <span title="Sharpness (Laplacian variance)">
+              ◈ {img.sharpness_score.toFixed(0)}
+            </span>
+          )}
+          {img.brightness_score != null && (
+            <span title="Brightness (mean pixel 0–255)">
+              ☀ {img.brightness_score.toFixed(0)}
+            </span>
+          )}
+        </div>
       </div>
+
+      {/* usable toggle */}
+      <button
+        onClick={() => usableMutation.mutate({ id: img.id, usable: !img.usable })}
+        disabled={usableMutation.isPending}
+        style={{
+          margin: '4px 8px 8px',
+          padding: '3px 0',
+          borderRadius: 4,
+          fontSize: 11,
+          fontWeight: 600,
+          border: 'none',
+          cursor: 'pointer',
+          background: img.usable ? '#14532d' : '#450a0a',
+          color: img.usable ? '#86efac' : '#fca5a5',
+          opacity: usableMutation.isPending ? 0.6 : 1,
+          fontFamily: 'inherit',
+          width: 'calc(100% - 16px)',
+        }}
+        title={img.usable ? 'Mark as skip' : 'Mark as usable'}
+      >
+        {img.usable ? '✓ Usable' : '✗ Skip'}
+      </button>
     </div>
   )
 }
