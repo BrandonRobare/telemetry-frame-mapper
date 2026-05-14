@@ -18,6 +18,8 @@ def generate_lawnmower(
     """Returns lanes_geojson, lane_count, total_distance_m, waypoint_spacing_m."""
     if side_overlap >= 1.0:
         raise ValueError(f"side_overlap must be < 1.0, got {side_overlap}")
+    if forward_overlap >= 1.0:
+        raise ValueError(f"forward_overlap must be < 1.0, got {forward_overlap}")
 
     poly = shape(json.loads(target_geojson))
     bounds = poly.bounds  # minx, miny, maxx, maxy

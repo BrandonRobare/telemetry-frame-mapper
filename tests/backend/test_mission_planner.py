@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import math
 
+import pytest
+
 from backend.services.mission_planner import generate_lawnmower
 
 _POLY = (
@@ -52,3 +54,13 @@ def test_higher_overlap_gives_shorter_spacing():
         forward_overlap=0.8,
     )
     assert r_high["waypoint_spacing_m"] < r_low["waypoint_spacing_m"]
+
+
+def test_forward_overlap_must_be_less_than_one():
+    with pytest.raises(ValueError, match="forward_overlap"):
+        generate_lawnmower(
+            target_geojson=_POLY,
+            altitude_ft=200,
+            side_overlap=0.7,
+            forward_overlap=1.0,
+        )
