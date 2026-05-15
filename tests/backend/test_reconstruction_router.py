@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json as _json
 from unittest.mock import patch
 
 from backend.db.models import Image, Reconstruction
@@ -104,3 +105,45 @@ def test_cancel_reconstruction(client):
         resp = client.delete(f"/reconstruction/{rec.id}")
     assert resp.status_code == 200
     mock_cancel.assert_called_once_with(rec.id)
+
+
+def test_start_reconstruction_with_target_area(client):
+    db = _get_db(client)
+    s = _make_session_with_images(db)
+    from backend.db.models import TargetArea
+    ta = TargetArea(
+        name="Test Area",
+        geom_geojson=_json.dumps({
+            "type": "Polygon",
+            "coordinates": [[[34.99, -80.001], [35.01, -80.001],
+                             [35.01, -79.999], [34.99, -79.999], [34.99, -80.001]]],
+        }),
+    )
+    db.add(ta)
+    db.commit()
+    db.refresh(ta)
+
+    with patch("backend.routers.reconstruction.start_reconstruction") as mock_start:
+        rec = Reconstruction(
+            id=1, session_id=s.id, status="pending", preset="quick",
+            progress_pct=0.0, frames_used=3, step="",
+        )
+        mock_start.return_value = rec
+        resp = client.post(
+            "/reconstruction/start",
+            json={"session_id": s.id, "preset": "quick", "target_area_id": ta.id},
+        )
+
+    assert resp.status_code == 201
+    _args, kwargs = mock_start.call_args
+    assert kwargs.get("target_area_geojson") is not None
+
+
+def test_start_reconstruction_target_area_not_found(client):
+    db = _get_db(client)
+    s = _make_session_with_images(db)
+    resp = client.post(
+        "/reconstruction/start",
+        json={"session_id": s.id, "preset": "quick", "target_area_id": 999999},
+    )
+    assert resp.status_code == 404
