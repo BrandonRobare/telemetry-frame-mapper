@@ -11,6 +11,13 @@ services:
       - ./exports:/app/exports
       - ./data:/app/data
       - ./config.yaml:/app/config.yaml
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
 
   frontend:
     build: ./frontend
@@ -18,15 +25,3 @@ services:
       - "5173:5173"
     depends_on:
       - backend
-
-profiles:
-  nvidia:
-    services:
-      backend:
-        deploy:
-          resources:
-            reservations:
-              devices:
-                - driver: nvidia
-                  count: all
-                  capabilities: [gpu]
