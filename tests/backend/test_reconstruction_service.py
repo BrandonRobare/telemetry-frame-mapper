@@ -170,7 +170,7 @@ def test_workspace_image_copied_or_linked():
 # ---------------------------------------------------------------------------
 
 
-def _make_square_geojson(min_lat, min_lon, max_lat, max_lon) -> str:
+def _make_square_geojson(min_lon, min_lat, max_lon, max_lat) -> str:
     return json.dumps({
         "type": "Polygon",
         "coordinates": [[
@@ -185,7 +185,7 @@ def _make_square_geojson(min_lat, min_lon, max_lat, max_lon) -> str:
 
 def test_filter_images_inside_polygon():
     from backend.services.reconstruction import _filter_images_to_target_area
-    geojson = _make_square_geojson(34.9, -80.1, 35.1, -79.9)
+    geojson = _make_square_geojson(-80.1, 34.9, -79.9, 35.1)
     inside = _make_mock_image(lat=35.0, lon=-80.0)
     outside = _make_mock_image(lat=36.0, lon=-81.0)
     result = _filter_images_to_target_area([inside, outside], geojson)
@@ -195,9 +195,19 @@ def test_filter_images_inside_polygon():
 
 def test_filter_images_excludes_no_gps():
     from backend.services.reconstruction import _filter_images_to_target_area
-    geojson = _make_square_geojson(34.9, -80.1, 35.1, -79.9)
+    geojson = _make_square_geojson(-80.1, 34.9, -79.9, 35.1)
     img = _make_mock_image()
     img.latitude = None
+    img.longitude = None
+    result = _filter_images_to_target_area([img], geojson)
+    assert result == []
+
+
+def test_filter_images_excludes_partial_gps():
+    from backend.services.reconstruction import _filter_images_to_target_area
+    geojson = _make_square_geojson(-80.1, 34.9, -79.9, 35.1)
+    img = _make_mock_image()
+    img.latitude = 35.0
     img.longitude = None
     result = _filter_images_to_target_area([img], geojson)
     assert result == []

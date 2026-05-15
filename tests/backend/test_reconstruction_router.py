@@ -115,8 +115,8 @@ def test_start_reconstruction_with_target_area(client):
         name="Test Area",
         geom_geojson=_json.dumps({
             "type": "Polygon",
-            "coordinates": [[[34.99, -80.001], [35.01, -80.001],
-                             [35.01, -79.999], [34.99, -79.999], [34.99, -80.001]]],
+            "coordinates": [[[-80.001, 34.99], [-79.999, 34.99],
+                             [-79.999, 35.01], [-80.001, 35.01], [-80.001, 34.99]]],
         }),
     )
     db.add(ta)
@@ -136,7 +136,7 @@ def test_start_reconstruction_with_target_area(client):
 
     assert resp.status_code == 201
     _args, kwargs = mock_start.call_args
-    assert kwargs.get("target_area_geojson") is not None
+    assert kwargs.get("target_area_geojson") == ta.geom_geojson
 
 
 def test_start_reconstruction_target_area_not_found(client):
