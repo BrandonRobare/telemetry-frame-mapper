@@ -22,3 +22,26 @@ def test_ground_dimensions():
     cfg = load_config("config.yaml")
     assert cfg.ground_width_m == pytest.approx(107.5, abs=2.0)
     assert cfg.ground_height_m == pytest.approx(60.8, abs=2.0)
+
+
+def test_get_reconstruction_config_defaults():
+    from backend.core.config import get_reconstruction_config
+    cfg = get_reconstruction_config()
+    assert "presets" in cfg
+    assert "quick" in cfg["presets"]
+    assert "full" in cfg["presets"]
+    assert cfg["presets"]["quick"]["iterations"] == 1000
+    assert cfg["presets"]["full"]["iterations"] == 30000
+    assert cfg["colmap_threads"] == 8
+    assert cfg["sift_max_features"] == 8192
+
+
+def test_get_reconstruction_config_preset_values():
+    from backend.core.config import get_reconstruction_config
+    cfg = get_reconstruction_config()
+    quick = cfg["presets"]["quick"]
+    assert quick["max_frames"] == 500
+    assert quick["exhaustive_matching"] is False
+    full = cfg["presets"]["full"]
+    assert full["max_frames"] is None
+    assert full["exhaustive_matching"] is True
