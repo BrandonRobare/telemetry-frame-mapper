@@ -23,6 +23,9 @@ class Session(Base):
     log_entries = relationship(
         "SessionLogEntry", back_populates="session", cascade="all, delete-orphan"
     )
+    reconstructions = relationship(
+        "Reconstruction", back_populates="session", cascade="all, delete-orphan"
+    )
 
 
 class Image(Base):
@@ -153,3 +156,40 @@ class SessionLogEntry(Base):
     photo_count = Column(Integer)
     message = Column(Text)
     session = relationship("Session", back_populates="log_entries")
+
+
+class Reconstruction(Base):
+    __tablename__ = "reconstructions"
+    id = Column(Integer, primary_key=True, index=True)
+    session_id = Column(Integer, ForeignKey("sessions.id"), nullable=False)
+    status = Column(String, default="pending")
+    preset = Column(String, default="quick")
+    progress_pct = Column(Float, default=0.0)
+    step = Column(String, default="")
+    frames_used = Column(Integer, default=0)
+    frames_registered = Column(Integer)
+    gaussian_count = Column(Integer)
+    psnr = Column(Float)
+    ssim = Column(Float)
+    colmap_dir = Column(String)
+    splat_path = Column(String)
+    splat_preview_path = Column(String)
+    splat_medium_path = Column(String)
+    thumb_path = Column(String)
+    geo_transform = Column(Text)
+    error_msg = Column(String)
+    started_at = Column(DateTime, default=datetime.utcnow)
+    completed_at = Column(DateTime)
+    duration_s = Column(Float)
+    session = relationship("Session", back_populates="reconstructions")
+    frames = relationship(
+        "ReconstructionFrame", back_populates="reconstruction", cascade="all, delete-orphan"
+    )
+
+
+class ReconstructionFrame(Base):
+    __tablename__ = "reconstruction_frames"
+    reconstruction_id = Column(Integer, ForeignKey("reconstructions.id"), primary_key=True)
+    image_id = Column(Integer, ForeignKey("images.id"), primary_key=True)
+    reconstruction = relationship("Reconstruction", back_populates="frames")
+    image = relationship("Image")

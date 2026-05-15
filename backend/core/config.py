@@ -63,3 +63,26 @@ def load_config(path: str = "config.yaml") -> AppConfig:
 @lru_cache(maxsize=1)
 def get_config() -> AppConfig:
     return load_config("config.yaml")
+
+
+def get_reconstruction_config(path: str = "config.yaml") -> dict:
+    """Return the reconstruction section from config.yaml with defaults applied."""
+    try:
+        with open(path) as f:
+            data = yaml.safe_load(f) or {}
+    except FileNotFoundError:
+        data = {}
+
+    defaults: dict = {
+        "presets": {
+            "quick": {"iterations": 1000, "max_frames": 500, "exhaustive_matching": False},
+            "full": {"iterations": 30000, "max_frames": None, "exhaustive_matching": True},
+        },
+        "colmap_threads": 8,
+        "sift_max_features": 8192,
+    }
+    recon = data.get("reconstruction", {})
+    merged = {**defaults, **recon}
+    if "presets" not in recon:
+        merged["presets"] = defaults["presets"]
+    return merged
