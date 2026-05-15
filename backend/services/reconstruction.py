@@ -140,6 +140,17 @@ def _extract_geo_transform(colmap_dir: Path) -> dict:
     }
 
 
+def _filter_images_to_target_area(images: list, geom_geojson: str) -> list:
+    """Return images whose GPS position falls inside the target area polygon."""
+    from shapely.geometry import Point, shape
+    polygon = shape(json.loads(geom_geojson))
+    return [
+        img for img in images
+        if img.latitude is not None and img.longitude is not None
+        and Point(img.longitude, img.latitude).within(polygon)
+    ]
+
+
 # ---------------------------------------------------------------------------
 # gsplat training (requires GPU + gsplat installed)
 # ---------------------------------------------------------------------------
@@ -181,7 +192,13 @@ def _generate_lod(splat_path: Path) -> tuple[Path, Path]:
 # Pipeline orchestrator
 # ---------------------------------------------------------------------------
 
-def start_reconstruction(session_id: int, preset: str, db: DBSession) -> Reconstruction:
+def start_reconstruction(
+    session_id: int,
+    preset: str,
+    db: DBSession,
+    *,
+    target_area_geojson: str | None = None,
+) -> Reconstruction:
     """Create Reconstruction record and launch background thread. Returns the record."""
     running = db.query(Reconstruction).filter(
         Reconstruction.session_id == session_id,
@@ -196,6 +213,11 @@ def start_reconstruction(session_id: int, preset: str, db: DBSession) -> Reconst
         Image.session_id == session_id,
         Image.usable == True,  # noqa: E712
     ).all()
+
+    # Target area crop filters the pool
+    if target_area_geojson:
+        images = _filter_images_to_target_area(images, target_area_geojson)
+
     if not images:
         raise ValueError("No usable images in session")
 

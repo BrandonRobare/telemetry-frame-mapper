@@ -5,7 +5,7 @@ from pydantic import BaseModel, field_validator
 from sqlalchemy.orm import Session as DBSession
 
 from ..db.database import get_db
-from ..db.models import Reconstruction
+from ..db.models import Reconstruction, TargetArea
 from ..services.reconstruction import cancel_reconstruction, start_reconstruction
 
 router = APIRouter(prefix="/reconstruction", tags=["reconstruction"])
@@ -16,6 +16,7 @@ VALID_PRESETS = {"quick", "full"}
 class StartIn(BaseModel):
     session_id: int
     preset: str = "quick"
+    target_area_id: int | None = None
 
     @field_validator("preset")
     @classmethod
@@ -46,8 +47,17 @@ class ReconstructionOut(BaseModel):
 
 @router.post("/start", response_model=ReconstructionOut, status_code=201)
 def start(body: StartIn, db: DBSession = Depends(get_db)):
+    target_area_geojson: str | None = None
+    if body.target_area_id is not None:
+        ta = db.query(TargetArea).filter(TargetArea.id == body.target_area_id).first()
+        if not ta:
+            raise HTTPException(status_code=404, detail="Target area not found")
+        target_area_geojson = ta.geom_geojson
     try:
-        rec = start_reconstruction(body.session_id, body.preset, db)
+        rec = start_reconstruction(
+            body.session_id, body.preset, db,
+            target_area_geojson=target_area_geojson,
+        )
     except ValueError as exc:
         msg = str(exc)
         if "already in progress" in msg:
