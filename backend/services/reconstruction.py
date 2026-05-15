@@ -9,6 +9,7 @@ import threading
 from datetime import datetime
 from pathlib import Path
 
+from shapely.geometry import Point, shape
 from sqlalchemy.orm import Session as DBSession
 
 from backend.core.config import get_config, get_reconstruction_config
@@ -142,7 +143,6 @@ def _extract_geo_transform(colmap_dir: Path) -> dict:
 
 def _filter_images_to_target_area(images: list, geom_geojson: str) -> list:
     """Return images whose GPS position falls inside the target area polygon."""
-    from shapely.geometry import Point, shape
     polygon = shape(json.loads(geom_geojson))
     return [
         img for img in images

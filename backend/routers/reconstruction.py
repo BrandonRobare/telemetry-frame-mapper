@@ -52,6 +52,8 @@ def start(body: StartIn, db: DBSession = Depends(get_db)):
         ta = db.query(TargetArea).filter(TargetArea.id == body.target_area_id).first()
         if not ta:
             raise HTTPException(status_code=404, detail="Target area not found")
+        if not ta.geom_geojson:
+            raise HTTPException(status_code=422, detail="Target area has no geometry defined")
         target_area_geojson = ta.geom_geojson
     try:
         rec = start_reconstruction(
