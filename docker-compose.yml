@@ -1,5 +1,5 @@
-# docker-compose.yml — stub, completed in Task 25
 version: "3.9"
+
 services:
   backend:
     build: ./backend
@@ -18,3 +18,15 @@ services:
       - "5173:5173"
     depends_on:
       - backend
+
+profiles:
+  nvidia:
+    services:
+      backend:
+        deploy:
+          resources:
+            reservations:
+              devices:
+                - driver: nvidia
+                  count: all
+                  capabilities: [gpu]
