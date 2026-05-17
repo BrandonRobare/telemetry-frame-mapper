@@ -1,5 +1,6 @@
-import yaml
 from pathlib import Path
+
+import yaml
 
 COMPOSE_FILE = Path(__file__).parent.parent / "docker-compose.yml"
 
