@@ -5,7 +5,7 @@ from pydantic import BaseModel, field_validator
 from sqlalchemy.orm import Session as DBSession
 
 from ..db.database import get_db
-from ..db.models import Reconstruction, TargetArea
+from ..db.models import Reconstruction, SessionFrameSelection, TargetArea
 from ..services.reconstruction import cancel_reconstruction, start_reconstruction
 
 router = APIRouter(prefix="/reconstruction", tags=["reconstruction"])
@@ -83,3 +83,34 @@ def cancel(reconstruction_id: int, db: DBSession = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Reconstruction not found")
     cancel_reconstruction(reconstruction_id)
     return {"ok": True}
+
+
+class FrameSelectionIn(BaseModel):
+    session_id: int
+    image_ids: list[int]
+
+
+@router.post("/frame-selection", status_code=204)
+def set_frame_selection(body: FrameSelectionIn, db: DBSession = Depends(get_db)):
+    db.query(SessionFrameSelection).filter(
+        SessionFrameSelection.session_id == body.session_id
+    ).delete()
+    for image_id in body.image_ids:
+        db.add(SessionFrameSelection(session_id=body.session_id, image_id=image_id))
+    db.commit()
+
+
+@router.delete("/frame-selection/{session_id}", status_code=204)
+def clear_frame_selection(session_id: int, db: DBSession = Depends(get_db)):
+    db.query(SessionFrameSelection).filter(
+        SessionFrameSelection.session_id == session_id
+    ).delete()
+    db.commit()
+
+
+@router.get("/frame-selection/{session_id}")
+def get_frame_selection(session_id: int, db: DBSession = Depends(get_db)):
+    rows = db.query(SessionFrameSelection).filter(
+        SessionFrameSelection.session_id == session_id
+    ).all()
+    return {"image_ids": [r.image_id for r in rows]}
