@@ -26,6 +26,9 @@ class Session(Base):
     reconstructions = relationship(
         "Reconstruction", back_populates="session", cascade="all, delete-orphan"
     )
+    frame_selections = relationship(
+        "SessionFrameSelection", cascade="all, delete-orphan", passive_deletes=True
+    )
 
 
 class Image(Base):
@@ -190,7 +193,7 @@ class Reconstruction(Base):
 class ReconstructionFrame(Base):
     __tablename__ = "reconstruction_frames"
     reconstruction_id = Column(Integer, ForeignKey("reconstructions.id"), primary_key=True)
-    image_id = Column(Integer, ForeignKey("images.id"), primary_key=True)
+    image_id = Column(Integer, ForeignKey("images.id", ondelete="CASCADE"), primary_key=True)
     reconstruction = relationship("Reconstruction", back_populates="frames")
     image = relationship("Image")
 
