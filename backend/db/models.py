@@ -197,5 +197,5 @@ class ReconstructionFrame(Base):
 
 class SessionFrameSelection(Base):
     __tablename__ = "session_frame_selections"
-    session_id = Column(Integer, ForeignKey("sessions.id"), primary_key=True)
-    image_id = Column(Integer, ForeignKey("images.id"), primary_key=True)
+    session_id = Column(Integer, ForeignKey("sessions.id", ondelete="CASCADE"), primary_key=True)
+    image_id = Column(Integer, ForeignKey("images.id", ondelete="CASCADE"), primary_key=True)
