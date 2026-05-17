@@ -117,7 +117,9 @@ def clear_frame_selection(session_id: int, db: DBSession = Depends(get_db)):
         db.commit()
     except Exception as exc:
         db.rollback()
-        raise HTTPException(status_code=422, detail=f"Failed to clear frame selection: {exc}") from exc
+        raise HTTPException(
+            status_code=422, detail=f"Failed to clear frame selection: {exc}"
+        ) from exc
 
 
 @router.get("/frame-selection/{session_id}")
