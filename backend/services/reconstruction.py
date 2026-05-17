@@ -308,7 +308,9 @@ def _run_pipeline(
         if cancel.is_set():
             _update_rec(
                 db, reconstruction_id,
-                status="failed", error_msg="Cancelled by user", completed_at=datetime.now(timezone.utc),
+                status="failed",
+                error_msg="Cancelled by user",
+                completed_at=datetime.now(timezone.utc),
             )
             return
 
@@ -320,7 +322,9 @@ def _run_pipeline(
         if cancel.is_set():
             _update_rec(
                 db, reconstruction_id,
-                status="failed", error_msg="Cancelled by user", completed_at=datetime.now(timezone.utc),
+                status="failed",
+                error_msg="Cancelled by user",
+                completed_at=datetime.now(timezone.utc),
             )
             return
 
