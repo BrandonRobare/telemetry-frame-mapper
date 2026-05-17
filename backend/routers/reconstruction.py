@@ -92,12 +92,16 @@ class FrameSelectionIn(BaseModel):
 
 @router.post("/frame-selection", status_code=204)
 def set_frame_selection(body: FrameSelectionIn, db: DBSession = Depends(get_db)):
-    db.query(SessionFrameSelection).filter(
-        SessionFrameSelection.session_id == body.session_id
-    ).delete()
-    for image_id in body.image_ids:
-        db.add(SessionFrameSelection(session_id=body.session_id, image_id=image_id))
-    db.commit()
+    try:
+        db.query(SessionFrameSelection).filter(
+            SessionFrameSelection.session_id == body.session_id
+        ).delete()
+        for image_id in body.image_ids:
+            db.add(SessionFrameSelection(session_id=body.session_id, image_id=image_id))
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=422, detail=f"Invalid frame selection: {exc}") from exc
 
 
 @router.delete("/frame-selection/{session_id}", status_code=204)

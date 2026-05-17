@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { get, patch } from '../../shared/api/client'
+import { get, patch, post } from '../../shared/api/client'
 import { useMapStore } from '../../shared/stores/mapStore'
 import type { Image } from '../../types/api'
 
@@ -27,11 +27,7 @@ function useSetFrameSelection(sessionId: number | null) {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (imageIds: number[]) =>
-      fetch(`${BASE_URL}/reconstruction/frame-selection`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ session_id: sessionId, image_ids: imageIds }),
-      }),
+      post<void>('/reconstruction/frame-selection', { session_id: sessionId, image_ids: imageIds }),
     onSettled: () => qc.invalidateQueries({ queryKey: ['frame-selection', sessionId] }),
   })
 }

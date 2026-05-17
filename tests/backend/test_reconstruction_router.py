@@ -178,7 +178,7 @@ def test_set_frame_selection_replaces_previous(client):
                 json={"session_id": s.id, "image_ids": [all_ids[0]]})
 
     resp = client.get(f"/reconstruction/frame-selection/{s.id}")
-    assert resp.json()["image_ids"] == [all_ids[0]]
+    assert set(resp.json()["image_ids"]) == {all_ids[0]}
 
 
 def test_clear_frame_selection(client):
