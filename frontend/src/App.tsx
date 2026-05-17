@@ -8,11 +8,12 @@ import PlanTab from './features/plan/PlanTab'
 import SessionLogTab from './features/session-log/SessionLogTab'
 import ReconstructTab from './features/reconstruct/ReconstructTab'
 import JobsTab from './features/jobs/JobsTab'
+import StorageTab from './features/storage/StorageTab'
 import { ToastStack } from './shared/components/ToastStack'
 import ImportModal from './features/import/ImportModal'
 import SessionPicker from './features/sessions/SessionPicker'
 
-type Tab = 'map' | 'gps-sync' | 'review' | 'plan' | 'export' | 'session-log' | 'reconstruct' | 'jobs'
+type Tab = 'map' | 'gps-sync' | 'review' | 'plan' | 'export' | 'session-log' | 'reconstruct' | 'jobs' | 'storage'
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'map', label: 'Map' },
@@ -23,6 +24,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'session-log', label: 'Session Log' },
   { id: 'reconstruct', label: 'Reconstruct' },
   { id: 'jobs', label: 'Jobs' },
+  { id: 'storage', label: 'Storage' },
 ]
 
 function ComingSoon({ label }: { label: string }) {
@@ -122,6 +124,7 @@ export default function App() {
         {activeTab === 'session-log' && <SessionLogTab />}
         {activeTab === 'reconstruct' && <ReconstructTab />}
         {activeTab === 'jobs' && <JobsTab />}
+        {activeTab === 'storage' && <StorageTab />}
       </div>
       <ToastStack />
       <ImportModal open={showImport} onClose={() => setShowImport(false)} />
