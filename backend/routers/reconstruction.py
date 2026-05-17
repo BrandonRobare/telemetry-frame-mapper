@@ -1,6 +1,10 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+import json
+from pathlib import Path
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, field_validator
 from sqlalchemy.orm import Session as DBSession
 
@@ -118,3 +122,41 @@ def get_frame_selection(session_id: int, db: DBSession = Depends(get_db)):
         SessionFrameSelection.session_id == session_id
     ).all()
     return {"image_ids": [r.image_id for r in rows]}
+
+
+@router.get("/{reconstruction_id}/splat")
+def download_splat(
+    reconstruction_id: int,
+    lod: str = Query("full", pattern="^(full|medium|preview)$"),
+    db: DBSession = Depends(get_db),
+):
+    rec = db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Reconstruction not found")
+    if rec.status != "complete":
+        raise HTTPException(status_code=202, detail="Reconstruction still in progress")
+
+    path_map = {
+        "full": rec.splat_path,
+        "medium": rec.splat_medium_path,
+        "preview": rec.splat_preview_path,
+    }
+    splat_path = path_map[lod]
+    if not splat_path or not Path(splat_path).exists():
+        raise HTTPException(status_code=404, detail=f"Splat file ({lod}) not found on disk")
+
+    return FileResponse(
+        splat_path,
+        media_type="application/octet-stream",
+        filename=f"splat_{reconstruction_id}_{lod}.ply",
+    )
+
+
+@router.get("/{reconstruction_id}/geo-transform")
+def get_geo_transform(reconstruction_id: int, db: DBSession = Depends(get_db)):
+    rec = db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Reconstruction not found")
+    if not rec.geo_transform:
+        raise HTTPException(status_code=404, detail="Geo-transform not yet available")
+    return json.loads(rec.geo_transform)
