@@ -110,10 +110,16 @@ def set_frame_selection(body: FrameSelectionIn, db: DBSession = Depends(get_db))
 
 @router.delete("/frame-selection/{session_id}", status_code=204)
 def clear_frame_selection(session_id: int, db: DBSession = Depends(get_db)):
-    db.query(SessionFrameSelection).filter(
-        SessionFrameSelection.session_id == session_id
-    ).delete()
-    db.commit()
+    try:
+        db.query(SessionFrameSelection).filter(
+            SessionFrameSelection.session_id == session_id
+        ).delete()
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=422, detail=f"Failed to clear frame selection: {exc}"
+        ) from exc
 
 
 @router.get("/frame-selection/{session_id}")
