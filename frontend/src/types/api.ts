@@ -70,3 +70,28 @@ export interface Reconstruction {
   geo_transform: string | null;
   splat_path: string | null;
 }
+
+export interface Job {
+  id: number;
+  type: "reconstruction";
+  session_id: number;
+  status: "pending" | "running_colmap" | "running_gsplat" | "complete" | "failed";
+  preset: string;
+  progress_pct: number;
+  step: string;
+  frames_used: number;
+  started_at: string | null;
+  completed_at: string | null;
+  error_msg: string | null;
+}
+
+export interface StorageStats {
+  total_bytes: number;
+  by_type: {
+    imports: number;
+    processed: number;
+    exports: number;
+    data: number;
+  };
+  by_session: unknown[];
+}
