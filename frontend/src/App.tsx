@@ -6,11 +6,15 @@ import ReviewTab from './features/review/ReviewTab'
 import ExportTab from './features/export/ExportTab'
 import PlanTab from './features/plan/PlanTab'
 import SessionLogTab from './features/session-log/SessionLogTab'
+import ReconstructTab from './features/reconstruct/ReconstructTab'
+import JobsTab from './features/jobs/JobsTab'
+import StorageTab from './features/storage/StorageTab'
+import SplatViewerTab from './features/splat/SplatViewerTab'
 import { ToastStack } from './shared/components/ToastStack'
 import ImportModal from './features/import/ImportModal'
 import SessionPicker from './features/sessions/SessionPicker'
 
-type Tab = 'map' | 'gps-sync' | 'review' | 'plan' | 'export' | 'session-log'
+type Tab = 'map' | 'gps-sync' | 'review' | 'plan' | 'export' | 'session-log' | 'reconstruct' | 'jobs' | 'storage' | 'splat'
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'map', label: 'Map' },
@@ -19,6 +23,10 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'plan', label: 'Plan' },
   { id: 'export', label: 'Export' },
   { id: 'session-log', label: 'Session Log' },
+  { id: 'reconstruct', label: 'Reconstruct' },
+  { id: 'jobs', label: 'Jobs' },
+  { id: 'storage', label: 'Storage' },
+  { id: 'splat', label: 'Splat Viewer' },
 ]
 
 function ComingSoon({ label }: { label: string }) {
@@ -116,6 +124,10 @@ export default function App() {
         {activeTab === 'plan' && <PlanTab />}
         {activeTab === 'export' && <ExportTab />}
         {activeTab === 'session-log' && <SessionLogTab />}
+        {activeTab === 'reconstruct' && <ReconstructTab />}
+        {activeTab === 'jobs' && <JobsTab />}
+        {activeTab === 'storage' && <StorageTab />}
+        {activeTab === 'splat' && <SplatViewerTab />}
       </div>
       <ToastStack />
       <ImportModal open={showImport} onClose={() => setShowImport(false)} />
