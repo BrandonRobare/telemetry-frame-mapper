@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session as DBSession
 
 from backend.core.config import get_config, get_reconstruction_config
 from backend.db.database import SessionLocal
-from backend.db.models import Image, Reconstruction, ReconstructionFrame
+from backend.db.models import Image, Reconstruction, ReconstructionFrame, SessionFrameSelection
 
 # Maps reconstruction_id → cancel Event
 _cancel_events: dict[int, threading.Event] = {}
@@ -213,6 +213,14 @@ def start_reconstruction(
         Image.session_id == session_id,
         Image.usable == True,  # noqa: E712
     ).all()
+
+    # Manual frame selection overrides the usable pool
+    selected_rows = db.query(SessionFrameSelection).filter(
+        SessionFrameSelection.session_id == session_id
+    ).all()
+    if selected_rows:
+        selected_ids = {row.image_id for row in selected_rows}
+        images = [img for img in images if img.id in selected_ids]
 
     # Target area crop filters the pool
     if target_area_geojson:

@@ -147,3 +147,58 @@ def test_start_reconstruction_target_area_not_found(client):
         json={"session_id": s.id, "preset": "quick", "target_area_id": 999999},
     )
     assert resp.status_code == 404
+
+
+def test_set_frame_selection(client):
+    db = _get_db(client)
+    s = _make_session_with_images(db)
+    from backend.db.models import Image as ImageModel
+    image_ids = [img.id for img in db.query(ImageModel).filter_by(session_id=s.id).all()]
+
+    resp = client.post(
+        "/reconstruction/frame-selection",
+        json={"session_id": s.id, "image_ids": image_ids[:2]},
+    )
+    assert resp.status_code == 204
+
+    resp2 = client.get(f"/reconstruction/frame-selection/{s.id}")
+    assert resp2.status_code == 200
+    assert set(resp2.json()["image_ids"]) == set(image_ids[:2])
+
+
+def test_set_frame_selection_replaces_previous(client):
+    db = _get_db(client)
+    s = _make_session_with_images(db)
+    from backend.db.models import Image as ImageModel
+    all_ids = [img.id for img in db.query(ImageModel).filter_by(session_id=s.id).all()]
+
+    client.post("/reconstruction/frame-selection",
+                json={"session_id": s.id, "image_ids": all_ids})
+    client.post("/reconstruction/frame-selection",
+                json={"session_id": s.id, "image_ids": [all_ids[0]]})
+
+    resp = client.get(f"/reconstruction/frame-selection/{s.id}")
+    assert resp.json()["image_ids"] == [all_ids[0]]
+
+
+def test_clear_frame_selection(client):
+    db = _get_db(client)
+    s = _make_session_with_images(db)
+    from backend.db.models import Image as ImageModel
+    image_ids = [img.id for img in db.query(ImageModel).filter_by(session_id=s.id).all()]
+
+    client.post("/reconstruction/frame-selection",
+                json={"session_id": s.id, "image_ids": image_ids})
+    resp = client.delete(f"/reconstruction/frame-selection/{s.id}")
+    assert resp.status_code == 204
+
+    resp2 = client.get(f"/reconstruction/frame-selection/{s.id}")
+    assert resp2.json()["image_ids"] == []
+
+
+def test_get_frame_selection_empty(client):
+    db = _get_db(client)
+    s = _make_session_with_images(db)
+    resp = client.get(f"/reconstruction/frame-selection/{s.id}")
+    assert resp.status_code == 200
+    assert resp.json()["image_ids"] == []
