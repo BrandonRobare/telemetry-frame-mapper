@@ -53,3 +53,20 @@ export interface CoverageResult {
   overlap_geojson: string | null;
   run_at: string;
 }
+
+export interface Reconstruction {
+  id: number;
+  session_id: number;
+  status: "pending" | "running_colmap" | "running_gsplat" | "complete" | "failed";
+  preset: "quick" | "full";
+  progress_pct: number;
+  step: string;
+  frames_used: number;
+  frames_registered: number | null;
+  gaussian_count: number | null;
+  psnr: number | null;
+  ssim: number | null;
+  error_msg: string | null;
+  geo_transform: string | null;
+  splat_path: string | null;
+}

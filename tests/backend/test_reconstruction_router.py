@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json as _json
 from unittest.mock import patch
 
 from backend.db.models import Image, Reconstruction
@@ -104,3 +105,192 @@ def test_cancel_reconstruction(client):
         resp = client.delete(f"/reconstruction/{rec.id}")
     assert resp.status_code == 200
     mock_cancel.assert_called_once_with(rec.id)
+
+
+def test_start_reconstruction_with_target_area(client):
+    db = _get_db(client)
+    s = _make_session_with_images(db)
+    from backend.db.models import TargetArea
+    ta = TargetArea(
+        name="Test Area",
+        geom_geojson=_json.dumps({
+            "type": "Polygon",
+            "coordinates": [[[-80.001, 34.99], [-79.999, 34.99],
+                             [-79.999, 35.01], [-80.001, 35.01], [-80.001, 34.99]]],
+        }),
+    )
+    db.add(ta)
+    db.commit()
+    db.refresh(ta)
+
+    with patch("backend.routers.reconstruction.start_reconstruction") as mock_start:
+        rec = Reconstruction(
+            id=1, session_id=s.id, status="pending", preset="quick",
+            progress_pct=0.0, frames_used=3, step="",
+        )
+        mock_start.return_value = rec
+        resp = client.post(
+            "/reconstruction/start",
+            json={"session_id": s.id, "preset": "quick", "target_area_id": ta.id},
+        )
+
+    assert resp.status_code == 201
+    _args, kwargs = mock_start.call_args
+    assert kwargs.get("target_area_geojson") == ta.geom_geojson
+
+
+def test_start_reconstruction_target_area_not_found(client):
+    db = _get_db(client)
+    s = _make_session_with_images(db)
+    resp = client.post(
+        "/reconstruction/start",
+        json={"session_id": s.id, "preset": "quick", "target_area_id": 999999},
+    )
+    assert resp.status_code == 404
+
+
+def test_set_frame_selection(client):
+    db = _get_db(client)
+    s = _make_session_with_images(db)
+    from backend.db.models import Image as ImageModel
+    image_ids = [img.id for img in db.query(ImageModel).filter_by(session_id=s.id).all()]
+
+    resp = client.post(
+        "/reconstruction/frame-selection",
+        json={"session_id": s.id, "image_ids": image_ids[:2]},
+    )
+    assert resp.status_code == 204
+
+    resp2 = client.get(f"/reconstruction/frame-selection/{s.id}")
+    assert resp2.status_code == 200
+    assert set(resp2.json()["image_ids"]) == set(image_ids[:2])
+
+
+def test_set_frame_selection_replaces_previous(client):
+    db = _get_db(client)
+    s = _make_session_with_images(db)
+    from backend.db.models import Image as ImageModel
+    all_ids = [img.id for img in db.query(ImageModel).filter_by(session_id=s.id).all()]
+
+    client.post("/reconstruction/frame-selection",
+                json={"session_id": s.id, "image_ids": all_ids})
+    client.post("/reconstruction/frame-selection",
+                json={"session_id": s.id, "image_ids": [all_ids[0]]})
+
+    resp = client.get(f"/reconstruction/frame-selection/{s.id}")
+    assert set(resp.json()["image_ids"]) == {all_ids[0]}
+
+
+def test_clear_frame_selection(client):
+    db = _get_db(client)
+    s = _make_session_with_images(db)
+    from backend.db.models import Image as ImageModel
+    image_ids = [img.id for img in db.query(ImageModel).filter_by(session_id=s.id).all()]
+
+    client.post("/reconstruction/frame-selection",
+                json={"session_id": s.id, "image_ids": image_ids})
+    resp = client.delete(f"/reconstruction/frame-selection/{s.id}")
+    assert resp.status_code == 204
+
+    resp2 = client.get(f"/reconstruction/frame-selection/{s.id}")
+    assert resp2.json()["image_ids"] == []
+
+
+def test_get_frame_selection_empty(client):
+    db = _get_db(client)
+    s = _make_session_with_images(db)
+    resp = client.get(f"/reconstruction/frame-selection/{s.id}")
+    assert resp.status_code == 200
+    assert resp.json()["image_ids"] == []
+
+
+def test_download_splat_not_found(client):
+    resp = client.get("/reconstruction/999999/splat")
+    assert resp.status_code == 404
+
+
+def test_download_splat_still_running(client):
+    db = _get_db(client)
+    s = _make_session_with_images(db)
+    rec = Reconstruction(
+        session_id=s.id, preset="quick", status="running_colmap",
+        progress_pct=50.0, frames_used=3,
+    )
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+
+    resp = client.get(f"/reconstruction/{rec.id}/splat")
+    assert resp.status_code == 202
+
+
+def test_download_splat_complete(client, tmp_path):
+    db = _get_db(client)
+    s = _make_session_with_images(db)
+    splat_file = tmp_path / "splat.ply"
+    splat_file.write_bytes(b"ply data")
+
+    rec = Reconstruction(
+        session_id=s.id, preset="quick", status="complete",
+        progress_pct=100.0, frames_used=3,
+        splat_path=str(splat_file),
+    )
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+
+    resp = client.get(f"/reconstruction/{rec.id}/splat?lod=full")
+    assert resp.status_code == 200
+    assert resp.content == b"ply data"
+
+
+def test_download_splat_invalid_lod(client):
+    resp = client.get("/reconstruction/1/splat?lod=tiny")
+    assert resp.status_code == 422
+
+
+def test_get_geo_transform(client):
+    import json as _json
+    db = _get_db(client)
+    s = _make_session_with_images(db)
+    geo = {
+        "scale": 1.0,
+        "rotation": [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
+        "translation": [0.0, 0.0, 0.0],
+        "utm_zone": "17N",
+        "utm_origin": [500000.0, 3869000.0],
+    }
+    rec = Reconstruction(
+        session_id=s.id, preset="quick", status="complete",
+        progress_pct=100.0, frames_used=3,
+        geo_transform=_json.dumps(geo),
+    )
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+
+    resp = client.get(f"/reconstruction/{rec.id}/geo-transform")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["utm_zone"] == "17N"
+    assert data["scale"] == 1.0
+
+
+def test_get_geo_transform_not_found(client):
+    resp = client.get("/reconstruction/999999/geo-transform")
+    assert resp.status_code == 404
+
+
+def test_get_geo_transform_unavailable(client):
+    db = _get_db(client)
+    s = _make_session_with_images(db)
+    rec = Reconstruction(
+        session_id=s.id, preset="quick", status="running_colmap",
+        progress_pct=30.0, frames_used=3,
+    )
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+
+    resp = client.get(f"/reconstruction/{rec.id}/geo-transform")
+    assert resp.status_code == 404

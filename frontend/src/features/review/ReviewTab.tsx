@@ -1,17 +1,34 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { get, patch } from '../../shared/api/client'
+import { get, patch, post } from '../../shared/api/client'
 import { useMapStore } from '../../shared/stores/mapStore'
 import type { Image } from '../../types/api'
 
 const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
 
-// ---- inline hook ----
+// ---- inline hooks ----
 function useImages(sessionId: number | null) {
   return useQuery<Image[]>({
     queryKey: ['images', sessionId],
     queryFn: () => get<Image[]>(`/images?session_id=${sessionId}`),
     enabled: sessionId !== null,
+  })
+}
+
+function useFrameSelection(sessionId: number | null) {
+  return useQuery<{ image_ids: number[] }>({
+    queryKey: ['frame-selection', sessionId],
+    queryFn: () => get(`/reconstruction/frame-selection/${sessionId}`),
+    enabled: sessionId !== null,
+  })
+}
+
+function useSetFrameSelection(sessionId: number | null) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (imageIds: number[]) =>
+      post<void>('/reconstruction/frame-selection', { session_id: sessionId, image_ids: imageIds }),
+    onSettled: () => qc.invalidateQueries({ queryKey: ['frame-selection', sessionId] }),
   })
 }
 
@@ -36,7 +53,6 @@ const FLAG_BADGE: Record<Image['flag'], { bg: string; text: string; label: strin
 // ---- thumb URL helper ----
 function thumbUrl(img: Image): string {
   if (img.thumb_path) {
-    // thumb_path is relative to the project root, e.g. "processed\1\thumbs\frame_00001.jpg"
     return `${BASE_URL}/${img.thumb_path.replace(/\\/g, '/')}`
   }
   return ''
@@ -53,9 +69,10 @@ interface StatsBarProps {
   activeFlag: Image['flag'] | null
   onFlagClick: (flag: Image['flag']) => void
   visibleCount: number
+  selectedCount: number
 }
 
-function StatsBar({ images, activeFlag, onFlagClick, visibleCount }: StatsBarProps) {
+function StatsBar({ images, activeFlag, onFlagClick, visibleCount, selectedCount }: StatsBarProps) {
   const counts: Record<Image['flag'], number> = {
     good: 0, blurry: 0, no_gps: 0, dark: 0, bright: 0,
   }
@@ -110,24 +127,22 @@ function StatsBar({ images, activeFlag, onFlagClick, visibleCount }: StatsBarPro
         <button
           onClick={() => onFlagClick(activeFlag)}
           style={{
-            background: 'none',
-            border: 'none',
-            cursor: 'pointer',
-            color: 'var(--text-muted)',
-            fontSize: 11,
-            fontFamily: 'inherit',
-            padding: 0,
-            marginLeft: -8,
+            background: 'none', border: 'none', cursor: 'pointer',
+            color: 'var(--text-muted)', fontSize: 11, fontFamily: 'inherit',
+            padding: 0, marginLeft: -8,
           }}
         >
           ✕ clear
         </button>
       )}
       <span style={{ marginLeft: 'auto', color: 'var(--text-muted)', fontSize: 12 }}>
+        {selectedCount > 0 && (
+          <span style={{ color: '#c4b5fd', fontWeight: 600, marginRight: 8 }}>
+            {selectedCount} selected for reconstruction
+          </span>
+        )}
         <span style={{ color: '#86efac', fontWeight: 600 }}>{usableCount}</span>
-        {' / '}
-        {images.length}
-        {' usable'}
+        {' / '}{images.length}{' usable'}
       </span>
     </div>
   )
@@ -137,9 +152,11 @@ function StatsBar({ images, activeFlag, onFlagClick, visibleCount }: StatsBarPro
 interface CardProps {
   img: Image
   sessionId: number
+  isSelected: boolean
+  onSelect: (id: number, selected: boolean) => void
 }
 
-function ImageCard({ img, sessionId }: CardProps) {
+function ImageCard({ img, sessionId, isSelected, onSelect }: CardProps) {
   const qc = useQueryClient()
 
   const flagMutation = useMutation({
@@ -183,9 +200,9 @@ function ImageCard({ img, sessionId }: CardProps) {
       className="flex flex-col rounded overflow-hidden"
       style={{
         background: 'var(--surface)',
-        border: img.usable
-          ? '1px solid var(--border)'
-          : '1px solid #7f1d1d',
+        border: isSelected
+          ? '1px solid #a78bfa'
+          : img.usable ? '1px solid var(--border)' : '1px solid #7f1d1d',
         position: 'relative',
         minHeight: 152,
       }}
@@ -226,19 +243,11 @@ function ImageCard({ img, sessionId }: CardProps) {
         title="Click to cycle flag"
         disabled={flagMutation.isPending}
         style={{
-          position: 'absolute',
-          top: 6,
-          right: 6,
-          padding: '2px 7px',
-          borderRadius: 4,
-          fontSize: 11,
-          fontWeight: 600,
-          border: 'none',
-          cursor: 'pointer',
-          background: badge.bg,
-          color: badge.text,
-          opacity: flagMutation.isPending ? 0.6 : 1,
-          fontFamily: 'inherit',
+          position: 'absolute', top: 6, right: 6,
+          padding: '2px 7px', borderRadius: 4, fontSize: 11, fontWeight: 600,
+          border: 'none', cursor: 'pointer',
+          background: badge.bg, color: badge.text,
+          opacity: flagMutation.isPending ? 0.6 : 1, fontFamily: 'inherit',
         }}
       >
         {badge.label}
@@ -249,34 +258,42 @@ function ImageCard({ img, sessionId }: CardProps) {
         <div className="truncate" title={img.filename}>{img.filename}</div>
         <div className="flex gap-2 mt-0.5" style={{ fontSize: 10 }}>
           {img.sharpness_score != null && (
-            <span title="Sharpness (Laplacian variance)">
-              ◈ {img.sharpness_score.toFixed(0)}
-            </span>
+            <span title="Sharpness (Laplacian variance)">◈ {img.sharpness_score.toFixed(0)}</span>
           )}
           {img.brightness_score != null && (
-            <span title="Brightness (mean pixel 0–255)">
-              ☀ {img.brightness_score.toFixed(0)}
-            </span>
+            <span title="Brightness (mean pixel 0–255)">☀ {img.brightness_score.toFixed(0)}</span>
           )}
         </div>
       </div>
+
+      {/* reconstruction selection checkbox */}
+      <label
+        style={{
+          display: 'flex', alignItems: 'center', gap: 5,
+          margin: '4px 8px 0', cursor: 'pointer',
+          fontSize: 11, color: isSelected ? '#c4b5fd' : 'var(--text-muted)',
+          fontFamily: 'inherit',
+        }}
+      >
+        <input
+          type="checkbox"
+          checked={isSelected}
+          onChange={(e) => onSelect(img.id, e.target.checked)}
+          style={{ accentColor: '#a78bfa', cursor: 'pointer' }}
+        />
+        For reconstruction
+      </label>
 
       {/* usable toggle */}
       <button
         onClick={() => usableMutation.mutate({ id: img.id, usable: !img.usable })}
         disabled={usableMutation.isPending}
         style={{
-          margin: '4px 8px 8px',
-          padding: '3px 0',
-          borderRadius: 4,
-          fontSize: 11,
-          fontWeight: 600,
-          border: 'none',
-          cursor: 'pointer',
+          margin: '4px 8px 8px', padding: '3px 0', borderRadius: 4,
+          fontSize: 11, fontWeight: 600, border: 'none', cursor: 'pointer',
           background: img.usable ? '#14532d' : '#450a0a',
           color: img.usable ? '#86efac' : '#fca5a5',
-          opacity: usableMutation.isPending ? 0.6 : 1,
-          fontFamily: 'inherit',
+          opacity: usableMutation.isPending ? 0.6 : 1, fontFamily: 'inherit',
           width: 'calc(100% - 16px)',
         }}
         title={img.usable ? 'Mark as skip' : 'Mark as usable'}
@@ -291,14 +308,13 @@ function ImageCard({ img, sessionId }: CardProps) {
 export default function ReviewTab() {
   const { selectedSessionId } = useMapStore()
   const { data: images, isLoading } = useImages(selectedSessionId)
+  const { data: selectionData } = useFrameSelection(selectedSessionId)
+  const setSelectionMutation = useSetFrameSelection(selectedSessionId)
   const [activeFlag, setActiveFlag] = useState<Image['flag'] | null>(null)
 
   if (selectedSessionId === null) {
     return (
-      <div
-        className="flex-1 flex items-center justify-center"
-        style={{ color: 'var(--text-muted)' }}
-      >
+      <div className="flex-1 flex items-center justify-center" style={{ color: 'var(--text-muted)' }}>
         Select a session first
       </div>
     )
@@ -306,10 +322,7 @@ export default function ReviewTab() {
 
   if (isLoading) {
     return (
-      <div
-        className="flex-1 flex items-center justify-center"
-        style={{ color: 'var(--text-muted)' }}
-      >
+      <div className="flex-1 flex items-center justify-center" style={{ color: 'var(--text-muted)' }}>
         Loading images…
       </div>
     )
@@ -317,9 +330,17 @@ export default function ReviewTab() {
 
   const list = images ?? []
   const filtered = activeFlag ? list.filter((img) => img.flag === activeFlag) : list
+  const selectedSet = new Set(selectionData?.image_ids ?? [])
 
   function handleFlagClick(flag: Image['flag']) {
     setActiveFlag((prev) => (prev === flag ? null : flag))
+  }
+
+  function handleSelect(id: number, checked: boolean) {
+    const newIds = checked
+      ? [...selectedSet, id]
+      : [...selectedSet].filter((x) => x !== id)
+    setSelectionMutation.mutate(newIds)
   }
 
   return (
@@ -329,6 +350,7 @@ export default function ReviewTab() {
         activeFlag={activeFlag}
         onFlagClick={handleFlagClick}
         visibleCount={filtered.length}
+        selectedCount={selectedSet.size}
       />
       <div
         className="flex-1 overflow-y-auto p-4"
@@ -340,17 +362,16 @@ export default function ReviewTab() {
         }}
       >
         {filtered.map((img) => (
-          <ImageCard key={img.id} img={img} sessionId={selectedSessionId} />
+          <ImageCard
+            key={img.id}
+            img={img}
+            sessionId={selectedSessionId}
+            isSelected={selectedSet.has(img.id)}
+            onSelect={handleSelect}
+          />
         ))}
         {filtered.length === 0 && (
-          <div
-            style={{
-              gridColumn: '1 / -1',
-              color: 'var(--text-muted)',
-              textAlign: 'center',
-              padding: '3rem 0',
-            }}
-          >
+          <div style={{ gridColumn: '1 / -1', color: 'var(--text-muted)', textAlign: 'center', padding: '3rem 0' }}>
             No images match this filter.
           </div>
         )}

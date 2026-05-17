@@ -9,11 +9,12 @@ import threading
 from datetime import datetime
 from pathlib import Path
 
+from shapely.geometry import Point, shape
 from sqlalchemy.orm import Session as DBSession
 
 from backend.core.config import get_config, get_reconstruction_config
 from backend.db.database import SessionLocal
-from backend.db.models import Image, Reconstruction, ReconstructionFrame
+from backend.db.models import Image, Reconstruction, ReconstructionFrame, SessionFrameSelection
 
 # Maps reconstruction_id → cancel Event
 _cancel_events: dict[int, threading.Event] = {}
@@ -140,6 +141,16 @@ def _extract_geo_transform(colmap_dir: Path) -> dict:
     }
 
 
+def _filter_images_to_target_area(images: list, geom_geojson: str) -> list:
+    """Return images whose GPS position falls inside the target area polygon."""
+    polygon = shape(json.loads(geom_geojson))
+    return [
+        img for img in images
+        if img.latitude is not None and img.longitude is not None
+        and Point(img.longitude, img.latitude).within(polygon)
+    ]
+
+
 # ---------------------------------------------------------------------------
 # gsplat training (requires GPU + gsplat installed)
 # ---------------------------------------------------------------------------
@@ -177,11 +188,30 @@ def _generate_lod(splat_path: Path) -> tuple[Path, Path]:
     return preview, medium
 
 
+def _generate_thumbnail(splat_path: Path, out_path: Path) -> Path | None:
+    """Render a 512×512 nadir-view JPEG thumbnail using gsplat's offline renderer.
+    Returns out_path on success, None if gsplat is unavailable."""
+    try:
+        import gsplat  # type: ignore[import]
+        render_nadir = gsplat.render_nadir
+    except (ImportError, AttributeError):
+        return None
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    render_nadir(str(splat_path), str(out_path), width=512, height=512)
+    return out_path
+
+
 # ---------------------------------------------------------------------------
 # Pipeline orchestrator
 # ---------------------------------------------------------------------------
 
-def start_reconstruction(session_id: int, preset: str, db: DBSession) -> Reconstruction:
+def start_reconstruction(
+    session_id: int,
+    preset: str,
+    db: DBSession,
+    *,
+    target_area_geojson: str | None = None,
+) -> Reconstruction:
     """Create Reconstruction record and launch background thread. Returns the record."""
     running = db.query(Reconstruction).filter(
         Reconstruction.session_id == session_id,
@@ -196,6 +226,19 @@ def start_reconstruction(session_id: int, preset: str, db: DBSession) -> Reconst
         Image.session_id == session_id,
         Image.usable == True,  # noqa: E712
     ).all()
+
+    # Manual frame selection overrides the usable pool
+    selected_rows = db.query(SessionFrameSelection).filter(
+        SessionFrameSelection.session_id == session_id
+    ).all()
+    if selected_rows:
+        selected_ids = {row.image_id for row in selected_rows}
+        images = [img for img in images if img.id in selected_ids]
+
+    # Target area crop filters the pool
+    if target_area_geojson:
+        images = _filter_images_to_target_area(images, target_area_geojson)
+
     if not images:
         raise ValueError("No usable images in session")
 
@@ -297,6 +340,10 @@ def _run_pipeline(
                 colmap_dir, splat_path, preset_cfg["iterations"], progress_cb, cancel
             )
             preview, medium = _generate_lod(splat_path)
+
+            thumb_candidate = Path(cfg.processed_dir) / "thumbs" / f"splat_{reconstruction_id}.jpg"
+            generated_thumb = _generate_thumbnail(splat_path, thumb_candidate)
+
             completed_at = datetime.utcnow()
             _update_rec(
                 db, reconstruction_id,
@@ -306,6 +353,7 @@ def _run_pipeline(
                 splat_path=str(splat_path),
                 splat_preview_path=str(preview),
                 splat_medium_path=str(medium),
+                thumb_path=str(generated_thumb) if generated_thumb else None,
                 gaussian_count=result.get("gaussian_count"),
                 psnr=result.get("psnr"),
                 ssim=result.get("ssim"),
