@@ -188,15 +188,17 @@ def _generate_lod(splat_path: Path) -> tuple[Path, Path]:
     return preview, medium
 
 
-def _generate_thumbnail(splat_path: Path, out_path: Path) -> None:
-    """Render a 512x512 nadir-view JPEG thumbnail using gsplat's offline renderer."""
+def _generate_thumbnail(splat_path: Path, out_path: Path) -> Path | None:
+    """Render a 512×512 nadir-view JPEG thumbnail using gsplat's offline renderer.
+    Returns out_path on success, None if gsplat is unavailable."""
     try:
         import gsplat  # type: ignore[import]
         render_nadir = gsplat.render_nadir
     except (ImportError, AttributeError):
-        return
+        return None
     out_path.parent.mkdir(parents=True, exist_ok=True)
     render_nadir(str(splat_path), str(out_path), width=512, height=512)
+    return out_path
 
 
 # ---------------------------------------------------------------------------
@@ -339,8 +341,8 @@ def _run_pipeline(
             )
             preview, medium = _generate_lod(splat_path)
 
-            thumb_path = Path(cfg.processed_dir) / "thumbs" / f"splat_{reconstruction_id}.jpg"
-            _generate_thumbnail(splat_path, thumb_path)
+            thumb_candidate = Path(cfg.processed_dir) / "thumbs" / f"splat_{reconstruction_id}.jpg"
+            generated_thumb = _generate_thumbnail(splat_path, thumb_candidate)
 
             completed_at = datetime.utcnow()
             _update_rec(
@@ -351,7 +353,7 @@ def _run_pipeline(
                 splat_path=str(splat_path),
                 splat_preview_path=str(preview),
                 splat_medium_path=str(medium),
-                thumb_path=str(thumb_path),
+                thumb_path=str(generated_thumb) if generated_thumb else None,
                 gaussian_count=result.get("gaussian_count"),
                 psnr=result.get("psnr"),
                 ssim=result.get("ssim"),

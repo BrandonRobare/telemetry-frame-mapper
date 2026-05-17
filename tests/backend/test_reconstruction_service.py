@@ -236,9 +236,10 @@ def test_generate_thumbnail_calls_gsplat_renderer(tmp_path):
 
     mock_render = MagicMock()
     with patch.dict("sys.modules", {"gsplat": MagicMock(render_nadir=mock_render)}):
-        _generate_thumbnail(splat, out)
+        result = _generate_thumbnail(splat, out)
 
     mock_render.assert_called_once_with(str(splat), str(out), width=512, height=512)
+    assert result == out
 
 
 def test_generate_thumbnail_creates_parent_dir(tmp_path):
@@ -267,8 +268,9 @@ def test_generate_thumbnail_no_gsplat_is_silent(tmp_path):
     out = tmp_path / "thumb.jpg"
 
     with patch.dict("sys.modules", {"gsplat": None}):
-        # Should not raise
-        _generate_thumbnail(splat, out)
+        result = _generate_thumbnail(splat, out)
+
+    assert result is None
 
 
 # ---------------------------------------------------------------------------
@@ -301,7 +303,7 @@ def test_run_pipeline_calls_generate_thumbnail(setup_test_db):
         mock_colmap = MagicMock()
         mock_gsplat = MagicMock(return_value={"gaussian_count": 100, "psnr": 25.0, "ssim": 0.9})
         mock_lod = MagicMock(return_value=(Path(tmp) / "p.ply", Path(tmp) / "m.ply"))
-        mock_thumb = MagicMock()
+        mock_thumb = MagicMock(return_value=None)
 
         with patch("backend.services.reconstruction._write_colmap_workspace", mock_workspace), \
              patch("backend.services.reconstruction._run_colmap", mock_colmap), \
@@ -320,3 +322,9 @@ def test_run_pipeline_calls_generate_thumbnail(setup_test_db):
             _run_pipeline(999, "quick", colmap_dir, [img.id], cancel)
 
         mock_thumb.assert_called_once()
+
+        # After _run_pipeline completes, check DB state
+        from backend.db.models import Reconstruction as ReconModel
+        rec_check = db.query(ReconModel).filter(ReconModel.session_id == s.id).first()
+        if rec_check:
+            assert rec_check.thumb_path is None
