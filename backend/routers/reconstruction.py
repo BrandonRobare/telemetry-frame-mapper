@@ -159,4 +159,9 @@ def get_geo_transform(reconstruction_id: int, db: DBSession = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Reconstruction not found")
     if not rec.geo_transform:
         raise HTTPException(status_code=404, detail="Geo-transform not yet available")
-    return json.loads(rec.geo_transform)
+    try:
+        return json.loads(rec.geo_transform)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(
+            status_code=500, detail="Stored geo-transform data is malformed"
+        ) from exc
