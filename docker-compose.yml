@@ -1,5 +1,5 @@
-# docker-compose.yml — stub, completed in Task 25
 version: "3.9"
+
 services:
   backend:
     build: ./backend
@@ -11,6 +11,13 @@ services:
       - ./exports:/app/exports
       - ./data:/app/data
       - ./config.yaml:/app/config.yaml
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
 
   frontend:
     build: ./frontend

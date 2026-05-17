@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import math
 import tempfile
 from pathlib import Path
@@ -162,3 +163,168 @@ def test_workspace_image_copied_or_linked():
         _write_colmap_workspace(colmap_dir, [img])
         dest = colmap_dir / "images" / "source.jpg"
         assert dest.exists()
+
+
+# ---------------------------------------------------------------------------
+# Target area filter tests
+# ---------------------------------------------------------------------------
+
+
+def _make_square_geojson(min_lon, min_lat, max_lon, max_lat) -> str:
+    return json.dumps({
+        "type": "Polygon",
+        "coordinates": [[
+            [min_lon, min_lat],
+            [max_lon, min_lat],
+            [max_lon, max_lat],
+            [min_lon, max_lat],
+            [min_lon, min_lat],
+        ]],
+    })
+
+
+def test_filter_images_inside_polygon():
+    from backend.services.reconstruction import _filter_images_to_target_area
+    geojson = _make_square_geojson(-80.1, 34.9, -79.9, 35.1)
+    inside = _make_mock_image(lat=35.0, lon=-80.0)
+    outside = _make_mock_image(lat=36.0, lon=-81.0)
+    result = _filter_images_to_target_area([inside, outside], geojson)
+    assert len(result) == 1
+    assert result[0].latitude == 35.0
+
+
+def test_filter_images_excludes_no_gps():
+    from backend.services.reconstruction import _filter_images_to_target_area
+    geojson = _make_square_geojson(-80.1, 34.9, -79.9, 35.1)
+    img = _make_mock_image()
+    img.latitude = None
+    img.longitude = None
+    result = _filter_images_to_target_area([img], geojson)
+    assert result == []
+
+
+def test_filter_images_excludes_partial_gps():
+    from backend.services.reconstruction import _filter_images_to_target_area
+    geojson = _make_square_geojson(-80.1, 34.9, -79.9, 35.1)
+    img = _make_mock_image()
+    img.latitude = 35.0
+    img.longitude = None
+    result = _filter_images_to_target_area([img], geojson)
+    assert result == []
+
+
+def test_filter_images_all_outside_returns_empty():
+    from backend.services.reconstruction import _filter_images_to_target_area
+    geojson = _make_square_geojson(0.0, 0.0, 1.0, 1.0)
+    img = _make_mock_image(lat=35.0, lon=-80.0)
+    result = _filter_images_to_target_area([img], geojson)
+    assert result == []
+
+
+# ---------------------------------------------------------------------------
+# Thumbnail generation tests
+# ---------------------------------------------------------------------------
+
+def test_generate_thumbnail_calls_gsplat_renderer(tmp_path):
+    from unittest.mock import MagicMock, patch
+
+    from backend.services.reconstruction import _generate_thumbnail
+
+    splat = tmp_path / "splat.ply"
+    splat.write_bytes(b"ply data")
+    out = tmp_path / "thumb.jpg"
+
+    mock_render = MagicMock()
+    with patch.dict("sys.modules", {"gsplat": MagicMock(render_nadir=mock_render)}):
+        result = _generate_thumbnail(splat, out)
+
+    mock_render.assert_called_once_with(str(splat), str(out), width=512, height=512)
+    assert result == out
+
+
+def test_generate_thumbnail_creates_parent_dir(tmp_path):
+    from unittest.mock import MagicMock, patch
+
+    from backend.services.reconstruction import _generate_thumbnail
+
+    splat = tmp_path / "splat.ply"
+    splat.write_bytes(b"ply data")
+    out = tmp_path / "nested" / "dir" / "thumb.jpg"
+
+    mock_render = MagicMock()
+    with patch.dict("sys.modules", {"gsplat": MagicMock(render_nadir=mock_render)}):
+        _generate_thumbnail(splat, out)
+
+    assert out.parent.is_dir()
+
+
+def test_generate_thumbnail_no_gsplat_is_silent(tmp_path):
+    from unittest.mock import patch
+
+    from backend.services.reconstruction import _generate_thumbnail
+
+    splat = tmp_path / "splat.ply"
+    splat.write_bytes(b"ply data")
+    out = tmp_path / "thumb.jpg"
+
+    with patch.dict("sys.modules", {"gsplat": None}):
+        result = _generate_thumbnail(splat, out)
+
+    assert result is None
+
+
+# ---------------------------------------------------------------------------
+# Integration test: _run_pipeline calls _generate_thumbnail
+# ---------------------------------------------------------------------------
+
+def test_run_pipeline_calls_generate_thumbnail(setup_test_db):
+    import tempfile
+    from unittest.mock import MagicMock, patch
+
+    from backend.db.database import get_db
+    from backend.db.models import Image as ImageModel
+    from backend.main import app
+    from backend.services.reconstruction import _run_pipeline
+    from tests.conftest import TestSessionLocal
+
+    db = next(app.dependency_overrides[get_db]())
+    s = _make_session(db)
+    img = ImageModel(session_id=s.id, filename="f.jpg", filepath="/tmp/f.jpg", usable=True,
+                     latitude=35.0, longitude=-80.0, altitude_m=100.0)
+    db.add(img)
+    db.commit()
+    db.refresh(img)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        colmap_dir = Path(tmp) / "colmap"
+        colmap_dir.mkdir()
+
+        mock_workspace = MagicMock()
+        mock_colmap = MagicMock()
+        mock_gsplat = MagicMock(return_value={"gaussian_count": 100, "psnr": 25.0, "ssim": 0.9})
+        mock_lod = MagicMock(return_value=(Path(tmp) / "p.ply", Path(tmp) / "m.ply"))
+        mock_thumb = MagicMock(return_value=None)
+
+        with patch("backend.services.reconstruction._write_colmap_workspace", mock_workspace), \
+             patch("backend.services.reconstruction._run_colmap", mock_colmap), \
+             patch("backend.services.reconstruction._run_gsplat", mock_gsplat), \
+             patch("backend.services.reconstruction._generate_lod", mock_lod), \
+             patch("backend.services.reconstruction._generate_thumbnail", mock_thumb), \
+             patch("backend.services.reconstruction.SessionLocal", TestSessionLocal), \
+             patch("backend.services.reconstruction.get_config") as mock_cfg:
+
+            mock_cfg.return_value.data_dir = tmp
+            mock_cfg.return_value.exports_dir = tmp
+            mock_cfg.return_value.processed_dir = tmp
+
+            import threading
+            cancel = threading.Event()
+            _run_pipeline(999, "quick", colmap_dir, [img.id], cancel)
+
+        mock_thumb.assert_called_once()
+
+        # After _run_pipeline completes, check DB state
+        from backend.db.models import Reconstruction as ReconModel
+        rec_check = db.query(ReconModel).filter(ReconModel.session_id == s.id).first()
+        if rec_check:
+            assert rec_check.thumb_path is None
