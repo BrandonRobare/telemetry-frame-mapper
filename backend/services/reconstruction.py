@@ -6,7 +6,7 @@ import os
 import shutil
 import subprocess
 import threading
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from shapely.geometry import Point, shape
@@ -308,7 +308,9 @@ def _run_pipeline(
         if cancel.is_set():
             _update_rec(
                 db, reconstruction_id,
-                status="failed", error_msg="Cancelled by user", completed_at=datetime.utcnow(),
+                status="failed",
+                error_msg="Cancelled by user",
+                completed_at=datetime.now(timezone.utc),
             )
             return
 
@@ -320,7 +322,9 @@ def _run_pipeline(
         if cancel.is_set():
             _update_rec(
                 db, reconstruction_id,
-                status="failed", error_msg="Cancelled by user", completed_at=datetime.utcnow(),
+                status="failed",
+                error_msg="Cancelled by user",
+                completed_at=datetime.now(timezone.utc),
             )
             return
 
@@ -344,7 +348,7 @@ def _run_pipeline(
             thumb_candidate = Path(cfg.processed_dir) / "thumbs" / f"splat_{reconstruction_id}.jpg"
             generated_thumb = _generate_thumbnail(splat_path, thumb_candidate)
 
-            completed_at = datetime.utcnow()
+            completed_at = datetime.now(timezone.utc)
             _update_rec(
                 db, reconstruction_id,
                 status="complete",
@@ -367,7 +371,7 @@ def _run_pipeline(
                     error_msg=(
                         "GPU ran out of memory — switch to 'quick' preset or reduce frame count"
                     ),
-                    completed_at=datetime.utcnow(),
+                    completed_at=datetime.now(timezone.utc),
                 )
             else:
                 raise
@@ -375,7 +379,7 @@ def _run_pipeline(
     except Exception as exc:
         _update_rec(
             db, reconstruction_id,
-            status="failed", error_msg=str(exc)[:500], completed_at=datetime.utcnow(),
+            status="failed", error_msg=str(exc)[:500], completed_at=datetime.now(timezone.utc),
         )
     finally:
         db.close()
