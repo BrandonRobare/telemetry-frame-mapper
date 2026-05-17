@@ -188,6 +188,17 @@ def _generate_lod(splat_path: Path) -> tuple[Path, Path]:
     return preview, medium
 
 
+def _generate_thumbnail(splat_path: Path, out_path: Path) -> None:
+    """Render a 512x512 nadir-view JPEG thumbnail using gsplat's offline renderer."""
+    try:
+        import gsplat  # type: ignore[import]
+        render_nadir = gsplat.render_nadir
+    except (ImportError, AttributeError):
+        return
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    render_nadir(str(splat_path), str(out_path), width=512, height=512)
+
+
 # ---------------------------------------------------------------------------
 # Pipeline orchestrator
 # ---------------------------------------------------------------------------
@@ -327,6 +338,10 @@ def _run_pipeline(
                 colmap_dir, splat_path, preset_cfg["iterations"], progress_cb, cancel
             )
             preview, medium = _generate_lod(splat_path)
+
+            thumb_path = Path(cfg.processed_dir) / "thumbs" / f"splat_{reconstruction_id}.jpg"
+            _generate_thumbnail(splat_path, thumb_path)
+
             completed_at = datetime.utcnow()
             _update_rec(
                 db, reconstruction_id,
@@ -336,6 +351,7 @@ def _run_pipeline(
                 splat_path=str(splat_path),
                 splat_preview_path=str(preview),
                 splat_medium_path=str(medium),
+                thumb_path=str(thumb_path),
                 gaussian_count=result.get("gaussian_count"),
                 psnr=result.get("psnr"),
                 ssim=result.get("ssim"),
