@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { get } from '../../shared/api/client'
 import { useMapStore } from '../../shared/stores/mapStore'
-import type { Job } from '../../types/api'
+import type { Job, GeoTransform } from '../../types/api'
 
 const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
 
@@ -19,6 +19,15 @@ function useAllJobsForSession(sessionId: number | null) {
       const hasRunning = jobs.some((j) => ACTIVE_STATUSES.includes(j.status))
       return hasRunning ? 2000 : 30_000
     },
+  })
+}
+
+function useGeoTransform(reconstructionId: number | null) {
+  return useQuery<GeoTransform>({
+    queryKey: ['geo-transform', reconstructionId],
+    queryFn: () => get<GeoTransform>(`/reconstruction/${reconstructionId!}/geo-transform`),
+    enabled: reconstructionId !== null,
+    staleTime: Infinity,
   })
 }
 
@@ -54,6 +63,29 @@ function RunningCard({ job }: { job: Job }) {
         />
       </div>
       <div style={{ marginTop: 5, fontSize: 10, color: 'var(--text-muted)' }}>{label}</div>
+    </div>
+  )
+}
+
+function GeoTransformPanel({ reconstructionId }: { reconstructionId: number }) {
+  const { data: geo } = useGeoTransform(reconstructionId)
+  if (!geo) return null
+  return (
+    <div
+      style={{
+        marginTop: 8, padding: '6px 8px', borderRadius: 4,
+        background: 'var(--bg)', fontSize: 10, color: 'var(--text-muted)',
+        border: '1px solid var(--border)',
+      }}
+    >
+      <div style={{ fontWeight: 600, color: 'var(--text)', marginBottom: 3, fontSize: 10 }}>
+        Geo-Transform
+      </div>
+      <div>UTM {geo.utm_zone}</div>
+      <div>Scale {geo.scale.toExponential(3)}</div>
+      <div>
+        Origin {geo.utm_origin[0].toFixed(0)}E {geo.utm_origin[1].toFixed(0)}N
+      </div>
     </div>
   )
 }
@@ -230,6 +262,7 @@ export default function SplatViewerTab() {
             ))}
           </>
         )}
+        {activeId !== null && <GeoTransformPanel reconstructionId={activeId} />}
       </div>
 
       {/* Viewer */}
