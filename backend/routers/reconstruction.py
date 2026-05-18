@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session as DBSession
 
 from ..db.database import get_db
 from ..db.models import Reconstruction, SessionFrameSelection, TargetArea
-from ..services.reconstruction import cancel_reconstruction, start_reconstruction
+from ..services.reconstruction import _rec_logs, cancel_reconstruction, start_reconstruction
 
 router = APIRouter(prefix="/reconstruction", tags=["reconstruction"])
 
@@ -171,3 +171,16 @@ def get_geo_transform(reconstruction_id: int, db: DBSession = Depends(get_db)):
         raise HTTPException(
             status_code=500, detail="Stored geo-transform data is malformed"
         ) from exc
+
+
+@router.get("/{reconstruction_id}/log")
+def get_log(
+    reconstruction_id: int,
+    limit: int = Query(100, ge=1, le=500),
+    db: DBSession = Depends(get_db),
+):
+    rec = db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Reconstruction not found")
+    lines = _rec_logs.get(reconstruction_id, [])
+    return {"lines": lines[-limit:]}
