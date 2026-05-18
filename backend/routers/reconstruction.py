@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session as DBSession
 
 from ..db.database import get_db
 from ..db.models import Reconstruction, SessionFrameSelection, TargetArea
-from ..services.reconstruction import _rec_logs, cancel_reconstruction, start_reconstruction
+from ..services.reconstruction import get_rec_log, cancel_reconstruction, start_reconstruction
 
 router = APIRouter(prefix="/reconstruction", tags=["reconstruction"])
 
@@ -182,5 +182,5 @@ def get_log(
     rec = db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).first()
     if not rec:
         raise HTTPException(status_code=404, detail="Reconstruction not found")
-    lines = _rec_logs.get(reconstruction_id, [])
+    lines = get_rec_log(reconstruction_id)
     return {"lines": lines[-limit:]}
