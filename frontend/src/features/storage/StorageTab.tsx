@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { get } from '../../shared/api/client'
+import { del, get } from '../../shared/api/client'
 import type { StorageStats, StorageFileItem, StorageFileList } from '../../types/api'
 
 function useStorageSummary() {
@@ -39,11 +39,14 @@ function FileBrowser() {
   async function handleDelete(file: StorageFileItem) {
     if (!confirm(`Delete ${file.name}? This cannot be undone.`)) return
     setDeleting(file.path)
-    await fetch(
-      `${import.meta.env.VITE_API_URL ?? 'http://localhost:8000'}/storage/file?path=${encodeURIComponent(file.path)}`,
-      { method: 'DELETE' },
-    )
-    setDeleting(null)
+    try {
+      await del(`/storage/file?path=${encodeURIComponent(file.path)}`)
+    } catch (e) {
+      alert(`Failed to delete ${file.name}: ${e instanceof Error ? e.message : 'Unknown error'}`)
+      return
+    } finally {
+      setDeleting(null)
+    }
     qc.invalidateQueries({ queryKey: ['storage-files', dir] })
     qc.invalidateQueries({ queryKey: ['storage-summary'] })
   }
