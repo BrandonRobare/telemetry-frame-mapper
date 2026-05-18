@@ -107,3 +107,11 @@ export interface SystemResources {
   vram_used_gb: number | null
   vram_total_gb: number | null
 }
+
+export interface GeoTransform {
+  scale: number
+  rotation: [[number, number, number], [number, number, number], [number, number, number]]
+  translation: [number, number, number]
+  utm_zone: string
+  utm_origin: [number, number]
+}
