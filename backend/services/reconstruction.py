@@ -19,6 +19,22 @@ from backend.db.models import Image, Reconstruction, ReconstructionFrame, Sessio
 # Maps reconstruction_id → cancel Event
 _cancel_events: dict[int, threading.Event] = {}
 
+_rec_logs: dict[int, list[str]] = {}
+_rec_logs_lock = threading.Lock()
+
+
+def _log_rec(rec_id: int, msg: str) -> None:
+    with _rec_logs_lock:
+        buf = _rec_logs.setdefault(rec_id, [])
+        buf.append(f"{datetime.now(timezone.utc).strftime('%H:%M:%S')} {msg}")
+        if len(buf) > 500:
+            _rec_logs[rec_id] = buf[-500:]
+
+
+def get_rec_log(rec_id: int) -> list[str]:
+    with _rec_logs_lock:
+        return list(_rec_logs.get(rec_id, []))
+
 
 # ---------------------------------------------------------------------------
 # Workspace writer
@@ -303,6 +319,7 @@ def _run_pipeline(
             db, reconstruction_id,
             status="running_colmap", step="writing workspace", progress_pct=2.0,
         )
+        _log_rec(reconstruction_id, "COLMAP: starting")
         _write_colmap_workspace(colmap_dir, images)
 
         if cancel.is_set():
@@ -318,6 +335,7 @@ def _run_pipeline(
             _update_rec(db, reconstruction_id, step=step, progress_pct=pct)
 
         _run_colmap(colmap_dir, progress_cb, cancel)
+        _log_rec(reconstruction_id, "COLMAP: complete")
 
         if cancel.is_set():
             _update_rec(
@@ -334,6 +352,7 @@ def _run_pipeline(
         _update_rec(
             db, reconstruction_id, status="running_gsplat", step="training", progress_pct=95.0,
         )
+        _log_rec(reconstruction_id, "Gaussian Splatting: starting")
 
         cfg = get_config()
         splat_path = Path(cfg.exports_dir) / str(reconstruction_id) / "splat.ply"
@@ -343,10 +362,15 @@ def _run_pipeline(
             result = _run_gsplat(
                 colmap_dir, splat_path, preset_cfg["iterations"], progress_cb, cancel
             )
+            _log_rec(reconstruction_id, "Gaussian Splatting: complete")
+            _log_rec(reconstruction_id, "LOD generation: starting")
             preview, medium = _generate_lod(splat_path)
+            _log_rec(reconstruction_id, "LOD generation: complete")
 
+            _log_rec(reconstruction_id, "Thumbnail generation: starting")
             thumb_candidate = Path(cfg.processed_dir) / "thumbs" / f"splat_{reconstruction_id}.jpg"
             generated_thumb = _generate_thumbnail(splat_path, thumb_candidate)
+            _log_rec(reconstruction_id, "Thumbnail generation: complete")
 
             completed_at = datetime.now(timezone.utc)
             _update_rec(
@@ -363,6 +387,7 @@ def _run_pipeline(
                 ssim=result.get("ssim"),
                 completed_at=completed_at,
             )
+            _log_rec(reconstruction_id, "Pipeline complete")
         except RuntimeError as exc:
             if "CUDA out of memory" in str(exc):
                 _update_rec(

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useMapStore } from './shared/stores/mapStore'
 import MapTab from './features/map/MapTab'
 import GpsSyncTab from './features/gps-sync/GpsSyncTab'
@@ -40,7 +40,14 @@ function ComingSoon({ label }: { label: string }) {
 export default function App() {
   const [activeTab, setActiveTab] = useState<Tab>('map')
   const [showImport, setShowImport] = useState(false)
-  const { theme, toggleTheme } = useMapStore()
+  const { theme, toggleTheme, requestedTab, setRequestedTab } = useMapStore()
+
+  useEffect(() => {
+    if (requestedTab && TABS.some((t) => t.id === requestedTab)) {
+      setActiveTab(requestedTab as Tab)
+      setRequestedTab(null)
+    }
+  }, [requestedTab, setRequestedTab])
 
   return (
     <div className="flex flex-col" style={{ height: '100vh', background: 'var(--bg)' }}>

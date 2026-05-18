@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { MapContainer, TileLayer, GeoJSON, useMap } from 'react-leaflet'
-import type { LatLngBoundsExpression } from 'leaflet'
+import type { LatLngBoundsExpression, Layer } from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import type { Footprint, CoverageResult } from '../../types/api'
 import { useMapStore } from '../../shared/stores/mapStore'
@@ -57,6 +57,15 @@ export default function LeafletMapView({ footprints, coverage, isLoading, error 
     )
   }
 
+  function onEachFootprint(_feature: unknown, layer: Layer) {
+    layer.on('click', () => {
+      const { selectedSessionId, setTargetSessionId, setRequestedTab } = useMapStore.getState()
+      if (selectedSessionId == null) return
+      setTargetSessionId(selectedSessionId)
+      setRequestedTab('splat')
+    })
+  }
+
   const footprintGeoJSON = footprints.length > 0
     ? {
         type: 'FeatureCollection' as const,
@@ -96,6 +105,7 @@ export default function LeafletMapView({ footprints, coverage, isLoading, error 
             key={JSON.stringify(footprintGeoJSON).length}
             data={footprintGeoJSON}
             style={{ color: '#58a6ff', fillColor: '#58a6ff', fillOpacity: 0.13, weight: 1.5 }}
+            onEachFeature={onEachFootprint}
           />
         )}
 

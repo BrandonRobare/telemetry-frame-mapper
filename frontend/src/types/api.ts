@@ -95,3 +95,35 @@ export interface StorageStats {
   };
   by_session: unknown[];
 }
+
+export interface SystemResources {
+  cpu_pct: number
+  ram_used_gb: number
+  ram_total_gb: number
+  disk_used_gb: number
+  disk_total_gb: number
+  disk_io_mbps: number | null
+  gpu_pct: number | null
+  vram_used_gb: number | null
+  vram_total_gb: number | null
+}
+
+export interface GeoTransform {
+  scale: number
+  rotation: [[number, number, number], [number, number, number], [number, number, number]]
+  translation: [number, number, number]
+  utm_zone: string
+  utm_origin: [number, number]
+}
+
+export interface StorageFileItem {
+  name: string
+  path: string
+  size_bytes: number
+  modified: number
+}
+
+export interface StorageFileList {
+  directory: string
+  files: StorageFileItem[]
+}
