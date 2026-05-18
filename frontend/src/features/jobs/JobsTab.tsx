@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { get } from '../../shared/api/client'
-import type { Job } from '../../types/api'
+import type { Job, SystemResources } from '../../types/api'
 
 function useAllJobs() {
   return useQuery<Job[]>({
@@ -14,6 +14,48 @@ function useAllJobs() {
       return hasRunning ? 3000 : 30_000
     },
   })
+}
+
+function useSystemResources() {
+  return useQuery<SystemResources>({
+    queryKey: ['system-resources'],
+    queryFn: () => get<SystemResources>('/system/resources'),
+    refetchInterval: 3000,
+  })
+}
+
+function ResourceBar() {
+  const { data: res } = useSystemResources()
+  if (!res) return <div style={{ height: 33, borderBottom: '1px solid var(--border)', flexShrink: 0 }} />
+  const ramPct = ((res.ram_used_gb / res.ram_total_gb) * 100).toFixed(0)
+  const diskPct = ((res.disk_used_gb / res.disk_total_gb) * 100).toFixed(0)
+  return (
+    <div
+      style={{
+        display: 'flex', gap: 20, padding: '7px 16px',
+        background: 'var(--surface)', borderBottom: '1px solid var(--border)',
+        fontSize: 11, color: 'var(--text-muted)', alignItems: 'center', flexShrink: 0,
+      }}
+    >
+      <span>CPU <strong style={{ color: 'var(--text)' }}>{res.cpu_pct.toFixed(0)}%</strong></span>
+      <span>
+        RAM{' '}
+        <strong style={{ color: 'var(--text)' }}>{res.ram_used_gb.toFixed(1)}</strong>
+        {' / '}{res.ram_total_gb.toFixed(0)} GB ({ramPct}%)
+      </span>
+      {res.gpu_pct != null && (
+        <span>GPU <strong style={{ color: '#86efac' }}>{res.gpu_pct.toFixed(0)}%</strong></span>
+      )}
+      {res.vram_used_gb != null && res.vram_total_gb != null && (
+        <span>
+          VRAM{' '}
+          <strong style={{ color: '#86efac' }}>{res.vram_used_gb.toFixed(1)}</strong>
+          {' / '}{res.vram_total_gb.toFixed(0)} GB
+        </span>
+      )}
+      <span style={{ marginLeft: 'auto' }}>Disk {diskPct}% used</span>
+    </div>
+  )
 }
 
 const STATUS_BADGE: Record<string, { bg: string; text: string; label: string }> = {
@@ -59,8 +101,10 @@ export default function JobsTab() {
   const done = list.filter((j) => !['pending', 'running_colmap', 'running_gsplat'].includes(j.status))
 
   return (
-    <div className="flex-1 overflow-y-auto p-6" style={{ color: 'var(--text)' }}>
-      <div className="mx-auto" style={{ maxWidth: 800 }}>
+    <div className="flex flex-col flex-1 overflow-hidden">
+      <ResourceBar />
+      <div className="flex-1 overflow-y-auto p-6" style={{ color: 'var(--text)' }}>
+        <div className="mx-auto" style={{ maxWidth: 800 }}>
 
         {running.length > 0 && (
           <section style={{ marginBottom: 24 }}>
@@ -170,6 +214,7 @@ export default function JobsTab() {
           </table>
         </section>
       </div>
+    </div>
     </div>
   )
 }
