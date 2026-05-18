@@ -1,7 +1,8 @@
 from __future__ import annotations
-from pathlib import Path
+
 import pytest
 from fastapi.testclient import TestClient
+
 from backend.main import app
 
 
@@ -44,7 +45,7 @@ def test_delete_file_not_found(client, tmp_path, monkeypatch):
     })()
     monkeypatch.setattr(storage_router, "get_config", lambda: mock_cfg)
 
-    resp = client.delete(f"/storage/file?path={tmp_path / 'does_not_exist.jpg'}")
+    resp = client.delete("/storage/file?directory=imports&filename=does_not_exist.jpg")
     assert resp.status_code == 404
 
 
@@ -61,12 +62,17 @@ def test_delete_file_success(client, tmp_path, monkeypatch):
     f = tmp_path / "deleteme.txt"
     f.write_text("bye")
 
-    resp = client.delete(f"/storage/file?path={f}")
+    resp = client.delete("/storage/file?directory=imports&filename=deleteme.txt")
     assert resp.status_code == 200
     assert resp.json()["deleted"] == str(f)
     assert not f.exists()
 
 
-def test_delete_file_outside_allowed_dirs(client):
-    resp = client.delete("/storage/file?path=/etc/passwd")
-    assert resp.status_code == 403
+def test_delete_file_traversal_rejected(client):
+    resp = client.delete("/storage/file?directory=imports&filename=../../../etc/passwd")
+    assert resp.status_code == 400
+
+
+def test_delete_file_invalid_directory(client):
+    resp = client.delete("/storage/file?directory=secret&filename=foo.txt")
+    assert resp.status_code == 422
