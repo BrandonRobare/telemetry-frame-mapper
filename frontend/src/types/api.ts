@@ -95,3 +95,15 @@ export interface StorageStats {
   };
   by_session: unknown[];
 }
+
+export interface SystemResources {
+  cpu_pct: number
+  ram_used_gb: number
+  ram_total_gb: number
+  disk_used_gb: number
+  disk_total_gb: number
+  disk_io_mbps: number | null
+  gpu_pct: number | null
+  vram_used_gb: number | null
+  vram_total_gb: number | null
+}
