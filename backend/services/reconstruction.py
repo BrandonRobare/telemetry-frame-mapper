@@ -20,14 +20,20 @@ from backend.db.models import Image, Reconstruction, ReconstructionFrame, Sessio
 _cancel_events: dict[int, threading.Event] = {}
 
 _rec_logs: dict[int, list[str]] = {}
+_rec_logs_lock = threading.Lock()
 
 
 def _log_rec(rec_id: int, msg: str) -> None:
-    """Append a timestamped log line to the in-memory buffer for this reconstruction."""
-    buf = _rec_logs.setdefault(rec_id, [])
-    buf.append(f"{datetime.utcnow().strftime('%H:%M:%S')} {msg}")
-    if len(buf) > 500:
-        _rec_logs[rec_id] = buf[-500:]
+    with _rec_logs_lock:
+        buf = _rec_logs.setdefault(rec_id, [])
+        buf.append(f"{datetime.now(timezone.utc).strftime('%H:%M:%S')} {msg}")
+        if len(buf) > 500:
+            _rec_logs[rec_id] = buf[-500:]
+
+
+def get_rec_log(rec_id: int) -> list[str]:
+    with _rec_logs_lock:
+        return list(_rec_logs.get(rec_id, []))
 
 
 # ---------------------------------------------------------------------------

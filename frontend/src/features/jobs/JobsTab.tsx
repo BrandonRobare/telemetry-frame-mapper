@@ -59,10 +59,10 @@ function ResourceBar() {
   )
 }
 
-function useReconstructionLog(id: number, enabled: boolean) {
+function useReconstructionLog(id: number, enabled: boolean, limit = 100) {
   return useQuery<{ lines: string[] }>({
-    queryKey: ['rec-log', id],
-    queryFn: () => get(`/reconstruction/${id}/log?limit=100`),
+    queryKey: ['rec-log', id, limit],
+    queryFn: () => get(`/reconstruction/${id}/log?limit=${limit}`),
     enabled,
     refetchInterval: enabled ? 2000 : false,
   })
@@ -97,7 +97,7 @@ function LogPanel({ recId, isActive }: { recId: number; isActive: boolean }) {
           {lines.length === 0 ? (
             <span style={{ color: 'var(--text-muted)' }}>No log entries yet.</span>
           ) : (
-            lines.map((line, i) => <div key={i}>{line}</div>)
+            lines.map((line, i) => <div key={`${i}-${line.slice(0, 8)}`}>{line}</div>)
           )}
         </div>
       )}
