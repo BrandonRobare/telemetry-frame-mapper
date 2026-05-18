@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { get } from '../../shared/api/client'
 import type { Job, SystemResources } from '../../types/api'
@@ -54,6 +55,52 @@ function ResourceBar() {
         </span>
       )}
       <span style={{ marginLeft: 'auto' }}>Disk {diskPct}% used</span>
+    </div>
+  )
+}
+
+function useReconstructionLog(id: number, enabled: boolean) {
+  return useQuery<{ lines: string[] }>({
+    queryKey: ['rec-log', id],
+    queryFn: () => get(`/reconstruction/${id}/log?limit=100`),
+    enabled,
+    refetchInterval: enabled ? 2000 : false,
+  })
+}
+
+function LogPanel({ recId, isActive }: { recId: number; isActive: boolean }) {
+  const [open, setOpen] = useState(false)
+  const { data } = useReconstructionLog(recId, open && isActive)
+  const lines = data?.lines ?? []
+
+  return (
+    <div style={{ marginTop: 6 }}>
+      <button
+        onClick={() => setOpen((o) => !o)}
+        style={{
+          background: 'none', border: 'none', cursor: 'pointer',
+          fontSize: 11, color: 'var(--text-muted)', fontFamily: 'inherit',
+          padding: 0,
+        }}
+      >
+        {open ? '▾' : '▸'} {open ? 'Hide' : 'Show'} log ({lines.length} lines)
+      </button>
+      {open && (
+        <div
+          style={{
+            marginTop: 4, padding: '6px 8px', borderRadius: 4,
+            background: 'var(--bg)', maxHeight: 180, overflowY: 'auto',
+            fontFamily: 'monospace', fontSize: 10, color: '#86efac',
+            border: '1px solid var(--border)',
+          }}
+        >
+          {lines.length === 0 ? (
+            <span style={{ color: 'var(--text-muted)' }}>No log entries yet.</span>
+          ) : (
+            lines.map((line, i) => <div key={i}>{line}</div>)
+          )}
+        </div>
+      )}
     </div>
   )
 }
@@ -153,6 +200,7 @@ export default function JobsTab() {
                     <p className="text-xs" style={{ color: 'var(--text-muted)', marginTop: 6, marginBottom: 0 }}>
                       {job.progress_pct.toFixed(1)}% · {job.step || 'Initializing…'}
                     </p>
+                    <LogPanel recId={job.id} isActive={true} />
                   </div>
                 )
               })}
