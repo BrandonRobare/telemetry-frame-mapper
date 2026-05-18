@@ -42,7 +42,7 @@ function FitBounds({ footprints }: { footprints: Footprint[] }) {
 }
 
 export default function LeafletMapView({ footprints, coverage, isLoading, error }: Props) {
-  const { activeLayers, selectedSessionId, setRequestedTab, setTargetSessionId } = useMapStore()
+  const { activeLayers } = useMapStore()
 
   if (error) {
     return (
@@ -59,6 +59,7 @@ export default function LeafletMapView({ footprints, coverage, isLoading, error 
 
   function onEachFootprint(_feature: unknown, layer: Layer) {
     layer.on('click', () => {
+      const { selectedSessionId, setTargetSessionId, setRequestedTab } = useMapStore.getState()
       if (selectedSessionId == null) return
       setTargetSessionId(selectedSessionId)
       setRequestedTab('splat')
