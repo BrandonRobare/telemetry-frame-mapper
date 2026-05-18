@@ -115,3 +115,15 @@ export interface GeoTransform {
   utm_zone: string
   utm_origin: [number, number]
 }
+
+export interface StorageFileItem {
+  name: string
+  path: string
+  size_bytes: number
+  modified: number
+}
+
+export interface StorageFileList {
+  directory: string
+  files: StorageFileItem[]
+}

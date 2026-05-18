@@ -1,6 +1,7 @@
-import { useQuery } from '@tanstack/react-query'
+import { useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { get } from '../../shared/api/client'
-import type { StorageStats } from '../../types/api'
+import type { StorageStats, StorageFileItem, StorageFileList } from '../../types/api'
 
 function useStorageSummary() {
   return useQuery<StorageStats>({
@@ -17,6 +18,102 @@ function formatBytes(bytes: number): string {
   if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(1)} KB`
   if (bytes < 1024 ** 3) return `${(bytes / 1024 ** 2).toFixed(1)} MB`
   return `${(bytes / 1024 ** 3).toFixed(2)} GB`
+}
+
+const DIRECTORIES = ['imports', 'processed', 'exports', 'data'] as const
+type Directory = (typeof DIRECTORIES)[number]
+
+function useStorageFiles(directory: Directory) {
+  return useQuery<StorageFileList>({
+    queryKey: ['storage-files', directory],
+    queryFn: () => get<StorageFileList>(`/storage/files?directory=${directory}`),
+  })
+}
+
+function FileBrowser() {
+  const qc = useQueryClient()
+  const [dir, setDir] = useState<Directory>('imports')
+  const [deleting, setDeleting] = useState<string | null>(null)
+  const { data, isLoading } = useStorageFiles(dir)
+
+  async function handleDelete(file: StorageFileItem) {
+    if (!confirm(`Delete ${file.name}? This cannot be undone.`)) return
+    setDeleting(file.path)
+    await fetch(
+      `${import.meta.env.VITE_API_URL ?? 'http://localhost:8000'}/storage/file?path=${encodeURIComponent(file.path)}`,
+      { method: 'DELETE' },
+    )
+    setDeleting(null)
+    qc.invalidateQueries({ queryKey: ['storage-files', dir] })
+    qc.invalidateQueries({ queryKey: ['storage-summary'] })
+  }
+
+  return (
+    <div style={{ marginTop: 20 }}>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+        {DIRECTORIES.map((d) => (
+          <button
+            key={d}
+            onClick={() => setDir(d)}
+            style={{
+              padding: '4px 12px', borderRadius: 4, fontSize: 12,
+              border: '1px solid var(--border)', cursor: 'pointer',
+              background: dir === d ? 'var(--border)' : 'var(--surface)',
+              color: dir === d ? 'var(--text)' : 'var(--text-muted)',
+              fontFamily: 'inherit',
+            }}
+          >
+            {d}
+          </button>
+        ))}
+      </div>
+      {isLoading ? (
+        <div style={{ color: 'var(--text-muted)', fontSize: 12 }}>Loading…</div>
+      ) : (data?.files ?? []).length === 0 ? (
+        <div style={{ color: 'var(--text-muted)', fontSize: 12 }}>No files in {dir}.</div>
+      ) : (
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+          <thead>
+            <tr style={{ color: 'var(--text-muted)', textAlign: 'left' }}>
+              <th style={{ padding: '4px 8px', borderBottom: '1px solid var(--border)', fontWeight: 500 }}>Name</th>
+              <th style={{ padding: '4px 8px', borderBottom: '1px solid var(--border)', fontWeight: 500, textAlign: 'right' }}>Size</th>
+              <th style={{ padding: '4px 8px', borderBottom: '1px solid var(--border)', fontWeight: 500, textAlign: 'right' }}>Modified</th>
+              <th style={{ padding: '4px 8px', borderBottom: '1px solid var(--border)' }} />
+            </tr>
+          </thead>
+          <tbody>
+            {(data?.files ?? []).map((f) => (
+              <tr
+                key={f.path}
+                style={{ borderBottom: '1px solid var(--border)', opacity: deleting === f.path ? 0.4 : 1 }}
+              >
+                <td style={{ padding: '5px 8px', color: 'var(--text)' }}>{f.name}</td>
+                <td style={{ padding: '5px 8px', color: 'var(--text-muted)', textAlign: 'right' }}>
+                  {formatBytes(f.size_bytes)}
+                </td>
+                <td style={{ padding: '5px 8px', color: 'var(--text-muted)', textAlign: 'right' }}>
+                  {new Date(f.modified * 1000).toLocaleDateString()}
+                </td>
+                <td style={{ padding: '5px 8px', textAlign: 'right' }}>
+                  <button
+                    onClick={() => handleDelete(f)}
+                    disabled={deleting === f.path}
+                    style={{
+                      background: 'none', border: '1px solid #7f1d1d', borderRadius: 4,
+                      color: '#fca5a5', cursor: 'pointer', fontSize: 11,
+                      padding: '2px 8px', fontFamily: 'inherit',
+                    }}
+                  >
+                    Delete
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  )
 }
 
 const DIR_META: Record<string, { label: string; color: string; description: string }> = {
@@ -137,6 +234,8 @@ export default function StorageTab() {
             )
           })}
         </section>
+
+        <FileBrowser />
       </div>
     </div>
   )

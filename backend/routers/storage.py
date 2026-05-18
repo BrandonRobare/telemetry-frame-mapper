@@ -3,7 +3,7 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException, Query
 
 from ..core.config import get_config
 
@@ -33,6 +33,48 @@ def _compute_summary() -> dict:
 
     total = sum(by_type.values())
     return {"total_bytes": total, "by_type": by_type, "by_session": []}
+
+
+VALID_DIRECTORIES = {"imports", "processed", "exports", "data"}
+
+
+@router.get("/files")
+def list_files(directory: str = Query("imports")):
+    if directory not in VALID_DIRECTORIES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"directory must be one of {sorted(VALID_DIRECTORIES)}",
+        )
+    cfg = get_config()
+    dir_map = {
+        "imports": cfg.imports_dir,
+        "processed": cfg.processed_dir,
+        "exports": cfg.exports_dir,
+        "data": cfg.data_dir,
+    }
+    base = Path(dir_map[directory])
+    if not base.exists():
+        return {"directory": directory, "files": []}
+    files = []
+    for f in sorted(base.iterdir()):
+        if f.is_file():
+            stat = f.stat()
+            files.append({
+                "name": f.name,
+                "path": str(f),
+                "size_bytes": stat.st_size,
+                "modified": stat.st_mtime,
+            })
+    return {"directory": directory, "files": files}
+
+
+@router.delete("/file")
+def delete_file(path: str = Query(...)):
+    p = Path(path)
+    if not p.exists():
+        raise HTTPException(status_code=404, detail="File not found")
+    p.unlink()
+    return {"deleted": str(p)}
 
 
 @router.get("/summary")
