@@ -193,14 +193,15 @@ export default function SplatViewerTab() {
 
   useEffect(() => {
     if (targetSessionId == null) return
-    const match = [...completed]
+    const completedJobs = (allJobs ?? []).filter((j) => j.status === 'complete')
+    const match = [...completedJobs]
       .sort((a, b) => b.id - a.id)
       .find((j) => j.session_id === targetSessionId)
     if (match) {
       setSelectedJobId(match.id)
       setTargetSessionId(null)
     }
-  }, [targetSessionId, completed])
+  }, [targetSessionId, allJobs, setTargetSessionId])
 
   if (selectedSessionId === null) {
     return (

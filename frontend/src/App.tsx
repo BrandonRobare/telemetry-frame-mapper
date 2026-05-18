@@ -43,7 +43,7 @@ export default function App() {
   const { theme, toggleTheme, requestedTab, setRequestedTab } = useMapStore()
 
   useEffect(() => {
-    if (requestedTab) {
+    if (requestedTab && TABS.some((t) => t.id === requestedTab)) {
       setActiveTab(requestedTab as Tab)
       setRequestedTab(null)
     }
