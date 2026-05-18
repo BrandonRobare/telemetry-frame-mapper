@@ -294,3 +294,40 @@ def test_get_geo_transform_unavailable(client):
 
     resp = client.get(f"/reconstruction/{rec.id}/geo-transform")
     assert resp.status_code == 404
+
+
+def test_get_log_empty(client):
+    db = _get_db(client)
+    s = _make_session_with_images(db)
+    rec = Reconstruction(
+        session_id=s.id, preset="quick", status="running_colmap",
+        progress_pct=10.0, frames_used=3,
+    )
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+
+    resp = client.get(f"/reconstruction/{rec.id}/log")
+    assert resp.status_code == 200
+    assert resp.json() == {"lines": []}
+
+
+def test_get_log_not_found(client):
+    resp = client.get("/reconstruction/999999/log")
+    assert resp.status_code == 404
+
+
+def test_get_log_limit_param(client):
+    db = _get_db(client)
+    s = _make_session_with_images(db)
+    rec = Reconstruction(
+        session_id=s.id, preset="quick", status="running_colmap",
+        progress_pct=20.0, frames_used=3,
+    )
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+
+    resp = client.get(f"/reconstruction/{rec.id}/log?limit=50")
+    assert resp.status_code == 200
+    assert "lines" in resp.json()

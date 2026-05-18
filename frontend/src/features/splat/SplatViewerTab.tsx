@@ -2,17 +2,92 @@ import { useEffect, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { get } from '../../shared/api/client'
 import { useMapStore } from '../../shared/stores/mapStore'
-import type { Job } from '../../types/api'
+import type { Job, GeoTransform } from '../../types/api'
 
 const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
 
-function useSessionJobs(sessionId: number | null) {
+const ACTIVE_STATUSES: string[] = ['pending', 'running_colmap', 'running_gsplat']
+
+function useAllJobsForSession(sessionId: number | null) {
   return useQuery<Job[]>({
-    queryKey: ['jobs'],
+    queryKey: ['jobs', 'session', sessionId],
     queryFn: () => get<Job[]>('/jobs/'),
-    select: (jobs) => jobs.filter((j) => j.session_id === sessionId && j.status === 'complete'),
+    select: (jobs) => jobs.filter((j) => j.session_id === sessionId),
     enabled: sessionId !== null,
+    refetchInterval: (query) => {
+      const jobs = query.state.data ?? []
+      const hasRunning = jobs.some((j) => ACTIVE_STATUSES.includes(j.status))
+      return hasRunning ? 2000 : 30_000
+    },
   })
+}
+
+function useGeoTransform(reconstructionId: number | null) {
+  return useQuery<GeoTransform>({
+    queryKey: ['geo-transform', reconstructionId],
+    queryFn: () => get<GeoTransform>(`/reconstruction/${reconstructionId!}/geo-transform`),
+    enabled: reconstructionId !== null,
+    staleTime: Infinity,
+  })
+}
+
+const STATUS_STEP_LABEL: Record<string, string> = {
+  pending: 'Queued…',
+  running_colmap: 'COLMAP — feature extraction & matching',
+  running_gsplat: 'Gaussian Splatting',
+}
+
+function RunningCard({ job }: { job: Job }) {
+  const label = STATUS_STEP_LABEL[job.status] ?? job.step
+  const barColor = job.status === 'pending' ? '#6b7280' : '#3b82f6'
+  return (
+    <div
+      style={{
+        padding: '10px 12px', borderRadius: 6,
+        border: '1px solid #3b82f6',
+        background: 'rgba(59,130,246,0.06)',
+      }}
+    >
+      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginBottom: 6 }}>
+        <span style={{ color: 'var(--text)', fontWeight: 600 }}>
+          #{job.id} · {job.preset}
+        </span>
+        <span style={{ color: '#60a5fa' }}>{job.progress_pct.toFixed(0)}%</span>
+      </div>
+      <div style={{ height: 4, background: 'var(--border)', borderRadius: 2, overflow: 'hidden' }}>
+        <div
+          style={{
+            height: '100%', background: barColor,
+            width: `${job.progress_pct}%`, transition: 'width 0.6s ease',
+          }}
+        />
+      </div>
+      <div style={{ marginTop: 5, fontSize: 10, color: 'var(--text-muted)' }}>{label}</div>
+    </div>
+  )
+}
+
+function GeoTransformPanel({ reconstructionId }: { reconstructionId: number }) {
+  const { data: geo } = useGeoTransform(reconstructionId)
+  if (!geo) return null
+  return (
+    <div
+      style={{
+        marginTop: 8, padding: '6px 8px', borderRadius: 4,
+        background: 'var(--bg)', fontSize: 10, color: 'var(--text-muted)',
+        border: '1px solid var(--border)',
+      }}
+    >
+      <div style={{ fontWeight: 600, color: 'var(--text)', marginBottom: 3, fontSize: 10 }}>
+        Geo-Transform
+      </div>
+      <div>UTM {geo.utm_zone}</div>
+      <div>Scale {geo.scale.toExponential(3)}</div>
+      <div>
+        Origin {geo.utm_origin[0].toFixed(0)}E {geo.utm_origin[1].toFixed(0)}N
+      </div>
+    </div>
+  )
 }
 
 function SplatCanvas({ reconstructionId }: { reconstructionId: number }) {
@@ -107,12 +182,26 @@ function SplatCanvas({ reconstructionId }: { reconstructionId: number }) {
 }
 
 export default function SplatViewerTab() {
-  const { selectedSessionId } = useMapStore()
-  const { data: completedJobs, isLoading } = useSessionJobs(selectedSessionId)
+  const { selectedSessionId, targetSessionId, setTargetSessionId } = useMapStore()
+  const { data: allJobs, isLoading } = useAllJobsForSession(selectedSessionId)
   const [selectedJobId, setSelectedJobId] = useState<number | null>(null)
 
-  const jobs = completedJobs ?? []
-  const activeId = selectedJobId ?? jobs[0]?.id ?? null
+  const jobs = allJobs ?? []
+  const running = jobs.filter((j) => ACTIVE_STATUSES.includes(j.status))
+  const completed = jobs.filter((j) => j.status === 'complete')
+  const activeId = selectedJobId ?? completed[0]?.id ?? null
+
+  useEffect(() => {
+    if (targetSessionId == null) return
+    const completedJobs = (allJobs ?? []).filter((j) => j.status === 'complete')
+    const match = [...completedJobs]
+      .sort((a, b) => b.id - a.id)
+      .find((j) => j.session_id === targetSessionId)
+    if (match) {
+      setSelectedJobId(match.id)
+      setTargetSessionId(null)
+    }
+  }, [targetSessionId, allJobs, setTargetSessionId])
 
   if (selectedSessionId === null) {
     return (
@@ -130,10 +219,10 @@ export default function SplatViewerTab() {
     )
   }
 
-  if (jobs.length === 0) {
+  if (running.length === 0 && completed.length === 0) {
     return (
       <div className="flex-1 flex items-center justify-center" style={{ color: 'var(--text-muted)' }}>
-        No completed reconstructions for this session. Start one in the Reconstruct tab.
+        No reconstructions for this session. Start one in the Reconstruct tab.
       </div>
     )
   }
@@ -143,33 +232,49 @@ export default function SplatViewerTab() {
       {/* Sidebar */}
       <div
         style={{
-          width: 200, padding: 16, borderRight: '1px solid var(--border)',
+          width: 200, padding: 12, borderRight: '1px solid var(--border)',
           background: 'var(--surface)', display: 'flex', flexDirection: 'column', gap: 8,
           overflowY: 'auto',
         }}
       >
-        <p className="text-xs font-medium" style={{ color: 'var(--text-muted)', margin: '0 0 4px' }}>
-          Reconstructions
-        </p>
-        {jobs.map((job) => (
-          <button
-            key={job.id}
-            onClick={() => setSelectedJobId(job.id)}
-            style={{
-              background: activeId === job.id ? 'rgba(167,139,250,0.15)' : 'none',
-              border: activeId === job.id ? '1px solid rgba(167,139,250,0.4)' : '1px solid transparent',
-              borderRadius: 6, padding: '8px 10px', cursor: 'pointer',
-              textAlign: 'left', fontFamily: 'inherit',
-            }}
-          >
-            <p className="text-xs font-medium" style={{ color: 'var(--text)', margin: '0 0 2px' }}>
-              #{job.id} — {job.preset}
+        {running.length > 0 && (
+          <>
+            <p className="text-xs font-medium" style={{ color: 'var(--text-muted)', margin: '4px 0 2px' }}>
+              In Progress
             </p>
-            <p className="text-xs" style={{ color: 'var(--text-muted)', margin: 0 }}>
-              {job.frames_used} frames
+            {running.map((job) => <RunningCard key={job.id} job={job} />)}
+          </>
+        )}
+        {completed.length > 0 && (
+          <>
+            <p
+              className="text-xs font-medium"
+              style={{ color: 'var(--text-muted)', margin: running.length > 0 ? '8px 0 2px' : '4px 0 2px' }}
+            >
+              Completed
             </p>
-          </button>
-        ))}
+            {completed.map((job) => (
+              <button
+                key={job.id}
+                onClick={() => setSelectedJobId(job.id)}
+                style={{
+                  background: activeId === job.id ? 'rgba(167,139,250,0.15)' : 'none',
+                  border: activeId === job.id ? '1px solid rgba(167,139,250,0.4)' : '1px solid transparent',
+                  borderRadius: 6, padding: '8px 10px', cursor: 'pointer',
+                  textAlign: 'left', fontFamily: 'inherit',
+                }}
+              >
+                <p className="text-xs font-medium" style={{ color: 'var(--text)', margin: '0 0 2px' }}>
+                  #{job.id} — {job.preset}
+                </p>
+                <p className="text-xs" style={{ color: 'var(--text-muted)', margin: 0 }}>
+                  {job.frames_used} frames
+                </p>
+              </button>
+            ))}
+          </>
+        )}
+        {activeId !== null && <GeoTransformPanel reconstructionId={activeId} />}
       </div>
 
       {/* Viewer */}
@@ -178,7 +283,7 @@ export default function SplatViewerTab() {
           <SplatCanvas key={activeId} reconstructionId={activeId} />
         ) : (
           <div className="flex-1 flex items-center justify-center" style={{ color: 'var(--text-muted)' }}>
-            Select a reconstruction
+            {running.length > 0 ? 'Reconstruction in progress…' : 'Select a reconstruction'}
           </div>
         )}
       </div>

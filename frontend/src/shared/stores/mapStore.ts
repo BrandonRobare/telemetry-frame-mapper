@@ -16,6 +16,10 @@ interface MapStore {
   toggleLayer: (key: keyof ActiveLayers) => void
   toggleTheme: () => void
   toggleSidebar: () => void
+  requestedTab: string | null
+  setRequestedTab: (tab: string | null) => void
+  targetSessionId: number | null
+  setTargetSessionId: (id: number | null) => void
 }
 
 function applyTheme(theme: 'dark' | 'light') {
@@ -45,4 +49,9 @@ export const useMapStore = create<MapStore>((set) => ({
     }),
 
   toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
+
+  requestedTab: null,
+  setRequestedTab: (tab) => set({ requestedTab: tab }),
+  targetSessionId: null,
+  setTargetSessionId: (id) => set({ targetSessionId: id }),
 }))
