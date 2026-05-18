@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import time
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 from fastapi import APIRouter, HTTPException, Query
 
@@ -38,21 +38,48 @@ def _compute_summary() -> dict:
 VALID_DIRECTORIES = {"imports", "processed", "exports", "data"}
 
 
+def _invalid_directory_error() -> HTTPException:
+    return HTTPException(
+        status_code=422,
+        detail=f"directory must be one of {sorted(VALID_DIRECTORIES)}",
+    )
+
+
+def _storage_base(directory: str) -> Path:
+    if directory not in VALID_DIRECTORIES:
+        raise _invalid_directory_error()
+
+    cfg = get_config()
+    if directory == "imports":
+        return Path(cfg.imports_dir).resolve()
+    if directory == "processed":
+        return Path(cfg.processed_dir).resolve()
+    if directory == "exports":
+        return Path(cfg.exports_dir).resolve()
+    if directory == "data":
+        return Path(cfg.data_dir).resolve()
+    raise _invalid_directory_error()
+
+
+def _validate_filename(filename: str) -> None:
+    posix_path = PurePosixPath(filename)
+    windows_path = PureWindowsPath(filename)
+    if (
+        not filename
+        or ":" in filename
+        or posix_path.is_absolute()
+        or windows_path.is_absolute()
+        or posix_path.name != filename
+        or windows_path.name != filename
+        or any(part in ("", ".", "..") for part in posix_path.parts)
+        or any(part in ("", ".", "..") for part in windows_path.parts)
+    ):
+        raise HTTPException(status_code=400, detail="Invalid filename")
+
+
 @router.get("/files")
 def list_files(directory: str = Query("imports")):
-    if directory not in VALID_DIRECTORIES:
-        raise HTTPException(
-            status_code=422,
-            detail=f"directory must be one of {sorted(VALID_DIRECTORIES)}",
-        )
-    cfg = get_config()
-    dir_map = {
-        "imports": cfg.imports_dir,
-        "processed": cfg.processed_dir,
-        "exports": cfg.exports_dir,
-        "data": cfg.data_dir,
-    }
-    base = Path(dir_map[directory])
+    base = _storage_base(directory)
     if not base.exists():
         return {"directory": directory, "files": []}
     files = []
@@ -73,27 +100,28 @@ def delete_file(
     directory: str = Query(...),
     filename: str = Query(...),
 ):
-    if directory not in VALID_DIRECTORIES:
-        raise HTTPException(
-            status_code=422,
-            detail=f"directory must be one of {sorted(VALID_DIRECTORIES)}",
-        )
-    if "/" in filename or "\\" in filename or filename in (".", ".."):
-        raise HTTPException(status_code=400, detail="Invalid filename")
-    cfg = get_config()
-    dir_map = {
-        "imports": cfg.imports_dir,
-        "processed": cfg.processed_dir,
-        "exports": cfg.exports_dir,
-        "data": cfg.data_dir,
-    }
-    p = Path(dir_map[directory]) / filename
-    if not p.exists():
+    _validate_filename(filename)
+    base = _storage_base(directory)
+    if not base.exists():
         raise HTTPException(status_code=404, detail="File not found")
-    if not p.is_file():
-        raise HTTPException(status_code=400, detail="Path is not a file")
-    p.unlink()
-    return {"deleted": str(p)}
+
+    base_resolved = base.resolve()
+    for candidate in base.iterdir():
+        if candidate.name != filename:
+            continue
+
+        resolved = candidate.resolve()
+        if not resolved.is_relative_to(base_resolved):
+            raise HTTPException(
+                status_code=403,
+                detail="File must be inside storage directory",
+            )
+        if not resolved.is_file():
+            raise HTTPException(status_code=400, detail="Path is not a file")
+        resolved.unlink()
+        return {"deleted": str(resolved)}
+
+    raise HTTPException(status_code=404, detail="File not found")
 
 
 @router.get("/summary")
