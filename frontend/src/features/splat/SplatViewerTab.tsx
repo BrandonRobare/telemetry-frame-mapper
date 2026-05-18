@@ -182,7 +182,7 @@ function SplatCanvas({ reconstructionId }: { reconstructionId: number }) {
 }
 
 export default function SplatViewerTab() {
-  const { selectedSessionId } = useMapStore()
+  const { selectedSessionId, targetSessionId, setTargetSessionId } = useMapStore()
   const { data: allJobs, isLoading } = useAllJobsForSession(selectedSessionId)
   const [selectedJobId, setSelectedJobId] = useState<number | null>(null)
 
@@ -190,6 +190,17 @@ export default function SplatViewerTab() {
   const running = jobs.filter((j) => ACTIVE_STATUSES.includes(j.status))
   const completed = jobs.filter((j) => j.status === 'complete')
   const activeId = selectedJobId ?? completed[0]?.id ?? null
+
+  useEffect(() => {
+    if (targetSessionId == null) return
+    const match = [...completed]
+      .sort((a, b) => b.id - a.id)
+      .find((j) => j.session_id === targetSessionId)
+    if (match) {
+      setSelectedJobId(match.id)
+      setTargetSessionId(null)
+    }
+  }, [targetSessionId, completed])
 
   if (selectedSessionId === null) {
     return (
