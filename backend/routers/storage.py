@@ -69,17 +69,25 @@ def list_files(directory: str = Query("imports")):
 
 
 @router.delete("/file")
-def delete_file(path: str = Query(...)):
+def delete_file(
+    directory: str = Query(...),
+    filename: str = Query(...),
+):
+    if directory not in VALID_DIRECTORIES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"directory must be one of {sorted(VALID_DIRECTORIES)}",
+        )
+    if "/" in filename or "\\" in filename or filename in (".", ".."):
+        raise HTTPException(status_code=400, detail="Invalid filename")
     cfg = get_config()
-    allowed_roots = [
-        Path(cfg.imports_dir).resolve(),
-        Path(cfg.processed_dir).resolve(),
-        Path(cfg.exports_dir).resolve(),
-        Path(cfg.data_dir).resolve(),
-    ]
-    p = Path(path).resolve()
-    if not any(p.is_relative_to(root) for root in allowed_roots):
-        raise HTTPException(status_code=403, detail="Path is outside allowed directories")
+    dir_map = {
+        "imports": cfg.imports_dir,
+        "processed": cfg.processed_dir,
+        "exports": cfg.exports_dir,
+        "data": cfg.data_dir,
+    }
+    p = Path(dir_map[directory]) / filename
     if not p.exists():
         raise HTTPException(status_code=404, detail="File not found")
     if not p.is_file():

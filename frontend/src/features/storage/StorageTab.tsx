@@ -40,7 +40,7 @@ function FileBrowser() {
     if (!confirm(`Delete ${file.name}? This cannot be undone.`)) return
     setDeleting(file.path)
     try {
-      await del(`/storage/file?path=${encodeURIComponent(file.path)}`)
+      await del(`/storage/file?directory=${dir}&filename=${encodeURIComponent(file.name)}`)
     } catch (e) {
       alert(`Failed to delete ${file.name}: ${e instanceof Error ? e.message : 'Unknown error'}`)
       return
