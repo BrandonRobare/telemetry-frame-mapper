@@ -16,6 +16,7 @@ from .routers import footprints as footprints_router
 from .routers import images as images_router
 from .routers import jobs as jobs_router
 from .routers import plans as plans_router
+from .routers import annotations as annotations_router
 from .routers import reconstruction as reconstruction_router
 from .routers import session_log as session_log_router
 from .routers import sessions as sessions_router
@@ -43,6 +44,7 @@ app.include_router(export_router.router)
 app.include_router(session_log_router.router)
 app.include_router(footprints_router.router)
 app.include_router(reconstruction_router.router)
+app.include_router(annotations_router.router)
 app.include_router(system_router.router)
 app.include_router(jobs_router.router)
 app.include_router(storage_router.router)

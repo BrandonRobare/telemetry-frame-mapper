@@ -144,3 +144,14 @@ export interface StorageFileList {
   directory: string
   files: StorageFileItem[]
 }
+
+export interface Annotation {
+  id: number
+  reconstruction_id: number
+  label: string
+  lat: number
+  lon: number
+  alt_m: number
+  color: string
+  created_at: string
+}
