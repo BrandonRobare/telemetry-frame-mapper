@@ -66,7 +66,7 @@ def list_images(
     images = q.all()
 
     # Build reproj error map from most recent completed reconstruction
-    reproj_map: dict[int, float | None] = {}
+    reproj_map: dict[int, float] = {}
     latest = (
         db.query(Reconstruction.id)
         .filter(Reconstruction.session_id == session_id, Reconstruction.status == "complete")
