@@ -61,6 +61,14 @@ export interface TrainingMetricPoint {
   ssim: number;
 }
 
+export interface CoverageGapCell {
+  x: number;
+  y: number;
+  z: number;
+  size: number;
+  level: "sparse" | "thin" | "very_sparse";
+}
+
 export interface Reconstruction {
   id: number;
   session_id: number;
