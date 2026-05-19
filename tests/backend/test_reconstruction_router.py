@@ -371,3 +371,87 @@ def test_status_training_metrics_null_when_not_set(client):
     resp = client.get(f"/reconstruction/{rec.id}/status")
     assert resp.status_code == 200
     assert resp.json()["training_metrics"] is None
+
+
+def test_coverage_gaps_404_when_not_found(client):
+    resp = client.get("/reconstruction/99999/coverage-gaps")
+    assert resp.status_code == 404
+
+
+def test_coverage_gaps_404_when_not_complete(client):
+    db = _get_db(client)
+    s = _make_session_with_images(db)
+    rec = Reconstruction(session_id=s.id, status="running_gsplat", preset="quick",
+                         progress_pct=50.0, frames_used=3, step="training")
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+
+    resp = client.get(f"/reconstruction/{rec.id}/coverage-gaps")
+    assert resp.status_code == 404
+
+
+def test_coverage_gaps_returns_cached_json(client, tmp_path):
+    import json as json_module
+    db = _get_db(client)
+    s = _make_session_with_images(db)
+
+    gaps_file = tmp_path / "gaps.json"
+    cells = [{"x": 1.0, "y": 2.0, "z": 3.0, "size": 0.5, "level": "sparse"}]
+    gaps_file.write_text(json_module.dumps(cells))
+
+    rec = Reconstruction(
+        session_id=s.id, status="complete", preset="quick",
+        progress_pct=100.0, frames_used=3, step="done",
+        splat_path=str(tmp_path / "splat.ply"),
+        coverage_gaps_path=str(gaps_file),
+    )
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+
+    resp = client.get(f"/reconstruction/{rec.id}/coverage-gaps")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data) == 1
+    assert data[0]["level"] == "sparse"
+
+
+def test_coverage_gaps_computes_on_first_call(client, tmp_path):
+    import json as json_module
+    import numpy as np
+    from unittest.mock import patch
+
+    db = _get_db(client)
+    s = _make_session_with_images(db)
+
+    ply_path = tmp_path / "splat.ply"
+    header = (
+        "ply\nformat binary_little_endian 1.0\n"
+        "element vertex 4\n"
+        "property float x\nproperty float y\nproperty float z\n"
+        "end_header\n"
+    ).encode()
+    arr = np.array([[0, 0, 0], [0, 0, 0], [0, 0, 0], [5, 5, 5]], dtype=np.float32)
+    ply_path.write_bytes(header + arr.tobytes())
+
+    rec = Reconstruction(
+        session_id=s.id, status="complete", preset="quick",
+        progress_pct=100.0, frames_used=3, step="done",
+        splat_path=str(ply_path),
+    )
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+
+    with patch("backend.routers.reconstruction.get_config") as mock_cfg:
+        mock_cfg.return_value.exports_dir = str(tmp_path)
+        resp = client.get(f"/reconstruction/{rec.id}/coverage-gaps")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert isinstance(data, list)
+    # Verify coverage_gaps_path stored on record
+    db.expire_all()
+    db.refresh(rec)
+    assert rec.coverage_gaps_path is not None

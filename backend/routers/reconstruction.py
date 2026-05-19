@@ -8,9 +8,15 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, field_validator
 from sqlalchemy.orm import Session as DBSession
 
+from ..core.config import get_config
 from ..db.database import get_db
 from ..db.models import Reconstruction, SessionFrameSelection, TargetArea
-from ..services.reconstruction import cancel_reconstruction, get_rec_log, start_reconstruction
+from ..services.reconstruction import (
+    _compute_coverage_gaps,
+    cancel_reconstruction,
+    get_rec_log,
+    start_reconstruction,
+)
 
 router = APIRouter(prefix="/reconstruction", tags=["reconstruction"])
 
@@ -192,3 +198,32 @@ def get_log(
         raise HTTPException(status_code=404, detail="Reconstruction not found")
     lines = get_rec_log(reconstruction_id)
     return {"lines": lines[-limit:]}
+
+
+@router.get("/{reconstruction_id}/coverage-gaps")
+def get_coverage_gaps(reconstruction_id: int, db: DBSession = Depends(get_db)):
+    rec = db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Reconstruction not found")
+    if rec.status != "complete":
+        raise HTTPException(status_code=404, detail="Reconstruction not complete")
+    if not rec.splat_path:
+        raise HTTPException(status_code=404, detail="No splat available")
+
+    splat_path = Path(rec.splat_path)
+
+    if rec.coverage_gaps_path and Path(rec.coverage_gaps_path).exists():
+        return json.loads(Path(rec.coverage_gaps_path).read_text())
+
+    cfg = get_config()
+    output_path = Path(cfg.exports_dir) / str(reconstruction_id) / "coverage_gaps.json"
+    try:
+        cells = _compute_coverage_gaps(splat_path, output_path)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=422, detail=f"Failed to compute coverage gaps: {exc}"
+        ) from exc
+
+    rec.coverage_gaps_path = str(output_path)
+    db.commit()
+    return cells

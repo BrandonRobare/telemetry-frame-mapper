@@ -489,6 +489,70 @@ def test_parse_checkpoint_metrics_empty_output_returns_empty():
     assert _parse_checkpoint_metrics("nothing here") == []
 
 
+def test_compute_coverage_gaps_classifies_levels(tmp_path):
+    import json
+    import numpy as np
+    from backend.services.reconstruction import _compute_coverage_gaps
+
+    # Build a minimal binary PLY: 100 Gaussians at (0,0,0) and 3 at (10,10,10)
+    props = ["x", "y", "z"]
+    n_dense = 100
+    n_sparse = 3
+    n_total = n_dense + n_sparse
+
+    positions = np.zeros((n_total, 3), dtype=np.float32)
+    positions[:n_dense] = [0.0, 0.0, 0.0]
+    positions[n_dense:] = [10.0, 10.0, 10.0]
+
+    header = (
+        "ply\n"
+        "format binary_little_endian 1.0\n"
+        f"element vertex {n_total}\n"
+        "property float x\n"
+        "property float y\n"
+        "property float z\n"
+        "end_header\n"
+    ).encode("ascii")
+
+    ply_path = tmp_path / "test.ply"
+    ply_path.write_bytes(header + positions.tobytes())
+
+    output_path = tmp_path / "gaps.json"
+    cells = _compute_coverage_gaps(ply_path, output_path, voxel_size_m=1.0)
+
+    assert output_path.exists()
+    loaded = json.loads(output_path.read_text())
+    assert loaded == cells
+
+    # The sparse cluster (3 vs median ~51.5) → very_sparse
+    sparse_cells = [c for c in cells if c["level"] == "very_sparse"]
+    assert len(sparse_cells) == 1
+    assert sparse_cells[0]["x"] == pytest.approx(10.0, abs=1.1)
+
+    # The dense cluster (100 Gaussians at ~194% of median) → excluded
+    normal_cells = [c for c in cells if abs(c["x"]) < 1.0]
+    assert len(normal_cells) == 0
+
+
+def test_compute_coverage_gaps_empty_ply_returns_empty(tmp_path):
+    from backend.services.reconstruction import _compute_coverage_gaps
+
+    header = (
+        "ply\n"
+        "format binary_little_endian 1.0\n"
+        "element vertex 0\n"
+        "property float x\n"
+        "property float y\n"
+        "property float z\n"
+        "end_header\n"
+    ).encode("ascii")
+    ply_path = tmp_path / "empty.ply"
+    ply_path.write_bytes(header)
+
+    cells = _compute_coverage_gaps(ply_path, tmp_path / "gaps.json")
+    assert cells == []
+
+
 def test_store_reprojection_errors_rejected_frame_stays_null(setup_test_db, tmp_path):
     from backend.db.database import get_db
     from backend.db.models import Image, Reconstruction, ReconstructionFrame
