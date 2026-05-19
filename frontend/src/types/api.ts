@@ -55,6 +55,12 @@ export interface CoverageResult {
   run_at: string;
 }
 
+export interface TrainingMetricPoint {
+  iter: number;
+  psnr: number;
+  ssim: number;
+}
+
 export interface Reconstruction {
   id: number;
   session_id: number;
@@ -67,9 +73,11 @@ export interface Reconstruction {
   gaussian_count: number | null;
   psnr: number | null;
   ssim: number | null;
+  training_metrics: TrainingMetricPoint[] | null;
   error_msg: string | null;
   geo_transform: string | null;
   splat_path: string | null;
+  coverage_gaps_path: string | null;
 }
 
 export interface Job {

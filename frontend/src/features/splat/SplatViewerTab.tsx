@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { get } from '../../shared/api/client'
 import { useMapStore } from '../../shared/stores/mapStore'
-import type { Job, GeoTransform } from '../../types/api'
+import type { Job, GeoTransform, Reconstruction, TrainingMetricPoint } from '../../types/api'
 
 const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
 
@@ -26,6 +26,15 @@ function useGeoTransform(reconstructionId: number | null) {
   return useQuery<GeoTransform>({
     queryKey: ['geo-transform', reconstructionId],
     queryFn: () => get<GeoTransform>(`/reconstruction/${reconstructionId!}/geo-transform`),
+    enabled: reconstructionId !== null,
+    staleTime: Infinity,
+  })
+}
+
+function useReconstructionDetails(reconstructionId: number | null) {
+  return useQuery<Reconstruction>({
+    queryKey: ['reconstruction', 'details', reconstructionId],
+    queryFn: () => get<Reconstruction>(`/reconstruction/${reconstructionId!}/status`),
     enabled: reconstructionId !== null,
     staleTime: Infinity,
   })
@@ -85,6 +94,77 @@ function GeoTransformPanel({ reconstructionId }: { reconstructionId: number }) {
       <div>Scale {geo.scale.toExponential(3)}</div>
       <div>
         Origin {geo.utm_origin[0].toFixed(0)}E {geo.utm_origin[1].toFixed(0)}N
+      </div>
+    </div>
+  )
+}
+
+function TrainingMetricsPanel({ metrics }: { metrics: TrainingMetricPoint[] }) {
+  const iters = metrics.map((m) => m.iter)
+  const psnrVals = metrics.map((m) => m.psnr)
+  const ssimVals = metrics.map((m) => m.ssim)
+
+  function toPolyline(values: number[], color: string) {
+    const minV = Math.min(...values)
+    const maxV = Math.max(...values)
+    const range = maxV - minV || 1
+    const w = 72
+    const h = 28
+    const points = values.map((v, i) => {
+      const x = iters.length === 1 ? w / 2 : (i / (iters.length - 1)) * w
+      const y = h - ((v - minV) / range) * (h - 4) - 2
+      return `${x.toFixed(1)},${y.toFixed(1)}`
+    })
+    return (
+      <polyline
+        points={points.join(' ')}
+        fill="none"
+        stroke={color}
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    )
+  }
+
+  const finalPsnr = psnrVals[psnrVals.length - 1]
+  const finalSsim = ssimVals[ssimVals.length - 1]
+
+  return (
+    <div
+      style={{
+        marginTop: 8, padding: '6px 8px', borderRadius: 4,
+        background: 'var(--bg)', border: '1px solid var(--border)',
+      }}
+    >
+      <div style={{ fontWeight: 600, color: 'var(--text)', marginBottom: 6, fontSize: 10 }}>
+        Training Quality
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+        <div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 2 }}>
+            <span style={{ color: 'var(--text-muted)', fontSize: 8 }}>PSNR</span>
+            <span style={{ color: '#86efac', fontSize: 9, fontWeight: 700 }}>
+              {finalPsnr.toFixed(1)} dB
+            </span>
+          </div>
+          <svg viewBox="0 0 72 28" style={{ width: '100%', height: 28, display: 'block' }}>
+            {toPolyline(psnrVals, '#86efac')}
+          </svg>
+          <div style={{ color: 'var(--text-muted)', fontSize: 7, textAlign: 'center' }}>pixel accuracy</div>
+        </div>
+        <div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 2 }}>
+            <span style={{ color: 'var(--text-muted)', fontSize: 8 }}>SSIM</span>
+            <span style={{ color: '#60a5fa', fontSize: 9, fontWeight: 700 }}>
+              {finalSsim.toFixed(2)}
+            </span>
+          </div>
+          <svg viewBox="0 0 72 28" style={{ width: '100%', height: 28, display: 'block' }}>
+            {toPolyline(ssimVals, '#60a5fa')}
+          </svg>
+          <div style={{ color: 'var(--text-muted)', fontSize: 7, textAlign: 'center' }}>looks-like score</div>
+        </div>
       </div>
     </div>
   )
@@ -190,6 +270,7 @@ export default function SplatViewerTab() {
   const running = jobs.filter((j) => ACTIVE_STATUSES.includes(j.status))
   const completed = jobs.filter((j) => j.status === 'complete')
   const activeId = selectedJobId ?? completed[0]?.id ?? null
+  const { data: reconstructionDetails } = useReconstructionDetails(activeId)
 
   useEffect(() => {
     if (targetSessionId == null) return
@@ -275,6 +356,9 @@ export default function SplatViewerTab() {
           </>
         )}
         {activeId !== null && <GeoTransformPanel reconstructionId={activeId} />}
+        {reconstructionDetails?.training_metrics && (
+          <TrainingMetricsPanel metrics={reconstructionDetails.training_metrics} />
+        )}
       </div>
 
       {/* Viewer */}
