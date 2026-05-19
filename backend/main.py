@@ -9,6 +9,7 @@ from fastapi.staticfiles import StaticFiles
 
 from backend.db.database import init_db
 
+from .routers import annotations as annotations_router
 from .routers import coverage as coverage_router
 from .routers import export as export_router
 from .routers import flight_log as flight_log_router
@@ -43,6 +44,7 @@ app.include_router(export_router.router)
 app.include_router(session_log_router.router)
 app.include_router(footprints_router.router)
 app.include_router(reconstruction_router.router)
+app.include_router(annotations_router.router)
 app.include_router(system_router.router)
 app.include_router(jobs_router.router)
 app.include_router(storage_router.router)
