@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json as _json
+import pytest
 from unittest.mock import patch
 
 from backend.db.models import Image, Reconstruction
@@ -331,3 +332,42 @@ def test_get_log_limit_param(client):
     resp = client.get(f"/reconstruction/{rec.id}/log?limit=50")
     assert resp.status_code == 200
     assert "lines" in resp.json()
+
+
+def test_status_includes_training_metrics(client):
+    import json
+    db = _get_db(client)
+    s = _make_session_with_images(db)
+    metrics = [{"iter": 1000, "psnr": 18.2, "ssim": 0.71}]
+    rec = Reconstruction(
+        session_id=s.id, status="complete", preset="quick",
+        progress_pct=100.0, frames_used=3, step="done",
+        training_metrics=json.dumps(metrics),
+    )
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+
+    resp = client.get(f"/reconstruction/{rec.id}/status")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["training_metrics"] is not None
+    assert len(data["training_metrics"]) == 1
+    assert data["training_metrics"][0]["iter"] == 1000
+    assert data["training_metrics"][0]["psnr"] == pytest.approx(18.2)
+
+
+def test_status_training_metrics_null_when_not_set(client):
+    db = _get_db(client)
+    s = _make_session_with_images(db)
+    rec = Reconstruction(
+        session_id=s.id, status="complete", preset="quick",
+        progress_pct=100.0, frames_used=3, step="done",
+    )
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+
+    resp = client.get(f"/reconstruction/{rec.id}/status")
+    assert resp.status_code == 200
+    assert resp.json()["training_metrics"] is None
