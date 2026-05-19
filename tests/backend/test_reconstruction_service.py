@@ -6,6 +6,8 @@ import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock
 
+import pytest
+
 from backend.db.models import Reconstruction, ReconstructionFrame
 from backend.db.models import Session as SessionModel
 
@@ -16,6 +18,51 @@ def _make_session(db):
     db.commit()
     db.refresh(s)
     return s
+
+
+def test_new_model_columns_exist(setup_test_db):
+    from backend.db.database import get_db
+    from backend.db.models import Image
+    from backend.main import app
+
+    db = next(app.dependency_overrides[get_db]())
+    s = _make_session(db)
+
+    rec = Reconstruction(session_id=s.id, preset="quick", status="pending", frames_used=0)
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+
+    # New Reconstruction columns
+    assert hasattr(rec, "training_metrics")
+    assert rec.training_metrics is None
+    assert hasattr(rec, "coverage_gaps_path")
+    assert rec.coverage_gaps_path is None
+
+    img = Image(session_id=s.id, filename="f.jpg", filepath="/f.jpg", usable=True)
+    db.add(img)
+    db.commit()
+    db.refresh(img)
+
+    frame = ReconstructionFrame(reconstruction_id=rec.id, image_id=img.id)
+    db.add(frame)
+    db.commit()
+    db.refresh(frame)
+
+    # New ReconstructionFrame column
+    assert hasattr(frame, "colmap_error_px")
+    assert frame.colmap_error_px is None
+
+    frame.colmap_error_px = 1.23
+    rec.training_metrics = '[{"iter":1000,"psnr":18.2,"ssim":0.71}]'
+    rec.coverage_gaps_path = "/tmp/gaps.json"
+    db.commit()
+    db.refresh(frame)
+    db.refresh(rec)
+
+    assert frame.colmap_error_px == pytest.approx(1.23)
+    assert '"iter"' in rec.training_metrics
+    assert rec.coverage_gaps_path == "/tmp/gaps.json"
 
 
 def test_reconstruction_model_fields(setup_test_db):
