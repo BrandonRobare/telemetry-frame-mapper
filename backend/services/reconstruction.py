@@ -143,6 +143,60 @@ def _count_registered_images(images_txt: Path) -> int:
     return count // 2  # each image is 2 lines in COLMAP TXT format
 
 
+def _store_reprojection_errors(db: DBSession, reconstruction_id: int, colmap_dir: Path) -> None:
+    """Read COLMAP TXT output and write per-frame mean reprojection error to DB."""
+    points3d_txt = colmap_dir / "sparse" / "0" / "points3D.txt"
+    images_txt = colmap_dir / "sparse" / "0" / "images.txt"
+    if not points3d_txt.exists() or not images_txt.exists():
+        return
+
+    # Build {point3d_id: error} from points3D.txt
+    errors: dict[int, float] = {}
+    for line in points3d_txt.read_text().splitlines():
+        if not line or line.startswith("#"):
+            continue
+        parts = line.split()
+        if len(parts) >= 8:
+            errors[int(parts[0])] = float(parts[7])
+
+    # Parse images.txt (two lines per image after comments)
+    name_to_error: dict[str, float | None] = {}
+    raw_lines = [l for l in images_txt.read_text().splitlines() if not l.startswith("#")]
+    i = 0
+    while i < len(raw_lines):
+        header = raw_lines[i].strip()
+        if not header:
+            i += 1
+            continue
+        parts = header.split()
+        name = parts[9]
+        i += 1
+        points_line = raw_lines[i].strip() if i < len(raw_lines) else ""
+        i += 1
+        tokens = points_line.split()
+        valid = [
+            errors[int(tokens[j])]
+            for j in range(2, len(tokens), 3)
+            if tokens[j] != "-1" and int(tokens[j]) in errors
+        ]
+        name_to_error[name] = sum(valid) / len(valid) if valid else None
+
+    # Load frames and images for this reconstruction
+    frames = db.query(ReconstructionFrame).filter(
+        ReconstructionFrame.reconstruction_id == reconstruction_id
+    ).all()
+    image_ids = [f.image_id for f in frames]
+    images = db.query(Image).filter(Image.id.in_(image_ids)).all()
+    img_map = {img.filename: img.id for img in images}
+    frame_map = {f.image_id: f for f in frames}
+
+    for name, error in name_to_error.items():
+        if name in img_map and img_map[name] in frame_map:
+            frame_map[img_map[name]].colmap_error_px = error
+
+    db.commit()
+
+
 def _extract_geo_transform(colmap_dir: Path) -> dict:
     """Extract similarity transform from COLMAP model. Returns placeholder if unavailable."""
     geo_ref = colmap_dir / "geo_transform.json"
@@ -336,6 +390,7 @@ def _run_pipeline(
 
         _run_colmap(colmap_dir, progress_cb, cancel)
         _log_rec(reconstruction_id, "COLMAP: complete")
+        _store_reprojection_errors(db, reconstruction_id, colmap_dir)
 
         if cancel.is_set():
             _update_rec(
