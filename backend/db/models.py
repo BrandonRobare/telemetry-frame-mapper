@@ -190,6 +190,9 @@ class Reconstruction(Base):
     frames = relationship(
         "ReconstructionFrame", back_populates="reconstruction", cascade="all, delete-orphan"
     )
+    annotations = relationship(
+        "Annotation", back_populates="reconstruction", cascade="all, delete-orphan"
+    )
 
 
 class ReconstructionFrame(Base):
@@ -199,6 +202,19 @@ class ReconstructionFrame(Base):
     colmap_error_px = Column(Float)  # null = frame not registered by COLMAP
     reconstruction = relationship("Reconstruction", back_populates="frames")
     image = relationship("Image")
+
+
+class Annotation(Base):
+    __tablename__ = "annotations"
+    id = Column(Integer, primary_key=True, index=True)
+    reconstruction_id = Column(Integer, ForeignKey("reconstructions.id"), nullable=False)
+    label = Column(String, nullable=False)
+    lat = Column(Float, nullable=False)
+    lon = Column(Float, nullable=False)
+    alt_m = Column(Float, nullable=False)
+    color = Column(String, default="#ff6b35")
+    created_at = Column(DateTime, default=datetime.utcnow)
+    reconstruction = relationship("Reconstruction", back_populates="annotations")
 
 
 class SessionFrameSelection(Base):

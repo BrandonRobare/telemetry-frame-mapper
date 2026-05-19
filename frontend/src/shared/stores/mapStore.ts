@@ -7,6 +7,13 @@ interface ActiveLayers {
   targetArea: boolean
 }
 
+interface SyncedViewport {
+  lat: number
+  lon: number
+  zoom: number
+  source: 'leaflet' | '3d'
+}
+
 interface MapStore {
   selectedSessionId: number | null
   activeLayers: ActiveLayers
@@ -20,6 +27,10 @@ interface MapStore {
   setRequestedTab: (tab: string | null) => void
   targetSessionId: number | null
   setTargetSessionId: (id: number | null) => void
+  splitPaneActive: boolean
+  toggleSplitPane: () => void
+  syncedViewport: SyncedViewport | null
+  setSyncedViewport: (vp: SyncedViewport) => void
 }
 
 function applyTheme(theme: 'dark' | 'light') {
@@ -54,4 +65,8 @@ export const useMapStore = create<MapStore>((set) => ({
   setRequestedTab: (tab) => set({ requestedTab: tab }),
   targetSessionId: null,
   setTargetSessionId: (id) => set({ targetSessionId: id }),
+  splitPaneActive: false,
+  toggleSplitPane: () => set((s) => ({ splitPaneActive: !s.splitPaneActive })),
+  syncedViewport: null,
+  setSyncedViewport: (vp) => set({ syncedViewport: vp }),
 }))
