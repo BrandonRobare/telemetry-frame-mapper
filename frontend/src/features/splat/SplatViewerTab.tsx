@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { get } from '../../shared/api/client'
 import { useMapStore } from '../../shared/stores/mapStore'
-import type { Job, GeoTransform } from '../../types/api'
+import type { Job, GeoTransform, Reconstruction, TrainingMetricPoint, CoverageGapCell } from '../../types/api'
 
 const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
 
@@ -28,6 +28,25 @@ function useGeoTransform(reconstructionId: number | null) {
     queryFn: () => get<GeoTransform>(`/reconstruction/${reconstructionId!}/geo-transform`),
     enabled: reconstructionId !== null,
     staleTime: Infinity,
+  })
+}
+
+function useReconstructionDetails(reconstructionId: number | null) {
+  return useQuery<Reconstruction>({
+    queryKey: ['reconstruction', 'details', reconstructionId],
+    queryFn: () => get<Reconstruction>(`/reconstruction/${reconstructionId!}/status`),
+    enabled: reconstructionId !== null,
+    staleTime: Infinity,
+  })
+}
+
+function useCoverageGaps(reconstructionId: number | null, isComplete: boolean) {
+  return useQuery<CoverageGapCell[]>({
+    queryKey: ['coverage-gaps', reconstructionId],
+    queryFn: () => get<CoverageGapCell[]>(`/reconstruction/${reconstructionId!}/coverage-gaps`),
+    enabled: reconstructionId !== null && isComplete,
+    staleTime: Infinity,
+    retry: false,
   })
 }
 
@@ -90,11 +109,103 @@ function GeoTransformPanel({ reconstructionId }: { reconstructionId: number }) {
   )
 }
 
-function SplatCanvas({ reconstructionId }: { reconstructionId: number }) {
+function TrainingMetricsPanel({ metrics }: { metrics: TrainingMetricPoint[] }) {
+  const iters = metrics.map((m) => m.iter)
+  const psnrVals = metrics.map((m) => m.psnr)
+  const ssimVals = metrics.map((m) => m.ssim)
+
+  function toPolyline(values: number[], color: string) {
+    const minV = Math.min(...values)
+    const maxV = Math.max(...values)
+    const range = maxV - minV || 1
+    const w = 72
+    const h = 28
+    const points = values.map((v, i) => {
+      const x = iters.length === 1 ? w / 2 : (i / (iters.length - 1)) * w
+      const y = h - ((v - minV) / range) * (h - 4) - 2
+      return `${x.toFixed(1)},${y.toFixed(1)}`
+    })
+    return (
+      <polyline
+        points={points.join(' ')}
+        fill="none"
+        stroke={color}
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    )
+  }
+
+  const finalPsnr = psnrVals[psnrVals.length - 1]
+  const finalSsim = ssimVals[ssimVals.length - 1]
+
+  return (
+    <div
+      style={{
+        marginTop: 8, padding: '6px 8px', borderRadius: 4,
+        background: 'var(--bg)', border: '1px solid var(--border)',
+      }}
+    >
+      <div style={{ fontWeight: 600, color: 'var(--text)', marginBottom: 6, fontSize: 10 }}>
+        Training Quality
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+        <div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 2 }}>
+            <span style={{ color: 'var(--text-muted)', fontSize: 8 }}>PSNR</span>
+            <span style={{ color: '#86efac', fontSize: 9, fontWeight: 700 }}>
+              {finalPsnr.toFixed(1)} dB
+            </span>
+          </div>
+          <svg viewBox="0 0 72 28" style={{ width: '100%', height: 28, display: 'block' }}>
+            {toPolyline(psnrVals, '#86efac')}
+          </svg>
+          <div style={{ color: 'var(--text-muted)', fontSize: 7, textAlign: 'center' }}>pixel accuracy</div>
+        </div>
+        <div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 2 }}>
+            <span style={{ color: 'var(--text-muted)', fontSize: 8 }}>SSIM</span>
+            <span style={{ color: '#60a5fa', fontSize: 9, fontWeight: 700 }}>
+              {finalSsim.toFixed(2)}
+            </span>
+          </div>
+          <svg viewBox="0 0 72 28" style={{ width: '100%', height: 28, display: 'block' }}>
+            {toPolyline(ssimVals, '#60a5fa')}
+          </svg>
+          <div style={{ color: 'var(--text-muted)', fontSize: 7, textAlign: 'center' }}>looks-like score</div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+const GAP_COLORS: Record<string, number> = {
+  sparse: 0xeab308,
+  thin: 0xf97316,
+  very_sparse: 0xef4444,
+}
+
+const GAP_OPACITY: Record<string, number> = {
+  sparse: 0.35,
+  thin: 0.35,
+  very_sparse: 0.40,
+}
+
+interface SplatCanvasProps {
+  reconstructionId: number
+  coverageGaps: CoverageGapCell[] | null
+  showCoverageGaps: boolean
+}
+
+function SplatCanvas({ reconstructionId, coverageGaps, showCoverageGaps }: SplatCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const viewerRef = useRef<unknown>(null)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const gapGroupRef = useRef<any>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
+  const [viewerReady, setViewerReady] = useState(false)
 
   useEffect(() => {
     if (!containerRef.current) return
@@ -118,6 +229,7 @@ function SplatCanvas({ reconstructionId }: { reconstructionId: number }) {
         await viewer.addSplatScene(splatUrl, { streamView: true })
         if (!cancelled) {
           setLoading(false)
+          setViewerReady(true)
           viewer.start()
         }
       } catch (err) {
@@ -132,6 +244,7 @@ function SplatCanvas({ reconstructionId }: { reconstructionId: number }) {
 
     return () => {
       cancelled = true
+      setViewerReady(false)
       if (viewerRef.current) {
         try {
           (viewerRef.current as { dispose?: () => void }).dispose?.()
@@ -142,6 +255,65 @@ function SplatCanvas({ reconstructionId }: { reconstructionId: number }) {
       }
     }
   }, [reconstructionId])
+
+  // Build/rebuild coverage gap meshes when data or visibility changes
+  useEffect(() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const viewer = viewerRef.current as any
+    if (!viewer?.scene) return
+
+    const scene = viewer.scene
+
+    // Remove old group
+    if (gapGroupRef.current) {
+      scene.remove(gapGroupRef.current)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      gapGroupRef.current.traverse((obj: any) => {
+        if (obj.isMesh) {
+          obj.geometry.dispose()
+          obj.material.dispose()
+        }
+      })
+      gapGroupRef.current = null
+    }
+
+    if (!coverageGaps || !showCoverageGaps || coverageGaps.length === 0) return
+
+    let cancelled = false
+    import('three').then((THREE) => {
+      if (cancelled) return
+      const group = new THREE.Group()
+      for (const cell of coverageGaps) {
+        const geo = new THREE.BoxGeometry(cell.size, cell.size, cell.size)
+        const mat = new THREE.MeshBasicMaterial({
+          color: GAP_COLORS[cell.level] ?? 0xffffff,
+          transparent: true,
+          opacity: GAP_OPACITY[cell.level] ?? 0.35,
+          depthWrite: false,
+        })
+        const mesh = new THREE.Mesh(geo, mat)
+        mesh.position.set(cell.x, cell.y, cell.z)
+        group.add(mesh)
+      }
+      scene.add(group)
+      gapGroupRef.current = group
+    })
+
+    return () => {
+      cancelled = true
+      if (gapGroupRef.current) {
+        scene.remove(gapGroupRef.current)
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        gapGroupRef.current.traverse((obj: any) => {
+          if (obj.isMesh) {
+            obj.geometry.dispose()
+            obj.material.dispose()
+          }
+        })
+        gapGroupRef.current = null
+      }
+    }
+  }, [coverageGaps, showCoverageGaps, viewerReady])
 
   if (error) {
     return (
@@ -185,11 +357,18 @@ export default function SplatViewerTab() {
   const { selectedSessionId, targetSessionId, setTargetSessionId } = useMapStore()
   const { data: allJobs, isLoading } = useAllJobsForSession(selectedSessionId)
   const [selectedJobId, setSelectedJobId] = useState<number | null>(null)
+  const [showCoverageGaps, setShowCoverageGaps] = useState(false)
 
   const jobs = allJobs ?? []
   const running = jobs.filter((j) => ACTIVE_STATUSES.includes(j.status))
   const completed = jobs.filter((j) => j.status === 'complete')
   const activeId = selectedJobId ?? completed[0]?.id ?? null
+  const { data: reconstructionDetails } = useReconstructionDetails(activeId)
+  const selectedJobComplete = completed.some((j) => j.id === activeId)
+  const { data: coverageGaps, isFetching: gapsFetching } = useCoverageGaps(
+    activeId,
+    selectedJobComplete ?? false,
+  )
 
   useEffect(() => {
     if (targetSessionId == null) return
@@ -275,12 +454,56 @@ export default function SplatViewerTab() {
           </>
         )}
         {activeId !== null && <GeoTransformPanel reconstructionId={activeId} />}
+        {reconstructionDetails?.training_metrics && (
+          <TrainingMetricsPanel metrics={reconstructionDetails.training_metrics} />
+        )}
+        {activeId !== null && selectedJobComplete && (
+          <div style={{ marginTop: 8 }}>
+            <button
+              onClick={() => setShowCoverageGaps((v) => !v)}
+              disabled={gapsFetching}
+              style={{
+                width: '100%',
+                padding: '4px 8px',
+                borderRadius: 4,
+                border: '1px solid var(--border)',
+                background: showCoverageGaps ? 'rgba(239,68,68,0.15)' : 'var(--bg)',
+                color: showCoverageGaps ? '#f87171' : 'var(--text-muted)',
+                cursor: gapsFetching ? 'default' : 'pointer',
+                fontFamily: 'inherit',
+                fontSize: 11,
+                textAlign: 'left',
+              }}
+            >
+              {gapsFetching ? '⟳ Computing…' : showCoverageGaps ? '◉ Coverage Gaps' : '○ Coverage Gaps'}
+            </button>
+            {showCoverageGaps && !gapsFetching && coverageGaps && coverageGaps.length > 0 && (
+              <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 4, flexWrap: 'wrap' }}>
+                {[
+                  { color: '#eab308', label: 'sparse' },
+                  { color: '#f97316', label: 'thin' },
+                  { color: '#ef4444', label: 'very sparse' },
+                ].map(({ color, label }) => (
+                  <span key={label} style={{ display: 'flex', alignItems: 'center', gap: 3, fontSize: 9, color: 'var(--text-muted)' }}>
+                    <span style={{ width: 8, height: 8, background: color, borderRadius: 1, display: 'inline-block', opacity: 0.7 }} />
+                    {label}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Viewer */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: '#0a0a0a' }}>
         {activeId !== null ? (
-          <SplatCanvas key={activeId} reconstructionId={activeId} />
+          <SplatCanvas
+            key={activeId}
+            reconstructionId={activeId}
+            coverageGaps={coverageGaps ?? null}
+            showCoverageGaps={showCoverageGaps}
+          />
         ) : (
           <div className="flex-1 flex items-center justify-center" style={{ color: 'var(--text-muted)' }}>
             {running.length > 0 ? 'Reconstruction in progress…' : 'Select a reconstruction'}

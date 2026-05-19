@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import re
 import shutil
 import subprocess
 import threading
@@ -143,6 +144,149 @@ def _count_registered_images(images_txt: Path) -> int:
     return count // 2  # each image is 2 lines in COLMAP TXT format
 
 
+def _store_reprojection_errors(db: DBSession, reconstruction_id: int, colmap_dir: Path) -> None:
+    """Read COLMAP TXT output and write per-frame mean reprojection error to DB."""
+    points3d_txt = colmap_dir / "sparse" / "0" / "points3D.txt"
+    images_txt = colmap_dir / "sparse" / "0" / "images.txt"
+    if not points3d_txt.exists() or not images_txt.exists():
+        return
+
+    # Build {point3d_id: error} from points3D.txt
+    errors: dict[int, float] = {}
+    for line in points3d_txt.read_text().splitlines():
+        if not line or line.startswith("#"):
+            continue
+        parts = line.split()
+        if len(parts) >= 8:
+            errors[int(parts[0])] = float(parts[7])
+
+    # Parse images.txt (two lines per image after comments)
+    name_to_error: dict[str, float | None] = {}
+    raw_lines = [line for line in images_txt.read_text().splitlines() if not line.startswith("#")]
+    i = 0
+    while i < len(raw_lines):
+        header = raw_lines[i].strip()
+        if not header:
+            i += 1
+            continue
+        parts = header.split()
+        name = parts[9]
+        i += 1
+        points_line = raw_lines[i].strip() if i < len(raw_lines) else ""
+        i += 1
+        tokens = points_line.split()
+        valid = [
+            errors[int(tokens[j])]
+            for j in range(2, len(tokens), 3)
+            if tokens[j] != "-1" and int(tokens[j]) in errors
+        ]
+        name_to_error[name] = sum(valid) / len(valid) if valid else None
+
+    # Load frames and images for this reconstruction
+    frames = db.query(ReconstructionFrame).filter(
+        ReconstructionFrame.reconstruction_id == reconstruction_id
+    ).all()
+    image_ids = [f.image_id for f in frames]
+    images = db.query(Image).filter(Image.id.in_(image_ids)).all()
+    img_map = {img.filename: img.id for img in images}
+    frame_map = {f.image_id: f for f in frames}
+
+    for name, error in name_to_error.items():
+        if name in img_map and img_map[name] in frame_map:
+            frame_map[img_map[name]].colmap_error_px = error
+
+    db.commit()
+
+
+_CHECKPOINT_RE = re.compile(
+    r"\[iter\s+(\d+)\]\s+PSNR:\s+([\d.]+)\s+SSIM:\s+([\d.]+)"
+)
+
+
+def _parse_checkpoint_metrics(output: str) -> list[dict]:
+    return [
+        {"iter": int(m.group(1)), "psnr": float(m.group(2)), "ssim": float(m.group(3))}
+        for m in _CHECKPOINT_RE.finditer(output)
+    ]
+
+
+def _compute_coverage_gaps(
+    splat_path: Path, output_path: Path, voxel_size_m: float = 0.5
+) -> list[dict]:
+    """Voxelize Gaussian positions from .ply and classify sparse cells."""
+    import numpy as np
+
+    data = splat_path.read_bytes()
+
+    header_marker = b"\nend_header\n"
+    header_end = data.index(header_marker) + len(header_marker)
+    header_text = data[:header_end].decode("ascii", errors="replace")
+
+    vertex_count = 0
+    properties: list[str] = []
+    is_binary_little = False
+    for line in header_text.splitlines():
+        if line.startswith("element vertex"):
+            vertex_count = int(line.split()[-1])
+        elif line.startswith("property float"):
+            properties.append(line.split()[-1])
+        elif "binary_little_endian" in line:
+            is_binary_little = True
+
+    if vertex_count == 0:
+        return []
+
+    body = data[header_end:]
+
+    if is_binary_little:
+        dtype = np.dtype([(p, np.float32) for p in properties])
+        vertices = np.frombuffer(body[: vertex_count * dtype.itemsize], dtype=dtype)
+        x = vertices["x"].astype(np.float64)
+        y = vertices["y"].astype(np.float64)
+        z = vertices["z"].astype(np.float64)
+    else:
+        rows = body.decode("ascii", errors="replace").splitlines()[:vertex_count]
+        idx = {p: i for i, p in enumerate(properties)}
+        arr = np.array(
+            [[float(r.split()[idx["x"]]), float(r.split()[idx["y"]]),
+              float(r.split()[idx["z"]])] for r in rows if r.strip()],
+            dtype=np.float64,
+        )
+        x, y, z = arr[:, 0], arr[:, 1], arr[:, 2]
+
+    xi = ((x - x.min()) / voxel_size_m).astype(int)
+    yi = ((y - y.min()) / voxel_size_m).astype(int)
+    zi = ((z - z.min()) / voxel_size_m).astype(int)
+
+    coords = np.stack([xi, yi, zi], axis=1)
+    unique_voxels, counts = np.unique(coords, axis=0, return_counts=True)
+
+    median_count = float(np.median(counts))
+
+    cells = []
+    for (vx, vy, vz), count in zip(unique_voxels, counts, strict=True):
+        ratio = count / median_count
+        if ratio >= 0.40:
+            continue
+        if ratio < 0.05:
+            level = "very_sparse"
+        elif ratio < 0.25:
+            level = "thin"
+        else:
+            level = "sparse"
+        cells.append({
+            "x": float(x.min() + vx * voxel_size_m),
+            "y": float(y.min() + vy * voxel_size_m),
+            "z": float(z.min() + vz * voxel_size_m),
+            "size": voxel_size_m,
+            "level": level,
+        })
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(json.dumps(cells))
+    return cells
+
+
 def _extract_geo_transform(colmap_dir: Path) -> dict:
     """Extract similarity transform from COLMAP model. Returns placeholder if unavailable."""
     geo_ref = colmap_dir / "geo_transform.json"
@@ -174,7 +318,10 @@ def _filter_images_to_target_area(images: list, geom_geojson: str) -> list:
 def _run_gsplat(
     colmap_dir: Path, output_path: Path, iterations: int, progress_cb, cancel: threading.Event
 ) -> dict:
-    """Train a Gaussian splat. Returns {gaussian_count, psnr, ssim}."""
+    """Train a Gaussian splat. Returns {gaussian_count, psnr, ssim, training_metrics}."""
+    import contextlib
+    import io
+
     try:
         from gsplat import train  # type: ignore[import]
     except ImportError as exc:
@@ -182,13 +329,19 @@ def _run_gsplat(
             "gsplat is not installed. Run: pip install '.[reconstruction]'"
         ) from exc
 
-    return train(
-        colmap_dir=str(colmap_dir),
-        output_path=str(output_path),
-        iterations=iterations,
-        progress_cb=progress_cb,
-        cancel=cancel,
-    )
+    stdout_buf = io.StringIO()
+    with contextlib.redirect_stdout(stdout_buf):
+        result = train(
+            colmap_dir=str(colmap_dir),
+            output_path=str(output_path),
+            iterations=iterations,
+            progress_cb=progress_cb,
+            cancel=cancel,
+        )
+
+    metrics = _parse_checkpoint_metrics(stdout_buf.getvalue())
+    result["training_metrics"] = metrics if metrics else None
+    return result
 
 
 def _generate_lod(splat_path: Path) -> tuple[Path, Path]:
@@ -336,6 +489,7 @@ def _run_pipeline(
 
         _run_colmap(colmap_dir, progress_cb, cancel)
         _log_rec(reconstruction_id, "COLMAP: complete")
+        _store_reprojection_errors(db, reconstruction_id, colmap_dir)
 
         if cancel.is_set():
             _update_rec(
@@ -362,6 +516,7 @@ def _run_pipeline(
             result = _run_gsplat(
                 colmap_dir, splat_path, preset_cfg["iterations"], progress_cb, cancel
             )
+            training_metrics = result.get("training_metrics")
             _log_rec(reconstruction_id, "Gaussian Splatting: complete")
             _log_rec(reconstruction_id, "LOD generation: starting")
             preview, medium = _generate_lod(splat_path)
@@ -385,6 +540,7 @@ def _run_pipeline(
                 gaussian_count=result.get("gaussian_count"),
                 psnr=result.get("psnr"),
                 ssim=result.get("ssim"),
+                training_metrics=json.dumps(training_metrics) if training_metrics else None,
                 completed_at=completed_at,
             )
             _log_rec(reconstruction_id, "Pipeline complete")
