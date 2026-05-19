@@ -36,6 +36,15 @@ def setup_test_db():
     Base.metadata.drop_all(bind=test_engine)
 
 
+@pytest.fixture(autouse=True)
+def clean_tables(setup_test_db):
+    yield
+    with TestSessionLocal() as db:
+        for table in reversed(Base.metadata.sorted_tables):
+            db.execute(table.delete())
+        db.commit()
+
+
 @pytest.fixture(scope="session")
 def db_engine():
     return test_engine
