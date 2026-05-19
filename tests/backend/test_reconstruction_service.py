@@ -375,3 +375,128 @@ def test_run_pipeline_calls_generate_thumbnail(setup_test_db):
         rec_check = db.query(ReconModel).filter(ReconModel.session_id == s.id).first()
         if rec_check:
             assert rec_check.thumb_path is None
+
+
+# ---------------------------------------------------------------------------
+# _store_reprojection_errors tests
+# ---------------------------------------------------------------------------
+
+def test_store_reprojection_errors_writes_mean(setup_test_db, tmp_path):
+    from backend.db.database import get_db
+    from backend.db.models import Image, Reconstruction, ReconstructionFrame
+    from backend.db.models import Session as SessionModel
+    from backend.main import app
+    from backend.services.reconstruction import _store_reprojection_errors
+
+    db = next(app.dependency_overrides[get_db]())
+    s = SessionModel(name="T", folder_path="/tmp/t", photo_count=0, usable_count=0)
+    db.add(s)
+    db.commit()
+    db.refresh(s)
+
+    img1 = Image(session_id=s.id, filename="frame_00001.jpg", filepath="/f1.jpg", usable=True)
+    img2 = Image(session_id=s.id, filename="frame_00002.jpg", filepath="/f2.jpg", usable=True)
+    db.add_all([img1, img2])
+    db.commit()
+    db.refresh(img1)
+    db.refresh(img2)
+
+    rec = Reconstruction(session_id=s.id, preset="quick", status="pending", frames_used=2)
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+    db.add_all([
+        ReconstructionFrame(reconstruction_id=rec.id, image_id=img1.id),
+        ReconstructionFrame(reconstruction_id=rec.id, image_id=img2.id),
+    ])
+    db.commit()
+
+    # Build synthetic COLMAP TXT files
+    sparse = tmp_path / "sparse" / "0"
+    sparse.mkdir(parents=True)
+
+    # points3D.txt: 3 points with known errors
+    (sparse / "points3D.txt").write_text(
+        "# comment\n"
+        "1 0.1 0.2 0.3 255 0 0 0.5 1 0 2 1\n"   # error=0.5
+        "2 0.4 0.5 0.6 0 255 0 1.5 1 1 2 0\n"   # error=1.5
+        "3 0.7 0.8 0.9 0 0 255 2.0 2 0\n"        # error=2.0
+    )
+
+    # images.txt: img1 sees points 1+2, img2 sees point 3 only
+    (sparse / "images.txt").write_text(
+        "# comment\n"
+        f"1 1 0 0 0 0 0 0 1 frame_00001.jpg\n"
+        "100.0 200.0 1 150.0 250.0 2\n"
+        f"2 1 0 0 0 0 0 0 1 frame_00002.jpg\n"
+        "100.0 200.0 3 150.0 250.0 -1\n"
+    )
+
+    _store_reprojection_errors(db, rec.id, tmp_path)
+
+    db.expire_all()
+    f1 = db.query(ReconstructionFrame).filter(
+        ReconstructionFrame.reconstruction_id == rec.id,
+        ReconstructionFrame.image_id == img1.id,
+    ).first()
+    f2 = db.query(ReconstructionFrame).filter(
+        ReconstructionFrame.reconstruction_id == rec.id,
+        ReconstructionFrame.image_id == img2.id,
+    ).first()
+
+    # img1 mean = (0.5 + 1.5) / 2 = 1.0
+    assert f1.colmap_error_px == pytest.approx(1.0)
+    # img2 mean = 2.0
+    assert f2.colmap_error_px == pytest.approx(2.0)
+
+
+def test_store_reprojection_errors_missing_dir_is_noop(setup_test_db, tmp_path):
+    from backend.db.database import get_db
+    from backend.main import app
+    from backend.services.reconstruction import _store_reprojection_errors
+
+    db = next(app.dependency_overrides[get_db]())
+    # Should not raise even if sparse/0/ is absent
+    _store_reprojection_errors(db, 9999, tmp_path)
+
+
+def test_store_reprojection_errors_rejected_frame_stays_null(setup_test_db, tmp_path):
+    from backend.db.database import get_db
+    from backend.db.models import Image, Reconstruction, ReconstructionFrame
+    from backend.db.models import Session as SessionModel
+    from backend.main import app
+    from backend.services.reconstruction import _store_reprojection_errors
+
+    db = next(app.dependency_overrides[get_db]())
+    s = SessionModel(name="T2", folder_path="/tmp/t2", photo_count=0, usable_count=0)
+    db.add(s)
+    db.commit()
+    db.refresh(s)
+    img = Image(session_id=s.id, filename="rejected.jpg", filepath="/r.jpg", usable=True)
+    db.add(img)
+    db.commit()
+    db.refresh(img)
+    rec = Reconstruction(session_id=s.id, preset="quick", status="pending", frames_used=1)
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+    db.add(ReconstructionFrame(reconstruction_id=rec.id, image_id=img.id))
+    db.commit()
+
+    sparse = tmp_path / "sparse" / "0"
+    sparse.mkdir(parents=True)
+    (sparse / "points3D.txt").write_text("# empty\n")
+    # Image has only unmatched keypoints (all -1)
+    (sparse / "images.txt").write_text(
+        "1 1 0 0 0 0 0 0 1 rejected.jpg\n"
+        "100.0 200.0 -1\n"
+    )
+
+    _store_reprojection_errors(db, rec.id, tmp_path)
+
+    db.expire_all()
+    frame = db.query(ReconstructionFrame).filter(
+        ReconstructionFrame.reconstruction_id == rec.id,
+        ReconstructionFrame.image_id == img.id,
+    ).first()
+    assert frame.colmap_error_px is None
