@@ -161,7 +161,7 @@ def _store_reprojection_errors(db: DBSession, reconstruction_id: int, colmap_dir
 
     # Parse images.txt (two lines per image after comments)
     name_to_error: dict[str, float | None] = {}
-    raw_lines = [l for l in images_txt.read_text().splitlines() if not l.startswith("#")]
+    raw_lines = [line for line in images_txt.read_text().splitlines() if not line.startswith("#")]
     i = 0
     while i < len(raw_lines):
         header = raw_lines[i].strip()
