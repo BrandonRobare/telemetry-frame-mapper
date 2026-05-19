@@ -426,9 +426,9 @@ def test_store_reprojection_errors_writes_mean(setup_test_db, tmp_path):
     # images.txt: img1 sees points 1+2, img2 sees point 3 only
     (sparse / "images.txt").write_text(
         "# comment\n"
-        f"1 1 0 0 0 0 0 0 1 frame_00001.jpg\n"
+        "1 1 0 0 0 0 0 0 1 frame_00001.jpg\n"
         "100.0 200.0 1 150.0 250.0 2\n"
-        f"2 1 0 0 0 0 0 0 1 frame_00002.jpg\n"
+        "2 1 0 0 0 0 0 0 1 frame_00002.jpg\n"
         "100.0 200.0 3 150.0 250.0 -1\n"
     )
 
@@ -491,10 +491,12 @@ def test_parse_checkpoint_metrics_empty_output_returns_empty():
 
 def test_compute_coverage_gaps_classifies_levels(tmp_path):
     import json
+
     import numpy as np
+
     from backend.services.reconstruction import _compute_coverage_gaps
 
-    # Build a binary PLY: 10 dense voxels (100 pts each at unit positions) + 1 sparse voxel (3 pts far away)
+    # 10 dense voxels (100 pts each) + 1 sparse voxel (3 pts far away)
     # median = 100, ratio for sparse = 3/100 = 3% < 5% → very_sparse
     n_dense_voxels = 10
     pts_per_dense = 100
@@ -502,7 +504,7 @@ def test_compute_coverage_gaps_classifies_levels(tmp_path):
 
     positions = []
     for v in range(n_dense_voxels):
-        # Each dense voxel: 100 points at position (v * 2, 0, 0) — 2m apart so distinct voxels at voxel_size_m=1.0
+        # Each dense voxel: 100 pts at (v*2, 0, 0) — 2 m apart → distinct voxels at voxel_size_m=1.0
         cluster = np.full((pts_per_dense, 3), [float(v * 2), 0.0, 0.0], dtype=np.float32)
         positions.append(cluster)
     # Sparse voxel far away
