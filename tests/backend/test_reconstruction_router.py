@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import json as _json
-import pytest
 from unittest.mock import patch
+
+import pytest
 
 from backend.db.models import Image, Reconstruction
 from backend.db.models import Session as SessionModel
@@ -418,20 +419,20 @@ def test_coverage_gaps_returns_cached_json(client, tmp_path):
 
 
 def test_coverage_gaps_computes_on_first_call(client, tmp_path):
-    import json as json_module
-    import numpy as np
     from unittest.mock import patch
+
+    import numpy as np
 
     db = _get_db(client)
     s = _make_session_with_images(db)
 
     ply_path = tmp_path / "splat.ply"
     header = (
-        "ply\nformat binary_little_endian 1.0\n"
-        "element vertex 4\n"
-        "property float x\nproperty float y\nproperty float z\n"
-        "end_header\n"
-    ).encode()
+        b"ply\nformat binary_little_endian 1.0\n"
+        b"element vertex 4\n"
+        b"property float x\nproperty float y\nproperty float z\n"
+        b"end_header\n"
+    )
     arr = np.array([[0, 0, 0], [0, 0, 0], [0, 0, 0], [5, 5, 5]], dtype=np.float32)
     ply_path.write_bytes(header + arr.tobytes())
 
