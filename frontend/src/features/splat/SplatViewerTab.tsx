@@ -1,12 +1,32 @@
 import { useEffect, useRef, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
-import { get } from '../../shared/api/client'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { get, post, del } from '../../shared/api/client'
 import { useMapStore } from '../../shared/stores/mapStore'
-import type { Job, GeoTransform, Reconstruction, TrainingMetricPoint, CoverageGapCell } from '../../types/api'
+import type {
+  Job,
+  GeoTransform,
+  Reconstruction,
+  TrainingMetricPoint,
+  CoverageGapCell,
+  Annotation,
+} from '../../types/api'
+import { worldToGps, useRayCast } from './useViewerCoords'
+import MiniLeafletPane from './MiniLeafletPane'
 
 const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
 
 const ACTIVE_STATUSES: string[] = ['pending', 'running_colmap', 'running_gsplat']
+
+type ActiveTool = 'none' | 'annotate' | 'measure-dist' | 'measure-area'
+
+interface MeasurePoint {
+  worldPos: { x: number; y: number; z: number }
+  gps: { lat: number; lon: number; alt: number }
+}
+
+// ---------------------------------------------------------------------------
+// Queries
+// ---------------------------------------------------------------------------
 
 function useAllJobsForSession(sessionId: number | null) {
   return useQuery<Job[]>({
@@ -49,6 +69,19 @@ function useCoverageGaps(reconstructionId: number | null, isComplete: boolean) {
     retry: false,
   })
 }
+
+function useAnnotations(reconstructionId: number | null) {
+  return useQuery<Annotation[]>({
+    queryKey: ['annotations', reconstructionId],
+    queryFn: () => get<Annotation[]>(`/reconstruction/${reconstructionId!}/annotations`),
+    enabled: reconstructionId !== null,
+    staleTime: 30_000,
+  })
+}
+
+// ---------------------------------------------------------------------------
+// Small UI components
+// ---------------------------------------------------------------------------
 
 const STATUS_STEP_LABEL: Record<string, string> = {
   pending: 'Queued…',
@@ -180,6 +213,235 @@ function TrainingMetricsPanel({ metrics }: { metrics: TrainingMetricPoint[] }) {
   )
 }
 
+// ---------------------------------------------------------------------------
+// Label popover — shown after a canvas click in annotate mode
+// ---------------------------------------------------------------------------
+
+interface LabelPopoverProps {
+  screenX: number
+  screenY: number
+  onSave: (label: string, color: string) => void
+  onCancel: () => void
+}
+
+function LabelPopover({ screenX, screenY, onSave, onCancel }: LabelPopoverProps) {
+  const [label, setLabel] = useState('')
+  const [color, setColor] = useState('#ff6b35')
+
+  return (
+    <div
+      style={{
+        position: 'absolute',
+        left: Math.min(screenX + 8, window.innerWidth - 200),
+        top: Math.min(screenY + 8, window.innerHeight - 120),
+        zIndex: 100,
+        background: 'var(--surface)',
+        border: '1px solid var(--border)',
+        borderRadius: 6,
+        padding: '10px 12px',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 8,
+        width: 180,
+        boxShadow: '0 4px 12px rgba(0,0,0,0.4)',
+      }}
+    >
+      <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text)' }}>New annotation</div>
+      <input
+        autoFocus
+        value={label}
+        onChange={(e) => setLabel(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' && label.trim()) onSave(label.trim(), color)
+          if (e.key === 'Escape') onCancel()
+        }}
+        placeholder="Label…"
+        style={{
+          background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 4,
+          color: 'var(--text)', fontSize: 12, padding: '4px 6px', fontFamily: 'inherit',
+          outline: 'none',
+        }}
+      />
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <label style={{ fontSize: 10, color: 'var(--text-muted)', flex: 1 }}>Color</label>
+        <input
+          type="color"
+          value={color}
+          onChange={(e) => setColor(e.target.value)}
+          style={{ width: 28, height: 22, border: 'none', background: 'none', cursor: 'pointer', padding: 0 }}
+        />
+      </div>
+      <div style={{ display: 'flex', gap: 6 }}>
+        <button
+          onClick={() => label.trim() && onSave(label.trim(), color)}
+          disabled={!label.trim()}
+          style={{
+            flex: 1, padding: '4px 0', borderRadius: 4, border: 'none',
+            background: label.trim() ? '#7c3aed' : 'var(--border)',
+            color: label.trim() ? '#fff' : 'var(--text-muted)',
+            cursor: label.trim() ? 'pointer' : 'default',
+            fontSize: 11, fontFamily: 'inherit',
+          }}
+        >
+          Save
+        </button>
+        <button
+          onClick={onCancel}
+          style={{
+            flex: 1, padding: '4px 0', borderRadius: 4,
+            border: '1px solid var(--border)', background: 'none',
+            color: 'var(--text-muted)', cursor: 'pointer', fontSize: 11, fontFamily: 'inherit',
+          }}
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Measurement layer — renders Three.js lines + labels (ephemeral, no backend)
+// ---------------------------------------------------------------------------
+
+function makeLabelTexture(text: string): HTMLCanvasElement {
+  const canvas = document.createElement('canvas')
+  canvas.width = 256
+  canvas.height = 48
+  const ctx = canvas.getContext('2d')!
+  ctx.fillStyle = 'rgba(0,0,0,0.7)'
+  ctx.roundRect(2, 2, canvas.width - 4, canvas.height - 4, 6)
+  ctx.fill()
+  ctx.fillStyle = '#ffffff'
+  ctx.font = 'bold 22px sans-serif'
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+  ctx.fillText(text, canvas.width / 2, canvas.height / 2)
+  return canvas
+}
+
+interface MeasurementLayerProps {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  viewerRef: React.RefObject<any>
+  viewerReady: boolean
+  points: MeasurePoint[]
+  mode: 'measure-dist' | 'measure-area' | null
+}
+
+function useMeasurementLayer({ viewerRef, viewerReady, points, mode }: MeasurementLayerProps) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const groupRef = useRef<any>(null)
+
+  useEffect(() => {
+    const viewer = viewerRef.current
+    if (!viewer?.scene) return
+    const scene = viewer.scene
+
+    if (groupRef.current) {
+      scene.remove(groupRef.current)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      groupRef.current.traverse((obj: any) => {
+        obj.geometry?.dispose()
+        if (obj.material?.map) obj.material.map.dispose()
+        obj.material?.dispose()
+      })
+      groupRef.current = null
+    }
+
+    if (points.length < 2) return
+
+    let cancelled = false
+    import('three').then(async (THREE) => {
+      if (cancelled) return
+
+      const group = new THREE.Group()
+
+      // Line through all points
+      const positions = points.map((p) => new THREE.Vector3(p.worldPos.x, p.worldPos.y, p.worldPos.z))
+      if (mode === 'measure-area' && positions.length >= 3) {
+        positions.push(positions[0]) // close the polygon
+      }
+      const geom = new THREE.BufferGeometry().setFromPoints(positions)
+      const mat = new THREE.LineDashedMaterial({ color: 0xfacc15, dashSize: 0.1, gapSize: 0.05, linewidth: 1 })
+      const line = new THREE.Line(geom, mat)
+      line.computeLineDistances()
+      group.add(line)
+
+      // Polygon fill for area mode
+      if (mode === 'measure-area' && points.length >= 3) {
+        const shape = new THREE.Shape(points.map((p) => new THREE.Vector2(p.worldPos.x, p.worldPos.z)))
+        const fillGeo = new THREE.ShapeGeometry(shape)
+        // Rotate to lie in the XZ plane (Y up)
+        const pos = fillGeo.attributes.position
+        for (let i = 0; i < pos.count; i++) {
+          const x = pos.getX(i)
+          const z = pos.getY(i)
+          pos.setXYZ(i, x, points[0].worldPos.y, z)
+        }
+        pos.needsUpdate = true
+        const fillMat = new THREE.MeshBasicMaterial({
+          color: 0xfacc15, transparent: true, opacity: 0.18, side: THREE.DoubleSide, depthWrite: false,
+        })
+        group.add(new THREE.Mesh(fillGeo, fillMat))
+      }
+
+      // Label sprite
+      let labelText = ''
+      if (mode === 'measure-dist' && points.length >= 2) {
+        const distance = await import('@turf/distance').then(({ default: turfDist }) =>
+          turfDist(
+            [points[0].gps.lon, points[0].gps.lat],
+            [points[points.length - 1].gps.lon, points[points.length - 1].gps.lat],
+            { units: 'meters' },
+          )
+        )
+        labelText = distance >= 1000 ? `${(distance / 1000).toFixed(2)} km` : `${distance.toFixed(1)} m`
+      } else if (mode === 'measure-area' && points.length >= 3) {
+        const area = await import('@turf/area').then(({ default: turfArea }) => {
+          const coords = [...points.map((p): [number, number] => [p.gps.lon, p.gps.lat])]
+          coords.push(coords[0])
+          return turfArea({ type: 'Feature', geometry: { type: 'Polygon', coordinates: [coords] }, properties: {} })
+        })
+        labelText = area >= 10000 ? `${(area / 10000).toFixed(2)} ha` : `${area.toFixed(0)} m²`
+      }
+
+      if (labelText) {
+        const mid = positions[Math.floor((positions.length - 1) / 2)]
+        const tex = new THREE.CanvasTexture(makeLabelTexture(labelText))
+        const spriteMat = new THREE.SpriteMaterial({ map: tex, depthTest: false })
+        const sprite = new THREE.Sprite(spriteMat)
+        sprite.position.copy(mid)
+        sprite.scale.set(0.6, 0.12, 1)
+        group.add(sprite)
+      }
+
+      if (!cancelled) {
+        scene.add(group)
+        groupRef.current = group
+      }
+    })
+
+    return () => {
+      cancelled = true
+      if (groupRef.current) {
+        scene.remove(groupRef.current)
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        groupRef.current.traverse((obj: any) => {
+          obj.geometry?.dispose()
+          if (obj.material?.map) obj.material.map.dispose()
+          obj.material?.dispose()
+        })
+        groupRef.current = null
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [points, mode, viewerReady])
+}
+
+// ---------------------------------------------------------------------------
+// Coverage gap constants
+// ---------------------------------------------------------------------------
+
 const GAP_COLORS: Record<string, number> = {
   sparse: 0xeab308,
   thin: 0xf97316,
@@ -192,24 +454,73 @@ const GAP_OPACITY: Record<string, number> = {
   very_sparse: 0.40,
 }
 
+// ---------------------------------------------------------------------------
+// SplatCanvas
+// ---------------------------------------------------------------------------
+
+interface PendingAnnotation {
+  worldPos: { x: number; y: number; z: number }
+  screenPos: { x: number; y: number }
+}
+
 interface SplatCanvasProps {
   reconstructionId: number
   coverageGaps: CoverageGapCell[] | null
   showCoverageGaps: boolean
+  activeTool: ActiveTool
+  geoTransform: GeoTransform | undefined
+  annotations: Annotation[]
+  onAnnotationCreated: () => void
+  measurePoints: MeasurePoint[]
+  measureMode: 'measure-dist' | 'measure-area' | null
+  onMeasurePoint: (pt: MeasurePoint) => void
+  onMeasureClose: () => void
 }
 
-function SplatCanvas({ reconstructionId, coverageGaps, showCoverageGaps }: SplatCanvasProps) {
+function SplatCanvas({
+  reconstructionId,
+  coverageGaps,
+  showCoverageGaps,
+  activeTool,
+  geoTransform,
+  annotations,
+  onAnnotationCreated,
+  measurePoints,
+  measureMode,
+  onMeasurePoint,
+  onMeasureClose,
+}: SplatCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const viewerRef = useRef<unknown>(null)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const gapGroupRef = useRef<any>(null)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const annotationGroupRef = useRef<any>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [viewerReady, setViewerReady] = useState(false)
+  const [pendingAnnotation, setPendingAnnotation] = useState<PendingAnnotation | null>(null)
 
+  const queryClient = useQueryClient()
+  const { castRay } = useRayCast(
+    viewerRef as React.RefObject<unknown>,
+    containerRef,
+  )
+
+  useMeasurementLayer({ viewerRef: viewerRef as React.RefObject<unknown>, viewerReady, points: measurePoints, mode: measureMode })
+
+  const createAnnotation = useMutation({
+    mutationFn: (body: { label: string; lat: number; lon: number; alt_m: number; color: string }) =>
+      post<Annotation>(`/reconstruction/${reconstructionId}/annotations`, body),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['annotations', reconstructionId] })
+      onAnnotationCreated()
+    },
+  })
+
+  // Viewer init
   useEffect(() => {
     if (!containerRef.current) return
-
     let cancelled = false
 
     async function initViewer() {
@@ -256,23 +567,86 @@ function SplatCanvas({ reconstructionId, coverageGaps, showCoverageGaps }: Splat
     }
   }, [reconstructionId])
 
-  // Build/rebuild coverage gap meshes when data or visibility changes
+  // Sync 3D camera → Leaflet via syncedViewport
+  useEffect(() => {
+    if (!viewerReady || !geoTransform) return
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const viewer = viewerRef.current as any
+    if (!viewer) return
+
+    const controls = viewer.orbitControls ?? viewer.controls ?? null
+    if (!controls) return
+
+    function onCameraChange() {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const v = viewerRef.current as any
+      if (!v?.camera || !geoTransform) return
+      const cam = v.camera
+      const gps = worldToGps({ x: cam.position.x, y: cam.position.y, z: cam.position.z }, geoTransform)
+      if (!gps) return
+      const dist = cam.position.distanceTo(controls.target)
+      const zoom = Math.max(1, Math.min(20, Math.round(20 - Math.log2(Math.max(dist, 0.001)))))
+      useMapStore.getState().setSyncedViewport({ lat: gps.lat, lon: gps.lon, zoom, source: '3d' })
+    }
+
+    controls.addEventListener('change', onCameraChange)
+    return () => controls.removeEventListener('change', onCameraChange)
+  }, [viewerReady, geoTransform])
+
+  // Canvas click handler for annotate mode
+  useEffect(() => {
+    const container = containerRef.current
+    if (!container || !viewerReady) return
+    if (activeTool !== 'annotate') {
+      container.style.cursor = ''
+      return
+    }
+
+    container.style.cursor = 'crosshair'
+
+    function handleClick(e: MouseEvent) {
+      if (activeTool === 'annotate') {
+        castRay(e).then((result) => {
+          if (result) setPendingAnnotation(result)
+        })
+      } else if (activeTool === 'measure-dist' || activeTool === 'measure-area') {
+        castRay(e).then((result) => {
+          if (!result || !geoTransform) return
+          const gps = worldToGps(result.worldPos, geoTransform)
+          if (!gps) return
+          onMeasurePoint({ worldPos: result.worldPos, gps })
+        })
+      }
+    }
+
+    function handleDblClick(e: MouseEvent) {
+      if (activeTool === 'measure-area') {
+        e.preventDefault()
+        onMeasureClose()
+      }
+    }
+
+    container.addEventListener('click', handleClick)
+    container.addEventListener('dblclick', handleDblClick)
+    return () => {
+      container.removeEventListener('click', handleClick)
+      container.removeEventListener('dblclick', handleDblClick)
+      container.style.cursor = ''
+    }
+  }, [activeTool, viewerReady, castRay, geoTransform, onMeasurePoint, onMeasureClose])
+
+  // Coverage gap meshes
   useEffect(() => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const viewer = viewerRef.current as any
     if (!viewer?.scene) return
 
     const scene = viewer.scene
-
-    // Remove old group
     if (gapGroupRef.current) {
       scene.remove(gapGroupRef.current)
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       gapGroupRef.current.traverse((obj: any) => {
-        if (obj.isMesh) {
-          obj.geometry.dispose()
-          obj.material.dispose()
-        }
+        if (obj.isMesh) { obj.geometry.dispose(); obj.material.dispose() }
       })
       gapGroupRef.current = null
     }
@@ -305,24 +679,83 @@ function SplatCanvas({ reconstructionId, coverageGaps, showCoverageGaps }: Splat
         scene.remove(gapGroupRef.current)
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         gapGroupRef.current.traverse((obj: any) => {
-          if (obj.isMesh) {
-            obj.geometry.dispose()
-            obj.material.dispose()
-          }
+          if (obj.isMesh) { obj.geometry.dispose(); obj.material.dispose() }
         })
         gapGroupRef.current = null
       }
     }
   }, [coverageGaps, showCoverageGaps, viewerReady])
 
+  // Annotation sprites
+  useEffect(() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const viewer = viewerRef.current as any
+    if (!viewer?.scene) return
+
+    const scene = viewer.scene
+    if (annotationGroupRef.current) {
+      scene.remove(annotationGroupRef.current)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      annotationGroupRef.current.traverse((obj: any) => {
+        if (obj.isSprite) { obj.material.map?.dispose(); obj.material.dispose() }
+      })
+      annotationGroupRef.current = null
+    }
+
+    if (!annotations.length || !geoTransform) return
+
+    let cancelled = false
+    import('three').then(async (THREE) => {
+      if (cancelled) return
+      const group = new THREE.Group()
+      const { gpsToWorld } = await import('./useViewerCoords')
+
+      for (const ann of annotations) {
+        const wp = gpsToWorld({ lat: ann.lat, lon: ann.lon, alt: ann.alt_m }, geoTransform)
+        if (!wp) continue
+
+        // Draw label on a canvas texture
+        const canvas = document.createElement('canvas')
+        canvas.width = 256
+        canvas.height = 64
+        const ctx = canvas.getContext('2d')!
+        ctx.fillStyle = ann.color
+        ctx.roundRect(4, 4, canvas.width - 8, canvas.height - 8, 8)
+        ctx.fill()
+        ctx.fillStyle = '#ffffff'
+        ctx.font = 'bold 24px sans-serif'
+        ctx.textAlign = 'center'
+        ctx.textBaseline = 'middle'
+        ctx.fillText(ann.label, canvas.width / 2, canvas.height / 2)
+
+        const texture = new THREE.CanvasTexture(canvas)
+        const mat = new THREE.SpriteMaterial({ map: texture, depthTest: false })
+        const sprite = new THREE.Sprite(mat)
+        sprite.position.set(wp.x, wp.y, wp.z)
+        sprite.scale.set(0.5, 0.125, 1)
+        group.add(sprite)
+      }
+
+      scene.add(group)
+      annotationGroupRef.current = group
+    })
+
+    return () => {
+      cancelled = true
+      if (annotationGroupRef.current) {
+        scene.remove(annotationGroupRef.current)
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        annotationGroupRef.current.traverse((obj: any) => {
+          if (obj.isSprite) { obj.material.map?.dispose(); obj.material.dispose() }
+        })
+        annotationGroupRef.current = null
+      }
+    }
+  }, [annotations, geoTransform, viewerReady])
+
   if (error) {
     return (
-      <div
-        style={{
-          flex: 1, display: 'flex', flexDirection: 'column',
-          alignItems: 'center', justifyContent: 'center', gap: 8,
-        }}
-      >
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
         <p style={{ color: 'var(--danger, #f85149)', fontSize: 13 }}>Viewer error: {error}</p>
         <a
           href={`${BASE_URL}/reconstruction/${reconstructionId}/splat?lod=full`}
@@ -349,26 +782,186 @@ function SplatCanvas({ reconstructionId, coverageGaps, showCoverageGaps }: Splat
         </div>
       )}
       <div ref={containerRef} style={{ width: '100%', height: '100%' }} />
+      {pendingAnnotation && geoTransform && (
+        <LabelPopover
+          screenX={pendingAnnotation.screenPos.x}
+          screenY={pendingAnnotation.screenPos.y}
+          onSave={(label, color) => {
+            const gps = worldToGps(pendingAnnotation.worldPos, geoTransform)
+            if (gps) {
+              createAnnotation.mutate({ label, lat: gps.lat, lon: gps.lon, alt_m: gps.alt, color })
+            }
+            setPendingAnnotation(null)
+          }}
+          onCancel={() => setPendingAnnotation(null)}
+        />
+      )}
     </div>
   )
 }
 
+// ---------------------------------------------------------------------------
+// Viewer toolbar
+// ---------------------------------------------------------------------------
+
+interface ViewerToolbarProps {
+  activeTool: ActiveTool
+  onToolChange: (tool: ActiveTool) => void
+  geoTransformAvailable: boolean
+  hasMeasurePoints: boolean
+  onClearMeasure: () => void
+}
+
+function ViewerToolbar({
+  activeTool,
+  onToolChange,
+  geoTransformAvailable,
+  hasMeasurePoints,
+  onClearMeasure,
+}: ViewerToolbarProps) {
+  function toolBtn(tool: ActiveTool, label: string, title: string) {
+    const active = activeTool === tool
+    return (
+      <button
+        key={tool}
+        title={title}
+        onClick={() => onToolChange(active ? 'none' : tool)}
+        style={{
+          padding: '4px 8px', borderRadius: 4, fontSize: 11,
+          border: active ? '1px solid #7c3aed' : '1px solid var(--border)',
+          background: active ? 'rgba(124,58,237,0.15)' : 'var(--bg)',
+          color: active ? '#a78bfa' : 'var(--text-muted)',
+          cursor: geoTransformAvailable ? 'pointer' : 'not-allowed',
+          fontFamily: 'inherit',
+          opacity: geoTransformAvailable ? 1 : 0.5,
+        }}
+        disabled={!geoTransformAvailable}
+      >
+        {label}
+      </button>
+    )
+  }
+
+  const noGeo = 'Geo-transform unavailable'
+  return (
+    <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 8 }}>
+      {toolBtn('annotate', '⊕ Annotate', geoTransformAvailable ? 'Place GPS annotation' : noGeo)}
+      {toolBtn('measure-dist', '↔ Distance', geoTransformAvailable ? 'Measure distance between two points' : noGeo)}
+      {toolBtn('measure-area', '⬡ Area', geoTransformAvailable ? 'Measure polygon area (double-click to close)' : noGeo)}
+      {hasMeasurePoints && (
+        <button
+          onClick={onClearMeasure}
+          style={{
+            padding: '4px 8px', borderRadius: 4, fontSize: 11,
+            border: '1px solid var(--border)', background: 'var(--bg)',
+            color: 'var(--text-muted)', cursor: 'pointer', fontFamily: 'inherit',
+          }}
+          title="Clear measurements"
+        >
+          ✕ Clear
+        </button>
+      )}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Annotations list in sidebar
+// ---------------------------------------------------------------------------
+
+interface AnnotationsListProps {
+  reconstructionId: number
+  annotations: Annotation[]
+}
+
+function AnnotationsList({ reconstructionId, annotations }: AnnotationsListProps) {
+  const queryClient = useQueryClient()
+  const deleteAnnotation = useMutation({
+    mutationFn: (id: number) =>
+      del(`/reconstruction/${reconstructionId}/annotations/${id}`),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['annotations', reconstructionId] }),
+  })
+
+  if (!annotations.length) return null
+
+  return (
+    <div style={{ marginTop: 8 }}>
+      <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 4 }}>
+        Annotations ({annotations.length})
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+        {annotations.map((ann) => (
+          <div
+            key={ann.id}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 4,
+              padding: '3px 6px', borderRadius: 4,
+              border: '1px solid var(--border)', background: 'var(--bg)',
+            }}
+          >
+            <span
+              style={{
+                width: 8, height: 8, borderRadius: 2,
+                background: ann.color, flexShrink: 0,
+              }}
+            />
+            <span style={{ flex: 1, fontSize: 10, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {ann.label}
+            </span>
+            <button
+              onClick={() => deleteAnnotation.mutate(ann.id)}
+              style={{
+                background: 'none', border: 'none', cursor: 'pointer',
+                color: 'var(--text-muted)', fontSize: 11, padding: '0 2px', lineHeight: 1,
+              }}
+              title="Delete annotation"
+            >
+              ×
+            </button>
+          </div>
+        ))}
+      </div>
+      <a
+        href={`${BASE_URL}/reconstruction/${reconstructionId}/annotations.geojson`}
+        download={`annotations_${reconstructionId}.geojson`}
+        style={{
+          display: 'block', marginTop: 6, fontSize: 10,
+          color: '#58a6ff', textDecoration: 'none',
+        }}
+      >
+        ↓ Export GeoJSON
+      </a>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Main tab
+// ---------------------------------------------------------------------------
+
 export default function SplatViewerTab() {
-  const { selectedSessionId, targetSessionId, setTargetSessionId } = useMapStore()
+  const { selectedSessionId, targetSessionId, setTargetSessionId, splitPaneActive, toggleSplitPane } = useMapStore()
   const { data: allJobs, isLoading } = useAllJobsForSession(selectedSessionId)
   const [selectedJobId, setSelectedJobId] = useState<number | null>(null)
   const [showCoverageGaps, setShowCoverageGaps] = useState(false)
+  const [activeTool, setActiveTool] = useState<ActiveTool>('none')
+  const [measurePoints, setMeasurePoints] = useState<MeasurePoint[]>([])
+  const [measureMode, setMeasureMode] = useState<'measure-dist' | 'measure-area' | null>(null)
 
   const jobs = allJobs ?? []
   const running = jobs.filter((j) => ACTIVE_STATUSES.includes(j.status))
   const completed = jobs.filter((j) => j.status === 'complete')
   const activeId = selectedJobId ?? completed[0]?.id ?? null
   const { data: reconstructionDetails } = useReconstructionDetails(activeId)
+  const { data: geoTransform } = useGeoTransform(activeId)
   const selectedJobComplete = completed.some((j) => j.id === activeId)
   const { data: coverageGaps, isFetching: gapsFetching } = useCoverageGaps(
     activeId,
     selectedJobComplete ?? false,
   )
+  const { data: annotations = [] } = useAnnotations(activeId)
+
+  const geoAvailable = !!geoTransform && geoTransform.utm_zone !== 'unknown'
 
   useEffect(() => {
     if (targetSessionId == null) return
@@ -381,6 +974,36 @@ export default function SplatViewerTab() {
       setTargetSessionId(null)
     }
   }, [targetSessionId, allJobs, setTargetSessionId])
+
+  // Reset tool and measurements when switching reconstructions
+  useEffect(() => {
+    setActiveTool('none')
+    setMeasurePoints([])
+    setMeasureMode(null)
+  }, [activeId])
+
+  function handleMeasurePoint(pt: MeasurePoint) {
+    setMeasurePoints((prev) => {
+      const next = [...prev, pt]
+      if (activeTool === 'measure-dist' && next.length >= 2) {
+        setMeasureMode('measure-dist')
+        setActiveTool('none')
+        return next.slice(0, 2)
+      }
+      if (activeTool === 'measure-area') setMeasureMode('measure-area')
+      return next
+    })
+  }
+
+  function handleMeasureClose() {
+    setMeasureMode('measure-area')
+    setActiveTool('none')
+  }
+
+  function handleClearMeasure() {
+    setMeasurePoints([])
+    setMeasureMode(null)
+  }
 
   if (selectedSessionId === null) {
     return (
@@ -453,10 +1076,37 @@ export default function SplatViewerTab() {
             ))}
           </>
         )}
+
         {activeId !== null && <GeoTransformPanel reconstructionId={activeId} />}
+
+        {activeId !== null && selectedJobComplete && (
+          <>
+            <ViewerToolbar
+              activeTool={activeTool}
+              onToolChange={(tool) => { setActiveTool(tool); if (tool !== 'measure-dist' && tool !== 'measure-area') { setMeasurePoints([]); setMeasureMode(null) } }}
+              geoTransformAvailable={geoAvailable}
+              hasMeasurePoints={measurePoints.length > 0}
+              onClearMeasure={handleClearMeasure}
+            />
+            <button
+              onClick={toggleSplitPane}
+              style={{
+                padding: '4px 8px', borderRadius: 4, fontSize: 11, marginTop: 4,
+                border: splitPaneActive ? '1px solid #0ea5e9' : '1px solid var(--border)',
+                background: splitPaneActive ? 'rgba(14,165,233,0.15)' : 'var(--bg)',
+                color: splitPaneActive ? '#38bdf8' : 'var(--text-muted)',
+                cursor: 'pointer', fontFamily: 'inherit', width: '100%', textAlign: 'left',
+              }}
+            >
+              {splitPaneActive ? '⊟ Full 3D' : '⊞ Split View'}
+            </button>
+          </>
+        )}
+
         {reconstructionDetails?.training_metrics && (
           <TrainingMetricsPanel metrics={reconstructionDetails.training_metrics} />
         )}
+
         {activeId !== null && selectedJobComplete && (
           <div style={{ marginTop: 8 }}>
             <button
@@ -493,22 +1143,37 @@ export default function SplatViewerTab() {
             )}
           </div>
         )}
+
+        {activeId !== null && (
+          <AnnotationsList reconstructionId={activeId} annotations={annotations} />
+        )}
       </div>
 
       {/* Viewer */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: '#0a0a0a' }}>
-        {activeId !== null ? (
-          <SplatCanvas
-            key={activeId}
-            reconstructionId={activeId}
-            coverageGaps={coverageGaps ?? null}
-            showCoverageGaps={showCoverageGaps}
-          />
-        ) : (
-          <div className="flex-1 flex items-center justify-center" style={{ color: 'var(--text-muted)' }}>
-            {running.length > 0 ? 'Reconstruction in progress…' : 'Select a reconstruction'}
-          </div>
-        )}
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'row', background: '#0a0a0a', overflow: 'hidden' }}>
+        {splitPaneActive && activeId !== null && <MiniLeafletPane />}
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+          {activeId !== null ? (
+            <SplatCanvas
+              key={activeId}
+              reconstructionId={activeId}
+              coverageGaps={coverageGaps ?? null}
+              showCoverageGaps={showCoverageGaps}
+              activeTool={activeTool}
+              geoTransform={geoTransform}
+              annotations={annotations}
+              onAnnotationCreated={() => setActiveTool('none')}
+              measurePoints={measurePoints}
+              measureMode={measureMode}
+              onMeasurePoint={handleMeasurePoint}
+              onMeasureClose={handleMeasureClose}
+            />
+          ) : (
+            <div className="flex-1 flex items-center justify-center" style={{ color: 'var(--text-muted)' }}>
+              {running.length > 0 ? 'Reconstruction in progress…' : 'Select a reconstruction'}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   )
