@@ -184,6 +184,8 @@ class Reconstruction(Base):
     started_at = Column(DateTime, default=datetime.utcnow)
     completed_at = Column(DateTime)
     duration_s = Column(Float)
+    training_metrics = Column(Text)       # JSON: [{iter, psnr, ssim}, ...]
+    coverage_gaps_path = Column(String)   # path to cached coverage_gaps.json
     session = relationship("Session", back_populates="reconstructions")
     frames = relationship(
         "ReconstructionFrame", back_populates="reconstruction", cascade="all, delete-orphan"
@@ -194,6 +196,7 @@ class ReconstructionFrame(Base):
     __tablename__ = "reconstruction_frames"
     reconstruction_id = Column(Integer, ForeignKey("reconstructions.id"), primary_key=True)
     image_id = Column(Integer, ForeignKey("images.id", ondelete="CASCADE"), primary_key=True)
+    colmap_error_px = Column(Float)  # null = frame not registered by COLMAP
     reconstruction = relationship("Reconstruction", back_populates="frames")
     image = relationship("Image")
 
