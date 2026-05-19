@@ -9,7 +9,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session as DBSession
 
 from ..db.database import get_db
-from ..db.models import Footprint, Image
+from ..db.models import Footprint, Image, Reconstruction, ReconstructionFrame
 
 router = APIRouter(prefix="/images", tags=["images"])
 
@@ -32,6 +32,7 @@ class ImageOut(BaseModel):
     focal_length_mm: float | None
     sharpness_score: float | None
     brightness_score: float | None
+    colmap_error_px: float | None = None
     flag: str | None
     usable: bool | None
     notes: str | None
@@ -62,7 +63,26 @@ def list_images(
         q = q.outerjoin(Footprint, Footprint.image_id == Image.id).filter(
             Footprint.id.is_(None)
         )
-    return q.all()
+    images = q.all()
+
+    # Build reproj error map from most recent completed reconstruction
+    reproj_map: dict[int, float | None] = {}
+    latest = (
+        db.query(Reconstruction.id)
+        .filter(Reconstruction.session_id == session_id, Reconstruction.status == "complete")
+        .order_by(Reconstruction.id.desc())
+        .first()
+    )
+    if latest:
+        frames = db.query(ReconstructionFrame).filter(
+            ReconstructionFrame.reconstruction_id == latest.id
+        ).all()
+        reproj_map = {f.image_id: f.colmap_error_px for f in frames}
+
+    return [
+        ImageOut.model_validate(img).model_copy(update={"colmap_error_px": reproj_map.get(img.id)})
+        for img in images
+    ]
 
 
 @router.patch("/{image_id}", response_model=ImageOut)
