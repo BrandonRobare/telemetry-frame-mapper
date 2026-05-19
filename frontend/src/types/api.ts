@@ -27,6 +27,7 @@ export interface Image {
   focal_length_mm: number | null;
   sharpness_score: number | null;
   brightness_score: number | null;
+  colmap_error_px: number | null;
   flag: "good" | "blurry" | "dark" | "bright" | "no_gps";
   usable: boolean;
   notes: string | null;
