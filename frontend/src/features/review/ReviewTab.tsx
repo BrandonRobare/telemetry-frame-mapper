@@ -70,9 +70,11 @@ interface StatsBarProps {
   onFlagClick: (flag: Image['flag']) => void
   visibleCount: number
   selectedCount: number
+  sortBy: 'none' | 'reproj'
+  onSortChange: (sort: 'none' | 'reproj') => void
 }
 
-function StatsBar({ images, activeFlag, onFlagClick, visibleCount, selectedCount }: StatsBarProps) {
+function StatsBar({ images, activeFlag, onFlagClick, visibleCount, selectedCount, sortBy, onSortChange }: StatsBarProps) {
   const counts: Record<Image['flag'], number> = {
     good: 0, blurry: 0, no_gps: 0, dark: 0, bright: 0,
   }
@@ -135,6 +137,23 @@ function StatsBar({ images, activeFlag, onFlagClick, visibleCount, selectedCount
           ✕ clear
         </button>
       )}
+      <button
+        onClick={() => onSortChange(sortBy === 'reproj' ? 'none' : 'reproj')}
+        style={{
+          background: sortBy === 'reproj' ? 'var(--border)' : 'none',
+          border: 'none',
+          borderRadius: 4,
+          padding: '2px 6px',
+          cursor: 'pointer',
+          fontFamily: 'inherit',
+          fontSize: 'inherit',
+          color: sortBy === 'reproj' ? 'var(--text)' : 'var(--text-muted)',
+          outline: 'none',
+        }}
+        title="Sort by reprojection error (ascending)"
+      >
+        ⊕ reproj
+      </button>
       <span style={{ marginLeft: 'auto', color: 'var(--text-muted)', fontSize: 12 }}>
         {selectedCount > 0 && (
           <span style={{ color: '#c4b5fd', fontWeight: 600, marginRight: 8 }}>
@@ -263,6 +282,20 @@ function ImageCard({ img, sessionId, isSelected, onSelect }: CardProps) {
           {img.brightness_score != null && (
             <span title="Brightness (mean pixel 0–255)">☀ {img.brightness_score.toFixed(0)}</span>
           )}
+          {img.colmap_error_px != null && (
+            <span
+              title="COLMAP mean reprojection error"
+              style={{
+                color: img.colmap_error_px < 1.0
+                  ? '#4ade80'
+                  : img.colmap_error_px < 2.0
+                  ? '#fbbf24'
+                  : '#f87171',
+              }}
+            >
+              ⊕ {img.colmap_error_px.toFixed(1)}px
+            </span>
+          )}
         </div>
       </div>
 
@@ -311,6 +344,7 @@ export default function ReviewTab() {
   const { data: selectionData } = useFrameSelection(selectedSessionId)
   const setSelectionMutation = useSetFrameSelection(selectedSessionId)
   const [activeFlag, setActiveFlag] = useState<Image['flag'] | null>(null)
+  const [sortBy, setSortBy] = useState<'none' | 'reproj'>('none')
 
   if (selectedSessionId === null) {
     return (
@@ -329,7 +363,15 @@ export default function ReviewTab() {
   }
 
   const list = images ?? []
-  const filtered = activeFlag ? list.filter((img) => img.flag === activeFlag) : list
+  let filtered = activeFlag ? list.filter((img) => img.flag === activeFlag) : list
+  if (sortBy === 'reproj') {
+    filtered = [...filtered].sort((a, b) => {
+      if (a.colmap_error_px == null && b.colmap_error_px == null) return 0
+      if (a.colmap_error_px == null) return 1
+      if (b.colmap_error_px == null) return -1
+      return a.colmap_error_px - b.colmap_error_px
+    })
+  }
   const selectedSet = new Set(selectionData?.image_ids ?? [])
 
   function handleFlagClick(flag: Image['flag']) {
@@ -351,6 +393,8 @@ export default function ReviewTab() {
         onFlagClick={handleFlagClick}
         visibleCount={filtered.length}
         selectedCount={selectedSet.size}
+        sortBy={sortBy}
+        onSortChange={setSortBy}
       />
       <div
         className="flex-1 overflow-y-auto p-4"
