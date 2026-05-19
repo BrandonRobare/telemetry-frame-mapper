@@ -205,6 +205,7 @@ function SplatCanvas({ reconstructionId, coverageGaps, showCoverageGaps }: Splat
   const gapGroupRef = useRef<any>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
+  const [viewerReady, setViewerReady] = useState(false)
 
   useEffect(() => {
     if (!containerRef.current) return
@@ -228,6 +229,7 @@ function SplatCanvas({ reconstructionId, coverageGaps, showCoverageGaps }: Splat
         await viewer.addSplatScene(splatUrl, { streamView: true })
         if (!cancelled) {
           setLoading(false)
+          setViewerReady(true)
           viewer.start()
         }
       } catch (err) {
@@ -242,6 +244,7 @@ function SplatCanvas({ reconstructionId, coverageGaps, showCoverageGaps }: Splat
 
     return () => {
       cancelled = true
+      setViewerReady(false)
       if (viewerRef.current) {
         try {
           (viewerRef.current as { dispose?: () => void }).dispose?.()
@@ -276,7 +279,9 @@ function SplatCanvas({ reconstructionId, coverageGaps, showCoverageGaps }: Splat
 
     if (!coverageGaps || !showCoverageGaps || coverageGaps.length === 0) return
 
+    let cancelled = false
     import('three').then((THREE) => {
+      if (cancelled) return
       const group = new THREE.Group()
       for (const cell of coverageGaps) {
         const geo = new THREE.BoxGeometry(cell.size, cell.size, cell.size)
@@ -293,7 +298,22 @@ function SplatCanvas({ reconstructionId, coverageGaps, showCoverageGaps }: Splat
       scene.add(group)
       gapGroupRef.current = group
     })
-  }, [coverageGaps, showCoverageGaps])
+
+    return () => {
+      cancelled = true
+      if (gapGroupRef.current) {
+        scene.remove(gapGroupRef.current)
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        gapGroupRef.current.traverse((obj: any) => {
+          if (obj.isMesh) {
+            obj.geometry.dispose()
+            obj.material.dispose()
+          }
+        })
+        gapGroupRef.current = null
+      }
+    }
+  }, [coverageGaps, showCoverageGaps, viewerReady])
 
   if (error) {
     return (
@@ -344,7 +364,7 @@ export default function SplatViewerTab() {
   const completed = jobs.filter((j) => j.status === 'complete')
   const activeId = selectedJobId ?? completed[0]?.id ?? null
   const { data: reconstructionDetails } = useReconstructionDetails(activeId)
-  const selectedJobComplete = completed.find((j) => j.id === activeId)?.status === 'complete'
+  const selectedJobComplete = completed.some((j) => j.id === activeId)
   const { data: coverageGaps, isFetching: gapsFetching } = useCoverageGaps(
     activeId,
     selectedJobComplete ?? false,
