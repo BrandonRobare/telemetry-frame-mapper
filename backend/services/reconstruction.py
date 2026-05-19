@@ -210,6 +210,83 @@ def _parse_checkpoint_metrics(output: str) -> list[dict]:
     ]
 
 
+def _compute_coverage_gaps(
+    splat_path: Path, output_path: Path, voxel_size_m: float = 0.5
+) -> list[dict]:
+    """Voxelize Gaussian positions from .ply and classify sparse cells."""
+    import numpy as np
+
+    data = splat_path.read_bytes()
+
+    header_marker = b"\nend_header\n"
+    header_end = data.index(header_marker) + len(header_marker)
+    header_text = data[:header_end].decode("ascii", errors="replace")
+
+    vertex_count = 0
+    properties: list[str] = []
+    is_binary_little = False
+    for line in header_text.splitlines():
+        if line.startswith("element vertex"):
+            vertex_count = int(line.split()[-1])
+        elif line.startswith("property float"):
+            properties.append(line.split()[-1])
+        elif "binary_little_endian" in line:
+            is_binary_little = True
+
+    if vertex_count == 0:
+        return []
+
+    body = data[header_end:]
+
+    if is_binary_little:
+        dtype = np.dtype([(p, np.float32) for p in properties])
+        vertices = np.frombuffer(body[: vertex_count * dtype.itemsize], dtype=dtype)
+        x = vertices["x"].astype(np.float64)
+        y = vertices["y"].astype(np.float64)
+        z = vertices["z"].astype(np.float64)
+    else:
+        rows = body.decode("ascii", errors="replace").splitlines()[:vertex_count]
+        idx = {p: i for i, p in enumerate(properties)}
+        arr = np.array(
+            [[float(r.split()[idx["x"]]), float(r.split()[idx["y"]]),
+              float(r.split()[idx["z"]])] for r in rows if r.strip()],
+            dtype=np.float64,
+        )
+        x, y, z = arr[:, 0], arr[:, 1], arr[:, 2]
+
+    xi = ((x - x.min()) / voxel_size_m).astype(int)
+    yi = ((y - y.min()) / voxel_size_m).astype(int)
+    zi = ((z - z.min()) / voxel_size_m).astype(int)
+
+    coords = np.stack([xi, yi, zi], axis=1)
+    unique_voxels, counts = np.unique(coords, axis=0, return_counts=True)
+
+    median_count = float(np.median(counts))
+
+    cells = []
+    for (vx, vy, vz), count in zip(unique_voxels, counts, strict=True):
+        ratio = count / median_count
+        if ratio >= 0.40:
+            continue
+        if ratio < 0.10:
+            level = "very_sparse"
+        elif ratio < 0.25:
+            level = "thin"
+        else:
+            level = "sparse"
+        cells.append({
+            "x": float(x.min() + vx * voxel_size_m),
+            "y": float(y.min() + vy * voxel_size_m),
+            "z": float(z.min() + vz * voxel_size_m),
+            "size": voxel_size_m,
+            "level": level,
+        })
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(json.dumps(cells))
+    return cells
+
+
 def _extract_geo_transform(colmap_dir: Path) -> dict:
     """Extract similarity transform from COLMAP model. Returns placeholder if unavailable."""
     geo_ref = colmap_dir / "geo_transform.json"
