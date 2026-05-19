@@ -268,7 +268,7 @@ def _compute_coverage_gaps(
         ratio = count / median_count
         if ratio >= 0.40:
             continue
-        if ratio < 0.10:
+        if ratio < 0.05:
             level = "very_sparse"
         elif ratio < 0.25:
             level = "thin"

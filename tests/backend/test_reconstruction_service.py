@@ -494,15 +494,22 @@ def test_compute_coverage_gaps_classifies_levels(tmp_path):
     import numpy as np
     from backend.services.reconstruction import _compute_coverage_gaps
 
-    # Build a minimal binary PLY: 100 Gaussians at (0,0,0) and 3 at (10,10,10)
-    props = ["x", "y", "z"]
-    n_dense = 100
+    # Build a binary PLY: 10 dense voxels (100 pts each at unit positions) + 1 sparse voxel (3 pts far away)
+    # median = 100, ratio for sparse = 3/100 = 3% < 5% → very_sparse
+    n_dense_voxels = 10
+    pts_per_dense = 100
     n_sparse = 3
-    n_total = n_dense + n_sparse
 
-    positions = np.zeros((n_total, 3), dtype=np.float32)
-    positions[:n_dense] = [0.0, 0.0, 0.0]
-    positions[n_dense:] = [10.0, 10.0, 10.0]
+    positions = []
+    for v in range(n_dense_voxels):
+        # Each dense voxel: 100 points at position (v * 2, 0, 0) — 2m apart so distinct voxels at voxel_size_m=1.0
+        cluster = np.full((pts_per_dense, 3), [float(v * 2), 0.0, 0.0], dtype=np.float32)
+        positions.append(cluster)
+    # Sparse voxel far away
+    positions.append(np.full((n_sparse, 3), [100.0, 100.0, 100.0], dtype=np.float32))
+
+    all_positions = np.vstack(positions)
+    n_total = len(all_positions)
 
     header = (
         "ply\n"
@@ -515,7 +522,7 @@ def test_compute_coverage_gaps_classifies_levels(tmp_path):
     ).encode("ascii")
 
     ply_path = tmp_path / "test.ply"
-    ply_path.write_bytes(header + positions.tobytes())
+    ply_path.write_bytes(header + all_positions.tobytes())
 
     output_path = tmp_path / "gaps.json"
     cells = _compute_coverage_gaps(ply_path, output_path, voxel_size_m=1.0)
@@ -524,14 +531,14 @@ def test_compute_coverage_gaps_classifies_levels(tmp_path):
     loaded = json.loads(output_path.read_text())
     assert loaded == cells
 
-    # The sparse cluster (3 vs median ~51.5) → very_sparse
+    # Sparse voxel (3 pts vs median 100) → ratio = 3% < 5% → very_sparse
     sparse_cells = [c for c in cells if c["level"] == "very_sparse"]
     assert len(sparse_cells) == 1
-    assert sparse_cells[0]["x"] == pytest.approx(10.0, abs=1.1)
+    assert sparse_cells[0]["x"] == pytest.approx(100.0, abs=1.1)
 
-    # The dense cluster (100 Gaussians at ~194% of median) → excluded
-    normal_cells = [c for c in cells if abs(c["x"]) < 1.0]
-    assert len(normal_cells) == 0
+    # Dense voxels (100 pts vs median 100 → 100% → excluded as normal density)
+    excluded_cells = [c for c in cells if abs(c["x"]) < 20.0]
+    assert len(excluded_cells) == 0
 
 
 def test_compute_coverage_gaps_empty_ply_returns_empty(tmp_path):
