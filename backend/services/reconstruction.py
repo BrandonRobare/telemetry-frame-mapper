@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import re
 import shutil
 import subprocess
 import threading
@@ -197,6 +198,18 @@ def _store_reprojection_errors(db: DBSession, reconstruction_id: int, colmap_dir
     db.commit()
 
 
+_CHECKPOINT_RE = re.compile(
+    r"\[iter\s+(\d+)\]\s+PSNR:\s+([\d.]+)\s+SSIM:\s+([\d.]+)"
+)
+
+
+def _parse_checkpoint_metrics(output: str) -> list[dict]:
+    return [
+        {"iter": int(m.group(1)), "psnr": float(m.group(2)), "ssim": float(m.group(3))}
+        for m in _CHECKPOINT_RE.finditer(output)
+    ]
+
+
 def _extract_geo_transform(colmap_dir: Path) -> dict:
     """Extract similarity transform from COLMAP model. Returns placeholder if unavailable."""
     geo_ref = colmap_dir / "geo_transform.json"
@@ -228,7 +241,10 @@ def _filter_images_to_target_area(images: list, geom_geojson: str) -> list:
 def _run_gsplat(
     colmap_dir: Path, output_path: Path, iterations: int, progress_cb, cancel: threading.Event
 ) -> dict:
-    """Train a Gaussian splat. Returns {gaussian_count, psnr, ssim}."""
+    """Train a Gaussian splat. Returns {gaussian_count, psnr, ssim, training_metrics}."""
+    import contextlib
+    import io
+
     try:
         from gsplat import train  # type: ignore[import]
     except ImportError as exc:
@@ -236,13 +252,19 @@ def _run_gsplat(
             "gsplat is not installed. Run: pip install '.[reconstruction]'"
         ) from exc
 
-    return train(
-        colmap_dir=str(colmap_dir),
-        output_path=str(output_path),
-        iterations=iterations,
-        progress_cb=progress_cb,
-        cancel=cancel,
-    )
+    stdout_buf = io.StringIO()
+    with contextlib.redirect_stdout(stdout_buf):
+        result = train(
+            colmap_dir=str(colmap_dir),
+            output_path=str(output_path),
+            iterations=iterations,
+            progress_cb=progress_cb,
+            cancel=cancel,
+        )
+
+    metrics = _parse_checkpoint_metrics(stdout_buf.getvalue())
+    result["training_metrics"] = metrics if metrics else None
+    return result
 
 
 def _generate_lod(splat_path: Path) -> tuple[Path, Path]:
@@ -417,6 +439,7 @@ def _run_pipeline(
             result = _run_gsplat(
                 colmap_dir, splat_path, preset_cfg["iterations"], progress_cb, cancel
             )
+            training_metrics = result.get("training_metrics")
             _log_rec(reconstruction_id, "Gaussian Splatting: complete")
             _log_rec(reconstruction_id, "LOD generation: starting")
             preview, medium = _generate_lod(splat_path)
@@ -440,6 +463,7 @@ def _run_pipeline(
                 gaussian_count=result.get("gaussian_count"),
                 psnr=result.get("psnr"),
                 ssim=result.get("ssim"),
+                training_metrics=json.dumps(training_metrics) if training_metrics else None,
                 completed_at=completed_at,
             )
             _log_rec(reconstruction_id, "Pipeline complete")

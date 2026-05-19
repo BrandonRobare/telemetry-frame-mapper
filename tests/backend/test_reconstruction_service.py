@@ -460,6 +460,35 @@ def test_store_reprojection_errors_missing_dir_is_noop(setup_test_db, tmp_path):
     _store_reprojection_errors(db, 9999, tmp_path)
 
 
+# ---------------------------------------------------------------------------
+# _parse_checkpoint_metrics tests
+# ---------------------------------------------------------------------------
+
+def test_parse_checkpoint_metrics_extracts_all_checkpoints():
+    from backend.services.reconstruction import _parse_checkpoint_metrics
+
+    output = (
+        "some noise\n"
+        "[iter 1000] PSNR: 18.2 SSIM: 0.710\n"
+        "more noise\n"
+        "[iter 2000] PSNR: 21.5 SSIM: 0.800\n"
+        "[iter 7000] PSNR: 24.8 SSIM: 0.870\n"
+    )
+    metrics = _parse_checkpoint_metrics(output)
+
+    assert len(metrics) == 3
+    assert metrics[0] == {"iter": 1000, "psnr": pytest.approx(18.2), "ssim": pytest.approx(0.71)}
+    assert metrics[2]["iter"] == 7000
+    assert metrics[2]["psnr"] == pytest.approx(24.8)
+
+
+def test_parse_checkpoint_metrics_empty_output_returns_empty():
+    from backend.services.reconstruction import _parse_checkpoint_metrics
+
+    assert _parse_checkpoint_metrics("") == []
+    assert _parse_checkpoint_metrics("nothing here") == []
+
+
 def test_store_reprojection_errors_rejected_frame_stays_null(setup_test_db, tmp_path):
     from backend.db.database import get_db
     from backend.db.models import Image, Reconstruction, ReconstructionFrame
