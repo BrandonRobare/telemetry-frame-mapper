@@ -14,6 +14,7 @@ from ..db.models import Reconstruction, SessionFrameSelection, TargetArea
 from ..services.reconstruction import (
     _compute_coverage_gaps,
     _export_point_cloud,
+    _safe_export_path,
     cancel_reconstruction,
     get_rec_log,
     start_flythrough_render,
@@ -24,6 +25,19 @@ from ..services.reconstruction import (
 router = APIRouter(prefix="/reconstruction", tags=["reconstruction"])
 
 VALID_PRESETS = {"quick", "full"}
+
+
+def _safe_export_http_path(path: Path) -> Path:
+    cfg = get_config()
+    try:
+        return _safe_export_path(path, Path(cfg.exports_dir))
+    except ValueError as exc:
+        raise HTTPException(status_code=403, detail="Invalid export path") from exc
+
+
+def _reconstruction_artifact_path(reconstruction_id: int, filename: str) -> Path:
+    cfg = get_config()
+    return _safe_export_http_path(Path(cfg.exports_dir) / str(reconstruction_id) / filename)
 
 
 class StartIn(BaseModel):
@@ -255,8 +269,7 @@ def download_pointcloud(reconstruction_id: int, db: DBSession = Depends(get_db))
     if rec.status != "complete":
         raise HTTPException(status_code=202, detail="Reconstruction still in progress")
 
-    cfg = get_config()
-    canonical = Path(cfg.exports_dir) / str(reconstruction_id) / "pointcloud.las"
+    canonical = _reconstruction_artifact_path(rec.id, "pointcloud.las")
 
     if not canonical.exists():
         if not rec.colmap_dir:
@@ -313,16 +326,11 @@ def download_mesh(
         "mtl": rec.mesh_mtl_path,
     }
     mesh_path_raw = path_map[format]
-    if not mesh_path_raw or not Path(mesh_path_raw).exists():
+    if not mesh_path_raw:
         raise HTTPException(status_code=404, detail=f"Mesh file ({format}) not found on disk")
-
-    cfg = get_config()
-    exports_base = Path(cfg.exports_dir).resolve()
-    try:
-        safe_mesh_path = Path(mesh_path_raw).resolve()
-        safe_mesh_path.relative_to(exports_base)
-    except (ValueError, TypeError) as exc:
-        raise HTTPException(status_code=403, detail="Invalid mesh path") from exc
+    safe_mesh_path = _safe_export_http_path(Path(mesh_path_raw))
+    if not safe_mesh_path.exists():
+        raise HTTPException(status_code=404, detail=f"Mesh file ({format}) not found on disk")
 
     media_types = {
         "glb": "model/gltf-binary",
@@ -376,8 +384,7 @@ def download_flythrough(reconstruction_id: int, db: DBSession = Depends(get_db))
     if rec.flythrough_status != "complete":
         raise HTTPException(status_code=202, detail="Flythrough render still in progress")
 
-    cfg = get_config()
-    canonical = Path(cfg.exports_dir) / str(reconstruction_id) / "flythrough.mp4"
+    canonical = _reconstruction_artifact_path(rec.id, "flythrough.mp4")
     if not canonical.exists():
         raise HTTPException(status_code=404, detail="Flythrough file not found on disk")
 

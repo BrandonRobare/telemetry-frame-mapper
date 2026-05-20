@@ -723,6 +723,16 @@ def test_export_point_cloud_uses_nearest_gaussian_color(tmp_path):
     assert list(written["blue"]) == [30 * 257, 220 * 257]
 
 
+def test_safe_export_path_rejects_sibling_prefix(tmp_path):
+    from backend.services.reconstruction import _safe_export_path
+
+    exports_dir = tmp_path / "exports"
+    sibling = tmp_path / "exports2" / "pointcloud.las"
+
+    with pytest.raises(ValueError, match="outside exports directory"):
+        _safe_export_path(sibling, exports_dir)
+
+
 def test_run_sugar_missing_dependency_reports_optional_install(tmp_path):
     from unittest.mock import patch
 

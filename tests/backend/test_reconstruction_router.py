@@ -406,6 +406,32 @@ def test_download_mesh_returns_cached_glb(client, tmp_path):
     assert resp.headers["content-type"] == "model/gltf-binary"
 
 
+def test_download_mesh_rejects_path_outside_exports(client, tmp_path):
+    db = _get_db(client)
+    s = _make_session_with_images(db)
+
+    rec = Reconstruction(
+        session_id=s.id, preset="quick", status="complete",
+        progress_pct=100.0, frames_used=3, mesh_status="complete",
+    )
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+
+    exports_dir = tmp_path / "exports"
+    outside = tmp_path / "outside" / "mesh.glb"
+    outside.parent.mkdir(parents=True)
+    outside.write_bytes(b"glb")
+    rec.mesh_glb_path = str(outside)
+    db.commit()
+
+    with patch("backend.routers.reconstruction.get_config") as mock_cfg:
+        mock_cfg.return_value.exports_dir = str(exports_dir)
+        resp = client.get(f"/reconstruction/{rec.id}/mesh?format=glb")
+
+    assert resp.status_code == 403
+
+
 def test_download_mesh_running_returns_202(client):
     db = _get_db(client)
     s = _make_session_with_images(db)
