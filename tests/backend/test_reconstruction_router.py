@@ -709,8 +709,10 @@ def test_coverage_gaps_computes_on_first_call(client, tmp_path):
     db.commit()
     db.refresh(rec)
 
-    with patch("backend.routers.reconstruction.get_config") as mock_cfg:
+    with patch("backend.routers.reconstruction.get_config") as mock_cfg, \
+         patch("backend.services.reconstruction.get_config") as mock_svc_cfg:
         mock_cfg.return_value.exports_dir = str(tmp_path)
+        mock_svc_cfg.return_value.exports_dir = str(tmp_path)
         resp = client.get(f"/reconstruction/{rec.id}/coverage-gaps")
 
     assert resp.status_code == 200
