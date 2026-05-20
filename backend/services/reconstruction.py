@@ -997,6 +997,8 @@ def _compute_voxel_diff(
     *,
     voxel_size_m: float = 0.5,
 ) -> dict:
+    cfg = get_config()
+    output_path = _safe_export_path(output_path, Path(cfg.exports_dir))
     points_a, geo_a = _load_reconstruction_points_utm(rec_a)
     points_b, geo_b = _load_reconstruction_points_utm(rec_b, target_geo=geo_a)
     voxels_a = _voxelize_points(points_a, voxel_size_m)
