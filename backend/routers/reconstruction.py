@@ -438,10 +438,8 @@ def get_coverage_gaps(reconstruction_id: int, db: DBSession = Depends(get_db)):
     if rec.coverage_gaps_path and Path(rec.coverage_gaps_path).exists():
         return json.loads(Path(rec.coverage_gaps_path).read_text())
 
-    cfg = get_config()
-    output_path = Path(cfg.exports_dir) / str(reconstruction_id) / "coverage_gaps.json"
     try:
-        cells = _compute_coverage_gaps(splat_path, output_path)
+        cells, output_path = _compute_coverage_gaps(splat_path, reconstruction_id)
     except Exception as exc:
         raise HTTPException(
             status_code=422, detail=f"Failed to compute coverage gaps: {exc}"
