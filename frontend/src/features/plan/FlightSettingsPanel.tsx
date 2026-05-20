@@ -1,5 +1,3 @@
-import React from 'react'
-
 export interface FlightSettings {
   altitudeFt: number
   sideOverlapPct: number

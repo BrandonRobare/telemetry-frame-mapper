@@ -26,6 +26,16 @@ class Session(Base):
     reconstructions = relationship(
         "Reconstruction", back_populates="session", cascade="all, delete-orphan"
     )
+    comparisons_as_a = relationship(
+        "SessionComparison",
+        foreign_keys="SessionComparison.session_a_id",
+        cascade="all, delete-orphan",
+    )
+    comparisons_as_b = relationship(
+        "SessionComparison",
+        foreign_keys="SessionComparison.session_b_id",
+        cascade="all, delete-orphan",
+    )
     frame_selections = relationship(
         "SessionFrameSelection", cascade="all, delete-orphan", passive_deletes=True
     )
@@ -179,6 +189,15 @@ class Reconstruction(Base):
     splat_preview_path = Column(String)
     splat_medium_path = Column(String)
     thumb_path = Column(String)
+    pointcloud_path = Column(String)
+    mesh_glb_path = Column(String)
+    mesh_obj_path = Column(String)
+    mesh_mtl_path = Column(String)
+    mesh_status = Column(String)
+    mesh_error = Column(String)
+    flythrough_path = Column(String)
+    flythrough_status = Column(String)
+    flythrough_error = Column(String)
     geo_transform = Column(Text)
     error_msg = Column(String)
     started_at = Column(DateTime, default=datetime.utcnow)
@@ -221,3 +240,17 @@ class SessionFrameSelection(Base):
     __tablename__ = "session_frame_selections"
     session_id = Column(Integer, ForeignKey("sessions.id", ondelete="CASCADE"), primary_key=True)
     image_id = Column(Integer, ForeignKey("images.id", ondelete="CASCADE"), primary_key=True)
+
+
+class SessionComparison(Base):
+    __tablename__ = "session_comparisons"
+    id = Column(Integer, primary_key=True, index=True)
+    session_a_id = Column(Integer, ForeignKey("sessions.id"), nullable=False)
+    session_b_id = Column(Integer, ForeignKey("sessions.id"), nullable=False)
+    reconstruction_a_id = Column(Integer, ForeignKey("reconstructions.id"), nullable=False)
+    reconstruction_b_id = Column(Integer, ForeignKey("reconstructions.id"), nullable=False)
+    status = Column(String, default="pending")
+    diff_path = Column(String)
+    error_msg = Column(String)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    completed_at = Column(DateTime)
