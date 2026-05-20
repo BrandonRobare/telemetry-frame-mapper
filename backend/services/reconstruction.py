@@ -557,7 +557,7 @@ def _export_point_cloud(colmap_dir: Path, splat_path: Path, output_path: Path) -
     from pyproj import CRS
 
     cfg = get_config()
-    _assert_within_exports(output_path, Path(cfg.exports_dir))
+    output_path = _safe_export_path(output_path, Path(cfg.exports_dir))
 
     points_xyz, colmap_rgb = _read_colmap_points3d(colmap_dir / "sparse" / "0" / "points3D.txt")
     gaussian_xyz, gaussian_rgb = _load_ply_positions_and_colors(splat_path)
@@ -595,11 +595,19 @@ def _reconstruction_export_dir(reconstruction_id: int) -> Path:
     return Path(cfg.exports_dir) / str(reconstruction_id)
 
 
-def _assert_within_exports(path: Path, exports_dir: Path) -> None:
-    try:
-        path.resolve().relative_to(exports_dir.resolve())
-    except ValueError as exc:
-        raise ValueError(f"Export path {path} is outside exports directory") from exc
+def _safe_export_path(path: Path, exports_dir: Path) -> Path:
+    exports_root = os.path.normpath(os.path.realpath(exports_dir))
+    candidate = os.path.normpath(os.path.realpath(path))
+    exports_root_cmp = os.path.normcase(exports_root)
+    candidate_cmp = os.path.normcase(candidate)
+    exports_prefix = (
+        exports_root_cmp
+        if exports_root_cmp.endswith(os.sep)
+        else f"{exports_root_cmp}{os.sep}"
+    )
+    if candidate_cmp != exports_root_cmp and not candidate_cmp.startswith(exports_prefix):
+        raise ValueError(f"Export path {path} is outside exports directory")
+    return Path(candidate)
 
 
 def _load_geo_transform_for_reconstruction(rec: Reconstruction) -> dict:
