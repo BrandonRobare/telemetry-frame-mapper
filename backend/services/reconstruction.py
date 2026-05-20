@@ -556,6 +556,9 @@ def _export_point_cloud(colmap_dir: Path, splat_path: Path, output_path: Path) -
     import numpy as np
     from pyproj import CRS
 
+    cfg = get_config()
+    _assert_within_exports(output_path, Path(cfg.exports_dir))
+
     points_xyz, colmap_rgb = _read_colmap_points3d(colmap_dir / "sparse" / "0" / "points3D.txt")
     gaussian_xyz, gaussian_rgb = _load_ply_positions_and_colors(splat_path)
     colors = _nearest_gaussian_colors(points_xyz, gaussian_xyz, gaussian_rgb, colmap_rgb)
@@ -590,6 +593,13 @@ def _export_point_cloud(colmap_dir: Path, splat_path: Path, output_path: Path) -
 def _reconstruction_export_dir(reconstruction_id: int) -> Path:
     cfg = get_config()
     return Path(cfg.exports_dir) / str(reconstruction_id)
+
+
+def _assert_within_exports(path: Path, exports_dir: Path) -> None:
+    try:
+        path.resolve().relative_to(exports_dir.resolve())
+    except ValueError as exc:
+        raise ValueError(f"Export path {path} is outside exports directory") from exc
 
 
 def _load_geo_transform_for_reconstruction(rec: Reconstruction) -> dict:

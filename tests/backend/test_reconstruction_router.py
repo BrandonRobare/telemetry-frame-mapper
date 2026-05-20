@@ -275,18 +275,24 @@ def test_download_pointcloud_still_running(client):
 def test_download_pointcloud_returns_cached_file(client, tmp_path):
     db = _get_db(client)
     s = _make_session_with_images(db)
-    pointcloud_file = tmp_path / "pointcloud.las"
-    pointcloud_file.write_bytes(b"las data")
 
     rec = Reconstruction(
         session_id=s.id, preset="quick", status="complete",
-        progress_pct=100.0, frames_used=3, pointcloud_path=str(pointcloud_file),
+        progress_pct=100.0, frames_used=3,
     )
     db.add(rec)
     db.commit()
     db.refresh(rec)
 
-    resp = client.get(f"/reconstruction/{rec.id}/pointcloud")
+    exports_dir = tmp_path / "exports"
+    pointcloud_file = exports_dir / str(rec.id) / "pointcloud.las"
+    pointcloud_file.parent.mkdir(parents=True)
+    pointcloud_file.write_bytes(b"las data")
+
+    with patch("backend.routers.reconstruction.get_config") as mock_cfg:
+        mock_cfg.return_value.exports_dir = str(exports_dir)
+        resp = client.get(f"/reconstruction/{rec.id}/pointcloud")
+
     assert resp.status_code == 200
     assert resp.content == b"las data"
     assert "pointcloud_" in resp.headers["content-disposition"]
@@ -375,18 +381,26 @@ def test_get_mesh_status(client):
 def test_download_mesh_returns_cached_glb(client, tmp_path):
     db = _get_db(client)
     s = _make_session_with_images(db)
-    glb = tmp_path / "mesh.glb"
-    glb.write_bytes(b"glb")
+
     rec = Reconstruction(
         session_id=s.id, preset="quick", status="complete",
-        progress_pct=100.0, frames_used=3,
-        mesh_status="complete", mesh_glb_path=str(glb),
+        progress_pct=100.0, frames_used=3, mesh_status="complete",
     )
     db.add(rec)
     db.commit()
     db.refresh(rec)
 
-    resp = client.get(f"/reconstruction/{rec.id}/mesh?format=glb")
+    exports_dir = tmp_path / "exports"
+    glb = exports_dir / str(rec.id) / "mesh.glb"
+    glb.parent.mkdir(parents=True)
+    glb.write_bytes(b"glb")
+    rec.mesh_glb_path = str(glb)
+    db.commit()
+
+    with patch("backend.routers.reconstruction.get_config") as mock_cfg:
+        mock_cfg.return_value.exports_dir = str(exports_dir)
+        resp = client.get(f"/reconstruction/{rec.id}/mesh?format=glb")
+
     assert resp.status_code == 200
     assert resp.content == b"glb"
     assert resp.headers["content-type"] == "model/gltf-binary"
@@ -452,18 +466,24 @@ def test_render_video_starts_fallback_job(client):
 def test_download_flythrough_returns_cached_mp4(client, tmp_path):
     db = _get_db(client)
     s = _make_session_with_images(db)
-    video = tmp_path / "flythrough.mp4"
-    video.write_bytes(b"mp4")
+
     rec = Reconstruction(
         session_id=s.id, preset="quick", status="complete",
-        progress_pct=100.0, frames_used=3,
-        flythrough_status="complete", flythrough_path=str(video),
+        progress_pct=100.0, frames_used=3, flythrough_status="complete",
     )
     db.add(rec)
     db.commit()
     db.refresh(rec)
 
-    resp = client.get(f"/reconstruction/{rec.id}/flythrough")
+    exports_dir = tmp_path / "exports"
+    video = exports_dir / str(rec.id) / "flythrough.mp4"
+    video.parent.mkdir(parents=True)
+    video.write_bytes(b"mp4")
+
+    with patch("backend.routers.reconstruction.get_config") as mock_cfg:
+        mock_cfg.return_value.exports_dir = str(exports_dir)
+        resp = client.get(f"/reconstruction/{rec.id}/flythrough")
+
     assert resp.status_code == 200
     assert resp.content == b"mp4"
     assert resp.headers["content-type"] == "video/mp4"

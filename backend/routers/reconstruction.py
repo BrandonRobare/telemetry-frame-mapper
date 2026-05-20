@@ -255,28 +255,25 @@ def download_pointcloud(reconstruction_id: int, db: DBSession = Depends(get_db))
     if rec.status != "complete":
         raise HTTPException(status_code=202, detail="Reconstruction still in progress")
 
-    if rec.pointcloud_path and Path(rec.pointcloud_path).exists():
-        pointcloud_path = Path(rec.pointcloud_path)
-    else:
+    cfg = get_config()
+    canonical = Path(cfg.exports_dir) / str(reconstruction_id) / "pointcloud.las"
+
+    if not canonical.exists():
         if not rec.colmap_dir:
             raise HTTPException(status_code=404, detail="COLMAP workspace not found")
         if not rec.splat_path or not Path(rec.splat_path).exists():
             raise HTTPException(status_code=404, detail="Splat file not found on disk")
-
-        cfg = get_config()
-        pointcloud_path = Path(cfg.exports_dir) / str(reconstruction_id) / "pointcloud.las"
         try:
-            _export_point_cloud(Path(rec.colmap_dir), Path(rec.splat_path), pointcloud_path)
+            _export_point_cloud(Path(rec.colmap_dir), Path(rec.splat_path), canonical)
         except Exception as exc:
             raise HTTPException(
                 status_code=422, detail=f"Failed to export point cloud: {exc}"
             ) from exc
-
-        rec.pointcloud_path = str(pointcloud_path)
+        rec.pointcloud_path = str(canonical)
         db.commit()
 
     return FileResponse(
-        pointcloud_path,
+        canonical,
         media_type="application/vnd.las",
         filename=f"pointcloud_{reconstruction_id}.las",
     )
@@ -319,13 +316,21 @@ def download_mesh(
     if not mesh_path_raw or not Path(mesh_path_raw).exists():
         raise HTTPException(status_code=404, detail=f"Mesh file ({format}) not found on disk")
 
+    cfg = get_config()
+    exports_base = Path(cfg.exports_dir).resolve()
+    try:
+        safe_mesh_path = Path(mesh_path_raw).resolve()
+        safe_mesh_path.relative_to(exports_base)
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=403, detail="Invalid mesh path")
+
     media_types = {
         "glb": "model/gltf-binary",
         "obj": "text/plain",
         "mtl": "text/plain",
     }
     return FileResponse(
-        mesh_path_raw,
+        safe_mesh_path,
         media_type=media_types[format],
         filename=f"mesh_{reconstruction_id}.{format}",
     )
@@ -370,11 +375,14 @@ def download_flythrough(reconstruction_id: int, db: DBSession = Depends(get_db))
         raise HTTPException(status_code=404, detail="Reconstruction not found")
     if rec.flythrough_status != "complete":
         raise HTTPException(status_code=202, detail="Flythrough render still in progress")
-    if not rec.flythrough_path or not Path(rec.flythrough_path).exists():
+
+    cfg = get_config()
+    canonical = Path(cfg.exports_dir) / str(reconstruction_id) / "flythrough.mp4"
+    if not canonical.exists():
         raise HTTPException(status_code=404, detail="Flythrough file not found on disk")
 
     return FileResponse(
-        rec.flythrough_path,
+        canonical,
         media_type="video/mp4",
         filename=f"flythrough_{reconstruction_id}.mp4",
     )
