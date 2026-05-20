@@ -995,8 +995,36 @@ def _write_ascii_ply(path: Path, rows: list[tuple[float, float, float]]) -> None
     )
 
 
-def test_compute_voxel_diff_writes_new_and_removed_cells(tmp_path):
+def test_compute_voxel_diff_rejects_path_outside_exports(tmp_path, monkeypatch):
+    """_compute_voxel_diff must refuse output_path outside exports_dir (CWE-22)."""
+    from unittest.mock import MagicMock
+
     from backend.services.reconstruction import _compute_voxel_diff
+
+    exports_dir = tmp_path / "exports"
+    exports_dir.mkdir()
+    monkeypatch.setattr(
+        "backend.services.reconstruction.get_config",
+        lambda: MagicMock(exports_dir=str(exports_dir)),
+    )
+
+    evil_path = exports_dir / ".." / "secret" / "diff.json"
+    rec_a = MagicMock()
+    rec_b = MagicMock()
+
+    with pytest.raises(ValueError, match="outside exports directory"):
+        _compute_voxel_diff(rec_a, rec_b, evil_path)
+
+
+def test_compute_voxel_diff_writes_new_and_removed_cells(tmp_path, monkeypatch):
+    from unittest.mock import MagicMock
+
+    from backend.services.reconstruction import _compute_voxel_diff
+
+    monkeypatch.setattr(
+        "backend.services.reconstruction.get_config",
+        lambda: MagicMock(exports_dir=str(tmp_path)),
+    )
 
     a_ply = tmp_path / "a.ply"
     b_ply = tmp_path / "b.ply"
