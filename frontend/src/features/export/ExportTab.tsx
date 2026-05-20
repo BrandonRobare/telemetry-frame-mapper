@@ -1,10 +1,12 @@
-import { useState } from 'react'
-import { useQuery, useMutation } from '@tanstack/react-query'
+import { useState, type CSSProperties } from 'react'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { get, post } from '../../shared/api/client'
 import { useMapStore } from '../../shared/stores/mapStore'
 import { useToast } from '../../shared/hooks/useToast'
 import { Button } from '../../shared/components/Button'
-import type { Session, Image } from '../../types/api'
+import type { Session, Image, Job, MeshStatus } from '../../types/api'
+
+const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
 
 // ---- inline hooks ----
 
@@ -24,6 +26,26 @@ function useImages(sessionId: number | null) {
   })
 }
 
+function useCompletedReconstructions(sessionId: number | null) {
+  return useQuery<Job[]>({
+    queryKey: ['jobs', 'export', sessionId],
+    queryFn: () => get<Job[]>('/jobs/'),
+    select: (jobs) => jobs.filter((job) => job.session_id === sessionId && job.status === 'complete'),
+    enabled: sessionId !== null,
+  })
+}
+
+function useMeshStatus(reconstructionId: number) {
+  return useQuery<MeshStatus>({
+    queryKey: ['mesh-status', reconstructionId],
+    queryFn: () => get<MeshStatus>(`/reconstruction/${reconstructionId}/mesh/status`),
+    refetchInterval: (query) => {
+      const status = query.state.data?.mesh_status
+      return status === 'pending' || status === 'running' ? 2000 : false
+    },
+  })
+}
+
 // ---- helpers ----
 
 function formatDate(iso: string): string {
@@ -38,6 +60,114 @@ function formatDate(iso: string): string {
   }
 }
 
+function MeshExportCard({ job }: { job: Job }) {
+  const { addToast } = useToast()
+  const qc = useQueryClient()
+  const { data: mesh } = useMeshStatus(job.id)
+
+  const meshMutation = useMutation({
+    mutationFn: () => post<MeshStatus>(`/reconstruction/${job.id}/mesh`),
+    onSuccess: () => {
+      addToast(`Mesh export started for reconstruction #${job.id}`, 'success')
+      qc.invalidateQueries({ queryKey: ['mesh-status', job.id] })
+    },
+    onError: (err: Error) => addToast(`Mesh export failed: ${err.message}`, 'error'),
+  })
+
+  const status = mesh?.mesh_status ?? null
+  const running = status === 'pending' || status === 'running'
+  const complete = status === 'complete'
+
+  return (
+    <div
+      className="rounded px-3 py-3 flex flex-col gap-3"
+      style={{ background: 'var(--bg)', border: '1px solid var(--border)' }}
+    >
+      <div className="flex items-center gap-3">
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div className="text-sm" style={{ color: 'var(--text)', fontWeight: 600 }}>
+            Reconstruction #{job.id}
+          </div>
+          <div className="text-xs" style={{ color: 'var(--text-muted)' }}>
+            {job.preset} · {job.frames_used} frames
+          </div>
+        </div>
+        {!complete && (
+          <Button
+            variant="ghost"
+            disabled={running || meshMutation.isPending}
+            onClick={() => meshMutation.mutate()}
+          >
+            {running || meshMutation.isPending ? 'Generating…' : 'Generate Mesh'}
+          </Button>
+        )}
+      </div>
+
+      {running && (
+        <div style={{ height: 5, background: 'var(--border)', borderRadius: 3, overflow: 'hidden' }}>
+          <div
+            style={{
+              height: '100%',
+              width: '55%',
+              background: '#58a6ff',
+              borderRadius: 3,
+            }}
+          />
+        </div>
+      )}
+
+      {status === 'failed' && mesh?.mesh_error && (
+        <p className="text-xs" style={{ color: 'var(--danger, #f85149)', margin: 0 }}>
+          {mesh.mesh_error}
+        </p>
+      )}
+
+      {complete && (
+        <div className="flex gap-2 flex-wrap">
+          {mesh?.mesh_glb_path && (
+            <a
+              href={`${BASE_URL}/reconstruction/${job.id}/mesh?format=glb`}
+              download={`mesh_${job.id}.glb`}
+              style={downloadLinkStyle}
+            >
+              Download GLB
+            </a>
+          )}
+          {mesh?.mesh_obj_path && (
+            <a
+              href={`${BASE_URL}/reconstruction/${job.id}/mesh?format=obj`}
+              download={`mesh_${job.id}.obj`}
+              style={downloadLinkStyle}
+            >
+              Download OBJ
+            </a>
+          )}
+          {mesh?.mesh_mtl_path && (
+            <a
+              href={`${BASE_URL}/reconstruction/${job.id}/mesh?format=mtl`}
+              download={`mesh_${job.id}.mtl`}
+              style={downloadLinkStyle}
+            >
+              Download MTL
+            </a>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+const downloadLinkStyle: CSSProperties = {
+  padding: '5px 10px',
+  borderRadius: 4,
+  fontSize: 12,
+  background: 'rgba(88,166,255,0.1)',
+  border: '1px solid rgba(88,166,255,0.3)',
+  color: '#58a6ff',
+  textDecoration: 'none',
+  whiteSpace: 'nowrap',
+}
+
 // ---- main component ----
 
 export default function ExportTab() {
@@ -45,6 +175,8 @@ export default function ExportTab() {
   const { addToast } = useToast()
 
   const { data: session, isLoading: sessionLoading } = useSession(selectedSessionId)
+  const { data: completedReconstructions, isLoading: reconstructionsLoading } =
+    useCompletedReconstructions(selectedSessionId)
 
   // WebODM export state
   const [webodmResult, setWebodmResult] = useState<{ zip_path: string; image_count: number } | null>(null)
@@ -260,6 +392,109 @@ export default function ExportTab() {
           >
             {imagesFetching ? 'Fetching images…' : 'Export GeoJSON'}
           </Button>
+        </section>
+
+        {/* ---- Point Cloud Export card ---- */}
+        <section
+          className="rounded-lg p-5 flex flex-col gap-4"
+          style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}
+        >
+          <div>
+            <h2
+              className="text-base font-semibold"
+              style={{ color: 'var(--text)', margin: 0 }}
+            >
+              Point Cloud Export
+            </h2>
+            <p
+              className="text-sm mt-1"
+              style={{ color: 'var(--text-muted)', margin: '4px 0 0' }}
+            >
+              Download completed reconstructions as coloured LAS point clouds.
+            </p>
+          </div>
+
+          {reconstructionsLoading && (
+            <p className="text-sm" style={{ color: 'var(--text-muted)', margin: 0 }}>
+              Loading reconstructions…
+            </p>
+          )}
+
+          {!reconstructionsLoading && (completedReconstructions ?? []).length === 0 && (
+            <p className="text-sm" style={{ color: 'var(--text-muted)', margin: 0 }}>
+              No completed reconstruction is ready for point cloud export.
+            </p>
+          )}
+
+          {(completedReconstructions ?? []).map((job) => (
+            <div
+              key={job.id}
+              className="rounded px-3 py-2 flex items-center gap-3"
+              style={{ background: 'var(--bg)', border: '1px solid var(--border)' }}
+            >
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div className="text-sm" style={{ color: 'var(--text)', fontWeight: 600 }}>
+                  Reconstruction #{job.id}
+                </div>
+                <div className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                  {job.preset} · {job.frames_used} frames
+                </div>
+              </div>
+              <a
+                href={`${BASE_URL}/reconstruction/${job.id}/pointcloud`}
+                download={`pointcloud_${job.id}.las`}
+                style={{
+                  padding: '5px 10px',
+                  borderRadius: 4,
+                  fontSize: 12,
+                  background: 'rgba(88,166,255,0.1)',
+                  border: '1px solid rgba(88,166,255,0.3)',
+                  color: '#58a6ff',
+                  textDecoration: 'none',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                Download LAS
+              </a>
+            </div>
+          ))}
+        </section>
+
+        {/* ---- Mesh Export card ---- */}
+        <section
+          className="rounded-lg p-5 flex flex-col gap-4"
+          style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}
+        >
+          <div>
+            <h2
+              className="text-base font-semibold"
+              style={{ color: 'var(--text)', margin: 0 }}
+            >
+              Mesh Export
+            </h2>
+            <p
+              className="text-sm mt-1"
+              style={{ color: 'var(--text-muted)', margin: '4px 0 0' }}
+            >
+              Generate textured GLB/OBJ meshes from completed reconstructions.
+            </p>
+          </div>
+
+          {reconstructionsLoading && (
+            <p className="text-sm" style={{ color: 'var(--text-muted)', margin: 0 }}>
+              Loading reconstructions…
+            </p>
+          )}
+
+          {!reconstructionsLoading && (completedReconstructions ?? []).length === 0 && (
+            <p className="text-sm" style={{ color: 'var(--text-muted)', margin: 0 }}>
+              No completed reconstruction is ready for mesh export.
+            </p>
+          )}
+
+          {(completedReconstructions ?? []).map((job) => (
+            <MeshExportCard key={job.id} job={job} />
+          ))}
         </section>
       </div>
     </div>

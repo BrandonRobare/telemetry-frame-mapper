@@ -85,7 +85,32 @@ export interface Reconstruction {
   error_msg: string | null;
   geo_transform: string | null;
   splat_path: string | null;
+  pointcloud_path: string | null;
+  mesh_glb_path: string | null;
+  mesh_obj_path: string | null;
+  mesh_mtl_path: string | null;
+  mesh_status: "pending" | "running" | "complete" | "failed" | null;
+  mesh_error: string | null;
+  flythrough_path: string | null;
+  flythrough_status: "pending" | "running" | "complete" | "failed" | null;
+  flythrough_error: string | null;
   coverage_gaps_path: string | null;
+}
+
+export interface MeshStatus {
+  id: number
+  mesh_status: "pending" | "running" | "complete" | "failed" | null
+  mesh_error: string | null
+  mesh_glb_path: string | null
+  mesh_obj_path: string | null
+  mesh_mtl_path: string | null
+}
+
+export interface FlythroughStatus {
+  id: number
+  flythrough_status: "pending" | "running" | "complete" | "failed" | null
+  flythrough_error: string | null
+  flythrough_path: string | null
 }
 
 export interface Job {
@@ -154,4 +179,44 @@ export interface Annotation {
   alt_m: number
   color: string
   created_at: string
+}
+
+export interface SessionComparison {
+  id: number
+  session_a_id: number
+  session_b_id: number
+  reconstruction_a_id: number
+  reconstruction_b_id: number
+  status: "pending" | "running" | "complete" | "failed"
+  diff_path: string | null
+  error_msg: string | null
+  created_at: string
+  completed_at: string | null
+}
+
+export interface ComparisonCell {
+  x: number
+  y: number
+  z: number
+  size: number
+  type: "new" | "removed"
+}
+
+export interface ComparisonDiff {
+  comparison: {
+    session_a_id: number
+    session_b_id: number
+    reconstruction_a_id: number
+    reconstruction_b_id: number
+  }
+  voxel_size_m: number
+  utm_zone: string | null
+  summary: {
+    a_cells: number
+    b_cells: number
+    new_count: number
+    removed_count: number
+  }
+  new: ComparisonCell[]
+  removed: ComparisonCell[]
 }

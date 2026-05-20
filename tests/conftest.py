@@ -30,6 +30,7 @@ def override_get_db():
 @pytest.fixture(scope="session", autouse=True)
 def setup_test_db():
     from backend.db import models  # noqa: F401
+    Base.metadata.drop_all(bind=test_engine)
     Base.metadata.create_all(bind=test_engine)
     app.dependency_overrides[get_db] = override_get_db
     yield
