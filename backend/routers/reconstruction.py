@@ -321,8 +321,8 @@ def download_mesh(
     try:
         safe_mesh_path = Path(mesh_path_raw).resolve()
         safe_mesh_path.relative_to(exports_base)
-    except (ValueError, TypeError):
-        raise HTTPException(status_code=403, detail="Invalid mesh path")
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(status_code=403, detail="Invalid mesh path") from exc
 
     media_types = {
         "glb": "model/gltf-binary",
