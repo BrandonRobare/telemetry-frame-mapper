@@ -223,11 +223,19 @@ def _parse_checkpoint_metrics(output: str) -> list[dict]:
 
 
 def _compute_coverage_gaps(
-    splat_path: Path, output_path: Path, voxel_size_m: float = 0.5
-) -> list[dict]:
-    """Voxelize Gaussian positions from .ply and classify sparse cells."""
+    splat_path: Path, reconstruction_id: int, voxel_size_m: float = 0.5
+) -> tuple[list[dict], Path]:
+    """Voxelize Gaussian positions from .ply and classify sparse cells.
+
+    Returns (cells, output_path). The output path is constructed internally
+    from cfg.exports_dir and a sanitized integer id so no user-controlled
+    string reaches the file system (CodeQL py/path-injection).
+    """
     cfg = get_config()
-    output_path = _safe_export_path(output_path, Path(cfg.exports_dir))
+    exports_root = Path(cfg.exports_dir).resolve()
+    rec_id_segment = str(int(reconstruction_id))
+    output_path = exports_root / rec_id_segment / "coverage_gaps.json"
+    output_path = _safe_export_path(output_path, exports_root)
     import numpy as np
 
     data = splat_path.read_bytes()
@@ -248,7 +256,7 @@ def _compute_coverage_gaps(
             is_binary_little = True
 
     if vertex_count == 0:
-        return []
+        return [], output_path
 
     body = data[header_end:]
 
@@ -298,7 +306,7 @@ def _compute_coverage_gaps(
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(json.dumps(cells))
-    return cells
+    return cells, output_path
 
 
 def _extract_geo_transform(colmap_dir: Path) -> dict:
