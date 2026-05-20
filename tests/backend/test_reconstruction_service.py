@@ -709,7 +709,9 @@ def test_export_point_cloud_uses_nearest_gaussian_color(tmp_path):
 
     fake_laspy = SimpleNamespace(LasHeader=FakeHeader, LasData=FakeLasData)
 
-    with patch.dict("sys.modules", {"laspy": fake_laspy}):
+    with patch.dict("sys.modules", {"laspy": fake_laspy}), \
+         patch("backend.services.reconstruction.get_config") as mock_cfg:
+        mock_cfg.return_value.exports_dir = str(tmp_path)
         output = _export_point_cloud(colmap_dir, ply_path, tmp_path / "pointcloud.las")
 
     assert output == tmp_path / "pointcloud.las"
