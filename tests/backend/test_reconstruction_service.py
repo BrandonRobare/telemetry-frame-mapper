@@ -538,12 +538,18 @@ def test_parse_checkpoint_metrics_empty_output_returns_empty():
     assert _parse_checkpoint_metrics("nothing here") == []
 
 
-def test_compute_coverage_gaps_classifies_levels(tmp_path):
+def test_compute_coverage_gaps_classifies_levels(tmp_path, monkeypatch):
     import json
+    from unittest.mock import MagicMock
 
     import numpy as np
 
     from backend.services.reconstruction import _compute_coverage_gaps
+
+    monkeypatch.setattr(
+        "backend.services.reconstruction.get_config",
+        lambda: MagicMock(exports_dir=str(tmp_path)),
+    )
 
     # 10 dense voxels (100 pts each) + 1 sparse voxel (3 pts far away)
     # median = 100, ratio for sparse = 3/100 = 3% < 5% → very_sparse
@@ -592,8 +598,15 @@ def test_compute_coverage_gaps_classifies_levels(tmp_path):
     assert len(excluded_cells) == 0
 
 
-def test_compute_coverage_gaps_empty_ply_returns_empty(tmp_path):
+def test_compute_coverage_gaps_empty_ply_returns_empty(tmp_path, monkeypatch):
+    from unittest.mock import MagicMock
+
     from backend.services.reconstruction import _compute_coverage_gaps
+
+    monkeypatch.setattr(
+        "backend.services.reconstruction.get_config",
+        lambda: MagicMock(exports_dir=str(tmp_path)),
+    )
 
     header = (
         "ply\n"
@@ -721,6 +734,37 @@ def test_export_point_cloud_uses_nearest_gaussian_color(tmp_path):
     assert list(written["red"]) == [10 * 257, 200 * 257]
     assert list(written["green"]) == [20 * 257, 210 * 257]
     assert list(written["blue"]) == [30 * 257, 220 * 257]
+
+
+def test_compute_coverage_gaps_rejects_path_outside_exports(tmp_path, monkeypatch):
+    """_compute_coverage_gaps must refuse output_path outside exports_dir (CWE-22)."""
+    from unittest.mock import MagicMock
+
+    from backend.services.reconstruction import _compute_coverage_gaps
+
+    exports_dir = tmp_path / "exports"
+    exports_dir.mkdir()
+    monkeypatch.setattr(
+        "backend.services.reconstruction.get_config",
+        lambda: MagicMock(exports_dir=str(exports_dir)),
+    )
+
+    # output_path escapes exports_dir via traversal
+    evil_path = exports_dir / ".." / "secret" / "coverage_gaps.json"
+
+    import struct
+    splat = tmp_path / "test.ply"
+    header = (
+        b"ply\nformat binary_little_endian 1.0\n"
+        b"element vertex 1\n"
+        b"property float x\nproperty float y\nproperty float z\n"
+        b"end_header\n"
+    )
+    body = struct.pack("<fff", 0.0, 0.0, 0.0)
+    splat.write_bytes(header + body)
+
+    with pytest.raises(ValueError, match="outside exports directory"):
+        _compute_coverage_gaps(splat, evil_path)
 
 
 def test_safe_export_path_rejects_sibling_prefix(tmp_path):
