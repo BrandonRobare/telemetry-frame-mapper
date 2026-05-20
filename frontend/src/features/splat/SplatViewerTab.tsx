@@ -9,6 +9,7 @@ import type {
   TrainingMetricPoint,
   CoverageGapCell,
   Annotation,
+  FlythroughStatus,
 } from '../../types/api'
 import { worldToGps, useRayCast } from './useViewerCoords'
 import MiniLeafletPane from './MiniLeafletPane'
@@ -22,6 +23,12 @@ type ActiveTool = 'none' | 'annotate' | 'measure-dist' | 'measure-area'
 interface MeasurePoint {
   worldPos: { x: number; y: number; z: number }
   gps: { lat: number; lon: number; alt: number }
+}
+
+interface FlythroughKeyframe {
+  position: [number, number, number]
+  target: [number, number, number]
+  duration_s: number
 }
 
 // ---------------------------------------------------------------------------
@@ -76,6 +83,18 @@ function useAnnotations(reconstructionId: number | null) {
     queryFn: () => get<Annotation[]>(`/reconstruction/${reconstructionId!}/annotations`),
     enabled: reconstructionId !== null,
     staleTime: 30_000,
+  })
+}
+
+function useFlythroughStatus(reconstructionId: number | null) {
+  return useQuery<FlythroughStatus>({
+    queryKey: ['flythrough-status', reconstructionId],
+    queryFn: () => get<FlythroughStatus>(`/reconstruction/${reconstructionId!}/flythrough/status`),
+    enabled: reconstructionId !== null,
+    refetchInterval: (query) => {
+      const status = query.state.data?.flythrough_status
+      return status === 'pending' || status === 'running' ? 2000 : false
+    },
   })
 }
 
@@ -454,6 +473,101 @@ const GAP_OPACITY: Record<string, number> = {
   very_sparse: 0.40,
 }
 
+interface FlythroughControlsProps {
+  reconstructionId: number
+  keyframeCount: number
+  recording: boolean
+  message: string | null
+  status: FlythroughStatus | undefined
+  onAddKeyframe: () => void
+  onPreview: () => void
+  onRecord: () => void
+  onServerRender: () => void
+}
+
+function FlythroughControls({
+  reconstructionId,
+  keyframeCount,
+  recording,
+  message,
+  status,
+  onAddKeyframe,
+  onPreview,
+  onRecord,
+  onServerRender,
+}: FlythroughControlsProps) {
+  const canRun = keyframeCount >= 2 && !recording
+  const serverRunning = status?.flythrough_status === 'pending' || status?.flythrough_status === 'running'
+  const btnStyle = {
+    padding: '4px 8px',
+    borderRadius: 4,
+    border: '1px solid var(--border)',
+    background: 'var(--bg)',
+    color: 'var(--text-muted)',
+    cursor: 'pointer',
+    fontSize: 11,
+    fontFamily: 'inherit',
+  }
+
+  return (
+    <div
+      style={{
+        position: 'absolute',
+        right: 12,
+        top: 12,
+        zIndex: 20,
+        width: 220,
+        padding: 10,
+        borderRadius: 6,
+        background: 'rgba(13,17,23,0.88)',
+        border: '1px solid rgba(139,148,158,0.35)',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 8,
+      }}
+    >
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+        <span style={{ color: 'var(--text)', fontSize: 11, fontWeight: 700 }}>Flythrough</span>
+        <span style={{ color: 'var(--text-muted)', fontSize: 10 }}>{keyframeCount} keyframes</span>
+      </div>
+      <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+        <button type="button" onClick={onAddKeyframe} style={btnStyle}>Add Keyframe</button>
+        <button type="button" onClick={onPreview} disabled={!canRun} style={{ ...btnStyle, opacity: canRun ? 1 : 0.5 }}>
+          Preview
+        </button>
+        <button type="button" onClick={onRecord} disabled={!canRun} style={{ ...btnStyle, opacity: canRun ? 1 : 0.5 }}>
+          {recording ? 'Recording…' : 'Record'}
+        </button>
+        <button
+          type="button"
+          onClick={onServerRender}
+          disabled={!canRun || serverRunning}
+          style={{ ...btnStyle, opacity: canRun && !serverRunning ? 1 : 0.5 }}
+        >
+          {serverRunning ? 'Rendering…' : 'Server MP4'}
+        </button>
+      </div>
+      {message && (
+        <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: 10 }}>{message}</p>
+      )}
+      {status?.flythrough_status === 'failed' && status.flythrough_error && (
+        <p style={{ margin: 0, color: 'var(--danger, #f85149)', fontSize: 10 }}>
+          {status.flythrough_error}
+        </p>
+      )}
+      {status?.flythrough_status === 'complete' && status.flythrough_path && (
+        <a
+          href={`${BASE_URL}/reconstruction/${reconstructionId}/flythrough`}
+          download={`flythrough_${reconstructionId}.mp4`}
+          style={{ color: '#58a6ff', fontSize: 11, textDecoration: 'none' }}
+        >
+          Download server MP4
+        </a>
+      )}
+    </div>
+  )
+}
+
 // ---------------------------------------------------------------------------
 // SplatCanvas
 // ---------------------------------------------------------------------------
@@ -500,8 +614,12 @@ function SplatCanvas({
   const [loading, setLoading] = useState(true)
   const [viewerReady, setViewerReady] = useState(false)
   const [pendingAnnotation, setPendingAnnotation] = useState<PendingAnnotation | null>(null)
+  const [flythroughKeyframes, setFlythroughKeyframes] = useState<FlythroughKeyframe[]>([])
+  const [recording, setRecording] = useState(false)
+  const [flythroughMessage, setFlythroughMessage] = useState<string | null>(null)
 
   const queryClient = useQueryClient()
+  const { data: flythroughStatus } = useFlythroughStatus(reconstructionId)
   const { castRay } = useRayCast(
     viewerRef as React.RefObject<unknown>,
     containerRef,
@@ -517,6 +635,130 @@ function SplatCanvas({
       onAnnotationCreated()
     },
   })
+
+  const renderVideo = useMutation({
+    mutationFn: (keyframes: FlythroughKeyframe[]) =>
+      post<FlythroughStatus>(`/reconstruction/${reconstructionId}/render-video`, { keyframes }),
+    onSuccess: () => {
+      setFlythroughMessage('Server render queued.')
+      queryClient.invalidateQueries({ queryKey: ['flythrough-status', reconstructionId] })
+    },
+    onError: (err: Error) => setFlythroughMessage(err.message),
+  })
+
+  function captureCurrentKeyframe() {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const viewer = viewerRef.current as any
+    const camera = viewer?.camera
+    if (!camera) {
+      setFlythroughMessage('Camera is not ready.')
+      return
+    }
+    const controls = viewer.orbitControls ?? viewer.controls ?? null
+    const target = controls?.target ?? { x: 0, y: 0, z: 0 }
+    setFlythroughKeyframes((prev) => [
+      ...prev,
+      {
+        position: [camera.position.x, camera.position.y, camera.position.z],
+        target: [target.x, target.y, target.z],
+        duration_s: 3,
+      },
+    ])
+    setFlythroughMessage('Keyframe saved.')
+  }
+
+  function previewFlythrough(): Promise<void> {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const viewer = viewerRef.current as any
+    const camera = viewer?.camera
+    const controls = viewer?.orbitControls ?? viewer?.controls ?? null
+    if (!camera || flythroughKeyframes.length < 2) {
+      setFlythroughMessage('Add at least two keyframes.')
+      return Promise.resolve()
+    }
+
+    return new Promise((resolve) => {
+      let segment = 0
+      let startTime: number | null = null
+
+      function step(now: number) {
+        const current = flythroughKeyframes[segment]
+        const next = flythroughKeyframes[segment + 1]
+        if (!current || !next) {
+          resolve()
+          return
+        }
+        if (startTime === null) startTime = now
+        const durationMs = Math.max(250, next.duration_s * 1000)
+        const t = Math.min(1, (now - startTime) / durationMs)
+        const ease = t * t * (3 - 2 * t)
+        const pos = current.position.map((value, i) =>
+          value + (next.position[i] - value) * ease
+        )
+        const target = current.target.map((value, i) =>
+          value + (next.target[i] - value) * ease
+        )
+        camera.position.set(pos[0], pos[1], pos[2])
+        if (controls?.target?.set) controls.target.set(target[0], target[1], target[2])
+        controls?.update?.()
+        if (t < 1) {
+          window.requestAnimationFrame(step)
+          return
+        }
+        segment += 1
+        startTime = now
+        if (segment >= flythroughKeyframes.length - 1) {
+          resolve()
+        } else {
+          window.requestAnimationFrame(step)
+        }
+      }
+
+      window.requestAnimationFrame(step)
+    })
+  }
+
+  function downloadBlob(blob: Blob, extension: 'mp4' | 'webm') {
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `flythrough_${reconstructionId}.${extension}`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  async function recordFlythrough() {
+    const canvas = containerRef.current?.querySelector('canvas') as HTMLCanvasElement | null
+    if (!canvas?.captureStream || typeof MediaRecorder === 'undefined') {
+      setFlythroughMessage('Browser recording is not available here; use Server MP4.')
+      return
+    }
+    const mimeCandidates = [
+      'video/mp4;codecs=h264',
+      'video/mp4',
+      'video/webm;codecs=vp9',
+      'video/webm',
+    ]
+    const mimeType = mimeCandidates.find((mime) => MediaRecorder.isTypeSupported(mime)) ?? ''
+    const extension = mimeType.includes('mp4') ? 'mp4' : 'webm'
+    const stream = canvas.captureStream(30)
+    const chunks: BlobPart[] = []
+    const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined)
+    recorder.ondataavailable = (event) => {
+      if (event.data.size > 0) chunks.push(event.data)
+    }
+    recorder.onstop = () => {
+      downloadBlob(new Blob(chunks, { type: mimeType || 'video/webm' }), extension)
+      stream.getTracks().forEach((track) => track.stop())
+      setRecording(false)
+      setFlythroughMessage(`Downloaded ${extension.toUpperCase()} flythrough.`)
+    }
+    setRecording(true)
+    setFlythroughMessage('Recording browser flythrough…')
+    recorder.start()
+    await previewFlythrough()
+    recorder.stop()
+  }
 
   // Viewer init
   useEffect(() => {
@@ -782,6 +1024,21 @@ function SplatCanvas({
         </div>
       )}
       <div ref={containerRef} style={{ width: '100%', height: '100%' }} />
+      {viewerReady && (
+        <FlythroughControls
+          reconstructionId={reconstructionId}
+          keyframeCount={flythroughKeyframes.length}
+          recording={recording}
+          message={flythroughMessage}
+          status={flythroughStatus}
+          onAddKeyframe={captureCurrentKeyframe}
+          onPreview={() => {
+            previewFlythrough().then(() => setFlythroughMessage('Preview complete.'))
+          }}
+          onRecord={() => { void recordFlythrough() }}
+          onServerRender={() => renderVideo.mutate(flythroughKeyframes)}
+        />
+      )}
       {pendingAnnotation && geoTransform && (
         <LabelPopover
           screenX={pendingAnnotation.screenPos.x}
@@ -1100,6 +1357,23 @@ export default function SplatViewerTab() {
             >
               {splitPaneActive ? '⊟ Full 3D' : '⊞ Split View'}
             </button>
+            <a
+              href={`${BASE_URL}/reconstruction/${activeId}/pointcloud`}
+              download={`pointcloud_${activeId}.las`}
+              style={{
+                display: 'block',
+                padding: '4px 8px',
+                borderRadius: 4,
+                fontSize: 11,
+                marginTop: 4,
+                border: '1px solid rgba(88,166,255,0.3)',
+                background: 'rgba(88,166,255,0.1)',
+                color: '#58a6ff',
+                textDecoration: 'none',
+              }}
+            >
+              Download LAS
+            </a>
           </>
         )}
 

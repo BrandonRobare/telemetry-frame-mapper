@@ -4,11 +4,12 @@ import json
 import math
 import tempfile
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
 
-from backend.db.models import Reconstruction, ReconstructionFrame
+from backend.db.models import Reconstruction, ReconstructionFrame, SessionComparison
 from backend.db.models import Session as SessionModel
 
 
@@ -38,6 +39,24 @@ def test_new_model_columns_exist(setup_test_db):
     assert rec.training_metrics is None
     assert hasattr(rec, "coverage_gaps_path")
     assert rec.coverage_gaps_path is None
+    assert hasattr(rec, "pointcloud_path")
+    assert rec.pointcloud_path is None
+    assert hasattr(rec, "mesh_glb_path")
+    assert rec.mesh_glb_path is None
+    assert hasattr(rec, "mesh_obj_path")
+    assert rec.mesh_obj_path is None
+    assert hasattr(rec, "mesh_mtl_path")
+    assert rec.mesh_mtl_path is None
+    assert hasattr(rec, "mesh_status")
+    assert rec.mesh_status is None
+    assert hasattr(rec, "mesh_error")
+    assert rec.mesh_error is None
+    assert hasattr(rec, "flythrough_path")
+    assert rec.flythrough_path is None
+    assert hasattr(rec, "flythrough_status")
+    assert rec.flythrough_status is None
+    assert hasattr(rec, "flythrough_error")
+    assert rec.flythrough_error is None
 
     img = Image(session_id=s.id, filename="f.jpg", filepath="/f.jpg", usable=True)
     db.add(img)
@@ -56,6 +75,13 @@ def test_new_model_columns_exist(setup_test_db):
     frame.colmap_error_px = 1.23
     rec.training_metrics = '[{"iter":1000,"psnr":18.2,"ssim":0.71}]'
     rec.coverage_gaps_path = "/tmp/gaps.json"
+    rec.pointcloud_path = "/tmp/pointcloud.las"
+    rec.mesh_glb_path = "/tmp/mesh.glb"
+    rec.mesh_obj_path = "/tmp/mesh.obj"
+    rec.mesh_mtl_path = "/tmp/mesh.mtl"
+    rec.mesh_status = "complete"
+    rec.flythrough_path = "/tmp/flythrough.mp4"
+    rec.flythrough_status = "complete"
     db.commit()
     db.refresh(frame)
     db.refresh(rec)
@@ -63,6 +89,29 @@ def test_new_model_columns_exist(setup_test_db):
     assert frame.colmap_error_px == pytest.approx(1.23)
     assert '"iter"' in rec.training_metrics
     assert rec.coverage_gaps_path == "/tmp/gaps.json"
+    assert rec.pointcloud_path == "/tmp/pointcloud.las"
+    assert rec.mesh_glb_path == "/tmp/mesh.glb"
+    assert rec.mesh_obj_path == "/tmp/mesh.obj"
+    assert rec.mesh_mtl_path == "/tmp/mesh.mtl"
+    assert rec.mesh_status == "complete"
+    assert rec.flythrough_path == "/tmp/flythrough.mp4"
+    assert rec.flythrough_status == "complete"
+
+    comparison = SessionComparison(
+        session_a_id=s.id,
+        session_b_id=s.id,
+        reconstruction_a_id=rec.id,
+        reconstruction_b_id=rec.id,
+        status="pending",
+    )
+    db.add(comparison)
+    db.commit()
+    db.refresh(comparison)
+
+    assert comparison.id is not None
+    assert comparison.status == "pending"
+    assert comparison.diff_path is None
+    assert comparison.error_msg is None
 
 
 def test_reconstruction_model_fields(setup_test_db):
@@ -602,3 +651,363 @@ def test_store_reprojection_errors_rejected_frame_stays_null(setup_test_db, tmp_
         ReconstructionFrame.image_id == img.id,
     ).first()
     assert frame.colmap_error_px is None
+
+
+def test_export_point_cloud_uses_nearest_gaussian_color(tmp_path):
+    from unittest.mock import patch
+
+    from backend.services.reconstruction import _export_point_cloud
+
+    colmap_dir = tmp_path / "colmap"
+    sparse = colmap_dir / "sparse" / "0"
+    sparse.mkdir(parents=True)
+    (sparse / "points3D.txt").write_text(
+        "1 0 0 0 1 2 3 0.5\n"
+        "2 10 0 0 4 5 6 0.5\n"
+    )
+
+    ply_path = tmp_path / "splat.ply"
+    ply_path.write_text(
+        "ply\n"
+        "format ascii 1.0\n"
+        "element vertex 2\n"
+        "property float x\n"
+        "property float y\n"
+        "property float z\n"
+        "property uchar red\n"
+        "property uchar green\n"
+        "property uchar blue\n"
+        "end_header\n"
+        "0.1 0 0 10 20 30\n"
+        "9.9 0 0 200 210 220\n"
+    )
+
+    written = {}
+
+    class FakeHeader:
+        def __init__(self, point_format, version):
+            self.point_format = point_format
+            self.version = version
+            self.scales = None
+            self.offsets = None
+            self.crs = None
+
+        def add_crs(self, crs):
+            self.crs = crs
+
+    class FakeLasData:
+        def __init__(self, header):
+            self.header = header
+
+        def write(self, path):
+            written["path"] = Path(path)
+            written["x"] = self.x.copy()
+            written["red"] = self.red.copy()
+            written["green"] = self.green.copy()
+            written["blue"] = self.blue.copy()
+            Path(path).write_bytes(b"las")
+
+    fake_laspy = SimpleNamespace(LasHeader=FakeHeader, LasData=FakeLasData)
+
+    with patch.dict("sys.modules", {"laspy": fake_laspy}), \
+         patch("backend.services.reconstruction.get_config") as mock_cfg:
+        mock_cfg.return_value.exports_dir = str(tmp_path)
+        output = _export_point_cloud(colmap_dir, ply_path, tmp_path / "pointcloud.las")
+
+    assert output == tmp_path / "pointcloud.las"
+    assert written["path"] == output
+    assert output.read_bytes() == b"las"
+    assert list(written["x"]) == [0.0, 10.0]
+    assert list(written["red"]) == [10 * 257, 200 * 257]
+    assert list(written["green"]) == [20 * 257, 210 * 257]
+    assert list(written["blue"]) == [30 * 257, 220 * 257]
+
+
+def test_safe_export_path_rejects_sibling_prefix(tmp_path):
+    from backend.services.reconstruction import _safe_export_path
+
+    exports_dir = tmp_path / "exports"
+    sibling = tmp_path / "exports2" / "pointcloud.las"
+
+    with pytest.raises(ValueError, match="outside exports directory"):
+        _safe_export_path(sibling, exports_dir)
+
+
+def test_run_sugar_missing_dependency_reports_optional_install(tmp_path):
+    from unittest.mock import patch
+
+    from backend.services.reconstruction import _run_sugar
+
+    with patch.dict("sys.modules", {"sugar_scene": None, "sugar": None}):
+        with pytest.raises(RuntimeError, match="SuGaR is not installed"):
+            _run_sugar(tmp_path / "colmap", tmp_path / "splat.ply", tmp_path / "exports")
+
+
+def test_export_mesh_assets_writes_georef_sidecar(tmp_path):
+    from unittest.mock import patch
+
+    from backend.services.reconstruction import _export_mesh_assets
+
+    colmap_dir = tmp_path / "colmap"
+    colmap_dir.mkdir()
+    splat_path = tmp_path / "splat.ply"
+    splat_path.write_bytes(b"ply")
+    glb_path = tmp_path / "exports" / "7" / "mesh.glb"
+    obj_path = tmp_path / "exports" / "7" / "mesh.obj"
+
+    def fake_sugar(_colmap_dir, _splat_path, output_dir):
+        glb_path.parent.mkdir(parents=True, exist_ok=True)
+        glb_path.write_bytes(b"glb")
+        obj_path.write_text("obj", encoding="utf-8")
+        return {"glb": glb_path, "obj": obj_path}
+
+    rec = SimpleNamespace(
+        id=7,
+        session_id=3,
+        status="complete",
+        colmap_dir=str(colmap_dir),
+        splat_path=str(splat_path),
+        geo_transform=json.dumps({
+            "scale": 1.0,
+            "rotation": [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
+            "translation": [0, 0, 0],
+            "utm_zone": "17N",
+            "utm_origin": [500000, 3900000],
+        }),
+    )
+
+    with patch("backend.services.reconstruction.get_config") as mock_cfg, \
+         patch("backend.services.reconstruction._run_sugar", side_effect=fake_sugar):
+        mock_cfg.return_value.exports_dir = str(tmp_path / "exports")
+        outputs = _export_mesh_assets(rec)
+
+    georef_path = tmp_path / "exports" / "7" / "mesh_georef.json"
+    georef = json.loads(georef_path.read_text(encoding="utf-8"))
+    assert outputs["glb"] == glb_path
+    assert outputs["obj"] == obj_path
+    assert georef["reconstruction_id"] == 7
+    assert georef["geo_transform"]["utm_zone"] == "17N"
+
+
+def test_mesh_job_success_updates_status(setup_test_db, tmp_path):
+    from unittest.mock import patch
+
+    from backend.db.database import get_db
+    from backend.main import app
+    from backend.services.reconstruction import _run_mesh_export_job
+    from tests.conftest import TestSessionLocal
+
+    db = next(app.dependency_overrides[get_db]())
+    s = _make_session(db)
+    rec = Reconstruction(
+        session_id=s.id,
+        preset="quick",
+        status="complete",
+        frames_used=1,
+        mesh_status="pending",
+    )
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+
+    glb = tmp_path / "mesh.glb"
+    glb.write_bytes(b"glb")
+
+    with patch("backend.services.reconstruction.SessionLocal", TestSessionLocal), \
+         patch(
+             "backend.services.reconstruction._export_mesh_assets",
+             return_value={"glb": glb, "obj": None, "mtl": None, "georef": tmp_path / "geo.json"},
+         ):
+        _run_mesh_export_job(rec.id)
+
+    db.expire_all()
+    db.refresh(rec)
+    assert rec.mesh_status == "complete"
+    assert rec.mesh_glb_path == str(glb)
+    assert rec.mesh_error is None
+
+
+def test_mesh_job_failure_updates_error(setup_test_db):
+    from unittest.mock import patch
+
+    from backend.db.database import get_db
+    from backend.main import app
+    from backend.services.reconstruction import _run_mesh_export_job
+    from tests.conftest import TestSessionLocal
+
+    db = next(app.dependency_overrides[get_db]())
+    s = _make_session(db)
+    rec = Reconstruction(
+        session_id=s.id,
+        preset="quick",
+        status="complete",
+        frames_used=1,
+        mesh_status="pending",
+    )
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+
+    with patch("backend.services.reconstruction.SessionLocal", TestSessionLocal), \
+         patch(
+             "backend.services.reconstruction._export_mesh_assets",
+             side_effect=RuntimeError("SuGaR is not installed"),
+         ):
+        _run_mesh_export_job(rec.id)
+
+    db.expire_all()
+    db.refresh(rec)
+    assert rec.mesh_status == "failed"
+    assert "SuGaR" in rec.mesh_error
+
+
+def test_validate_keyframes_rejects_single_frame():
+    from backend.services.reconstruction import _validate_keyframes
+
+    with pytest.raises(RuntimeError, match="At least two keyframes"):
+        _validate_keyframes([{"position": [0, 0, 0]}])
+
+
+def test_run_video_renderer_missing_dependency_reports_browser_fallback(tmp_path):
+    from unittest.mock import patch
+
+    from backend.services.reconstruction import _run_video_renderer
+
+    with patch.dict("sys.modules", {"gsplat": None}):
+        with pytest.raises(RuntimeError, match="Use browser recording"):
+            _run_video_renderer(
+                tmp_path / "splat.ply",
+                tmp_path / "flythrough.mp4",
+                [
+                    {"position": [0, 0, 3], "target": [0, 0, 0], "duration_s": 1},
+                    {"position": [3, 0, 0], "target": [0, 0, 0], "duration_s": 1},
+                ],
+            )
+
+
+def test_flythrough_job_success_updates_status(setup_test_db, tmp_path):
+    from unittest.mock import patch
+
+    from backend.db.database import get_db
+    from backend.main import app
+    from backend.services.reconstruction import _run_flythrough_job
+    from tests.conftest import TestSessionLocal
+
+    db = next(app.dependency_overrides[get_db]())
+    s = _make_session(db)
+    splat = tmp_path / "splat.ply"
+    splat.write_bytes(b"ply")
+    rec = Reconstruction(
+        session_id=s.id,
+        preset="quick",
+        status="complete",
+        frames_used=1,
+        splat_path=str(splat),
+        flythrough_status="pending",
+    )
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+
+    def fake_render(_splat_path, output_path, _keyframes, **_kwargs):
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_bytes(b"mp4")
+        return output_path
+
+    with patch("backend.services.reconstruction.SessionLocal", TestSessionLocal), \
+         patch("backend.services.reconstruction.get_config") as mock_cfg, \
+         patch("backend.services.reconstruction._run_video_renderer", side_effect=fake_render):
+        mock_cfg.return_value.exports_dir = str(tmp_path / "exports")
+        _run_flythrough_job(
+            rec.id,
+            [
+                {"position": [0, 0, 3], "target": [0, 0, 0], "duration_s": 1},
+                {"position": [3, 0, 0], "target": [0, 0, 0], "duration_s": 1},
+            ],
+            30,
+            640,
+            480,
+        )
+
+    db.expire_all()
+    db.refresh(rec)
+    assert rec.flythrough_status == "complete"
+    assert rec.flythrough_path.endswith("flythrough.mp4")
+    assert Path(rec.flythrough_path).read_bytes() == b"mp4"
+
+
+def _write_ascii_ply(path: Path, rows: list[tuple[float, float, float]]) -> None:
+    body = "\n".join(f"{x} {y} {z}" for x, y, z in rows)
+    path.write_text(
+        "ply\n"
+        "format ascii 1.0\n"
+        f"element vertex {len(rows)}\n"
+        "property float x\n"
+        "property float y\n"
+        "property float z\n"
+        "end_header\n"
+        f"{body}\n",
+        encoding="utf-8",
+    )
+
+
+def test_compute_voxel_diff_writes_new_and_removed_cells(tmp_path):
+    from backend.services.reconstruction import _compute_voxel_diff
+
+    a_ply = tmp_path / "a.ply"
+    b_ply = tmp_path / "b.ply"
+    _write_ascii_ply(a_ply, [(0, 0, 0), (1, 0, 0)])
+    _write_ascii_ply(b_ply, [(1, 0, 0), (2, 0, 0)])
+    geo = json.dumps({
+        "scale": 1.0,
+        "rotation": [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
+        "translation": [0, 0, 0],
+        "utm_zone": "17N",
+        "utm_origin": [500000, 3900000],
+    })
+    rec_a = SimpleNamespace(
+        id=1,
+        session_id=10,
+        pointcloud_path=None,
+        splat_path=str(a_ply),
+        colmap_dir=None,
+        geo_transform=geo,
+    )
+    rec_b = SimpleNamespace(
+        id=2,
+        session_id=11,
+        pointcloud_path=None,
+        splat_path=str(b_ply),
+        colmap_dir=None,
+        geo_transform=geo,
+    )
+
+    diff_path = tmp_path / "diff.json"
+    diff = _compute_voxel_diff(rec_a, rec_b, diff_path, voxel_size_m=1.0)
+
+    assert diff_path.exists()
+    assert diff["summary"]["new_count"] == 1
+    assert diff["summary"]["removed_count"] == 1
+    assert diff["new"][0]["type"] == "new"
+    assert diff["removed"][0]["type"] == "removed"
+
+
+def test_diff_to_geojson_exports_features():
+    from backend.services.reconstruction import diff_to_geojson
+
+    diff = {
+        "utm_zone": "17N",
+        "summary": {"new_count": 1, "removed_count": 1},
+        "comparison": {"reconstruction_a_id": 1, "reconstruction_b_id": 2},
+        "new": [{"x": 500000.0, "y": 3900000.0, "z": 0.0, "size": 1.0}],
+        "removed": [{"x": 500001.0, "y": 3900000.0, "z": 0.0, "size": 1.0}],
+    }
+
+    geojson = diff_to_geojson(diff)
+
+    assert geojson["type"] == "FeatureCollection"
+    assert len(geojson["features"]) == 2
+    assert geojson["features"][0]["properties"]["type"] == "new"
+    lon, lat, _alt = geojson["features"][0]["geometry"]["coordinates"]
+    assert -90 < lon < -70
+    assert 30 < lat < 40

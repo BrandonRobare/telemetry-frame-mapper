@@ -10,11 +10,23 @@ import ReconstructTab from './features/reconstruct/ReconstructTab'
 import JobsTab from './features/jobs/JobsTab'
 import StorageTab from './features/storage/StorageTab'
 import SplatViewerTab from './features/splat/SplatViewerTab'
+import CompareTab from './features/compare/CompareTab'
 import { ToastStack } from './shared/components/ToastStack'
 import ImportModal from './features/import/ImportModal'
 import SessionPicker from './features/sessions/SessionPicker'
 
-type Tab = 'map' | 'gps-sync' | 'review' | 'plan' | 'export' | 'session-log' | 'reconstruct' | 'jobs' | 'storage' | 'splat'
+type Tab =
+  | 'map'
+  | 'gps-sync'
+  | 'review'
+  | 'plan'
+  | 'export'
+  | 'session-log'
+  | 'reconstruct'
+  | 'jobs'
+  | 'storage'
+  | 'splat'
+  | 'compare'
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'map', label: 'Map' },
@@ -27,15 +39,8 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'jobs', label: 'Jobs' },
   { id: 'storage', label: 'Storage' },
   { id: 'splat', label: 'Splat Viewer' },
+  { id: 'compare', label: 'Compare' },
 ]
-
-function ComingSoon({ label }: { label: string }) {
-  return (
-    <div className="flex-1 flex items-center justify-center" style={{ color: 'var(--text-muted)' }}>
-      <p>{label} — coming soon</p>
-    </div>
-  )
-}
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<Tab>('map')
@@ -135,6 +140,7 @@ export default function App() {
         {activeTab === 'jobs' && <JobsTab />}
         {activeTab === 'storage' && <StorageTab />}
         {activeTab === 'splat' && <SplatViewerTab />}
+        {activeTab === 'compare' && <CompareTab />}
       </div>
       <ToastStack />
       <ImportModal open={showImport} onClose={() => setShowImport(false)} />
