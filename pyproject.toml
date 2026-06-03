@@ -54,7 +54,7 @@ dev = [
 ]
 reconstruction = [
   "laspy>=2.5",
-  "sugar"
+  "gsplat>=1.5.0"
 ]
 
 [project.scripts]

@@ -31,8 +31,15 @@ Without the `--profile nvidia` flag, the backend runs in CPU-only mode.
 
 ## External Binaries
 
-The following binaries must be on `PATH` (or configured via `config.yaml`):
+Required for the CLI release gate:
 
-- **ffmpeg** — video extraction
-- **exiftool** — EXIF writing
-- **colmap** — Structure from Motion (required for reconstruction)
+- **ffmpeg** — DJI MP4 video/SRT extraction. It must be on `PATH` or passed with `--ffmpeg`.
+- **exiftool** — GPS EXIF writing. It must be on `PATH` or passed with `--exiftool`.
+
+Optional/manual reconstruction tools:
+
+- **colmap** — Structure from Motion for Reconstruct tab jobs. Missing COLMAP should fail the reconstruction job with clear install/PATH guidance, not break backend import.
+- **gsplat** + CUDA-capable GPU — Gaussian splat training and optional server-side video rendering. Install the Python extra with `pip install -e ".[backend,reconstruction]"` for local reconstruction validation.
+- **SuGaR** (`sugar_scene`/`sugar`) — mesh export only. It is a manual upstream install and is not included in the Python `reconstruction` extra.
+
+CI should use fakes/mocks for external binaries and optional reconstruction libraries. Real `ffmpeg`/`exiftool` smoke is must-pass for v1.0; real COLMAP/gsplat/SuGaR/video-render smoke is optional/manual unless reconstruction is promoted to production-ready.

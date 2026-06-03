@@ -68,11 +68,17 @@ def write_exiftool_args_file(
 
 def write_exif(exiftool: str | Path, tags: list[FrameTag], args_path: Path) -> None:
     write_exiftool_args_file(tags, args_path, exiftool)
-    result = subprocess.run(
-        [str(exiftool), "-@", external_file_arg(args_path, exiftool)],
-        text=True,
-        capture_output=True,
-        check=False,
-    )
+    try:
+        result = subprocess.run(
+            [str(exiftool), "-@", external_file_arg(args_path, exiftool)],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+    except FileNotFoundError as exc:
+        raise RuntimeError(
+            "exiftool executable not found: "
+            f"{exiftool}. Install ExifTool or pass --exiftool /path/to/exiftool."
+        ) from exc
     if result.returncode != 0:
         raise RuntimeError(f"exiftool failed:\n{result.stdout}\n{result.stderr}")
