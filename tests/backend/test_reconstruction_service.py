@@ -261,6 +261,17 @@ def test_workspace_image_copied_or_linked():
         assert dest.exists()
 
 
+def test_run_colmap_missing_binary_reports_install_guidance(tmp_path):
+    import threading
+    from unittest.mock import patch
+
+    from backend.services.reconstruction import _run_colmap
+
+    with patch("backend.services.reconstruction.subprocess.run", side_effect=FileNotFoundError):
+        with pytest.raises(RuntimeError, match="COLMAP executable not found"):
+            _run_colmap(tmp_path / "colmap", lambda *_args: None, threading.Event())
+
+
 # ---------------------------------------------------------------------------
 # Target area filter tests
 # ---------------------------------------------------------------------------

@@ -58,6 +58,25 @@ pip install -e ".[dev]"
 
 The CLI requires `ffmpeg` and `exiftool` on your PATH (or pass `--ffmpeg` / `--exiftool`).
 
+### External tool gates
+
+Required for v1.0 release smoke:
+
+| Tool | Required for | Gate |
+|---|---|---|
+| `ffmpeg` | CLI SRT extraction from DJI MP4 files | Must be on `PATH` or passed with `--ffmpeg`; missing binaries fail with install guidance. |
+| `exiftool` | CLI GPS EXIF writes | Must be on `PATH` or passed with `--exiftool`; missing binaries fail with install guidance. |
+
+Optional/manual reconstruction gates:
+
+| Tool/dependency | Required for | Expected failure mode when absent |
+|---|---|---|
+| `colmap` | Reconstruct tab SfM workspace pipeline | Reconstruction job fails with `COLMAP executable not found` install guidance. |
+| `gsplat` + CUDA-capable GPU | Gaussian splat training, thumbnails, optional server video renderer | Install with `pip install '.[reconstruction]'`; training fails with `gsplat is not installed`; thumbnail generation degrades silently; server video rendering tells users to use browser recording or install optional reconstruction dependencies. |
+| SuGaR (`sugar_scene`/`sugar`) | Mesh export | Not installed by the Python extra; install from the upstream SuGaR project when mesh export is needed. Mesh export job fails with `SuGaR is not installed` optional dependency guidance. |
+
+CI should use fakes/mocks for these tools. Real `ffmpeg`/`exiftool` CLI smoke is must-pass for v1.0; real COLMAP/gsplat/SuGaR/video-render smoke is optional/manual unless the release explicitly advertises reconstruction as production-ready.
+
 The backend creates a SQLite database at `data/drone_mapping.db` on first run.
 
 ### Frontend

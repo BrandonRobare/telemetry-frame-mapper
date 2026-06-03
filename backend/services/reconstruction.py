@@ -133,7 +133,13 @@ def _run_colmap(colmap_dir: Path, progress_cb, cancel: threading.Event) -> None:
         if cancel.is_set():
             return
         progress_cb(step_name, pct)
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True)
+        except FileNotFoundError as exc:
+            raise RuntimeError(
+                "COLMAP executable not found: colmap. Install COLMAP and ensure it is on PATH "
+                "before starting reconstruction."
+            ) from exc
         if result.returncode != 0:
             raise RuntimeError(
                 f"COLMAP {step_name} failed: {result.stderr[:500]}"
