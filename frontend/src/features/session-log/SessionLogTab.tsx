@@ -9,7 +9,7 @@ interface SessionLogEntry {
   photo_count: number | null
   coverage_pct: number | null
   message: string | null
-  created_at: string
+  timestamp: string | null
 }
 
 function useSessionLog(sessionId: number | null) {
@@ -74,7 +74,7 @@ export default function SessionLogTab() {
 
   const sorted = (entries ?? [])
     .slice()
-    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+    .sort((a, b) => new Date(b.timestamp ?? '').getTime() - new Date(a.timestamp ?? '').getTime())
 
   if (sorted.length === 0) {
     return (
@@ -117,7 +117,7 @@ export default function SessionLogTab() {
               style={{ borderBottom: '1px solid var(--border)' }}
             >
               <td style={{ padding: '8px 12px', whiteSpace: 'nowrap', color: 'var(--text-muted)' }}>
-                {new Date(entry.created_at).toLocaleString()}
+                {entry.timestamp ? new Date(entry.timestamp).toLocaleString() : '—'}
               </td>
               <td style={{ padding: '8px 12px' }}>
                 <EventBadge type={entry.event_type} />
