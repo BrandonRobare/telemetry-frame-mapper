@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field
 from functools import lru_cache
+from pathlib import Path
 
 import yaml
 
@@ -57,6 +58,15 @@ def load_config(path: str = "config.yaml") -> AppConfig:
         if AppConfig.__dataclass_fields__[f].init
     }
     filtered = {k: v for k, v in data.items() if k in init_fields}
+
+    config_path = Path(path).resolve()
+    config_dir = config_path.parent
+    for _field in ("imports_dir", "processed_dir", "exports_dir", "data_dir"):
+        if _field in filtered:
+            p = Path(str(filtered[_field]))
+            if not p.is_absolute():
+                filtered[_field] = str(config_dir / p)
+
     return AppConfig(**filtered)
 
 
