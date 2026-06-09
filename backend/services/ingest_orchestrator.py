@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import threading
 from pathlib import Path
 
@@ -23,12 +24,15 @@ def get_progress(session_id: int) -> dict:
 def _run(session_id: int, folder: Path, db_factory) -> None:
     from ..core.config import load_config  # lazy import to avoid circular
 
-    jpgs = (
-        sorted(folder.glob("*.jpg"))
-        + sorted(folder.glob("*.jpeg"))
-        + sorted(folder.glob("*.JPG"))
-        + sorted(folder.glob("*.JPEG"))
-    )
+    _JPEG_SUFFIXES = {".jpg", ".jpeg"}
+    seen: set[str] = set()
+    jpgs: list[Path] = []
+    for p in sorted(folder.iterdir()):
+        if p.is_file() and p.suffix.lower() in _JPEG_SUFFIXES:
+            key = os.path.normcase(str(p.resolve()))
+            if key not in seen:
+                seen.add(key)
+                jpgs.append(p)
     total = len(jpgs)
     with _progress_lock:
         _progress[session_id] = {"processed": 0, "total": total, "status": "running"}
