@@ -72,7 +72,7 @@ export function useImportSession() {
     enabled: importingSessionId !== null,
     refetchInterval: (query) => {
       const status = query.state.data?.status
-      return status === 'running' ? 1000 : false
+      return (status === 'done' || status === 'error') ? false : 1000
     },
   })
 

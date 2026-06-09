@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 from datetime import datetime
 
 import piexif
@@ -17,6 +18,33 @@ def _rational_to_float(rational) -> float:
     if isinstance(rational, tuple) and len(rational) == 2:
         return rational[0] / rational[1] if rational[1] != 0 else 0.0
     return 0.0
+
+
+def _extract_xmp_dji(filepath: str) -> dict:
+    """Read DJI XMP metadata from a JPEG file.
+
+    Parses RelativeAltitude (AGL), FlightYawDegree, and GimbalPitchDegree
+    from the raw XMP block embedded near the start of the file.
+    Returns a dict with whichever keys were found.
+    """
+    try:
+        with open(filepath, "rb") as f:
+            data = f.read(131072)  # XMP is always in the first 128 KB
+    except OSError:
+        return {}
+    result: dict = {}
+    for key, pattern in (
+        ("altitude_m", rb'RelativeAltitude="([+-]?\d+\.?\d*)"'),
+        ("yaw", rb'FlightYawDegree="([+-]?\d+\.?\d*)"'),
+        ("gimbal_pitch", rb'GimbalPitchDegree="([+-]?\d+\.?\d*)"'),
+    ):
+        m = re.search(pattern, data)
+        if m:
+            try:
+                result[key] = float(m.group(1))
+            except ValueError:
+                pass
+    return result
 
 
 def extract_exif(filepath: str) -> dict:
@@ -87,6 +115,14 @@ def extract_exif(filepath: str) -> dict:
 
         if alt_raw:
             result["altitude_m"] = _rational_to_float(alt_raw)
+
+    xmp = _extract_xmp_dji(filepath)
+    if "altitude_m" in xmp:
+        result["altitude_m"] = xmp["altitude_m"]
+    if "yaw" in xmp:
+        result["yaw"] = xmp["yaw"]
+    if "gimbal_pitch" in xmp:
+        result["gimbal_pitch"] = xmp["gimbal_pitch"]
 
     return result
 
