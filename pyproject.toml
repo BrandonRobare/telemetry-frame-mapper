@@ -49,7 +49,7 @@ backend = [
 ]
 dev = [
   "pytest>=8.0",
-  "pytest-asyncio==1.3.0",
+  "pytest-asyncio==1.4.0",
   "ruff>=0.4"
 ]
 reconstruction = [
