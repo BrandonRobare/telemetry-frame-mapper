@@ -276,7 +276,7 @@ export default function ExportTab() {
     >
       <div
         className="mx-auto flex flex-col gap-6"
-        style={{ maxWidth: 640 }}
+        style={{ maxWidth: 720 }}
       >
         {/* ---- Session summary card ---- */}
         <section
