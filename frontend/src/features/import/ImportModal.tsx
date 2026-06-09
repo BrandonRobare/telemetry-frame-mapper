@@ -228,14 +228,14 @@ export default function ImportModal({ open, onClose }: ImportModalProps) {
               className="text-xs font-medium block"
               style={{ color: 'var(--text-muted)', marginBottom: 6 }}
             >
-              Folder path
+              Path inside imports/ folder
             </label>
             <input
               id="import-folder"
               type="text"
               value={folderPath}
               onChange={(e) => setFolderPath(e.target.value)}
-              placeholder="e.g. C:\\Flights\\2026-05-02 or /mnt/flights/field-a"
+              placeholder="e.g. 2026-05-02-field-a"
               disabled={isBusy}
               style={{
                 width: '100%', boxSizing: 'border-box',
@@ -251,7 +251,7 @@ export default function ImportModal({ open, onClose }: ImportModalProps) {
               }}
             />
             <p className="text-xs" style={{ color: 'var(--text-muted)', marginTop: 5 }}>
-              Absolute path on the server filesystem containing JPEG images.
+              Relative path inside the server's imports/ folder — copy your JPEG files there first.
             </p>
           </div>
 
