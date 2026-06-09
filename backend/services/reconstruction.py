@@ -352,9 +352,10 @@ def _run_gsplat(
 
     try:
         from gsplat import train  # type: ignore[import]
-    except ImportError as exc:
+    except (ImportError, AttributeError) as exc:
         raise RuntimeError(
-            "gsplat is not installed. Run: pip install '.[reconstruction]'"
+            "gsplat.train is not available in the installed gsplat package. "
+            "The reconstruction will complete with COLMAP sparse cloud only."
         ) from exc
 
     stdout_buf = io.StringIO()
@@ -1350,7 +1351,15 @@ def _run_pipeline(
                     completed_at=datetime.now(timezone.utc),
                 )
             else:
-                raise
+                _log_rec(reconstruction_id, f"Gaussian Splatting skipped: {exc}")
+                _update_rec(
+                    db, reconstruction_id,
+                    status="complete",
+                    step="colmap_only",
+                    progress_pct=100.0,
+                    completed_at=datetime.now(timezone.utc),
+                )
+                _log_rec(reconstruction_id, "Pipeline complete (COLMAP only)")
 
     except Exception as exc:
         _update_rec(

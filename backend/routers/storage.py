@@ -19,6 +19,17 @@ def _dir_size(path: Path) -> int:
     return sum(f.stat().st_size for f in path.rglob("*") if f.is_file())
 
 
+def _data_db_size(path: Path) -> int:
+    """Measure only DB and config files in the data directory."""
+    if not path.exists():
+        return 0
+    return sum(
+        f.stat().st_size
+        for f in path.rglob("*")
+        if f.is_file() and f.suffix.lower() in {".db", ".yaml", ".yml", ".json"}
+    )
+
+
 def _compute_summary() -> dict:
     cfg = get_config()
     dirs = {
@@ -29,7 +40,10 @@ def _compute_summary() -> dict:
     }
     by_type: dict[str, int] = {}
     for name, d in dirs.items():
-        by_type[name] = _dir_size(d)
+        if name == "data":
+            by_type[name] = _data_db_size(d)
+        else:
+            by_type[name] = _dir_size(d)
 
     total = sum(by_type.values())
     return {"total_bytes": total, "by_type": by_type, "by_session": []}

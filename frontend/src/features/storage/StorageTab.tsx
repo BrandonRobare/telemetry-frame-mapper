@@ -123,7 +123,7 @@ const DIR_META: Record<string, { label: string; color: string; description: stri
   imports:   { label: 'Imports',   color: '#60a5fa', description: 'Raw imported session folders' },
   processed: { label: 'Processed', color: '#a78bfa', description: 'Thumbnails and COLMAP workspaces' },
   exports:   { label: 'Exports',   color: '#34d399', description: 'WebODM zips and GeoJSON files' },
-  data:      { label: 'Data',      color: '#f59e0b', description: 'SQLite database and config' },
+  data:      { label: 'Data',      color: '#f59e0b', description: 'SQLite database and config files' },
 }
 
 export default function StorageTab() {
