@@ -1227,16 +1227,20 @@ export default function SplatViewerTab() {
       .sort((a, b) => b.id - a.id)
       .find((j) => j.session_id === targetSessionId)
     if (match) {
-      setSelectedJobId(match.id)
-      setTargetSessionId(null)
+      queueMicrotask(() => {
+        setSelectedJobId(match.id)
+        setTargetSessionId(null)
+      })
     }
   }, [targetSessionId, allJobs, setTargetSessionId])
 
   // Reset tool and measurements when switching reconstructions
   useEffect(() => {
-    setActiveTool('none')
-    setMeasurePoints([])
-    setMeasureMode(null)
+    queueMicrotask(() => {
+      setActiveTool('none')
+      setMeasurePoints([])
+      setMeasureMode(null)
+    })
   }, [activeId])
 
   function handleMeasurePoint(pt: MeasurePoint) {

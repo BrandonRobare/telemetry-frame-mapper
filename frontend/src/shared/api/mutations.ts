@@ -77,14 +77,15 @@ export function useImportSession() {
   })
 
   useEffect(() => {
-    if (!progressQuery.data) return
-    if (progressQuery.data.status === 'done') {
+    const status = progressQuery.data?.status
+    if (!status) return
+    if (status === 'done') {
       queryClient.invalidateQueries({ queryKey: ['sessions'] })
       addToast('Session imported successfully', 'success')
-      setImportingSessionId(null)
-    } else if (progressQuery.data.status === 'error') {
+      queueMicrotask(() => setImportingSessionId(null))
+    } else if (status === 'error') {
       addToast('Import failed', 'error')
-      setImportingSessionId(null)
+      queueMicrotask(() => setImportingSessionId(null))
     }
   }, [progressQuery.data?.status, queryClient, addToast])
 
