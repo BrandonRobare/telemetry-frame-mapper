@@ -48,10 +48,12 @@ export default function App() {
   const { theme, toggleTheme, requestedTab, setRequestedTab } = useMapStore()
 
   useEffect(() => {
-    if (requestedTab && TABS.some((t) => t.id === requestedTab)) {
+    if (!requestedTab || !TABS.some((t) => t.id === requestedTab)) return
+
+    queueMicrotask(() => {
       setActiveTab(requestedTab as Tab)
       setRequestedTab(null)
-    }
+    })
   }, [requestedTab, setRequestedTab])
 
   return (

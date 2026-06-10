@@ -113,13 +113,15 @@ export default function CompareTab() {
   useEffect(() => {
     if (reconstructionAId !== null || completedJobs.length === 0) return
     const preferred = completedJobs.find((job) => job.session_id === selectedSessionId)
-    setReconstructionAId((preferred ?? completedJobs[0]).id)
+
+    queueMicrotask(() => setReconstructionAId((preferred ?? completedJobs[0]).id))
   }, [completedJobs, reconstructionAId, selectedSessionId])
 
   useEffect(() => {
     if (reconstructionBId !== null || completedJobs.length < 2) return
     const firstDifferent = completedJobs.find((job) => job.id !== reconstructionAId)
-    if (firstDifferent) setReconstructionBId(firstDifferent.id)
+
+    if (firstDifferent) queueMicrotask(() => setReconstructionBId(firstDifferent.id))
   }, [completedJobs, reconstructionAId, reconstructionBId])
 
   const compareMutation = useMutation({

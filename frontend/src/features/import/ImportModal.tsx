@@ -21,13 +21,15 @@ function useBackendHealth(enabled: boolean): HealthStatus {
 
   useEffect(() => {
     if (!enabled) return
-    setStatus('checking')
     const controller = new AbortController()
-    check(controller.signal)
+
+    queueMicrotask(() => setStatus('checking'))
+    const initialCheck = window.setTimeout(() => check(controller.signal), 0)
     // Re-poll every 5 s while the modal is open so it auto-recovers
     const interval = setInterval(() => check(controller.signal), 5_000)
     return () => {
       controller.abort()
+      window.clearTimeout(initialCheck)
       clearInterval(interval)
     }
   }, [enabled, check])
