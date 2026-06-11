@@ -33,7 +33,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="Drone Mapping API", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="Drone Mapping API", version="1.0.0", lifespan=lifespan)
 app.include_router(sessions_router.router)
 app.include_router(target_areas_router.router)
 app.include_router(coverage_router.router)

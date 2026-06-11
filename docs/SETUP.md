@@ -1,33 +1,37 @@
 # Setup Guide
 
-## GPU Acceleration (optional)
+## GPU splat training (Windows)
 
-Reconstruction runs on CPU by default. To use NVIDIA GPU acceleration:
+Splat training is optional — without it, reconstructions still complete with a COLMAP
+sparse cloud (`colmap_only`). To train gaussian splats on an NVIDIA GPU:
 
 ### Prerequisites
 
-1. NVIDIA driver ≥ 525.60
-2. [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html)
+1. NVIDIA driver for a CUDA-capable GPU
+2. CUDA Toolkit 13.x (`nvcc --version` should work in a fresh terminal)
+3. MSVC Build Tools with the "Desktop development with C++" workload (`cl.exe`)
+
+### Install
+
+torch and gsplat are intentionally **not** part of the `[reconstruction]` extra:
+CUDA-enabled torch wheels are not on the default PyPI index, and gsplat's sdist requires
+torch already installed at build time. Install in two steps, then the extras:
 
 ```bash
-# Ubuntu/Debian
-curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | sudo gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
-distribution=$(. /etc/os-release;echo $ID$VERSION_ID)
-curl -s -L https://nvidia.github.io/libnvidia-container/$distribution/libnvidia-container.list | \
-  sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' | \
-  sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list
-sudo apt-get update && sudo apt-get install -y nvidia-container-toolkit
-sudo nvidia-ctk runtime configure --runtime=docker
-sudo systemctl restart docker
+pip install torch --index-url https://download.pytorch.org/whl/cu130
+pip install gsplat --index-url https://docs.gsplat.studio/whl/pt29cu130 --extra-index-url https://pypi.org/simple
+pip install -e ".[backend,reconstruction]"
 ```
 
-### Running with GPU
+Notes:
 
-```bash
-docker compose --profile nvidia up
-```
-
-Without the `--profile nvidia` flag, the backend runs in CPU-only mode.
+- The torch and `nvcc` CUDA **major versions must match**: CUDA Toolkit 13.2 pairs with
+  `cu130` wheels, not `cu12x`.
+- If no prebuilt gsplat wheel matches your torch/CUDA combination, gsplat JIT-compiles its
+  CUDA kernels on **first import** (5–15 minutes; needs `cl.exe` and `nvcc` on PATH; set
+  `TORCH_CUDA_ARCH_LIST=8.6` for an RTX 3050 Ti).
+- Warm up once with `python -c "import gsplat"` before starting the first training job so
+  the JIT compile doesn't eat into it.
 
 ## External Binaries
 
@@ -39,7 +43,7 @@ Required for the CLI release gate:
 Optional/manual reconstruction tools:
 
 - **colmap** — Structure from Motion for Reconstruct tab jobs. Missing COLMAP should fail the reconstruction job with clear install/PATH guidance, not break backend import.
-- **gsplat** + CUDA-capable GPU — Gaussian splat training and optional server-side video rendering. Install the Python extra with `pip install -e ".[backend,reconstruction]"` for local reconstruction validation.
+- **torch + gsplat** + CUDA-capable GPU — Gaussian splat training and optional server-side video rendering. Manual two-step install (see the GPU section above); intentionally not included in the Python `reconstruction` extra.
 - **SuGaR** (`sugar_scene`/`sugar`) — mesh export only. It is a manual upstream install and is not included in the Python `reconstruction` extra.
 
 CI should use fakes/mocks for external binaries and optional reconstruction libraries. Real `ffmpeg`/`exiftool` smoke is must-pass for v1.0; real COLMAP/gsplat/SuGaR/video-render smoke is optional/manual unless reconstruction is promoted to production-ready.
