@@ -1,8 +1,17 @@
 # Drone Video Geotagger
 
-Geotags DJI drone video frames with GPS EXIF metadata for WebODM/OpenDroneMap processing, with a web UI for visualising coverage and planning missions.
+A full pipeline from DJI drone video to a GPS-registered 3D gaussian splat: geotag extracted frames from the embedded telemetry, review coverage on a map, run COLMAP + gaussian-splat reconstruction, and explore/export the result — plus WebODM/OpenDroneMap-ready output at every step.
 
-DJI videos can store GPS telemetry in an embedded subtitle track. Extracted still frames do not always keep that location data. This tool reads the DJI telemetry, lines it up with the extracted frame sequence, and writes GPS EXIF tags into the JPG files.
+DJI videos can store GPS telemetry in an embedded subtitle track. Extracted still frames do not keep that location data. The CLI reads the DJI telemetry, lines it up with the extracted frame sequence, and writes GPS EXIF tags into the JPG files; the web app takes it from there:
+
+```
+DJI video ──ffmpeg──> frames ──CLI──> geotagged JPGs ──import──> map/review/plan
+                                                                      │
+                                              COLMAP SfM ──> gsplat training ──> splat viewer,
+                                                                                 LAS/mesh/GeoJSON export
+```
+
+New here? Follow the [end-to-end workflow tutorial](docs/WORKFLOW.md).
 
 This repository is a monorepo with three components:
 
@@ -15,7 +24,7 @@ This repository is a monorepo with three components:
 ```
 src/              CLI package (drone-video-geotagger command)
 backend/          FastAPI app (API server, DB models, services)
-frontend/         Vite + React frontend (Map tab + 4 placeholder tabs)
+frontend/         Vite + React frontend (11-tab workflow UI)
 tests/            pytest suite (tests/cli/ and tests/backend/)
 dashboard/        Dev-time status dashboard (stdlib only, http://localhost:7000)
 data/             SQLite database (gitignored)
@@ -33,16 +42,22 @@ exports/          KML/GPX mission plan exports (gitignored)
 - Creates an audit CSV for inspecting frame timing and coordinates.
 
 ### Backend
-- REST API for image import, quality scoring (sharpness + brightness via OpenCV), and ground footprint computation (Shapely/UTM).
+- REST API for image import, quality scoring (sharpness + brightness via OpenCV), and ground footprint computation from DJI XMP altitude/yaw (Shapely/UTM).
+- Coverage analysis, lawnmower mission planning with KML/GPX export, and flight-log sync.
+- Reconstruction job pipeline: COLMAP SfM (quick/full presets, target-area crop, frame selection), GPS geo-registration, gaussian-splat training, LOD generation, and per-frame reprojection-error reporting.
+- Exports: WebODM package, GeoJSON, LAS 1.4 point cloud, optional SuGaR mesh, flythrough video.
 - SQLite database via SQLAlchemy (swappable for PostgreSQL via `DATABASE_URL`).
-- Coverage analysis and mission planning services (in progress).
 
-### Frontend (Map tab — live)
-- Interactive Leaflet map with ESRI satellite basemap.
-- Footprint polygons (blue) and coverage overlay (green) toggled per-layer.
-- Session sidebar: stats grid, coverage %, quality flags, Run Coverage Analysis button.
+### Frontend (11 tabs, all functional)
+- **Map** — Leaflet + ESRI satellite, footprint polygons, coverage overlay, session stats sidebar.
+- **GPS Sync** — DJI FlightRecord CSV matching with timing deltas.
+- **Review** — thumbnail grid, quality flags, COLMAP reprojection-error badges, reconstruction frame selection.
+- **Plan** — target-area drawing, lawnmower plan generation, KML/GPX export.
+- **Export** — WebODM zip, GeoJSON, LAS point cloud, mesh GLB/OBJ/MTL.
+- **Session Log · Reconstruct · Jobs · Storage** — event history, preset-based job start, resource monitor with live logs, disk usage + file browser.
+- **Splat Viewer** — in-browser gaussian-splat rendering, PSNR/SSIM sparklines, coverage-gap heatmap, GPS-pinned annotations, distance/area measurement, ortho/3D split view, flythrough recording.
+- **Compare** — voxel change detection between two reconstructions of the same site.
 - Dark/light theme with persistence.
-- GPS Sync, Review, Plan, and Export tabs scaffolded (coming soon).
 
 ## Install
 
@@ -159,11 +174,27 @@ Upload the geotagged folder to WebODM; it reads GPS EXIF tags on import.
 ## Tests
 
 ```bash
-pytest        # 31 tests (CLI + backend)
+pytest        # 216 tests (CLI + backend)
 ruff check .  # linter
+cd frontend && npm test -- --run   # frontend unit tests (vitest)
 ```
 
-Tests use inline fixture data and temporary paths — no real flight files required.
+Tests use inline fixture data and temporary paths — no real flight files required. CI mocks all external binaries; see [V1_EXTERNAL_TOOL_RELEASE_GATES.md](V1_EXTERNAL_TOOL_RELEASE_GATES.md).
+
+## Documentation
+
+| Doc | What it covers |
+|---|---|
+| [docs/WORKFLOW.md](docs/WORKFLOW.md) | End-to-end tutorial: DJI video → geotag → import → reconstruct → splat → export |
+| [docs/INSTALL.md](docs/INSTALL.md) | System requirements and per-platform setup (ffmpeg, exiftool, COLMAP) |
+| [docs/SETUP.md](docs/SETUP.md) | GPU / CUDA / gsplat training setup |
+| [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | Exact error messages → causes → fixes |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Component map, reconstruction state machine, design rules |
+| [docs/release-audit-v1.md](docs/release-audit-v1.md) | The 2026-06-11 v1.0 release audit |
+| [V1_RELEASE_CHECKLIST.md](V1_RELEASE_CHECKLIST.md) | Remaining work to tag 1.0, as self-contained agent tasks |
+| [CHANGELOG.md](CHANGELOG.md) | Release notes |
+
+The backend API is self-documenting at `http://localhost:8000/docs` while running.
 
 ## Privacy
 
