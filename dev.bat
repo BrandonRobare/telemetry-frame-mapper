@@ -1,12 +1,24 @@
 @echo off
-REM dev.bat — start backend + frontend for local development
+REM dev.bat — start backend + frontend for local development (run from the repo root)
+cd /d "%~dp0"
+
 echo Starting backend...
-start "Backend" cmd /k "cd backend && python -m venv .venv && .venv\Scripts\activate && pip install -r requirements.txt && uvicorn main:app --reload --port 8000"
-echo Starting frontend...
+if not exist .venv\ python -m venv .venv
+REM Run uvicorn from the repo root: config.yaml and the .\processed static mount resolve from here
+start "Backend" cmd /k ".venv\Scripts\activate && python -m pip install -e .[backend,dev] && uvicorn backend.main:app --reload --port 8000"
+
+where node >nul 2>nul
+if errorlevel 1 (
+    echo node/npm not found -- install Node 18+ from https://nodejs.org to run the frontend.
+    echo Backend starting at http://localhost:8000
+    goto :eof
+)
+
 if exist frontend\ (
+    echo Starting frontend...
     start "Frontend" cmd /k "cd frontend && npm install && npm run dev"
     echo Open http://localhost:5173
 ) else (
     echo frontend/ not found -- skipping frontend dev server
-    echo Backend running at http://localhost:8000
+    echo Backend starting at http://localhost:8000
 )
