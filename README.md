@@ -163,6 +163,8 @@ python dashboard/server.py
 | `--srt` | Optional DJI SRT file (extracted from video if omitted) |
 | `--frame-rate` | Optional frame extraction rate (estimated from SRT if omitted) |
 
+Frame index rule: the index is the **last** number in each filename — `frame_00042.jpg` and `DJI_0081_frame_42.jpg` both index as frame 42. Files with no digits in the name are skipped.
+
 ## CLI outputs
 
 - Geotagged JPG files in `<frames>_geotagged/`

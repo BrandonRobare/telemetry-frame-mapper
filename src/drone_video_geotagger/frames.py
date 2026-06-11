@@ -25,9 +25,11 @@ class FrameTag:
 def collect_frames(frame_dir: Path) -> list[tuple[Path, int]]:
     frames = []
     for path in sorted(frame_dir.glob("*.jpg")):
-        match = re.search(r"(\d+)", path.stem)
-        if match:
-            frames.append((path, int(match.group(1))))
+        # Frame index = the LAST number in the filename, so prefixed names like
+        # DJI_0081_frame_42.jpg index as 42, not 81. Files without digits are skipped.
+        digit_groups = re.findall(r"\d+", path.stem)
+        if digit_groups:
+            frames.append((path, int(digit_groups[-1])))
     if not frames:
         raise ValueError(f"No .jpg frames found in {frame_dir}")
     return frames
