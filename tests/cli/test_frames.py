@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from drone_video_geotagger.frames import build_frame_tags, infer_frame_rate
+from drone_video_geotagger.frames import build_frame_tags, collect_frames, infer_frame_rate
 from drone_video_geotagger.telemetry import TelemetryPoint
 
 
@@ -57,3 +57,35 @@ def test_infer_frame_rate_uses_nearest_common_rate() -> None:
     frames = [(Path(f"frame_{index:05d}.jpg"), index) for index in range(1, 117)]
 
     assert infer_frame_rate(frames, telemetry_end_s=14.5) == 8
+
+
+def test_infer_frame_rate_returns_default_without_telemetry() -> None:
+    frames = [(Path(f"frame_{index:05d}.jpg"), index) for index in range(1, 10)]
+
+    assert infer_frame_rate(frames, telemetry_end_s=0) == 8.0
+
+
+def test_collect_frames_uses_last_digit_group(tmp_path: Path) -> None:
+    (tmp_path / "DJI_0081_frame_42.jpg").touch()
+    (tmp_path / "DJI_0081_frame_43.jpg").touch()
+
+    frames = collect_frames(tmp_path)
+
+    assert [index for _, index in frames] == [42, 43]
+
+
+def test_collect_frames_plain_frame_names(tmp_path: Path) -> None:
+    (tmp_path / "frame_00042.jpg").touch()
+
+    frames = collect_frames(tmp_path)
+
+    assert frames == [(tmp_path / "frame_00042.jpg", 42)]
+
+
+def test_collect_frames_skips_files_without_digits(tmp_path: Path) -> None:
+    (tmp_path / "cover.jpg").touch()
+    (tmp_path / "frame_00001.jpg").touch()
+
+    frames = collect_frames(tmp_path)
+
+    assert frames == [(tmp_path / "frame_00001.jpg", 1)]
