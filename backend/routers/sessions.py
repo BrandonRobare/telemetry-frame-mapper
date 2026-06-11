@@ -78,7 +78,7 @@ def import_session(req: ImportRequest, db: DBSession = Depends(get_db)):
     s = SessionModel(
         name=req.name,
         folder_path=str(folder),
-        imported_at=datetime.datetime.utcnow(),
+        imported_at=datetime.datetime.now(datetime.timezone.utc),
         photo_count=0,
         usable_count=0,
     )
