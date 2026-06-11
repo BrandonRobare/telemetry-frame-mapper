@@ -15,14 +15,17 @@ class TelemetryPoint:
 
 
 def parse_srt_time(value: str) -> float:
-    hours, minutes, rest = value.split(":")
-    seconds, millis = rest.split(",")
-    return (
-        int(hours) * 3600
-        + int(minutes) * 60
-        + int(seconds)
-        + int(millis.ljust(3, "0")[:3]) / 1000.0
-    )
+    try:
+        hours, minutes, rest = value.split(":")
+        seconds, millis = rest.split(",")
+        return (
+            int(hours) * 3600
+            + int(minutes) * 60
+            + int(seconds)
+            + int(millis.ljust(3, "0")[:3]) / 1000.0
+        )
+    except ValueError as exc:
+        raise ValueError(f"Unrecognized SRT timecode: {value!r}") from exc
 
 
 def parse_srt_text(text: str) -> list[TelemetryPoint]:
