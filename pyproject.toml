@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "drone-video-geotagger"
-version = "0.1.0"
+version = "1.0.0"
 description = "Geotags DJI drone video frames with GPS EXIF metadata for WebODM/OpenDroneMap processing."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -14,7 +14,7 @@ authors = [
 ]
 keywords = ["dji", "exif", "geotagging", "webodm", "opendronemap"]
 classifiers = [
-  "Development Status :: 3 - Alpha",
+  "Development Status :: 5 - Production/Stable",
   "Environment :: Console",
   "Intended Audience :: Science/Research",
   "License :: OSI Approved :: MIT License",
@@ -52,9 +52,11 @@ dev = [
   "pytest-asyncio==1.4.0",
   "ruff>=0.4"
 ]
+# torch and gsplat are intentionally NOT listed here: CUDA-enabled torch is not on the
+# default PyPI index, and gsplat's sdist requires torch at build time, so the extra could
+# never resolve as advertised. GPU training install is a manual two-step — see docs/SETUP.md.
 reconstruction = [
-  "laspy>=2.5",
-  "gsplat>=1.5.0"
+  "laspy>=2.5"
 ]
 
 [project.scripts]

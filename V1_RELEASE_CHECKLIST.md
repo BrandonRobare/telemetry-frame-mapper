@@ -29,7 +29,7 @@ T1 and T2 are independent of each other and ideal first parallel dispatches.
 
 ## P0 — Release blockers
 
-### T1 — [ ] New module `backend/services/colmap_io.py`: COLMAP sparse-model loader
+### T1 — [x] New module `backend/services/colmap_io.py`: COLMAP sparse-model loader
 
 **Goal:** A pure-numpy loader for COLMAP sparse models so the splat trainer (T3) can read camera poses and points without any COLMAP Python bindings.
 
@@ -78,7 +78,7 @@ def world_to_cam_matrix(image: ColmapImage) -> np.ndarray   # 4x4 viewmat
 
 ---
 
-### T2 — [ ] New module `backend/services/ply_io.py`: 3DGS PLY read/write/prune
+### T2 — [x] New module `backend/services/ply_io.py`: 3DGS PLY read/write/prune
 
 **Goal:** Read and write Gaussian-splat PLY files in the standard INRIA 3DGS layout — the exact format `@mkkellogg/gaussian-splats-3d` (the frontend viewer) consumes — plus a numpy-only opacity prune for LOD generation.
 
@@ -228,7 +228,7 @@ def render_flythrough(splat_path: Path, output_path: Path, keyframes: list[dict]
 
 ---
 
-### T5 — [ ] Frontend: explicit PLY format in the splat viewer
+### T5 — [x] Frontend: explicit PLY format in the splat viewer
 
 **Goal:** One-line latent-bug fix that blocks T14. The viewer URL ends in `?lod=preview`, and `@mkkellogg/gaussian-splats-3d` infers scene format from the URL suffix — it will misdetect the real PLY the moment T1–T4 produce one (never exercised before because no splat was ever created).
 
@@ -245,7 +245,7 @@ await viewer.addSplatScene(splatUrl, { streamView: true, format: SceneFormat.Ply
 
 ---
 
-### T6 — [ ] Packaging: version 1.0.0 + reconstruction-extra honesty + GPU install docs
+### T6 — [x] Packaging: version 1.0.0 + reconstruction-extra honesty + GPU install docs
 
 **Goal:** Make the package metadata say 1.0, and make the documented install path for GPU training actually resolvable.
 
@@ -262,7 +262,7 @@ await viewer.addSplatScene(splatUrl, { streamView: true, format: SceneFormat.Ply
 
 ---
 
-### T7 — [ ] Drop Docker for 1.0
+### T7 — [x] Drop Docker for 1.0
 
 **Goal:** Stop advertising a broken install path. `docker-compose.yml` references `backend/Dockerfile` and `frontend/Dockerfile`; **neither file exists**. Decision (2026-06-11): native install only for 1.0; Docker may return in 1.1 done properly.
 
@@ -275,7 +275,7 @@ await viewer.addSplatScene(splatUrl, { streamView: true, format: SceneFormat.Ply
 
 ---
 
-### T8 — [ ] Replace deprecated `datetime.utcnow()` (11 sites)
+### T8 — [x] Replace deprecated `datetime.utcnow()` (11 sites)
 
 **Goal:** Eliminate all 174 deprecation warnings (Python 3.12+) before they become errors in future Python versions.
 

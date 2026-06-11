@@ -87,7 +87,7 @@ Optional/manual reconstruction gates:
 | Tool/dependency | Required for | Expected failure mode when absent |
 |---|---|---|
 | `colmap` | Reconstruct tab SfM workspace pipeline | Reconstruction job fails with `COLMAP executable not found` install guidance. |
-| `gsplat` + CUDA-capable GPU | Gaussian splat training, thumbnails, optional server video renderer | Install with `pip install '.[reconstruction]'`; training fails with `gsplat is not installed`; thumbnail generation degrades silently; server video rendering tells users to use browser recording or install optional reconstruction dependencies. |
+| `torch` + `gsplat` + CUDA-capable GPU | Gaussian splat training, thumbnails, optional server video renderer | Manual two-step install (see [docs/SETUP.md](docs/SETUP.md)) — intentionally not in the `[reconstruction]` extra; without it training is skipped and the job completes COLMAP-only; thumbnail generation degrades silently; server video rendering tells users to use browser recording or install optional reconstruction dependencies. |
 | SuGaR (`sugar_scene`/`sugar`) | Mesh export | Not installed by the Python extra; install from the upstream SuGaR project when mesh export is needed. Mesh export job fails with `SuGaR is not installed` optional dependency guidance. |
 
 CI should use fakes/mocks for these tools. Real `ffmpeg`/`exiftool` CLI smoke is must-pass for v1.0; real COLMAP/gsplat/SuGaR/video-render smoke is optional/manual unless the release explicitly advertises reconstruction as production-ready.
