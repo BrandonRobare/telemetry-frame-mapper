@@ -23,6 +23,11 @@ def test_parse_srt_time() -> None:
     assert parse_srt_time("00:01:02,125") == pytest.approx(62.125)
 
 
+def test_parse_srt_time_rejects_malformed_timecode() -> None:
+    with pytest.raises(ValueError, match="Unrecognized SRT timecode: '12.34.56'"):
+        parse_srt_time("12.34.56")
+
+
 def test_parse_srt_text_reads_gps_and_height() -> None:
     points = parse_srt_text(SRT_TEXT)
 
