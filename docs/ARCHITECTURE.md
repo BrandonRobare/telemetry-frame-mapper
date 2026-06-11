@@ -1,0 +1,85 @@
+# Architecture
+
+telemetry-frame-mapper is a monorepo with three runnable components sharing one repository and one data directory layout:
+
+```
+DJI video ──CLI──> geotagged JPGs ──import──> backend DB/services ──REST──> React UI
+                                                      │
+                                                      └──> COLMAP ──> gsplat trainer ──> splat.ply ──> viewer/exports
+```
+
+## Components
+
+### CLI — `src/drone_video_geotagger/`
+
+A standalone geotagging tool (`drone-video-geotagger`). Pipeline order inside `cli.py::run()`:
+
+| Stage | Module | What it does |
+|---|---|---|
+| 1 | `video.py` | `ffmpeg` extracts the DJI subtitle telemetry track (stream `0:2`) to SRT; reads `creation_time` for the video start timestamp |
+| 2 | `telemetry.py` | Parses DJI SRT into `TelemetryPoint`s (time window, lat/lon, relative altitude); linear interpolation between points |
+| 3 | `frames.py` | Collects `*.jpg`, frame index = last number in the filename; infers extraction fps from telemetry duration when not given; builds `FrameTag`s (absolute altitude = takeoff + relative) |
+| 4 | `exiftool.py` | Writes one ExifTool args file and invokes `exiftool -@ file` once for all frames |
+| 5 | `audit.py` | Writes `frame_geotags.csv` for inspection |
+
+`paths.py` translates WSL paths to Windows paths when the configured executable is a `.exe`. External binaries are always invoked as argv lists (no shell); missing binaries raise actionable install guidance.
+
+### Backend — `backend/`
+
+FastAPI app (`backend.main:app`), SQLite via SQLAlchemy (PostgreSQL-swappable through `DATABASE_URL`), schema created on startup with small manual column-add shims for upgrades.
+
+- **Routers** (17): sessions, images, footprints, coverage, flight_log, srt, plans, export, session_log, reconstruction, annotations, comparisons, system, jobs, storage, target_areas — ~53 endpoints, self-documented at `/docs`.
+- **Key services:**
+  - `ingest.py` / `ingest_orchestrator.py` — EXIF GPS + DJI XMP extraction (relative altitude → AGL, yaw, gimbal pitch), quality scoring (OpenCV sharpness/brightness), thumbnails, footprint computation, case-insensitive file dedupe.
+  - `geometry.py` — ground footprint math: UTM projection, FOV-based extent from AGL, yaw rotation (Shapely/pyproj).
+  - `mission planning` (`plans` router) — lawnmower path generation over a target area, KML/GPX export.
+  - `reconstruction.py` — the heavy pipeline (below).
+  - `colmap_io.py` / `ply_io.py` / `splat_trainer.py` *(checklist T1–T3)* — COLMAP sparse-model loader (numpy), INRIA-layout 3DGS PLY I/O + opacity-prune LODs (numpy), and the gsplat training loop (torch/gsplat, lazily imported so the backend never requires them).
+- **Config:** `config.yaml` at repo root → `AppConfig` dataclass; relative directory settings resolve against the config file's location. Reconstruction presets (`quick`/`full`) live under the `reconstruction:` key.
+
+### Frontend — `frontend/`
+
+Vite + React 19 + TypeScript, feature-sliced (`src/features/<tab>/` + `src/shared/`). Server state via TanStack Query, UI state via Zustand, Leaflet/react-leaflet for maps, `@mkkellogg/gaussian-splats-3d` (Three.js) for the splat canvas, Tailwind v4.
+
+Eleven tabs: **Map** (footprints + coverage on satellite imagery), **GPS Sync** (flight-log matching), **Review** (quality flags, frame selection, reprojection-error badges), **Plan** (target areas, lawnmower plans), **Export** (WebODM zip, GeoJSON, LAS, mesh), **Session Log**, **Reconstruct** (presets, job start), **Jobs** (resource monitor + job logs), **Storage** (disk breakdown + file browser), **Splat Viewer** (3D canvas, sparklines, coverage-gap heatmap, annotations, measurements, ortho/3D split, flythrough), **Compare** (voxel change detection between reconstructions).
+
+## The reconstruction job
+
+Jobs run as a background daemon thread with a `threading.Event` cancel flag, writing progress directly to the `Reconstruction` row (no task queue — single-user tool, GPU jobs are serial anyway).
+
+**State machine:**
+
+```
+pending ──> running_colmap (0–95%) ──> running_gsplat (95–100%) ──> complete (step=done)
+                 │                            │
+                 │                            ├── training deps absent ──> complete (step=colmap_only)
+                 │                            ├── CUDA OOM ──> failed ("switch to 'quick' preset…")
+                 │                            └── cancel    ──> failed ("Cancelled by user")
+                 └── COLMAP error / cancel ──> failed (stage + stderr recorded)
+```
+
+**Stage detail:**
+1. *Workspace* — selected frames are linked/copied into `colmap_dir/images/`, single PINHOLE camera derived from configured FOV.
+2. *COLMAP* (subprocess): `feature_extractor → exhaustive_matcher → mapper → model_converter` — the sparse model lands in `sparse/0/` in both BIN and TXT form. Per-image reprojection errors are parsed from the TXT model and surfaced in the Review tab. A similarity geo-transform (COLMAP space ↔ UTM, seeded by the GPS EXIF) is stored as JSON on the record — this is what lets the viewer do GPS-accurate annotations and measurements.
+3. *Splat training* (in-process, torch + `gsplat.rasterization` with default densification): initialized from the sparse points, capped gaussian count for small GPUs, periodic PSNR/SSIM eval feeding the viewer's sparklines; exports standard INRIA-layout `splat.ply` plus 10 %/50 % opacity-pruned LODs and a nadir thumbnail.
+4. *Lazy derivatives on first request:* LAS point cloud (laspy), coverage-gap voxelization, voxel diff for Compare — each cached to `exports/{id}/` with its path stored on the record.
+5. *Optional:* SuGaR mesh export (manual upstream install), server-side MP4 flythrough (browser MediaRecorder is the primary path).
+
+## Data layout
+
+```
+data/        SQLite DB + runtime data        (gitignored)
+imports/     drop folder for image sessions  (gitignored)  ← import paths are relative to here
+processed/   thumbnails, derived images      (gitignored, served at /processed)
+exports/     plans, splats, LODs, LAS, diffs (gitignored)  ← exports/{reconstruction_id}/…
+```
+
+**Key DB entities:** `Session` (one import) → `Image` (per frame: GPS, AGL, yaw, quality, flags, footprint WKT/GeoJSON) → `Reconstruction` (preset, status/step/progress, splat/LOD/thumb paths, geo-transform, metrics) → `Comparison` (voxel diff between two reconstructions), plus target areas, plans, flight logs, annotations, session log entries.
+
+## Design rules that matter when contributing
+
+- **External tools are subprocesses behind gates** — argv lists, never shell; missing binaries must produce install guidance, not tracebacks; CI never gets real binaries ([V1_EXTERNAL_TOOL_RELEASE_GATES.md](../V1_EXTERNAL_TOOL_RELEASE_GATES.md)).
+- **Heavy Python deps are lazy** — torch/gsplat/SuGaR/laspy import inside functions; `pip install .[backend]` and backend import must always work without them, degrading per the state machine above.
+- **The splat PLY layout is a contract** — exact INRIA property order, channel-major `f_rest`, wxyz quaternions; the browser viewer, LAS colorization, and coverage gaps all parse it.
+- **Paths are `Path` objects; Python 3.10+; `from __future__ import annotations`; ruff E/F/I/UP/B at line length 100.**
+- Tests use inline fixtures only — real flight data never enters the repo (`.gitignore` enforces).
