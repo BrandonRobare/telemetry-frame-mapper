@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from unittest.mock import patch
 
 from backend.db.models import Reconstruction, SessionComparison
@@ -50,7 +50,7 @@ def test_create_comparison_starts_job(client):
         reconstruction_a_id=rec_a.id,
         reconstruction_b_id=rec_b.id,
         status="pending",
-        created_at=datetime.utcnow(),
+        created_at=datetime.now(timezone.utc),
     )
 
     with patch(

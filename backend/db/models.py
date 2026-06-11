@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import relationship
@@ -14,7 +14,7 @@ class Session(Base):
     name = Column(String, nullable=False)
     folder_path = Column(String)
     import_mode = Column(String, default="full")
-    imported_at = Column(DateTime, default=datetime.utcnow)
+    imported_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     photo_count = Column(Integer, default=0)
     usable_count = Column(Integer, default=0)
     notes = Column(Text)
@@ -89,7 +89,7 @@ class FlightLog(Base):
     filepath = Column(String)
     format = Column(String)
     point_count = Column(Integer, default=0)
-    uploaded_at = Column(DateTime, default=datetime.utcnow)
+    uploaded_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     session = relationship("Session", back_populates="flight_logs")
     points = relationship(
         "FlightLogPoint", back_populates="flight_log", cascade="all, delete-orphan"
@@ -114,7 +114,7 @@ class TargetArea(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String)
     geom_geojson = Column(Text)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     notes = Column(Text)
     coverage_runs = relationship(
         "CoverageRun", back_populates="target_area", cascade="all, delete-orphan"
@@ -134,7 +134,7 @@ class CoverageRun(Base):
     coverage_pct = Column(Float)
     gap_geojson = Column(Text)
     overlap_geojson = Column(Text)
-    run_at = Column(DateTime, default=datetime.utcnow)
+    run_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     target_area = relationship("TargetArea", back_populates="coverage_runs")
     mission_plans = relationship("MissionPlan", back_populates="coverage_run")
 
@@ -154,7 +154,7 @@ class MissionPlan(Base):
     lanes_geojson = Column(Text)
     kml_path = Column(String)
     gpx_path = Column(String)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     target_area = relationship("TargetArea", back_populates="mission_plans")
     coverage_run = relationship("CoverageRun", back_populates="mission_plans")
 
@@ -163,7 +163,7 @@ class SessionLogEntry(Base):
     __tablename__ = "session_log_entries"
     id = Column(Integer, primary_key=True, index=True)
     session_id = Column(Integer, ForeignKey("sessions.id"), nullable=True)
-    timestamp = Column(DateTime, default=datetime.utcnow)
+    timestamp = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     event_type = Column(String)
     coverage_pct = Column(Float)
     photo_count = Column(Integer)
@@ -200,7 +200,7 @@ class Reconstruction(Base):
     flythrough_error = Column(String)
     geo_transform = Column(Text)
     error_msg = Column(String)
-    started_at = Column(DateTime, default=datetime.utcnow)
+    started_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     completed_at = Column(DateTime)
     duration_s = Column(Float)
     training_metrics = Column(Text)       # JSON: [{iter, psnr, ssim}, ...]
@@ -232,7 +232,7 @@ class Annotation(Base):
     lon = Column(Float, nullable=False)
     alt_m = Column(Float, nullable=False)
     color = Column(String, default="#ff6b35")
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     reconstruction = relationship("Reconstruction", back_populates="annotations")
 
 
@@ -252,5 +252,5 @@ class SessionComparison(Base):
     status = Column(String, default="pending")
     diff_path = Column(String)
     error_msg = Column(String)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     completed_at = Column(DateTime)

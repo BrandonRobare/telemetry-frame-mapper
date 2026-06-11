@@ -69,7 +69,4 @@ The reconstruction's geo-transform couldn't be derived (UTM zone unknown) — ty
 
 ## General
 
-**Backend tests pass but the suite prints deprecation warnings about `datetime.utcnow()`.**
-Known, harmless, and tracked (checklist T8). Zero warnings expected after that task merges.
-
 **Anything else:** the Jobs tab log panel and the uvicorn console carry stage-specific errors; the API is self-documenting at `http://localhost:8000/docs`. File issues at the GitHub repo with the log excerpt and your OS/GPU details.
