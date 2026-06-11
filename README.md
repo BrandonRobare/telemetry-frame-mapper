@@ -174,7 +174,7 @@ Upload the geotagged folder to WebODM; it reads GPS EXIF tags on import.
 ## Tests
 
 ```bash
-pytest        # 216 tests (CLI + backend)
+pytest        # 204 tests (CLI + backend)
 ruff check .  # linter
 cd frontend && npm test -- --run   # frontend unit tests (vitest)
 ```
