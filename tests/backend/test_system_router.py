@@ -22,6 +22,32 @@ def test_system_resources_returns_fields(client):
     assert "vram_used_gb" in data
 
 
+def test_system_resources_reports_tools_unavailable(client):
+    with (
+        patch("backend.routers.system.shutil.which", return_value=None),
+        patch("backend.routers.system.importlib.util.find_spec", return_value=None),
+    ):
+        resp = client.get("/system/resources")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["colmap_available"] is False
+    assert body["gsplat_available"] is False
+
+
+def test_system_resources_reports_tools_available(client):
+    with (
+        patch("backend.routers.system.shutil.which", return_value="C:/colmap/bin/colmap.exe"),
+        patch("backend.routers.system.importlib.util.find_spec", return_value=object()),
+    ):
+        resp = client.get("/system/resources")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["colmap_available"] is True
+    assert body["gsplat_available"] is True
+
+
 def test_system_resources_gpu_null_without_nvidia(client):
     with patch("backend.routers.system.psutil") as mock_psutil:
         mock_psutil.cpu_percent.return_value = 10.0
