@@ -767,7 +767,7 @@ function SplatCanvas({
 
     async function initViewer() {
       try {
-        const { Viewer } = await import('@mkkellogg/gaussian-splats-3d')
+        const { Viewer, SceneFormat } = await import('@mkkellogg/gaussian-splats-3d')
         if (cancelled || !containerRef.current) return
 
         const viewer = new Viewer({
@@ -779,7 +779,7 @@ function SplatCanvas({
         viewerRef.current = viewer
 
         const splatUrl = `${BASE_URL}/reconstruction/${reconstructionId}/splat?lod=preview`
-        await viewer.addSplatScene(splatUrl, { streamView: true })
+        await viewer.addSplatScene(splatUrl, { streamView: true, format: SceneFormat.Ply })
         if (!cancelled) {
           setLoading(false)
           setViewerReady(true)
