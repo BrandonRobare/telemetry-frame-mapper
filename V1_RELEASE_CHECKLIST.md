@@ -118,7 +118,7 @@ def ply_property_names(sh_degree: int) -> list[str]
 
 ---
 
-### T3 — [ ] New module `backend/services/splat_trainer.py`: real gaussian-splat training
+### T3 — [x] New module `backend/services/splat_trainer.py`: real gaussian-splat training
 
 **Goal:** Replace the phantom `gsplat.train` API with a real training loop built on `gsplat.rasterization` so reconstructions actually produce a splat. **This is the 1.0 headline feature** — without it the product never produces a gaussian splat (see audit finding F11-bis in [docs/release-audit-v1.md](docs/release-audit-v1.md)).
 
@@ -205,7 +205,7 @@ def render_flythrough(splat_path: Path, output_path: Path, keyframes: list[dict]
 
 ---
 
-### T4 — [ ] Wire the trainer into `backend/services/reconstruction.py`
+### T4 — [x] Wire the trainer into `backend/services/reconstruction.py`
 
 **Goal:** Replace every phantom-gsplat call site with the real implementations from T1–T3, preserving the graceful-degradation contracts.
 

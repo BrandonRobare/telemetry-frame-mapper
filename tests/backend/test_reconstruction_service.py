@@ -332,7 +332,7 @@ def test_filter_images_all_outside_returns_empty():
 # Thumbnail generation tests
 # ---------------------------------------------------------------------------
 
-def test_generate_thumbnail_calls_gsplat_renderer(tmp_path):
+def test_generate_thumbnail_delegates_to_trainer(tmp_path):
     from unittest.mock import MagicMock, patch
 
     from backend.services.reconstruction import _generate_thumbnail
@@ -341,11 +341,11 @@ def test_generate_thumbnail_calls_gsplat_renderer(tmp_path):
     splat.write_bytes(b"ply data")
     out = tmp_path / "thumb.jpg"
 
-    mock_render = MagicMock()
-    with patch.dict("sys.modules", {"gsplat": MagicMock(render_nadir=mock_render)}):
+    mock_render = MagicMock(return_value=out)
+    with patch("backend.services.reconstruction.splat_trainer.render_thumbnail", mock_render):
         result = _generate_thumbnail(splat, out)
 
-    mock_render.assert_called_once_with(str(splat), str(out), width=512, height=512)
+    mock_render.assert_called_once_with(splat, out)
     assert result == out
 
 
@@ -358,24 +358,23 @@ def test_generate_thumbnail_creates_parent_dir(tmp_path):
     splat.write_bytes(b"ply data")
     out = tmp_path / "nested" / "dir" / "thumb.jpg"
 
-    mock_render = MagicMock()
-    with patch.dict("sys.modules", {"gsplat": MagicMock(render_nadir=mock_render)}):
+    mock_render = MagicMock(return_value=out)
+    with patch("backend.services.reconstruction.splat_trainer.render_thumbnail", mock_render):
         _generate_thumbnail(splat, out)
 
     assert out.parent.is_dir()
 
 
-def test_generate_thumbnail_no_gsplat_is_silent(tmp_path):
-    from unittest.mock import patch
-
+def test_generate_thumbnail_no_gpu_stack_is_silent(tmp_path):
+    # No patching: the test environment has no torch/gsplat, so the real
+    # trainer render_thumbnail must degrade to None without raising.
     from backend.services.reconstruction import _generate_thumbnail
 
     splat = tmp_path / "splat.ply"
     splat.write_bytes(b"ply data")
     out = tmp_path / "thumb.jpg"
 
-    with patch.dict("sys.modules", {"gsplat": None}):
-        result = _generate_thumbnail(splat, out)
+    result = _generate_thumbnail(splat, out)
 
     assert result is None
 
@@ -435,6 +434,159 @@ def test_run_pipeline_calls_generate_thumbnail(setup_test_db):
         rec_check = db.query(ReconModel).filter(ReconModel.session_id == s.id).first()
         if rec_check:
             assert rec_check.thumb_path is None
+
+
+# ---------------------------------------------------------------------------
+# Pipeline training-branch tests (T4 wiring contracts)
+# ---------------------------------------------------------------------------
+
+def _pipeline_fixture(db, tmp):
+    """Create a session + usable image + reconstruction row for pipeline tests."""
+    from backend.db.models import Image as ImageModel
+
+    s = _make_session(db)
+    img = ImageModel(session_id=s.id, filename="f.jpg", filepath="/tmp/f.jpg", usable=True,
+                     latitude=35.0, longitude=-80.0, altitude_m=100.0)
+    db.add(img)
+    db.commit()
+    db.refresh(img)
+    rec = Reconstruction(session_id=s.id, preset="quick", status="pending", frames_used=1)
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+    colmap_dir = Path(tmp) / "colmap"
+    colmap_dir.mkdir()
+    return rec, img, colmap_dir
+
+
+def _run_pipeline_with_gsplat(db, tmp, rec, img, colmap_dir, gsplat_mock):
+    """Run _run_pipeline with COLMAP mocked out and a given _run_gsplat stand-in."""
+    import threading
+    from unittest.mock import MagicMock, patch
+
+    from backend.services.reconstruction import _run_pipeline
+    from tests.conftest import TestSessionLocal
+
+    with patch("backend.services.reconstruction._write_colmap_workspace", MagicMock()), \
+         patch("backend.services.reconstruction._run_colmap", MagicMock()), \
+         patch("backend.services.reconstruction._run_gsplat", gsplat_mock), \
+         patch("backend.services.reconstruction.SessionLocal", TestSessionLocal), \
+         patch("backend.services.reconstruction.get_config") as mock_cfg:
+        mock_cfg.return_value.data_dir = tmp
+        mock_cfg.return_value.exports_dir = tmp
+        mock_cfg.return_value.processed_dir = tmp
+        _run_pipeline(rec.id, "quick", colmap_dir, [img.id], threading.Event())
+    db.refresh(rec)
+
+
+def test_run_pipeline_gsplat_missing_completes_colmap_only(setup_test_db):
+    from backend.db.database import get_db
+    from backend.main import app
+
+    db = next(app.dependency_overrides[get_db]())
+    with tempfile.TemporaryDirectory() as tmp:
+        rec, img, colmap_dir = _pipeline_fixture(db, tmp)
+        guidance = MagicMock(side_effect=RuntimeError(
+            "Gaussian-splat training dependencies (torch + gsplat) are not installed — "
+            "see docs/SETUP.md for the GPU install. "
+            "The reconstruction will complete with COLMAP sparse cloud only."
+        ))
+        _run_pipeline_with_gsplat(db, tmp, rec, img, colmap_dir, guidance)
+
+    assert rec.status == "complete"
+    assert rec.step == "colmap_only"
+    assert rec.progress_pct == 100.0
+
+
+def test_run_pipeline_cancel_during_training_marks_failed(setup_test_db):
+    from backend.db.database import get_db
+    from backend.main import app
+    from backend.services.splat_trainer import ReconstructionCancelled
+
+    db = next(app.dependency_overrides[get_db]())
+    with tempfile.TemporaryDirectory() as tmp:
+        rec, img, colmap_dir = _pipeline_fixture(db, tmp)
+        cancelled = MagicMock(side_effect=ReconstructionCancelled("Cancelled by user"))
+        _run_pipeline_with_gsplat(db, tmp, rec, img, colmap_dir, cancelled)
+
+    assert rec.status == "failed"
+    assert rec.error_msg == "Cancelled by user"
+    assert rec.step != "colmap_only"
+
+
+def test_run_pipeline_oom_maps_to_preset_hint(setup_test_db):
+    from backend.db.database import get_db
+    from backend.main import app
+
+    db = next(app.dependency_overrides[get_db]())
+    with tempfile.TemporaryDirectory() as tmp:
+        rec, img, colmap_dir = _pipeline_fixture(db, tmp)
+        oom = MagicMock(side_effect=RuntimeError("CUDA out of memory: tried to allocate 2 GiB"))
+        _run_pipeline_with_gsplat(db, tmp, rec, img, colmap_dir, oom)
+
+    assert rec.status == "failed"
+    assert "switch to 'quick' preset" in rec.error_msg
+
+
+def test_run_pipeline_trainer_result_persisted_and_lod_generated(setup_test_db):
+    """Mocked-trainer orchestration: a real PLY flows through the real _generate_lod."""
+    import threading
+    from unittest.mock import MagicMock, patch
+
+    import numpy as np
+
+    from backend.db.database import get_db
+    from backend.main import app
+    from backend.services import ply_io
+    from backend.services.reconstruction import _run_pipeline
+    from tests.conftest import TestSessionLocal
+
+    db = next(app.dependency_overrides[get_db]())
+    metrics = [
+        {"iter": 250, "psnr": 21.0, "ssim": 0.80},
+        {"iter": 1000, "psnr": 25.5, "ssim": 0.91},
+    ]
+
+    def fake_train(colmap_dir, output_path, config, progress_cb, cancel):
+        assert config.iterations == 1000  # quick preset flowed through from_preset
+        cloud = ply_io.GaussianCloud(
+            means=np.arange(12, dtype=np.float32).reshape(4, 3),
+            sh0=np.zeros((4, 3), dtype=np.float32),
+            shN=np.zeros((4, 0, 3), dtype=np.float32),
+            opacities=np.array([0.4, -0.2, 1.3, 0.0], dtype=np.float32),
+            scales=np.zeros((4, 3), dtype=np.float32),
+            quats=np.tile(np.array([1, 0, 0, 0], dtype=np.float32), (4, 1)),
+        )
+        ply_io.write_3dgs_ply(output_path, cloud)
+        return {"gaussian_count": 4, "psnr": 25.5, "ssim": 0.91, "training_metrics": metrics}
+
+    with tempfile.TemporaryDirectory() as tmp:
+        rec, img, colmap_dir = _pipeline_fixture(db, tmp)
+        with patch("backend.services.reconstruction._write_colmap_workspace", MagicMock()), \
+             patch("backend.services.reconstruction._run_colmap", MagicMock()), \
+             patch("backend.services.splat_trainer.train_splats", fake_train), \
+             patch("backend.services.reconstruction.SessionLocal", TestSessionLocal), \
+             patch("backend.services.reconstruction.get_config") as mock_cfg:
+            mock_cfg.return_value.data_dir = tmp
+            mock_cfg.return_value.exports_dir = tmp
+            mock_cfg.return_value.processed_dir = tmp
+            _run_pipeline(rec.id, "quick", colmap_dir, [img.id], threading.Event())
+
+        db.refresh(rec)
+        assert rec.status == "complete"
+        assert rec.step == "done"
+        assert rec.gaussian_count == 4
+        assert rec.psnr == 25.5
+        assert rec.ssim == 0.91
+        assert json.loads(rec.training_metrics) == metrics
+
+        # The real _generate_lod ran ply_io.prune_by_opacity on the real PLY.
+        splat_path = Path(tmp) / str(rec.id) / "splat.ply"
+        assert splat_path.exists()
+        preview = ply_io.read_3dgs_ply(Path(rec.splat_preview_path))
+        medium = ply_io.read_3dgs_ply(Path(rec.splat_medium_path))
+        assert preview.means.shape[0] == 1  # max(1, int(4 * 0.10))
+        assert medium.means.shape[0] == 2  # int(4 * 0.50)
 
 
 # ---------------------------------------------------------------------------

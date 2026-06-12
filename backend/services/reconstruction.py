@@ -22,6 +22,8 @@ from backend.db.models import (
     SessionComparison,
     SessionFrameSelection,
 )
+from backend.services import ply_io, splat_trainer
+from backend.services.splat_trainer import ReconstructionCancelled, TrainerConfig
 
 # Maps reconstruction_id → cancel Event
 _cancel_events: dict[int, threading.Event] = {}
@@ -222,6 +224,8 @@ _CHECKPOINT_RE = re.compile(
 
 
 def _parse_checkpoint_metrics(output: str) -> list[dict]:
+    # Retained for log-replay compatibility: the in-process trainer (T3) returns
+    # metrics directly, but tests and historical training logs still use this format.
     return [
         {"iter": int(m.group(1)), "psnr": float(m.group(2)), "ssim": float(m.group(3))}
         for m in _CHECKPOINT_RE.finditer(output)
@@ -344,59 +348,29 @@ def _filter_images_to_target_area(images: list, geom_geojson: str) -> list:
 # ---------------------------------------------------------------------------
 
 def _run_gsplat(
-    colmap_dir: Path, output_path: Path, iterations: int, progress_cb, cancel: threading.Event
+    colmap_dir: Path, output_path: Path, preset_cfg: dict, progress_cb, cancel: threading.Event
 ) -> dict:
     """Train a Gaussian splat. Returns {gaussian_count, psnr, ssim, training_metrics}."""
-    import contextlib
-    import io
-
-    try:
-        from gsplat import train  # type: ignore[import]
-    except (ImportError, AttributeError) as exc:
-        raise RuntimeError(
-            "gsplat.train is not available in the installed gsplat package. "
-            "The reconstruction will complete with COLMAP sparse cloud only."
-        ) from exc
-
-    stdout_buf = io.StringIO()
-    with contextlib.redirect_stdout(stdout_buf):
-        result = train(
-            colmap_dir=str(colmap_dir),
-            output_path=str(output_path),
-            iterations=iterations,
-            progress_cb=progress_cb,
-            cancel=cancel,
-        )
-
-    metrics = _parse_checkpoint_metrics(stdout_buf.getvalue())
-    result["training_metrics"] = metrics if metrics else None
-    return result
+    config = TrainerConfig.from_preset(preset_cfg)
+    return splat_trainer.train_splats(colmap_dir, output_path, config, progress_cb, cancel)
 
 
 def _generate_lod(splat_path: Path) -> tuple[Path, Path]:
-    """Return (preview_path, medium_path) — 10% and 50% pruned variants."""
+    """Return (preview_path, medium_path) — 10% and 50% opacity-pruned variants."""
     preview = splat_path.with_name(splat_path.stem + "_preview.ply")
     medium = splat_path.with_name(splat_path.stem + "_medium.ply")
-    try:
-        from gsplat import prune_by_opacity  # type: ignore[import]
-        prune_by_opacity(str(splat_path), str(preview), keep_ratio=0.10)
-        prune_by_opacity(str(splat_path), str(medium), keep_ratio=0.50)
-    except ImportError:
-        pass
+    ply_io.prune_by_opacity(splat_path, preview, keep_ratio=0.10)
+    ply_io.prune_by_opacity(splat_path, medium, keep_ratio=0.50)
     return preview, medium
 
 
 def _generate_thumbnail(splat_path: Path, out_path: Path) -> Path | None:
-    """Render a 512×512 nadir-view JPEG thumbnail using gsplat's offline renderer.
-    Returns out_path on success, None if gsplat is unavailable."""
-    try:
-        import gsplat  # type: ignore[import]
-        render_nadir = gsplat.render_nadir
-    except (ImportError, AttributeError):
-        return None
+    """Render a 512×512 JPEG thumbnail of the splat.
+
+    Best-effort: returns out_path on success, None when the GPU stack is
+    unavailable or rendering fails (the trainer never raises here)."""
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    render_nadir(str(splat_path), str(out_path), width=512, height=512)
-    return out_path
+    return splat_trainer.render_thumbnail(splat_path, out_path)
 
 
 def _read_colmap_points3d(points3d_txt: Path) -> tuple:
@@ -830,26 +804,9 @@ def _run_video_renderer(
     height: int = 1080,
 ) -> Path:
     """Render an offline flythrough video when browser recording is unavailable."""
-    try:
-        import gsplat  # type: ignore[import]
-    except ImportError as exc:
-        raise RuntimeError(
-            "gsplat video rendering is not installed. Use browser recording or install "
-            "optional reconstruction dependencies."
-        ) from exc
-
-    render_video = getattr(gsplat, "render_video", None)
-    if render_video is None:
-        raise RuntimeError("Installed gsplat package does not expose render_video")
-
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    render_video(
-        splat_path=str(splat_path),
-        output_path=str(output_path),
-        keyframes=keyframes,
-        fps=fps,
-        width=width,
-        height=height,
+    splat_trainer.render_flythrough(
+        splat_path, output_path, keyframes, fps=fps, width=width, height=height
     )
     if not output_path.exists():
         raise RuntimeError("Video renderer did not write an output file")
@@ -1309,9 +1266,7 @@ def _run_pipeline(
         splat_path.parent.mkdir(parents=True, exist_ok=True)
 
         try:
-            result = _run_gsplat(
-                colmap_dir, splat_path, preset_cfg["iterations"], progress_cb, cancel
-            )
+            result = _run_gsplat(colmap_dir, splat_path, preset_cfg, progress_cb, cancel)
             training_metrics = result.get("training_metrics")
             _log_rec(reconstruction_id, "Gaussian Splatting: complete")
             _log_rec(reconstruction_id, "LOD generation: starting")
@@ -1340,6 +1295,15 @@ def _run_pipeline(
                 completed_at=completed_at,
             )
             _log_rec(reconstruction_id, "Pipeline complete")
+        except ReconstructionCancelled:
+            # Must precede the RuntimeError branch (it is a RuntimeError subclass):
+            # a mid-training cancel is a failure, not a colmap_only completion.
+            _update_rec(
+                db, reconstruction_id,
+                status="failed",
+                error_msg="Cancelled by user",
+                completed_at=datetime.now(timezone.utc),
+            )
         except RuntimeError as exc:
             if "CUDA out of memory" in str(exc):
                 _update_rec(
