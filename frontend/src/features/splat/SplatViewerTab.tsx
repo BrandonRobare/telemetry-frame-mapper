@@ -776,6 +776,10 @@ function SplatCanvas({
           initialCameraPosition: [0, -1, -3],
           initialCameraLookAt: [0, 0, 0],
           rootElement: containerRef.current,
+          // SharedArrayBuffer needs cross-origin isolation (COOP/COEP headers) that
+          // neither the Vite dev server nor typical static hosting provides — with
+          // the default, addSplatScene never resolves and the viewer hangs on load.
+          sharedMemoryForWorkers: false,
         })
         viewerRef.current = viewer
 
