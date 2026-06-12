@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { del, get } from '../../shared/api/client'
 import type { StorageStats, StorageFileItem, StorageFileList } from '../../types/api'
+import { formatBytes } from './formatBytes'
 
 function useStorageSummary() {
   return useQuery<StorageStats>({
@@ -10,14 +11,6 @@ function useStorageSummary() {
     refetchInterval: 60_000,
     staleTime: 30_000,
   })
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes === 0) return '0 B'
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(1)} KB`
-  if (bytes < 1024 ** 3) return `${(bytes / 1024 ** 2).toFixed(1)} MB`
-  return `${(bytes / 1024 ** 3).toFixed(2)} GB`
 }
 
 const DIRECTORIES = ['imports', 'processed', 'exports', 'data'] as const
