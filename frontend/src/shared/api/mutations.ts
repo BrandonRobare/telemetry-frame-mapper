@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState, useEffect } from 'react'
 import { get, post, patch } from './client'
+import { importProgressRefetchInterval } from './importProgress'
 import { useToast } from '../hooks/useToast'
 import type { Session, Image } from '../../types/api'
 
@@ -70,10 +71,7 @@ export function useImportSession() {
       `/sessions/${importingSessionId}/progress`
     ),
     enabled: importingSessionId !== null,
-    refetchInterval: (query) => {
-      const status = query.state.data?.status
-      return (status === 'done' || status === 'error') ? false : 1000
-    },
+    refetchInterval: (query) => importProgressRefetchInterval(query.state.data?.status),
   })
 
   useEffect(() => {
