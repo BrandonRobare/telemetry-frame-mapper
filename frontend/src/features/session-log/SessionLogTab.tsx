@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { get } from '../../shared/api/client'
 import { useMapStore } from '../../shared/stores/mapStore'
+import { formatLogTimestamp } from './formatLogTimestamp'
 
 interface SessionLogEntry {
   id: number
@@ -117,7 +118,7 @@ export default function SessionLogTab() {
               style={{ borderBottom: '1px solid var(--border)' }}
             >
               <td style={{ padding: '8px 12px', whiteSpace: 'nowrap', color: 'var(--text-muted)' }}>
-                {entry.timestamp ? new Date(entry.timestamp).toLocaleString() : '—'}
+                {formatLogTimestamp(entry.timestamp)}
               </td>
               <td style={{ padding: '8px 12px' }}>
                 <EventBadge type={entry.event_type} />

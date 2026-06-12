@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { useImportSession } from '../../shared/api/mutations'
 import { useMapStore } from '../../shared/stores/mapStore'
 import { Button } from '../../shared/components/Button'
+import { validateImportPath } from './validateImportPath'
 
 const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
 
@@ -45,6 +46,7 @@ interface ImportModalProps {
 export default function ImportModal({ open, onClose }: ImportModalProps) {
   const [name, setName] = useState('')
   const [folderPath, setFolderPath] = useState('')
+  const [pathError, setPathError] = useState<string | null>(null)
   const { mutate, isPending, isImporting, progress, data: importedSession, isError, error, reset } = useImportSession()
   const { setSession } = useMapStore()
   const nameRef = useRef<HTMLInputElement>(null)
@@ -81,6 +83,7 @@ export default function ImportModal({ open, onClose }: ImportModalProps) {
     if (isImporting || isPending) return
     setName('')
     setFolderPath('')
+    setPathError(null)
     reset()
     onClose()
   }
@@ -88,6 +91,9 @@ export default function ImportModal({ open, onClose }: ImportModalProps) {
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (!name.trim() || !folderPath.trim()) return
+    const pathProblem = validateImportPath(folderPath)
+    setPathError(pathProblem)
+    if (pathProblem) return
     mutate({ name: name.trim(), folder_path: folderPath.trim() })
   }
 
@@ -236,7 +242,7 @@ export default function ImportModal({ open, onClose }: ImportModalProps) {
               id="import-folder"
               type="text"
               value={folderPath}
-              onChange={(e) => setFolderPath(e.target.value)}
+              onChange={(e) => { setFolderPath(e.target.value); setPathError(null) }}
               placeholder="e.g. 2026-05-02-field-a"
               disabled={isBusy}
               style={{
@@ -255,6 +261,11 @@ export default function ImportModal({ open, onClose }: ImportModalProps) {
             <p className="text-xs" style={{ color: 'var(--text-muted)', marginTop: 5 }}>
               Relative path inside the server's imports/ folder — copy your JPEG files there first.
             </p>
+            {pathError && (
+              <p className="text-xs" style={{ color: 'var(--danger, #f85149)', marginTop: 4 }}>
+                {pathError}
+              </p>
+            )}
           </div>
 
           {/* Progress section */}
