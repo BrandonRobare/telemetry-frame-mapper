@@ -12,6 +12,7 @@ import type {
   FlythroughStatus,
 } from '../../types/api'
 import { worldToGps, useRayCast } from './useViewerCoords'
+import { smoothstep } from './smoothstep'
 import MiniLeafletPane from './MiniLeafletPane'
 
 const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
@@ -691,7 +692,7 @@ function SplatCanvas({
         if (startTime === null) startTime = now
         const durationMs = Math.max(250, next.duration_s * 1000)
         const t = Math.min(1, (now - startTime) / durationMs)
-        const ease = t * t * (3 - 2 * t)
+        const ease = smoothstep(t)
         const pos = current.position.map((value, i) =>
           value + (next.position[i] - value) * ease
         )
