@@ -12,7 +12,8 @@ export function Panel({ children, className = '' }: PanelProps) {
       style={{
         background: 'var(--surface)',
         border: '1px solid var(--border)',
-        borderRadius: '8px',
+        borderRadius: 'var(--radius-lg)',
+        transition: 'border-color var(--dur) var(--ease)',
       }}
     >
       {children}

@@ -38,7 +38,9 @@ function applyTheme(theme: 'dark' | 'light') {
   localStorage.setItem('theme', theme)
 }
 
-const savedTheme = (localStorage.getItem('theme') as 'dark' | 'light' | null) ?? 'dark'
+// Light-only for now — the warm-dark theme is a later follow-up, so we ignore any
+// previously-saved 'dark' preference and always start in the new warm-light theme.
+const savedTheme: 'dark' | 'light' = 'light'
 applyTheme(savedTheme)
 
 export const useMapStore = create<MapStore>((set) => ({

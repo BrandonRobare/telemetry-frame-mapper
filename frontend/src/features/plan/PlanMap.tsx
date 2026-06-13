@@ -20,7 +20,7 @@ function DrawControl({ onPolygonDrawn }: DrawControlProps) {
     const drawControl = new (L.Control as unknown as { Draw: new (opts: unknown) => L.Control }).Draw({
       edit: { featureGroup: drawnItems },
       draw: {
-        polygon: { shapeOptions: { color: '#58a6ff', fillOpacity: 0.15 } },
+        polygon: { shapeOptions: { color: '#B87C4C', fillOpacity: 0.15 } },
         polyline: false,
         rectangle: false,
         circle: false,

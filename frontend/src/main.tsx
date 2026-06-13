@@ -1,5 +1,6 @@
 import { createRoot } from 'react-dom/client'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { MotionConfig } from 'framer-motion'
 import './index.css'
 import App from './App.tsx'
 import { ErrorBoundary } from './ErrorBoundary.tsx'
@@ -16,7 +17,9 @@ const queryClient = new QueryClient({
 createRoot(document.getElementById('root')!).render(
   <ErrorBoundary>
     <QueryClientProvider client={queryClient}>
-      <App />
+      <MotionConfig reducedMotion="user">
+        <App />
+      </MotionConfig>
     </QueryClientProvider>
   </ErrorBoundary>,
 )

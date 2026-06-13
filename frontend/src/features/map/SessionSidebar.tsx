@@ -1,26 +1,61 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { motion } from 'framer-motion'
 import type { Session, CoverageResult } from '../../types/api'
 import { useMapStore } from '../../shared/stores/mapStore'
 import { get } from '../../shared/api/client'
+import { Skeleton } from '../../shared/components/Skeleton'
 
 interface Props {
   session: Session | undefined
   coverage: CoverageResult | null | undefined
   frameCount: number
+  isLoading?: boolean
 }
 
 function StatCard({ label, value, color }: { label: string; value: React.ReactNode; color?: string }) {
   return (
-    <div className="rounded p-2" style={{ background: 'var(--bg)', border: '1px solid var(--border)' }}>
+    <motion.div
+      whileHover={{ y: -2 }}
+      transition={{ duration: 0.15, ease: [0.22, 1, 0.36, 1] }}
+      className="p-2"
+      style={{
+        background: 'var(--surface-2)',
+        border: '1px solid var(--border)',
+        borderRadius: 'var(--radius-md)',
+      }}
+    >
       <div className="text-xs" style={{ color: 'var(--text-muted)' }}>{label}</div>
-      <div className="text-base font-semibold mt-0.5" style={{ color: color ?? 'var(--accent)' }}>
+      <div className="text-base font-semibold mt-0.5" style={{ color: color ?? 'var(--accent-strong)' }}>
         {value}
       </div>
-    </div>
+    </motion.div>
   )
 }
 
-export default function SessionSidebar({ session, coverage, frameCount }: Props) {
+function SidebarSkeleton() {
+  return (
+    <aside
+      className="shrink-0 flex flex-col gap-3"
+      style={{ width: 200, background: 'var(--surface)', borderLeft: '1px solid var(--border)', padding: 12 }}
+    >
+      <Skeleton width="60%" height={10} />
+      <Skeleton width="80%" height={14} />
+      <div className="grid grid-cols-2 gap-1.5" style={{ marginTop: 4 }}>
+        {Array.from({ length: 4 }).map((_, i) => (
+          <div key={i} style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', padding: 8 }}>
+            <Skeleton width="70%" height={8} />
+            <div style={{ height: 6 }} />
+            <Skeleton width="50%" height={12} />
+          </div>
+        ))}
+      </div>
+      <Skeleton width="100%" height={6} radius="999px" />
+      <Skeleton width="100%" height={32} radius="var(--radius-sm)" style={{ marginTop: 'auto' }} />
+    </aside>
+  )
+}
+
+export default function SessionSidebar({ session, coverage, frameCount, isLoading }: Props) {
   const { sidebarOpen, toggleSidebar, selectedSessionId } = useMapStore()
   const queryClient = useQueryClient()
 
@@ -40,6 +75,10 @@ export default function SessionSidebar({ session, coverage, frameCount }: Props)
         ‹
       </button>
     )
+  }
+
+  if (isLoading && !session) {
+    return <SidebarSkeleton />
   }
 
   if (!session) {
@@ -94,10 +133,10 @@ export default function SessionSidebar({ session, coverage, frameCount }: Props)
             <span style={{ color: 'var(--text-muted)' }}>Coverage</span>
             <span style={{ color: 'var(--success)' }}>{covPct.toFixed(0)}%</span>
           </div>
-          <div className="rounded-full h-1" style={{ background: 'var(--border)' }}>
+          <div className="rounded-full h-1" style={{ background: 'var(--surface-2)' }}>
             <div
               className="h-full rounded-full transition-all duration-700"
-              style={{ width: `${covPct}%`, background: 'linear-gradient(90deg, var(--success), #22c55e)' }}
+              style={{ width: `${covPct}%`, background: 'var(--sage)' }}
             />
           </div>
         </div>
@@ -124,11 +163,11 @@ export default function SessionSidebar({ session, coverage, frameCount }: Props)
       <button
         onClick={() => coverageMutation.mutate()}
         disabled={coverageMutation.isPending}
-        className="m-3 rounded text-sm cursor-pointer border-none"
+        className="m-3 rounded text-sm cursor-pointer border-none transition-all duration-150 active:scale-[0.98]"
         style={{
           padding: '8px',
-          background: coverageMutation.isPending ? 'var(--border)' : 'var(--accent)',
-          color: '#fff',
+          background: coverageMutation.isPending ? 'var(--border-strong)' : 'var(--accent-strong)',
+          color: '#FFFDF7',
           fontFamily: 'inherit',
           opacity: coverageMutation.isPending ? 0.7 : 1,
         }}

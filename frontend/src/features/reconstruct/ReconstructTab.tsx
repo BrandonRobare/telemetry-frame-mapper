@@ -52,15 +52,15 @@ function formatDuration(start: string, end: string | null): string {
 }
 
 const STATUS_BADGE: Record<string, { bg: string; text: string; label: string }> = {
-  pending:        { bg: '#1e3a5f', text: '#93c5fd', label: 'Pending' },
-  running_colmap: { bg: '#78350f', text: '#fcd34d', label: 'COLMAP' },
-  running_gsplat: { bg: '#4c1d95', text: '#c4b5fd', label: 'Gaussian' },
-  complete:       { bg: '#14532d', text: '#86efac', label: 'Complete' },
-  failed:         { bg: '#450a0a', text: '#fca5a5', label: 'Failed' },
+  pending:        { bg: 'var(--tan-soft)',     text: 'var(--tan-text)',      label: 'Pending' },
+  running_colmap: { bg: 'var(--warning-soft)', text: 'var(--warning)',       label: 'COLMAP' },
+  running_gsplat: { bg: 'var(--accent-soft)',  text: 'var(--accent-strong)', label: 'Gaussian' },
+  complete:       { bg: 'var(--success-soft)', text: 'var(--success)',       label: 'Complete' },
+  failed:         { bg: 'var(--danger-soft)',  text: 'var(--danger)',        label: 'Failed' },
 }
 
 function StatusBadge({ status }: { status: string }) {
-  const s = STATUS_BADGE[status] ?? { bg: 'var(--surface)', text: 'var(--text)', label: status }
+  const s = STATUS_BADGE[status] ?? { bg: 'var(--surface-2)', text: 'var(--text)', label: status }
   return (
     <span
       className="text-xs rounded"
@@ -137,7 +137,7 @@ export default function ReconstructTab() {
           </h2>
 
           {selectedCount > 0 && (
-            <p className="text-xs" style={{ color: '#c4b5fd', margin: 0 }}>
+            <p className="text-xs" style={{ color: 'var(--accent-strong)', margin: 0 }}>
               {selectedCount} frames manually selected (Review tab). Only these frames will be used.
             </p>
           )}
@@ -170,8 +170,8 @@ export default function ReconstructTab() {
               value={targetAreaId ?? ''}
               onChange={(e) => setTargetAreaId(e.target.value ? Number(e.target.value) : null)}
               style={{
-                background: 'var(--bg)', border: '1px solid var(--border)',
-                borderRadius: 4, padding: '5px 8px', color: 'var(--text)',
+                background: 'var(--surface-2)', border: '1px solid var(--border)',
+                borderRadius: 'var(--radius-sm)', padding: '5px 8px', color: 'var(--text)',
                 fontSize: 13, fontFamily: 'inherit', maxWidth: 280,
               }}
             >
@@ -200,7 +200,7 @@ export default function ReconstructTab() {
         {activeJob && (
           <section
             className="rounded-lg p-5 flex flex-col gap-3"
-            style={{ background: 'var(--surface)', border: '1px solid rgba(167,139,250,0.4)' }}
+            style={{ background: 'var(--surface)', border: '1px solid var(--accent)' }}
           >
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <h2 className="text-base font-semibold" style={{ color: 'var(--text)', margin: 0 }}>
@@ -226,11 +226,11 @@ export default function ReconstructTab() {
               </span>
             </div>
 
-            <div style={{ height: 6, borderRadius: 3, background: 'var(--border)', overflow: 'hidden' }}>
+            <div style={{ height: 6, borderRadius: 3, background: 'var(--surface-2)', overflow: 'hidden' }}>
               <div
                 style={{
                   height: '100%', borderRadius: 3,
-                  background: 'linear-gradient(90deg, #7c3aed, #a78bfa)',
+                  background: 'var(--accent)',
                   width: `${activeJob.progress_pct}%`,
                   transition: 'width 0.5s ease',
                 }}
@@ -260,8 +260,8 @@ export default function ReconstructTab() {
                   key={job.id}
                   style={{
                     display: 'flex', alignItems: 'center', gap: 10,
-                    background: 'var(--bg)', border: '1px solid var(--border)',
-                    borderRadius: 6, padding: '10px 12px',
+                    background: 'var(--surface-2)', border: '1px solid var(--border)',
+                    borderRadius: 'var(--radius-md)', padding: '10px 12px',
                   }}
                 >
                   <span className="text-xs" style={{ color: 'var(--text-muted)', minWidth: 28 }}>
@@ -281,10 +281,10 @@ export default function ReconstructTab() {
                       href={`${BASE_URL}/reconstruction/${job.id}/splat?lod=full`}
                       download={`splat_${job.id}.ply`}
                       style={{
-                        padding: '3px 10px', borderRadius: 4, fontSize: 12,
-                        background: 'rgba(88,166,255,0.1)',
-                        border: '1px solid rgba(88,166,255,0.3)',
-                        color: '#58a6ff', textDecoration: 'none', whiteSpace: 'nowrap',
+                        padding: '3px 10px', borderRadius: 'var(--radius-sm)', fontSize: 12,
+                        background: 'var(--accent-soft)',
+                        border: '1px solid var(--accent-soft)',
+                        color: 'var(--accent-strong)', textDecoration: 'none', whiteSpace: 'nowrap',
                       }}
                     >
                       ↓ Download .ply

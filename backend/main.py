@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import logging
 import os
+import shutil
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -30,6 +32,11 @@ from .routers import target_areas as target_areas_router
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
+    if shutil.which("colmap") is None:
+        logging.getLogger("backend").warning(
+            "COLMAP not found on PATH — reconstruction jobs will fail until it is installed "
+            "(see docs/INSTALL.md)"
+        )
     yield
 
 

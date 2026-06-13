@@ -45,27 +45,29 @@ function useComparisonDiff(comparisonId: number | null, ready: boolean) {
 
 function DiffOverlay({ cells }: { cells: ComparisonCell[] }) {
   const normalized = normalizeCellsForOverlay(cells)
+  // Diff dots use literal hex (SVG fill attribute won't resolve CSS vars), kept in
+  // sync with the warm tokens: --success (sage, new) and --danger-accent (brick, removed).
   return (
     <div
       style={{
         height: 360,
-        borderRadius: 6,
+        borderRadius: 'var(--radius-md)',
         border: '1px solid var(--border)',
-        background: '#05070a',
+        background: 'var(--surface-2)',
         position: 'relative',
         overflow: 'hidden',
       }}
     >
       <svg viewBox="0 0 100 100" preserveAspectRatio="none" style={{ width: '100%', height: '100%' }}>
-        <rect x="0" y="0" width="100" height="100" fill="#05070a" />
+        <rect x="0" y="0" width="100" height="100" fill="#F1E8D2" />
         {normalized.map((cell, index) => (
           <circle
             key={`${cell.type}-${index}-${cell.x}-${cell.y}-${cell.z}`}
             cx={cell.overlayX}
             cy={cell.overlayY}
             r={cell.type === 'new' ? 1.8 : 1.5}
-            fill={cell.type === 'new' ? '#22c55e' : '#ef4444'}
-            opacity="0.78"
+            fill={cell.type === 'new' ? '#4F6349' : '#B5503C'}
+            opacity="0.82"
           />
         ))}
       </svg>
@@ -223,7 +225,12 @@ export default function CompareTab() {
             </div>
             <div className="flex items-center gap-4 text-xs" style={{ color: 'var(--text-muted)' }}>
               <label className="flex items-center gap-1">
-                <input type="checkbox" checked={showNew} onChange={(event) => setShowNew(event.target.checked)} />
+                <input
+                  type="checkbox"
+                  checked={showNew}
+                  onChange={(event) => setShowNew(event.target.checked)}
+                  style={{ accentColor: 'var(--accent)' }}
+                />
                 New
               </label>
               <label className="flex items-center gap-1">
@@ -231,6 +238,7 @@ export default function CompareTab() {
                   type="checkbox"
                   checked={showRemoved}
                   onChange={(event) => setShowRemoved(event.target.checked)}
+                  style={{ accentColor: 'var(--accent)' }}
                 />
                 Removed
               </label>
@@ -238,7 +246,7 @@ export default function CompareTab() {
                 <a
                   href={`${BASE_URL}/comparisons/${comparison.id}/diff.geojson`}
                   download={`comparison_${comparison.id}.geojson`}
-                  style={{ color: '#58a6ff', textDecoration: 'none' }}
+                  style={{ color: 'var(--accent-strong)', textDecoration: 'none' }}
                 >
                   Export GeoJSON
                 </a>
@@ -261,9 +269,9 @@ export default function CompareTab() {
 }
 
 const selectStyle = {
-  background: 'var(--bg)',
+  background: 'var(--surface-2)',
   border: '1px solid var(--border)',
-  borderRadius: 4,
+  borderRadius: 'var(--radius-sm)',
   color: 'var(--text)',
   padding: '6px 8px',
   fontSize: 13,
