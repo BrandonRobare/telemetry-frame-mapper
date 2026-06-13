@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import importlib.util
+import shutil
+
 import psutil
 from fastapi import APIRouter
 
@@ -48,4 +51,7 @@ def get_resources():
         "gpu_pct": gpu_pct,
         "vram_used_gb": vram_used_gb,
         "vram_total_gb": vram_total_gb,
+        "colmap_available": shutil.which("colmap") is not None,
+        # Spec lookup only — importing gsplat can trigger a multi-minute CUDA JIT compile
+        "gsplat_available": importlib.util.find_spec("gsplat") is not None,
     }

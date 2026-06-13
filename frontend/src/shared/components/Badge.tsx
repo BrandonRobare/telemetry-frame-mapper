@@ -1,37 +1,28 @@
 import React from 'react';
 
-type BadgeColor = 'green' | 'amber' | 'red' | 'blue' | 'muted';
+type BadgeColor = 'sage' | 'amber' | 'red' | 'terracotta' | 'tan' | 'muted';
 
 interface BadgeProps {
   color: BadgeColor;
   children: React.ReactNode;
 }
 
-const colorVarMap: Record<BadgeColor, string> = {
-  green: 'var(--success)',
-  amber: 'var(--warning)',
-  red: 'var(--danger)',
-  blue: 'var(--accent)',
-  muted: 'var(--text-muted)',
-};
-
-// Fallback hex values for background at 15% opacity
-const colorBgMap: Record<BadgeColor, string> = {
-  green: 'rgba(34, 197, 94, 0.15)',
-  amber: 'rgba(251, 191, 36, 0.15)',
-  red: 'rgba(239, 68, 68, 0.15)',
-  blue: 'rgba(99, 102, 241, 0.15)',
-  muted: 'rgba(156, 163, 175, 0.15)',
+// Warm-light token pairs: readable text on a soft tint of the same family.
+const colorMap: Record<BadgeColor, { text: string; bg: string }> = {
+  sage:       { text: 'var(--success)', bg: 'var(--success-soft)' },
+  amber:      { text: 'var(--warning)', bg: 'var(--warning-soft)' },
+  red:        { text: 'var(--danger)',  bg: 'var(--danger-soft)' },
+  terracotta: { text: 'var(--accent-strong)', bg: 'var(--accent-soft)' },
+  tan:        { text: 'var(--tan-text)', bg: 'var(--tan-soft)' },
+  muted:      { text: 'var(--text-muted)', bg: 'var(--surface-2)' },
 };
 
 export function Badge({ color, children }: BadgeProps) {
+  const c = colorMap[color];
   return (
     <span
       className="rounded-full text-xs px-2 py-0.5 inline-flex font-medium"
-      style={{
-        color: colorVarMap[color],
-        background: colorBgMap[color],
-      }}
+      style={{ color: c.text, background: c.bg }}
     >
       {children}
     </span>

@@ -17,11 +17,12 @@
     "@turf/distance": "^7.3.5",
     "@types/leaflet-draw": "^1.0.13",
     "@types/proj4": "^2.19.0",
+    "framer-motion": "^12.40.0",
     "leaflet": "^1.9.4",
     "leaflet-draw": "^1.0.4",
     "proj4": "^2.20.8",
     "react": "^19.2.7",
-    "react-dom": "^19.2.6",
+    "react-dom": "^19.2.7",
     "react-leaflet": "^5.0.0",
     "zustand": "^5.0.13"
   },
