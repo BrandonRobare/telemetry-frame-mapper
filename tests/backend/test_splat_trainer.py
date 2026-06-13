@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import importlib
+import subprocess
 import sys
 import threading
 from pathlib import Path
@@ -23,12 +23,21 @@ _NO_GPU_STACK = {"torch": None, "gsplat": None}
 
 
 def test_module_imports_without_torch():
-    # Reloading under a blocked GPU stack proves the module top never imports it.
-    with patch.dict(sys.modules, _NO_GPU_STACK):
-        module = importlib.reload(importlib.import_module("backend.services.splat_trainer"))
-    for name in ("train_splats", "render_thumbnail", "render_flythrough", "TrainerConfig"):
-        assert hasattr(module, name)
-    assert issubclass(module.ReconstructionCancelled, RuntimeError)
+    # Clean-room subprocess: with the GPU stack blocked before anything else
+    # imports, the module must still import — proving its top level never pulls
+    # in torch/gsplat. (An in-process importlib.reload would re-create the
+    # module's classes and break `except ReconstructionCancelled` identity in
+    # reconstruction.py for every test that runs afterwards.)
+    code = (
+        "import sys; sys.modules['torch'] = None; sys.modules['gsplat'] = None; "
+        "import backend.services.splat_trainer as m; "
+        "assert all(hasattr(m, n) for n in ('train_splats', 'render_thumbnail', "
+        "'render_flythrough', 'TrainerConfig')); "
+        "assert issubclass(m.ReconstructionCancelled, RuntimeError)"
+    )
+    subprocess.run(
+        [sys.executable, "-c", code], check=True, cwd=Path(__file__).parents[2]
+    )
 
 
 def test_train_splats_without_torch_raises_colmap_only_guidance(tmp_path: Path):
