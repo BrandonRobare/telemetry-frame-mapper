@@ -9,33 +9,42 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from backend.services import splat_trainer
-from backend.services.splat_trainer import ReconstructionCancelled, TrainerConfig, smoothstep
+from backend.services.splat_trainer import TrainerConfig, smoothstep
 
 
 def _noop_progress(step: str, pct: float) -> None:
     pass
 
 
+# Setting a sys.modules entry to None makes `import <name>` raise ImportError, so
+# these tests simulate a torch-less environment deterministically — they must pass
+# both in CI (no torch installed) and on the GPU dev machine (torch installed).
+_NO_GPU_STACK = {"torch": None, "gsplat": None}
+
+
 def test_module_imports_without_torch():
-    module = importlib.import_module("backend.services.splat_trainer")
-    # Importing the trainer must never pull in the optional GPU stack.
-    assert "torch" not in sys.modules
-    assert "gsplat" not in sys.modules
+    # Reloading under a blocked GPU stack proves the module top never imports it.
+    with patch.dict(sys.modules, _NO_GPU_STACK):
+        module = importlib.reload(importlib.import_module("backend.services.splat_trainer"))
     for name in ("train_splats", "render_thumbnail", "render_flythrough", "TrainerConfig"):
         assert hasattr(module, name)
-    assert issubclass(ReconstructionCancelled, RuntimeError)
+    assert issubclass(module.ReconstructionCancelled, RuntimeError)
 
 
 def test_train_splats_without_torch_raises_colmap_only_guidance(tmp_path: Path):
     config = TrainerConfig.from_preset({"iterations": 1000})
-    with pytest.raises(RuntimeError, match="COLMAP sparse cloud only"):
+    with (
+        patch.dict(sys.modules, _NO_GPU_STACK),
+        pytest.raises(RuntimeError, match="COLMAP sparse cloud only"),
+    ):
         splat_trainer.train_splats(
             tmp_path, tmp_path / "splat.ply", config, _noop_progress, threading.Event()
         )
 
 
 def test_render_thumbnail_without_torch_returns_none(tmp_path: Path):
-    result = splat_trainer.render_thumbnail(tmp_path / "splat.ply", tmp_path / "thumb.jpg")
+    with patch.dict(sys.modules, _NO_GPU_STACK):
+        result = splat_trainer.render_thumbnail(tmp_path / "splat.ply", tmp_path / "thumb.jpg")
     assert result is None
 
 
@@ -44,9 +53,12 @@ def test_render_flythrough_without_torch_mentions_browser_recording(tmp_path: Pa
         {"position": [0.0, 0.0, 0.0], "target": [0.0, 0.0, 1.0], "duration_s": 1.0},
         {"position": [1.0, 0.0, 0.0], "target": [1.0, 0.0, 1.0], "duration_s": 1.0},
     ]
-    with pytest.raises(
-        RuntimeError,
-        match="Use browser recording or install optional reconstruction dependencies",
+    with (
+        patch.dict(sys.modules, _NO_GPU_STACK),
+        pytest.raises(
+            RuntimeError,
+            match="Use browser recording or install optional reconstruction dependencies",
+        ),
     ):
         splat_trainer.render_flythrough(
             tmp_path / "splat.ply", tmp_path / "out.mp4", keyframes,
