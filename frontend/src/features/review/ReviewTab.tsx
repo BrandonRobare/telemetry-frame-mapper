@@ -43,11 +43,11 @@ function nextFlag(current: Image['flag']): Image['flag'] {
 
 // ---- badge colour ----
 const FLAG_BADGE: Record<Image['flag'], { bg: string; text: string; label: string }> = {
-  good:   { bg: '#166534', text: '#bbf7d0', label: 'Good' },
-  blurry: { bg: '#78350f', text: '#fde68a', label: 'Blurry' },
-  no_gps: { bg: '#1e3a5f', text: '#bfdbfe', label: 'No GPS' },
-  dark:   { bg: '#374151', text: '#d1d5db', label: 'Dark' },
-  bright: { bg: '#374151', text: '#d1d5db', label: 'Bright' },
+  good:   { bg: 'var(--success-soft)', text: 'var(--success)',   label: 'Good' },
+  blurry: { bg: 'var(--warning-soft)', text: 'var(--warning)',   label: 'Blurry' },
+  no_gps: { bg: 'var(--tan-soft)',     text: 'var(--tan-text)',  label: 'No GPS' },
+  dark:   { bg: 'var(--surface-2)',    text: 'var(--text-muted)', label: 'Dark' },
+  bright: { bg: 'var(--surface-2)',    text: 'var(--text-muted)', label: 'Bright' },
 }
 
 // ---- thumb URL helper ----
@@ -82,11 +82,11 @@ function StatsBar({ images, activeFlag, onFlagClick, visibleCount, selectedCount
   const usableCount = images.filter((img) => img.usable).length
 
   const items: { label: string; flag: Image['flag']; count: number; color: string }[] = [
-    { label: 'Good',   flag: 'good',   count: counts.good,   color: '#4ade80' },
-    { label: 'Blurry', flag: 'blurry', count: counts.blurry, color: '#fbbf24' },
-    { label: 'No GPS', flag: 'no_gps', count: counts.no_gps, color: '#60a5fa' },
-    { label: 'Dark',   flag: 'dark',   count: counts.dark,   color: '#9ca3af' },
-    { label: 'Bright', flag: 'bright', count: counts.bright, color: '#9ca3af' },
+    { label: 'Good',   flag: 'good',   count: counts.good,   color: '#4F6349' },
+    { label: 'Blurry', flag: 'blurry', count: counts.blurry, color: '#C8902F' },
+    { label: 'No GPS', flag: 'no_gps', count: counts.no_gps, color: '#7A6A4F' },
+    { label: 'Dark',   flag: 'dark',   count: counts.dark,   color: '#9A9078' },
+    { label: 'Bright', flag: 'bright', count: counts.bright, color: '#9A9078' },
   ]
 
   return (
@@ -105,9 +105,9 @@ function StatsBar({ images, activeFlag, onFlagClick, visibleCount, selectedCount
             onClick={() => onFlagClick(flag)}
             className="flex items-center gap-1.5"
             style={{
-              background: active ? 'var(--border)' : 'none',
+              background: active ? 'var(--surface-2)' : 'none',
               border: 'none',
-              borderRadius: 4,
+              borderRadius: 'var(--radius-sm)',
               padding: active ? '2px 6px' : '2px 0',
               cursor: 'pointer',
               fontFamily: 'inherit',
@@ -140,9 +140,9 @@ function StatsBar({ images, activeFlag, onFlagClick, visibleCount, selectedCount
       <button
         onClick={() => onSortChange(sortBy === 'reproj' ? 'none' : 'reproj')}
         style={{
-          background: sortBy === 'reproj' ? 'var(--border)' : 'none',
+          background: sortBy === 'reproj' ? 'var(--surface-2)' : 'none',
           border: 'none',
-          borderRadius: 4,
+          borderRadius: 'var(--radius-sm)',
           padding: '2px 6px',
           cursor: 'pointer',
           fontFamily: 'inherit',
@@ -156,11 +156,11 @@ function StatsBar({ images, activeFlag, onFlagClick, visibleCount, selectedCount
       </button>
       <span style={{ marginLeft: 'auto', color: 'var(--text-muted)', fontSize: 12 }}>
         {selectedCount > 0 && (
-          <span style={{ color: '#c4b5fd', fontWeight: 600, marginRight: 8 }}>
+          <span style={{ color: 'var(--accent-strong)', fontWeight: 600, marginRight: 8 }}>
             {selectedCount} selected for reconstruction
           </span>
         )}
-        <span style={{ color: '#86efac', fontWeight: 600 }}>{usableCount}</span>
+        <span style={{ color: 'var(--success)', fontWeight: 600 }}>{usableCount}</span>
         {' / '}{images.length}{' usable'}
       </span>
     </div>
@@ -220,8 +220,8 @@ function ImageCard({ img, sessionId, isSelected, onSelect }: CardProps) {
       style={{
         background: 'var(--surface)',
         border: isSelected
-          ? '1px solid #a78bfa'
-          : img.usable ? '1px solid var(--border)' : '1px solid #7f1d1d',
+          ? '1px solid var(--accent)'
+          : img.usable ? '1px solid var(--border)' : '1px solid var(--danger-accent)',
         position: 'relative',
         minHeight: 152,
       }}
@@ -229,7 +229,7 @@ function ImageCard({ img, sessionId, isSelected, onSelect }: CardProps) {
       {/* thumbnail */}
       <div
         className="flex items-center justify-center text-sm font-bold"
-        style={{ height: 120, background: 'var(--bg)', overflow: 'hidden' }}
+        style={{ height: 120, background: 'var(--surface-2)', overflow: 'hidden' }}
       >
         {img.thumb_path ? (
           <img
@@ -287,10 +287,10 @@ function ImageCard({ img, sessionId, isSelected, onSelect }: CardProps) {
               title="COLMAP mean reprojection error"
               style={{
                 color: img.colmap_error_px < 1.0
-                  ? '#4ade80'
+                  ? 'var(--success)'
                   : img.colmap_error_px < 2.0
-                  ? '#fbbf24'
-                  : '#f87171',
+                  ? 'var(--warning)'
+                  : 'var(--danger)',
               }}
             >
               ⊕ {img.colmap_error_px.toFixed(1)}px
@@ -304,7 +304,7 @@ function ImageCard({ img, sessionId, isSelected, onSelect }: CardProps) {
         style={{
           display: 'flex', alignItems: 'center', gap: 5,
           margin: '4px 8px 0', cursor: 'pointer',
-          fontSize: 11, color: isSelected ? '#c4b5fd' : 'var(--text-muted)',
+          fontSize: 11, color: isSelected ? 'var(--accent-strong)' : 'var(--text-muted)',
           fontFamily: 'inherit',
         }}
       >
@@ -312,7 +312,7 @@ function ImageCard({ img, sessionId, isSelected, onSelect }: CardProps) {
           type="checkbox"
           checked={isSelected}
           onChange={(e) => onSelect(img.id, e.target.checked)}
-          style={{ accentColor: '#a78bfa', cursor: 'pointer' }}
+          style={{ accentColor: 'var(--accent)', cursor: 'pointer' }}
         />
         For reconstruction
       </label>
@@ -322,10 +322,10 @@ function ImageCard({ img, sessionId, isSelected, onSelect }: CardProps) {
         onClick={() => usableMutation.mutate({ id: img.id, usable: !img.usable })}
         disabled={usableMutation.isPending}
         style={{
-          margin: '4px 8px 8px', padding: '3px 0', borderRadius: 4,
+          margin: '4px 8px 8px', padding: '3px 0', borderRadius: 'var(--radius-sm)',
           fontSize: 11, fontWeight: 600, border: 'none', cursor: 'pointer',
-          background: img.usable ? '#14532d' : '#450a0a',
-          color: img.usable ? '#86efac' : '#fca5a5',
+          background: img.usable ? 'var(--success-soft)' : 'var(--danger-soft)',
+          color: img.usable ? 'var(--success)' : 'var(--danger)',
           opacity: usableMutation.isPending ? 0.6 : 1, fontFamily: 'inherit',
           width: 'calc(100% - 16px)',
         }}

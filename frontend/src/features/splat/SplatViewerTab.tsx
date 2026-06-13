@@ -1,7 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
+import { motion, AnimatePresence } from 'framer-motion'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { get, post, del } from '../../shared/api/client'
 import { useMapStore } from '../../shared/stores/mapStore'
+import { Skeleton } from '../../shared/components/Skeleton'
+import { easeOut } from '../../shared/motion'
 import type {
   Job,
   GeoTransform,
@@ -12,6 +15,7 @@ import type {
   FlythroughStatus,
 } from '../../types/api'
 import { worldToGps, useRayCast } from './useViewerCoords'
+import { smoothstep } from './smoothstep'
 import MiniLeafletPane from './MiniLeafletPane'
 
 const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
@@ -110,22 +114,22 @@ const STATUS_STEP_LABEL: Record<string, string> = {
 
 function RunningCard({ job }: { job: Job }) {
   const label = STATUS_STEP_LABEL[job.status] ?? job.step
-  const barColor = job.status === 'pending' ? '#6b7280' : '#3b82f6'
+  const barColor = job.status === 'pending' ? 'var(--tan)' : 'var(--accent)'
   return (
     <div
       style={{
-        padding: '10px 12px', borderRadius: 6,
-        border: '1px solid #3b82f6',
-        background: 'rgba(59,130,246,0.06)',
+        padding: '10px 12px', borderRadius: 'var(--radius-md)',
+        border: '1px solid var(--accent)',
+        background: 'var(--accent-soft)',
       }}
     >
       <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginBottom: 6 }}>
         <span style={{ color: 'var(--text)', fontWeight: 600 }}>
           #{job.id} · {job.preset}
         </span>
-        <span style={{ color: '#60a5fa' }}>{job.progress_pct.toFixed(0)}%</span>
+        <span style={{ color: 'var(--accent-strong)' }}>{job.progress_pct.toFixed(0)}%</span>
       </div>
-      <div style={{ height: 4, background: 'var(--border)', borderRadius: 2, overflow: 'hidden' }}>
+      <div style={{ height: 4, background: 'var(--surface-2)', borderRadius: 2, overflow: 'hidden' }}>
         <div
           style={{
             height: '100%', background: barColor,
@@ -144,8 +148,8 @@ function GeoTransformPanel({ reconstructionId }: { reconstructionId: number }) {
   return (
     <div
       style={{
-        marginTop: 8, padding: '6px 8px', borderRadius: 4,
-        background: 'var(--bg)', fontSize: 10, color: 'var(--text-muted)',
+        marginTop: 8, padding: '6px 8px', borderRadius: 'var(--radius-sm)',
+        background: 'var(--surface-2)', fontSize: 10, color: 'var(--text-muted)',
         border: '1px solid var(--border)',
       }}
     >
@@ -195,8 +199,8 @@ function TrainingMetricsPanel({ metrics }: { metrics: TrainingMetricPoint[] }) {
   return (
     <div
       style={{
-        marginTop: 8, padding: '6px 8px', borderRadius: 4,
-        background: 'var(--bg)', border: '1px solid var(--border)',
+        marginTop: 8, padding: '6px 8px', borderRadius: 'var(--radius-sm)',
+        background: 'var(--surface-2)', border: '1px solid var(--border)',
       }}
     >
       <div style={{ fontWeight: 600, color: 'var(--text)', marginBottom: 6, fontSize: 10 }}>
@@ -206,24 +210,24 @@ function TrainingMetricsPanel({ metrics }: { metrics: TrainingMetricPoint[] }) {
         <div>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 2 }}>
             <span style={{ color: 'var(--text-muted)', fontSize: 8 }}>PSNR</span>
-            <span style={{ color: '#86efac', fontSize: 9, fontWeight: 700 }}>
+            <span style={{ color: '#4F6349', fontSize: 9, fontWeight: 700 }}>
               {finalPsnr.toFixed(1)} dB
             </span>
           </div>
           <svg viewBox="0 0 72 28" style={{ width: '100%', height: 28, display: 'block' }}>
-            {toPolyline(psnrVals, '#86efac')}
+            {toPolyline(psnrVals, '#4F6349')}
           </svg>
           <div style={{ color: 'var(--text-muted)', fontSize: 7, textAlign: 'center' }}>pixel accuracy</div>
         </div>
         <div>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 2 }}>
             <span style={{ color: 'var(--text-muted)', fontSize: 8 }}>SSIM</span>
-            <span style={{ color: '#60a5fa', fontSize: 9, fontWeight: 700 }}>
+            <span style={{ color: '#9A5E32', fontSize: 9, fontWeight: 700 }}>
               {finalSsim.toFixed(2)}
             </span>
           </div>
           <svg viewBox="0 0 72 28" style={{ width: '100%', height: 28, display: 'block' }}>
-            {toPolyline(ssimVals, '#60a5fa')}
+            {toPolyline(ssimVals, '#9A5E32')}
           </svg>
           <div style={{ color: 'var(--text-muted)', fontSize: 7, textAlign: 'center' }}>looks-like score</div>
         </div>
@@ -295,9 +299,9 @@ function LabelPopover({ screenX, screenY, onSave, onCancel }: LabelPopoverProps)
           onClick={() => label.trim() && onSave(label.trim(), color)}
           disabled={!label.trim()}
           style={{
-            flex: 1, padding: '4px 0', borderRadius: 4, border: 'none',
-            background: label.trim() ? '#7c3aed' : 'var(--border)',
-            color: label.trim() ? '#fff' : 'var(--text-muted)',
+            flex: 1, padding: '4px 0', borderRadius: 'var(--radius-sm)', border: 'none',
+            background: label.trim() ? 'var(--accent-strong)' : 'var(--surface-2)',
+            color: label.trim() ? '#FFFDF7' : 'var(--text-muted)',
             cursor: label.trim() ? 'pointer' : 'default',
             fontSize: 11, fontFamily: 'inherit',
           }}
@@ -498,12 +502,14 @@ function FlythroughControls({
 }: FlythroughControlsProps) {
   const canRun = keyframeCount >= 2 && !recording
   const serverRunning = status?.flythrough_status === 'pending' || status?.flythrough_status === 'running'
+  // This panel floats over the always-dark 3D canvas, so it uses an explicit
+  // dark-warm surface with light text rather than the light theme tokens.
   const btnStyle = {
     padding: '4px 8px',
-    borderRadius: 4,
-    border: '1px solid var(--border)',
-    background: 'var(--bg)',
-    color: 'var(--text-muted)',
+    borderRadius: 6,
+    border: '1px solid rgba(255,255,255,0.18)',
+    background: 'rgba(255,255,255,0.06)',
+    color: '#D8D2C7',
     cursor: 'pointer',
     fontSize: 11,
     fontFamily: 'inherit',
@@ -518,17 +524,17 @@ function FlythroughControls({
         zIndex: 20,
         width: 220,
         padding: 10,
-        borderRadius: 6,
-        background: 'rgba(13,17,23,0.88)',
-        border: '1px solid rgba(139,148,158,0.35)',
+        borderRadius: 'var(--radius-md)',
+        background: 'rgba(28,27,25,0.9)',
+        border: '1px solid rgba(255,255,255,0.14)',
         display: 'flex',
         flexDirection: 'column',
         gap: 8,
       }}
     >
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-        <span style={{ color: 'var(--text)', fontSize: 11, fontWeight: 700 }}>Flythrough</span>
-        <span style={{ color: 'var(--text-muted)', fontSize: 10 }}>{keyframeCount} keyframes</span>
+        <span style={{ color: '#F2ECE0', fontSize: 11, fontWeight: 700 }}>Flythrough</span>
+        <span style={{ color: '#B9B2A6', fontSize: 10 }}>{keyframeCount} keyframes</span>
       </div>
       <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
         <button type="button" onClick={onAddKeyframe} style={btnStyle}>Add Keyframe</button>
@@ -548,10 +554,10 @@ function FlythroughControls({
         </button>
       </div>
       {message && (
-        <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: 10 }}>{message}</p>
+        <p style={{ margin: 0, color: '#B9B2A6', fontSize: 10 }}>{message}</p>
       )}
       {status?.flythrough_status === 'failed' && status.flythrough_error && (
-        <p style={{ margin: 0, color: 'var(--danger, #f85149)', fontSize: 10 }}>
+        <p style={{ margin: 0, color: '#F0A18C', fontSize: 10 }}>
           {status.flythrough_error}
         </p>
       )}
@@ -559,7 +565,7 @@ function FlythroughControls({
         <a
           href={`${BASE_URL}/reconstruction/${reconstructionId}/flythrough`}
           download={`flythrough_${reconstructionId}.mp4`}
-          style={{ color: '#58a6ff', fontSize: 11, textDecoration: 'none' }}
+          style={{ color: '#E2A877', fontSize: 11, textDecoration: 'none' }}
         >
           Download server MP4
         </a>
@@ -691,7 +697,7 @@ function SplatCanvas({
         if (startTime === null) startTime = now
         const durationMs = Math.max(250, next.duration_s * 1000)
         const t = Math.min(1, (now - startTime) / durationMs)
-        const ease = t * t * (3 - 2 * t)
+        const ease = smoothstep(t)
         const pos = current.position.map((value, i) =>
           value + (next.position[i] - value) * ease
         )
@@ -775,6 +781,10 @@ function SplatCanvas({
           initialCameraPosition: [0, -1, -3],
           initialCameraLookAt: [0, 0, 0],
           rootElement: containerRef.current,
+          // SharedArrayBuffer needs cross-origin isolation (COOP/COEP headers) that
+          // neither the Vite dev server nor typical static hosting provides — with
+          // the default, addSplatScene never resolves and the viewer hangs on load.
+          sharedMemoryForWorkers: false,
         })
         viewerRef.current = viewer
 
@@ -1002,7 +1012,7 @@ function SplatCanvas({
         <a
           href={`${BASE_URL}/reconstruction/${reconstructionId}/splat?lod=full`}
           download={`splat_${reconstructionId}.ply`}
-          style={{ color: '#58a6ff', fontSize: 13 }}
+          style={{ color: 'var(--accent-strong)', fontSize: 13 }}
         >
           Download .ply instead
         </a>
@@ -1012,17 +1022,24 @@ function SplatCanvas({
 
   return (
     <div style={{ position: 'relative', flex: 1 }}>
-      {loading && (
-        <div
-          style={{
-            position: 'absolute', inset: 0,
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            background: 'var(--bg)', zIndex: 10,
-          }}
-        >
-          <p style={{ color: 'var(--text-muted)', fontSize: 13 }}>Loading splat…</p>
-        </div>
-      )}
+      <AnimatePresence>
+        {loading && (
+          <motion.div
+            initial={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.28, ease: easeOut }}
+            style={{
+              position: 'absolute', inset: 0, zIndex: 10,
+              background: 'var(--surface)',
+              display: 'flex', flexDirection: 'column',
+              alignItems: 'center', justifyContent: 'center', gap: 14, padding: 24,
+            }}
+          >
+            <Skeleton width="70%" height={260} radius="var(--radius-lg)" style={{ maxWidth: 560 }} />
+            <span style={{ color: 'var(--text-muted)', fontSize: 13 }}>Loading splat…</span>
+          </motion.div>
+        )}
+      </AnimatePresence>
       <div ref={containerRef} style={{ width: '100%', height: '100%' }} />
       {viewerReady && (
         <FlythroughControls
@@ -1085,9 +1102,9 @@ function ViewerToolbar({
         onClick={() => onToolChange(active ? 'none' : tool)}
         style={{
           padding: '4px 8px', borderRadius: 4, fontSize: 11,
-          border: active ? '1px solid #7c3aed' : '1px solid var(--border)',
-          background: active ? 'rgba(124,58,237,0.15)' : 'var(--bg)',
-          color: active ? '#a78bfa' : 'var(--text-muted)',
+          border: active ? '1px solid var(--accent)' : '1px solid var(--border)',
+          background: active ? 'var(--accent-soft)' : 'var(--surface-2)',
+          color: active ? 'var(--accent-strong)' : 'var(--text-muted)',
           cursor: geoTransformAvailable ? 'pointer' : 'not-allowed',
           fontFamily: 'inherit',
           opacity: geoTransformAvailable ? 1 : 0.5,
@@ -1109,8 +1126,8 @@ function ViewerToolbar({
         <button
           onClick={onClearMeasure}
           style={{
-            padding: '4px 8px', borderRadius: 4, fontSize: 11,
-            border: '1px solid var(--border)', background: 'var(--bg)',
+            padding: '4px 8px', borderRadius: 'var(--radius-sm)', fontSize: 11,
+            border: '1px solid var(--border)', background: 'var(--surface-2)',
             color: 'var(--text-muted)', cursor: 'pointer', fontFamily: 'inherit',
           }}
           title="Clear measurements"
@@ -1152,8 +1169,8 @@ function AnnotationsList({ reconstructionId, annotations }: AnnotationsListProps
             key={ann.id}
             style={{
               display: 'flex', alignItems: 'center', gap: 4,
-              padding: '3px 6px', borderRadius: 4,
-              border: '1px solid var(--border)', background: 'var(--bg)',
+              padding: '3px 6px', borderRadius: 'var(--radius-sm)',
+              border: '1px solid var(--border)', background: 'var(--surface-2)',
             }}
           >
             <span
@@ -1183,7 +1200,7 @@ function AnnotationsList({ reconstructionId, annotations }: AnnotationsListProps
         download={`annotations_${reconstructionId}.geojson`}
         style={{
           display: 'block', marginTop: 6, fontSize: 10,
-          color: '#58a6ff', textDecoration: 'none',
+          color: 'var(--accent-strong)', textDecoration: 'none',
         }}
       >
         ↓ Export GeoJSON
@@ -1321,9 +1338,9 @@ export default function SplatViewerTab() {
                 key={job.id}
                 onClick={() => setSelectedJobId(job.id)}
                 style={{
-                  background: activeId === job.id ? 'rgba(167,139,250,0.15)' : 'none',
-                  border: activeId === job.id ? '1px solid rgba(167,139,250,0.4)' : '1px solid transparent',
-                  borderRadius: 6, padding: '8px 10px', cursor: 'pointer',
+                  background: activeId === job.id ? 'var(--accent-soft)' : 'none',
+                  border: activeId === job.id ? '1px solid var(--accent)' : '1px solid transparent',
+                  borderRadius: 'var(--radius-md)', padding: '8px 10px', cursor: 'pointer',
                   textAlign: 'left', fontFamily: 'inherit',
                 }}
               >
@@ -1352,10 +1369,10 @@ export default function SplatViewerTab() {
             <button
               onClick={toggleSplitPane}
               style={{
-                padding: '4px 8px', borderRadius: 4, fontSize: 11, marginTop: 4,
-                border: splitPaneActive ? '1px solid #0ea5e9' : '1px solid var(--border)',
-                background: splitPaneActive ? 'rgba(14,165,233,0.15)' : 'var(--bg)',
-                color: splitPaneActive ? '#38bdf8' : 'var(--text-muted)',
+                padding: '4px 8px', borderRadius: 'var(--radius-sm)', fontSize: 11, marginTop: 4,
+                border: splitPaneActive ? '1px solid var(--accent)' : '1px solid var(--border)',
+                background: splitPaneActive ? 'var(--accent-soft)' : 'var(--surface-2)',
+                color: splitPaneActive ? 'var(--accent-strong)' : 'var(--text-muted)',
                 cursor: 'pointer', fontFamily: 'inherit', width: '100%', textAlign: 'left',
               }}
             >
@@ -1367,12 +1384,12 @@ export default function SplatViewerTab() {
               style={{
                 display: 'block',
                 padding: '4px 8px',
-                borderRadius: 4,
+                borderRadius: 'var(--radius-sm)',
                 fontSize: 11,
                 marginTop: 4,
-                border: '1px solid rgba(88,166,255,0.3)',
-                background: 'rgba(88,166,255,0.1)',
-                color: '#58a6ff',
+                border: '1px solid var(--accent-soft)',
+                background: 'var(--accent-soft)',
+                color: 'var(--accent-strong)',
                 textDecoration: 'none',
               }}
             >
@@ -1393,10 +1410,10 @@ export default function SplatViewerTab() {
               style={{
                 width: '100%',
                 padding: '4px 8px',
-                borderRadius: 4,
-                border: '1px solid var(--border)',
-                background: showCoverageGaps ? 'rgba(239,68,68,0.15)' : 'var(--bg)',
-                color: showCoverageGaps ? '#f87171' : 'var(--text-muted)',
+                borderRadius: 'var(--radius-sm)',
+                border: showCoverageGaps ? '1px solid var(--danger-accent)' : '1px solid var(--border)',
+                background: showCoverageGaps ? 'var(--danger-soft)' : 'var(--surface-2)',
+                color: showCoverageGaps ? 'var(--danger)' : 'var(--text-muted)',
                 cursor: gapsFetching ? 'default' : 'pointer',
                 fontFamily: 'inherit',
                 fontSize: 11,
