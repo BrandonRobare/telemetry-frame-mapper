@@ -108,8 +108,8 @@ export default function PlanTab() {
           style={{
             padding: '8px 12px',
             marginBottom: 20,
-            background: 'rgba(88,166,255,0.1)',
-            border: '1px solid rgba(88,166,255,0.3)',
+            background: 'var(--accent-soft)',
+            border: '1px solid var(--accent-soft)',
             color: 'var(--text-muted)',
           }}
         >
@@ -139,7 +139,7 @@ export default function PlanTab() {
             style={{
               marginTop: 20,
               padding: '12px 14px',
-              background: 'var(--bg)',
+              background: 'var(--surface-2)',
               border: '1px solid var(--border)',
             }}
           >
