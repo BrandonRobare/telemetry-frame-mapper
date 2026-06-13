@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 
 type ButtonVariant = 'primary' | 'ghost' | 'danger';
 type ButtonSize = 'sm' | 'md';
@@ -8,21 +8,31 @@ interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   size?: ButtonSize;
 }
 
-const variantStyles: Record<ButtonVariant, React.CSSProperties> = {
+interface VariantStyle {
+  bg: string;
+  hoverBg: string;
+  color: string;
+  border: string;
+}
+
+const variantStyles: Record<ButtonVariant, VariantStyle> = {
   primary: {
-    background: 'var(--accent)',
-    color: 'white',
+    bg: 'var(--accent-strong)',
+    hoverBg: 'var(--accent-hover)',
+    color: '#FFFDF7',
     border: 'none',
   },
   ghost: {
-    background: 'transparent',
-    color: 'var(--text-muted)',
-    border: '1px solid var(--border)',
+    bg: 'transparent',
+    hoverBg: 'var(--surface-2)',
+    color: 'var(--text)',
+    border: '1px solid var(--border-strong)',
   },
   danger: {
-    background: 'transparent',
-    color: 'var(--danger)',
-    border: '1px solid var(--danger)',
+    bg: 'transparent',
+    hoverBg: 'var(--danger-soft)',
+    color: 'var(--danger-accent)',
+    border: '1px solid var(--danger-accent)',
   },
 };
 
@@ -39,11 +49,19 @@ export function Button({
   children,
   ...props
 }: ButtonProps) {
+  const [hover, setHover] = useState(false);
+  const v = variantStyles[variant];
   return (
     <button
       disabled={disabled}
-      className={`rounded font-medium transition-opacity ${sizeClasses[size]} ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'} ${className}`}
-      style={variantStyles[variant]}
+      className={`rounded font-medium transition-all duration-150 active:scale-[0.98] ${sizeClasses[size]} ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'} ${className}`}
+      style={{
+        background: !disabled && hover ? v.hoverBg : v.bg,
+        color: v.color,
+        border: v.border,
+      }}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
       {...props}
     >
       {children}
