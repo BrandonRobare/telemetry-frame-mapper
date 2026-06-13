@@ -166,11 +166,9 @@ export default function ImportModal({ open, onClose }: ImportModalProps) {
             style={{
               padding: '8px 12px',
               marginBottom: 16,
-              background: backendDown
-                ? 'rgba(248,81,73,0.10)'
-                : 'rgba(139,148,158,0.10)',
-              border: `1px solid ${backendDown ? 'rgba(248,81,73,0.35)' : 'rgba(139,148,158,0.3)'}`,
-              color: backendDown ? 'var(--danger, #f85149)' : 'var(--text-muted)',
+              background: backendDown ? 'var(--danger-soft)' : 'var(--surface-2)',
+              border: `1px solid ${backendDown ? 'var(--danger-accent)' : 'var(--border)'}`,
+              color: backendDown ? 'var(--danger)' : 'var(--text-muted)',
             }}
           >
             {backendDown ? (
@@ -181,9 +179,9 @@ export default function ImportModal({ open, onClose }: ImportModalProps) {
                     display: 'block',
                     marginTop: 5,
                     padding: '4px 8px',
-                    background: 'rgba(0,0,0,0.25)',
-                    borderRadius: 4,
-                    fontFamily: 'monospace',
+                    background: 'rgba(46,42,34,0.10)',
+                    borderRadius: 'var(--radius-sm)',
+                    fontFamily: 'var(--font-mono)',
                     fontSize: 11,
                     userSelect: 'all',
                   }}
@@ -218,9 +216,9 @@ export default function ImportModal({ open, onClose }: ImportModalProps) {
               style={{
                 width: '100%', boxSizing: 'border-box',
                 padding: '8px 12px',
-                background: 'var(--bg)',
+                background: 'var(--surface-2)',
                 border: '1px solid var(--border)',
-                borderRadius: 6,
+                borderRadius: 'var(--radius-sm)',
                 color: 'var(--text)',
                 fontSize: 13,
                 fontFamily: 'inherit',
@@ -248,9 +246,9 @@ export default function ImportModal({ open, onClose }: ImportModalProps) {
               style={{
                 width: '100%', boxSizing: 'border-box',
                 padding: '8px 12px',
-                background: 'var(--bg)',
+                background: 'var(--surface-2)',
                 border: '1px solid var(--border)',
-                borderRadius: 6,
+                borderRadius: 'var(--radius-sm)',
                 color: 'var(--text)',
                 fontSize: 13,
                 fontFamily: 'inherit',
@@ -284,7 +282,7 @@ export default function ImportModal({ open, onClose }: ImportModalProps) {
               <div
                 style={{
                   height: 6, borderRadius: 3,
-                  background: 'var(--border)',
+                  background: 'var(--surface-2)',
                   overflow: 'hidden',
                 }}
               >
@@ -307,9 +305,9 @@ export default function ImportModal({ open, onClose }: ImportModalProps) {
               className="text-xs rounded"
               style={{
                 padding: '8px 12px', marginBottom: 16,
-                background: 'rgba(248,81,73,0.12)',
-                border: '1px solid rgba(248,81,73,0.4)',
-                color: 'var(--danger, #f85149)',
+                background: 'var(--danger-soft)',
+                border: '1px solid var(--danger-accent)',
+                color: 'var(--danger)',
               }}
             >
               {errorMessage}

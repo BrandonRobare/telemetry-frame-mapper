@@ -1,10 +1,11 @@
 import { useMapStore } from '../../shared/stores/mapStore'
 
+// Checkbox accent colors mirror the warm-light map layer colors.
 const LAYERS = [
-  { key: 'footprints' as const, label: 'Footprints', color: '#58a6ff' },
-  { key: 'coverage' as const, label: 'Coverage', color: '#4ade80' },
-  { key: 'heatmap' as const, label: 'Heatmap', color: '#f59e0b' },
-  { key: 'targetArea' as const, label: 'Target Area', color: '#f59e0b' },
+  { key: 'footprints' as const, label: 'Footprints', color: '#B87C4C' },
+  { key: 'coverage' as const, label: 'Coverage', color: '#A8BBA3' },
+  { key: 'heatmap' as const, label: 'Heatmap', color: '#C8902F' },
+  { key: 'targetArea' as const, label: 'Target Area', color: '#C4A484' },
 ]
 
 export default function LayerControls() {

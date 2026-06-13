@@ -9,6 +9,12 @@ const ESRI_SATELLITE =
   'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
 const OSM = 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png'
 
+// Leaflet sets these as SVG presentation attributes, so they must be literal
+// hex (CSS vars don't resolve there). Kept in sync with the warm-light tokens:
+// --accent (terracotta) and --sage.
+const FOOTPRINT_COLOR = '#B87C4C'
+const COVERAGE_COLOR = '#A8BBA3'
+
 interface Props {
   footprints: Footprint[]
   coverage: CoverageResult | null
@@ -48,8 +54,13 @@ export default function LeafletMapView({ footprints, coverage, isLoading, error 
     return (
       <div className="flex-1 flex items-center justify-center">
         <div
-          className="rounded px-4 py-3 text-sm"
-          style={{ background: '#3b000022', border: '1px solid var(--danger)', color: 'var(--danger)' }}
+          className="px-4 py-3 text-sm"
+          style={{
+            background: 'var(--danger-soft)',
+            border: '1px solid var(--danger-accent)',
+            borderRadius: 'var(--radius-md)',
+            color: 'var(--danger)',
+          }}
         >
           Could not load footprints — is the backend running?
         </div>
@@ -104,7 +115,7 @@ export default function LeafletMapView({ footprints, coverage, isLoading, error 
           <GeoJSON
             key={JSON.stringify(footprintGeoJSON).length}
             data={footprintGeoJSON}
-            style={{ color: '#58a6ff', fillColor: '#58a6ff', fillOpacity: 0.13, weight: 1.5 }}
+            style={{ color: FOOTPRINT_COLOR, fillColor: FOOTPRINT_COLOR, fillOpacity: 0.13, weight: 1.5 }}
             onEachFeature={onEachFootprint}
           />
         )}
@@ -113,7 +124,7 @@ export default function LeafletMapView({ footprints, coverage, isLoading, error 
           <GeoJSON
             key={`cov-${coverage?.id}`}
             data={gapGeoJSON}
-            style={{ color: '#4ade80', fillColor: '#4ade80', fillOpacity: 0.1, weight: 1.5 }}
+            style={{ color: COVERAGE_COLOR, fillColor: COVERAGE_COLOR, fillOpacity: 0.12, weight: 1.5 }}
           />
         )}
 
