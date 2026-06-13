@@ -18,7 +18,7 @@ export class ErrorBoundary extends Component<Props, State> {
   render() {
     if (this.state.error) {
       return (
-        <div style={{ padding: 24, fontFamily: 'monospace', color: '#f87171', background: '#0d1117', minHeight: '100vh' }}>
+        <div style={{ padding: 24, fontFamily: 'var(--font-mono)', color: 'var(--danger)', background: 'var(--bg)', minHeight: '100vh' }}>
           <strong>Render error — check console for details</strong>
           <pre style={{ marginTop: 12, whiteSpace: 'pre-wrap', fontSize: 13 }}>
             {this.state.error.message}

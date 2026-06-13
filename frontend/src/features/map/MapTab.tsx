@@ -49,6 +49,7 @@ export default function MapTab() {
         session={session}
         coverage={coverage}
         frameCount={footprints.length}
+        isLoading={isLoading}
       />
     </div>
   )

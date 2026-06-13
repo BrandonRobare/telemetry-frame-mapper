@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { get } from '../../shared/api/client'
 import type { Job, SystemResources } from '../../types/api'
+import { SkeletonRow } from '../../shared/components/Skeleton'
 
 function useAllJobs() {
   return useQuery<Job[]>({
@@ -45,12 +46,12 @@ function ResourceBar() {
         {' / '}{res.ram_total_gb.toFixed(0)} GB ({ramPct}%)
       </span>
       {res.gpu_pct != null && (
-        <span>GPU <strong style={{ color: '#86efac' }}>{res.gpu_pct.toFixed(0)}%</strong></span>
+        <span>GPU <strong style={{ color: 'var(--success)' }}>{res.gpu_pct.toFixed(0)}%</strong></span>
       )}
       {res.vram_used_gb != null && res.vram_total_gb != null && (
         <span>
           VRAM{' '}
-          <strong style={{ color: '#86efac' }}>{res.vram_used_gb.toFixed(1)}</strong>
+          <strong style={{ color: 'var(--success)' }}>{res.vram_used_gb.toFixed(1)}</strong>
           {' / '}{res.vram_total_gb.toFixed(0)} GB
         </span>
       )}
@@ -88,9 +89,9 @@ function LogPanel({ recId, isActive }: { recId: number; isActive: boolean }) {
       {open && (
         <div
           style={{
-            marginTop: 4, padding: '6px 8px', borderRadius: 4,
-            background: 'var(--bg)', maxHeight: 180, overflowY: 'auto',
-            fontFamily: 'monospace', fontSize: 10, color: '#86efac',
+            marginTop: 4, padding: '6px 8px', borderRadius: 'var(--radius-sm)',
+            background: 'var(--surface-2)', maxHeight: 180, overflowY: 'auto',
+            fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text)',
             border: '1px solid var(--border)',
           }}
         >
@@ -106,11 +107,11 @@ function LogPanel({ recId, isActive }: { recId: number; isActive: boolean }) {
 }
 
 const STATUS_BADGE: Record<string, { bg: string; text: string; label: string }> = {
-  pending:        { bg: '#1e3a5f', text: '#93c5fd', label: 'Pending' },
-  running_colmap: { bg: '#78350f', text: '#fcd34d', label: 'COLMAP' },
-  running_gsplat: { bg: '#4c1d95', text: '#c4b5fd', label: 'Gaussian' },
-  complete:       { bg: '#14532d', text: '#86efac', label: 'Complete' },
-  failed:         { bg: '#450a0a', text: '#fca5a5', label: 'Failed' },
+  pending:        { bg: 'var(--tan-soft)',     text: 'var(--tan-text)',      label: 'Pending' },
+  running_colmap: { bg: 'var(--warning-soft)', text: 'var(--warning)',       label: 'COLMAP' },
+  running_gsplat: { bg: 'var(--accent-soft)',  text: 'var(--accent-strong)', label: 'Gaussian' },
+  complete:       { bg: 'var(--success-soft)', text: 'var(--success)',       label: 'Complete' },
+  failed:         { bg: 'var(--danger-soft)',  text: 'var(--danger)',        label: 'Failed' },
 }
 
 function formatDuration(start: string, end: string | null): string {
@@ -126,8 +127,14 @@ export default function JobsTab() {
 
   if (isLoading) {
     return (
-      <div className="flex-1 flex items-center justify-center" style={{ color: 'var(--text-muted)' }}>
-        Loading jobs…
+      <div className="flex flex-col flex-1 overflow-hidden">
+        <div className="flex-1 overflow-y-auto p-6">
+          <div className="mx-auto" style={{ maxWidth: 800, display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {Array.from({ length: 4 }).map((_, i) => (
+              <SkeletonRow key={i} />
+            ))}
+          </div>
+        </div>
       </div>
     )
   }
@@ -166,8 +173,8 @@ export default function JobsTab() {
                     key={job.id}
                     style={{
                       background: 'var(--surface)',
-                      border: '1px solid rgba(167,139,250,0.35)',
-                      borderRadius: 8, padding: '14px 16px',
+                      border: '1px solid var(--accent)',
+                      borderRadius: 'var(--radius-md)', padding: '14px 16px',
                     }}
                   >
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
@@ -187,11 +194,11 @@ export default function JobsTab() {
                         </span>
                       )}
                     </div>
-                    <div style={{ height: 4, borderRadius: 2, background: 'var(--border)', overflow: 'hidden' }}>
+                    <div style={{ height: 4, borderRadius: 2, background: 'var(--surface-2)', overflow: 'hidden' }}>
                       <div
                         style={{
                           height: '100%', borderRadius: 2,
-                          background: 'linear-gradient(90deg, #7c3aed, #a78bfa)',
+                          background: 'var(--accent)',
                           width: `${job.progress_pct}%`,
                           transition: 'width 0.5s ease',
                         }}

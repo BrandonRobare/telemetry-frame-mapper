@@ -52,10 +52,11 @@ function FileBrowser() {
             key={d}
             onClick={() => setDir(d)}
             style={{
-              padding: '4px 12px', borderRadius: 4, fontSize: 12,
-              border: '1px solid var(--border)', cursor: 'pointer',
-              background: dir === d ? 'var(--border)' : 'var(--surface)',
-              color: dir === d ? 'var(--text)' : 'var(--text-muted)',
+              padding: '4px 12px', borderRadius: 'var(--radius-sm)', fontSize: 12,
+              border: dir === d ? '1px solid var(--accent)' : '1px solid var(--border)',
+              cursor: 'pointer',
+              background: dir === d ? 'var(--accent-soft)' : 'var(--surface)',
+              color: dir === d ? 'var(--accent-strong)' : 'var(--text-muted)',
               fontFamily: 'inherit',
             }}
           >
@@ -95,8 +96,8 @@ function FileBrowser() {
                     onClick={() => handleDelete(f)}
                     disabled={deleting === f.path}
                     style={{
-                      background: 'none', border: '1px solid #7f1d1d', borderRadius: 4,
-                      color: '#fca5a5', cursor: 'pointer', fontSize: 11,
+                      background: 'none', border: '1px solid var(--danger-accent)', borderRadius: 'var(--radius-sm)',
+                      color: 'var(--danger)', cursor: 'pointer', fontSize: 11,
                       padding: '2px 8px', fontFamily: 'inherit',
                     }}
                   >
@@ -112,11 +113,12 @@ function FileBrowser() {
   )
 }
 
+// Categorical colors from the warm palette: terracotta / tan / sage / amber.
 const DIR_META: Record<string, { label: string; color: string; description: string }> = {
-  imports:   { label: 'Imports',   color: '#60a5fa', description: 'Raw imported session folders' },
-  processed: { label: 'Processed', color: '#a78bfa', description: 'Thumbnails and COLMAP workspaces' },
-  exports:   { label: 'Exports',   color: '#34d399', description: 'WebODM zips and GeoJSON files' },
-  data:      { label: 'Data',      color: '#f59e0b', description: 'SQLite database and config files' },
+  imports:   { label: 'Imports',   color: '#B87C4C', description: 'Raw imported session folders' },
+  processed: { label: 'Processed', color: '#C4A484', description: 'Thumbnails and COLMAP workspaces' },
+  exports:   { label: 'Exports',   color: '#A8BBA3', description: 'WebODM zips and GeoJSON files' },
+  data:      { label: 'Data',      color: '#C8902F', description: 'SQLite database and config files' },
 }
 
 export default function StorageTab() {
@@ -185,7 +187,7 @@ export default function StorageTab() {
           style={{ border: '1px solid var(--border)' }}
         >
           {entries.map(([key, bytes], i) => {
-            const meta = DIR_META[key] ?? { label: key, color: '#9ca3af', description: '' }
+            const meta = DIR_META[key] ?? { label: key, color: '#9A9078', description: '' }
             const pct = total > 0 ? (bytes / total) * 100 : 0
             return (
               <div

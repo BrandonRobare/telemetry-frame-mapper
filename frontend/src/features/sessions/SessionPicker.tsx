@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { useSessions } from './useSessions'
 import { useMapStore } from '../../shared/stores/mapStore'
+import { Skeleton } from '../../shared/components/Skeleton'
 
 interface SessionPickerProps {
   /** Called when the user clicks the empty-state "Import" prompt */
@@ -8,9 +9,9 @@ interface SessionPickerProps {
 }
 
 const SELECT_STYLE: React.CSSProperties = {
-  background: 'var(--bg)',
+  background: 'var(--surface-2)',
   border: '1px solid var(--border)',
-  borderRadius: 5,
+  borderRadius: 'var(--radius-sm)',
   color: 'var(--text)',
   fontSize: 12,
   fontFamily: 'inherit',
@@ -33,9 +34,9 @@ export default function SessionPicker({ onImport }: SessionPickerProps) {
 
   if (isLoading) {
     return (
-      <span className="text-xs" style={{ color: 'var(--text-muted)', padding: '0 8px' }}>
-        Loading sessions…
-      </span>
+      <div style={{ padding: '0 8px' }}>
+        <Skeleton width={150} height={20} radius="var(--radius-sm)" />
+      </div>
     )
   }
 
@@ -44,7 +45,7 @@ export default function SessionPicker({ onImport }: SessionPickerProps) {
       <button
         onClick={onImport}
         className="text-xs cursor-pointer border-none bg-transparent"
-        style={{ color: 'var(--accent)', padding: '0 8px', fontFamily: 'inherit' }}
+        style={{ color: 'var(--accent-strong)', padding: '0 8px', fontFamily: 'inherit' }}
       >
         Import your first session →
       </button>

@@ -24,16 +24,15 @@ function useSessionLog(sessionId: number | null) {
 }
 
 const EVENT_BADGE: Record<string, React.CSSProperties> = {
-  import_complete: { background: 'rgba(63,185,80,0.15)', color: '#3fb950', border: '1px solid rgba(63,185,80,0.3)' },
-  import_error:    { background: 'rgba(248,81,73,0.15)', color: '#f85149', border: '1px solid rgba(248,81,73,0.3)' },
-  coverage_run:    { background: 'rgba(88,166,255,0.15)', color: '#58a6ff', border: '1px solid rgba(88,166,255,0.3)' },
+  import_complete: { background: 'var(--success-soft)', color: 'var(--success)' },
+  import_error:    { background: 'var(--danger-soft)',  color: 'var(--danger)' },
+  coverage_run:    { background: 'var(--accent-soft)',  color: 'var(--accent-strong)' },
 }
 
 function EventBadge({ type }: { type: string }) {
   const style = EVENT_BADGE[type] ?? {
-    background: 'var(--surface)',
+    background: 'var(--surface-2)',
     color: 'var(--text-muted)',
-    border: '1px solid var(--border)',
   }
   return (
     <span

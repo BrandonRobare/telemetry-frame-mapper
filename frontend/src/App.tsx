@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { motion, AnimatePresence } from 'framer-motion'
 import { useMapStore } from './shared/stores/mapStore'
 import MapTab from './features/map/MapTab'
 import GpsSyncTab from './features/gps-sync/GpsSyncTab'
@@ -14,6 +15,7 @@ import CompareTab from './features/compare/CompareTab'
 import { ToastStack } from './shared/components/ToastStack'
 import ImportModal from './features/import/ImportModal'
 import SessionPicker from './features/sessions/SessionPicker'
+import { fadeSlide, tabTransition, easeOut } from './shared/motion'
 
 type Tab =
   | 'map'
@@ -42,10 +44,37 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'compare', label: 'Compare' },
 ]
 
+/** Framing/target mark — fits a mapping + telemetry tool, replaces the emoji logo. */
+function LogoMark() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <rect x="2.5" y="2.5" width="19" height="19" rx="5" fill="var(--accent-soft)" stroke="var(--accent)" strokeWidth="1.5" />
+      <circle cx="12" cy="12" r="2.4" fill="var(--accent)" />
+      <path d="M12 4.5v2M12 17.5v2M4.5 12h2M17.5 12h2" stroke="var(--accent)" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+function renderTab(tab: Tab) {
+  switch (tab) {
+    case 'map': return <MapTab />
+    case 'gps-sync': return <GpsSyncTab />
+    case 'review': return <ReviewTab />
+    case 'plan': return <PlanTab />
+    case 'export': return <ExportTab />
+    case 'session-log': return <SessionLogTab />
+    case 'reconstruct': return <ReconstructTab />
+    case 'jobs': return <JobsTab />
+    case 'storage': return <StorageTab />
+    case 'splat': return <SplatViewerTab />
+    case 'compare': return <CompareTab />
+  }
+}
+
 export default function App() {
   const [activeTab, setActiveTab] = useState<Tab>('map')
   const [showImport, setShowImport] = useState(false)
-  const { theme, toggleTheme, requestedTab, setRequestedTab } = useMapStore()
+  const { requestedTab, setRequestedTab } = useMapStore()
 
   useEffect(() => {
     if (!requestedTab || !TABS.some((t) => t.id === requestedTab)) return
@@ -65,12 +94,7 @@ export default function App() {
       >
         {/* Logo */}
         <div className="flex items-center gap-2 shrink-0" style={{ padding: '0 20px 0 16px' }}>
-          <div
-            className="flex items-center justify-center rounded text-sm"
-            style={{ width: 24, height: 24, background: 'linear-gradient(135deg, #58a6ff, #1f6feb)' }}
-          >
-            🛸
-          </div>
+          <LogoMark />
           <span className="text-sm font-semibold" style={{ color: 'var(--text)' }}>
             Frame Mapper
           </span>
@@ -78,20 +102,38 @@ export default function App() {
 
         {/* Tabs */}
         <div className="flex flex-1">
-          {TABS.map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className="px-4 text-sm cursor-pointer border-none bg-transparent h-full"
-              style={{
-                color: activeTab === tab.id ? 'var(--accent)' : 'var(--text-muted)',
-                borderBottom: activeTab === tab.id ? '2px solid var(--accent)' : '2px solid transparent',
-                fontFamily: 'inherit',
-              }}
-            >
-              {tab.label}
-            </button>
-          ))}
+          {TABS.map((tab) => {
+            const active = activeTab === tab.id
+            return (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className="relative px-4 text-sm cursor-pointer border-none bg-transparent h-full"
+                style={{
+                  color: active ? 'var(--text)' : 'var(--text-muted)',
+                  fontFamily: 'inherit',
+                  transition: 'color var(--dur) var(--ease)',
+                }}
+              >
+                {tab.label}
+                {active && (
+                  <motion.div
+                    layoutId="activeTabUnderline"
+                    style={{
+                      position: 'absolute',
+                      left: 8,
+                      right: 8,
+                      bottom: 0,
+                      height: 2,
+                      borderRadius: 2,
+                      background: 'var(--accent)',
+                    }}
+                    transition={{ duration: 0.22, ease: easeOut }}
+                  />
+                )}
+              </button>
+            )
+          })}
         </div>
 
         {/* Session picker */}
@@ -102,28 +144,17 @@ export default function App() {
         {/* Controls */}
         <div className="flex items-center gap-2 shrink-0 pr-4">
           <button
-            onClick={toggleTheme}
-            className="flex items-center gap-1.5 rounded-full text-xs cursor-pointer border"
-            style={{
-              padding: '4px 12px',
-              background: 'transparent',
-              borderColor: 'var(--border)',
-              color: 'var(--text-muted)',
-              fontFamily: 'inherit',
-            }}
-            title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
-          >
-            {theme === 'dark' ? '☾ Dark' : '☀ Light'}
-          </button>
-          <button
             onClick={() => setShowImport(true)}
             className="text-sm rounded cursor-pointer border-none"
             style={{
               padding: '5px 14px',
-              background: 'var(--accent)',
-              color: '#fff',
+              background: 'var(--accent-strong)',
+              color: '#FFFDF7',
               fontFamily: 'inherit',
+              transition: 'background var(--dur) var(--ease)',
             }}
+            onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--accent-hover)')}
+            onMouseLeave={(e) => (e.currentTarget.style.background = 'var(--accent-strong)')}
           >
             + Import
           </button>
@@ -132,17 +163,19 @@ export default function App() {
 
       {/* Tab content */}
       <div className="flex flex-1 overflow-hidden">
-        {activeTab === 'map' && <MapTab />}
-        {activeTab === 'gps-sync' && <GpsSyncTab />}
-        {activeTab === 'review' && <ReviewTab />}
-        {activeTab === 'plan' && <PlanTab />}
-        {activeTab === 'export' && <ExportTab />}
-        {activeTab === 'session-log' && <SessionLogTab />}
-        {activeTab === 'reconstruct' && <ReconstructTab />}
-        {activeTab === 'jobs' && <JobsTab />}
-        {activeTab === 'storage' && <StorageTab />}
-        {activeTab === 'splat' && <SplatViewerTab />}
-        {activeTab === 'compare' && <CompareTab />}
+        <AnimatePresence mode="wait" initial={false}>
+          <motion.div
+            key={activeTab}
+            className="flex flex-1 overflow-hidden"
+            variants={fadeSlide}
+            initial="initial"
+            animate="animate"
+            exit="exit"
+            transition={tabTransition}
+          >
+            {renderTab(activeTab)}
+          </motion.div>
+        </AnimatePresence>
       </div>
       <ToastStack />
       <ImportModal open={showImport} onClose={() => setShowImport(false)} />
