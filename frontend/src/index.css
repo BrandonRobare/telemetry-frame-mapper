@@ -1,29 +1,93 @@
 @import "tailwindcss";
 
+/* ---------------------------------------------------------------------------
+   Warm Light — design tokens
+   Built out from four base colors: cream #F7F1DE, terracotta #B87C4C,
+   tan #C4A484, sage #A8BBA3. Light is the default theme; a warm-dark theme
+   is a later follow-up (parked under [data-theme="dark"] below).
+--------------------------------------------------------------------------- */
 :root {
-  --bg: #0d1117;
-  --surface: #161b22;
-  --border: #30363d;
-  --accent: #58a6ff;
-  --accent-hover: #388bfd;
-  --text: #e6edf3;
-  --text-muted: #8b949e;
-  --success: #4ade80;
-  --warning: #f59e0b;
-  --danger: #f87171;
+  /* surfaces */
+  --bg: #F7F1DE;            /* cream page background (base) */
+  --surface: #FFFDF7;       /* cards / nav — warm white, lifts off cream */
+  --surface-2: #F1E8D2;     /* insets / inputs / skeleton base / hover */
+  --border: #E4D8C2;        /* hairline borders (soft tan tint) */
+  --border-strong: #D8C39E; /* hover / emphasis borders */
+
+  /* text */
+  --text: #2E2A22;          /* warm near-black (never pure black) */
+  --text-muted: #6B6456;    /* secondary text */
+  --text-faint: #9A9078;    /* hints */
+
+  /* terracotta accent — brand vs. accessible variants */
+  --accent: #B87C4C;        /* brand accent (base): underlines, bars, focus, UI chrome */
+  --accent-strong: #9A5E32; /* accessible terracotta: filled buttons (white text) + text links */
+  --accent-hover: #874F29;  /* hover for strong fills / links */
+  --accent-soft: #F0DEC9;   /* terracotta tint — active backgrounds, badges */
+
+  /* sage (success / complete) */
+  --sage: #A8BBA3;          /* raw sage indicator / bar fill (base) */
+  --success: #4F6349;       /* readable sage-derived text on light */
+  --success-soft: #DEE8D6;  /* sage tint background */
+
+  /* tan (neutral / pending / secondary) */
+  --tan: #C4A484;           /* tan accent (base) */
+  --tan-text: #7A6A4F;      /* readable tan text */
+  --tan-soft: #EFE6D2;      /* tan tint background */
+
+  /* amber (warning) */
+  --warning: #8A6418;       /* readable warm-amber text */
+  --warning-accent: #C8902F;/* warm amber accent / bar */
+  --warning-soft: #F4E6C8;
+
+  /* brick (danger) */
+  --danger: #8A3A28;        /* readable danger text */
+  --danger-accent: #B5503C; /* danger accent / border */
+  --danger-soft: #F1DBD3;
+
+  /* typography */
+  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', Menlo, 'Cascadia Code', Consolas, monospace;
+
+  /* radii */
+  --radius-sm: 6px;
+  --radius-md: 9px;
+  --radius-lg: 12px;
+
+  /* motion */
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --dur-fast: 120ms;
+  --dur: 180ms;
+  --dur-slow: 280ms;
 }
 
-[data-theme="light"] {
-  --bg: #f8fafc;
-  --surface: #ffffff;
-  --border: #e2e8f0;
-  --accent: #0ea5e9;
-  --accent-hover: #0284c7;
-  --text: #0f172a;
-  --text-muted: #64748b;
-  --success: #16a34a;
-  --warning: #d97706;
-  --danger: #dc2626;
+/* Parked: previous cold palette. The theme toggle is removed for now; a proper
+   warm-dark theme is a follow-up. Kept so [data-theme] wiring stays intact. */
+[data-theme="dark"] {
+  --bg: #0d1117;
+  --surface: #161b22;
+  --surface-2: #21262d;
+  --border: #30363d;
+  --border-strong: #444c56;
+  --text: #e6edf3;
+  --text-muted: #8b949e;
+  --text-faint: #6e7681;
+  --accent: #d8915e;
+  --accent-strong: #d8915e;
+  --accent-hover: #e0a373;
+  --accent-soft: rgba(216, 145, 94, 0.15);
+  --sage: #7fa37a;
+  --success: #7fa37a;
+  --success-soft: rgba(127, 163, 122, 0.15);
+  --tan: #c4a484;
+  --tan-text: #c4a484;
+  --tan-soft: rgba(196, 164, 132, 0.15);
+  --warning: #e3b341;
+  --warning-accent: #e3b341;
+  --warning-soft: rgba(227, 179, 65, 0.15);
+  --danger: #f0816d;
+  --danger-accent: #f0816d;
+  --danger-soft: rgba(240, 129, 109, 0.15);
 }
 
 * {
@@ -34,5 +98,35 @@ body {
   background-color: var(--bg);
   color: var(--text);
   margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Leaflet's default attribution links are cold blue — warm them.
+   Two classes outrank Leaflet's own .leaflet-container a (equal-specificity, later in cascade). */
+.leaflet-container .leaflet-control-attribution a {
+  color: var(--accent-strong);
+}
+
+/* Skeleton loading — calm opacity pulse (no shimmer sweep) */
+@keyframes fm-pulse {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 0.9; }
+}
+
+.fm-skeleton {
+  background: var(--surface-2);
+  border-radius: var(--radius-sm);
+  animation: fm-pulse 1.6s var(--ease) infinite;
+}
+
+/* Respect reduced-motion: disable animations and transitions */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
 }

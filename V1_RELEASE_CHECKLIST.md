@@ -118,7 +118,7 @@ def ply_property_names(sh_degree: int) -> list[str]
 
 ---
 
-### T3 — [ ] New module `backend/services/splat_trainer.py`: real gaussian-splat training
+### T3 — [x] New module `backend/services/splat_trainer.py`: real gaussian-splat training
 
 **Goal:** Replace the phantom `gsplat.train` API with a real training loop built on `gsplat.rasterization` so reconstructions actually produce a splat. **This is the 1.0 headline feature** — without it the product never produces a gaussian splat (see audit finding F11-bis in [docs/release-audit-v1.md](docs/release-audit-v1.md)).
 
@@ -205,7 +205,7 @@ def render_flythrough(splat_path: Path, output_path: Path, keyframes: list[dict]
 
 ---
 
-### T4 — [ ] Wire the trainer into `backend/services/reconstruction.py`
+### T4 — [x] Wire the trainer into `backend/services/reconstruction.py`
 
 **Goal:** Replace every phantom-gsplat call site with the real implementations from T1–T3, preserving the graceful-degradation contracts.
 
@@ -290,7 +290,7 @@ await viewer.addSplatScene(splatUrl, { streamView: true, format: SceneFormat.Ply
 
 ## P1 — Quality gates
 
-### T9 — [ ] CI hardening: Python matrix + frontend job
+### T9 — [x] CI hardening: Python matrix + frontend job
 
 **Goal:** CI currently tests only Python 3.12 and never touches the frontend ([.github/workflows/ci.yml](.github/workflows/ci.yml), 29 lines). The package claims 3.10–3.12 support; the frontend has lint/test/build scripts that never run.
 
@@ -303,7 +303,7 @@ await viewer.addSplatScene(splatUrl, { streamView: true, format: SceneFormat.Ply
 
 ---
 
-### T10 — [ ] Frontend smoke tests (vitest)
+### T10 — [x] Frontend smoke tests (vitest)
 
 **Goal:** The frontend has 40 source files and 2 test files (`useViewerCoords.test.ts`, `formatDiff.test.ts`). Add ~6–8 high-value pure-logic tests — not full component coverage.
 
@@ -318,7 +318,7 @@ await viewer.addSplatScene(splatUrl, { streamView: true, format: SceneFormat.Ply
 
 ---
 
-### T11 — [ ] CLI edge-case tests + frame-index regex fix
+### T11 — [x] CLI edge-case tests + frame-index regex fix
 
 **Goal:** Close the small CLI gaps the audit found in `src/drone_video_geotagger/`.
 
@@ -331,7 +331,7 @@ await viewer.addSplatScene(splatUrl, { streamView: true, format: SceneFormat.Ply
 
 ---
 
-### T12 — [ ] Backend startup preflight for COLMAP
+### T12 — [x] Backend startup preflight for COLMAP
 
 **Goal:** Today a missing COLMAP binary surfaces only when a reconstruction job fails minutes into a session. Warn at startup and expose it to the UI.
 
@@ -345,7 +345,7 @@ await viewer.addSplatScene(splatUrl, { streamView: true, format: SceneFormat.Ply
 
 ---
 
-### T13 — [ ] Fix broken dev scripts (dev.sh / dev.bat)
+### T13 — [x] Fix broken dev scripts (dev.sh / dev.bat)
 
 **Goal:** Both scripts run `cd backend && pip install -r requirements.txt` — but `backend/requirements.txt` was **deleted** by ADR-011 (deps moved to pyproject extras), so both scripts fail on a fresh clone. They also create a venv inside `backend/` and run `uvicorn main:app` from there, which breaks the `backend.main:app` import convention.
 

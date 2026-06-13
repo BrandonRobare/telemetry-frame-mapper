@@ -81,7 +81,7 @@ function MeshExportCard({ job }: { job: Job }) {
   return (
     <div
       className="rounded px-3 py-3 flex flex-col gap-3"
-      style={{ background: 'var(--bg)', border: '1px solid var(--border)' }}
+      style={{ background: 'var(--surface-2)', border: '1px solid var(--border)' }}
     >
       <div className="flex items-center gap-3">
         <div style={{ flex: 1, minWidth: 0 }}>
@@ -104,12 +104,12 @@ function MeshExportCard({ job }: { job: Job }) {
       </div>
 
       {running && (
-        <div style={{ height: 5, background: 'var(--border)', borderRadius: 3, overflow: 'hidden' }}>
+        <div style={{ height: 5, background: 'var(--surface-2)', borderRadius: 3, overflow: 'hidden' }}>
           <div
             style={{
               height: '100%',
               width: '55%',
-              background: '#58a6ff',
+              background: 'var(--accent)',
               borderRadius: 3,
             }}
           />
@@ -159,11 +159,11 @@ function MeshExportCard({ job }: { job: Job }) {
 
 const downloadLinkStyle: CSSProperties = {
   padding: '5px 10px',
-  borderRadius: 4,
+  borderRadius: 'var(--radius-sm)',
   fontSize: 12,
-  background: 'rgba(88,166,255,0.1)',
-  border: '1px solid rgba(88,166,255,0.3)',
-  color: '#58a6ff',
+  background: 'var(--accent-soft)',
+  border: '1px solid var(--accent-soft)',
+  color: 'var(--accent-strong)',
   textDecoration: 'none',
   whiteSpace: 'nowrap',
 }
@@ -348,9 +348,9 @@ export default function ExportTab() {
             {webodmResult && (
               <div
                 className="rounded px-3 py-2 text-sm flex flex-col gap-0.5"
-                style={{ background: 'var(--bg)', border: '1px solid var(--border)' }}
+                style={{ background: 'var(--surface-2)', border: '1px solid var(--border)' }}
               >
-                <span style={{ color: '#4ade80', fontWeight: 600 }}>
+                <span style={{ color: 'var(--success)', fontWeight: 600 }}>
                   Ready — {webodmResult.image_count} images
                 </span>
                 <span
@@ -430,7 +430,7 @@ export default function ExportTab() {
             <div
               key={job.id}
               className="rounded px-3 py-2 flex items-center gap-3"
-              style={{ background: 'var(--bg)', border: '1px solid var(--border)' }}
+              style={{ background: 'var(--surface-2)', border: '1px solid var(--border)' }}
             >
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div className="text-sm" style={{ color: 'var(--text)', fontWeight: 600 }}>
@@ -445,11 +445,11 @@ export default function ExportTab() {
                 download={`pointcloud_${job.id}.las`}
                 style={{
                   padding: '5px 10px',
-                  borderRadius: 4,
+                  borderRadius: 'var(--radius-sm)',
                   fontSize: 12,
-                  background: 'rgba(88,166,255,0.1)',
-                  border: '1px solid rgba(88,166,255,0.3)',
-                  color: '#58a6ff',
+                  background: 'var(--accent-soft)',
+                  border: '1px solid var(--accent-soft)',
+                  color: 'var(--accent-strong)',
                   textDecoration: 'none',
                   whiteSpace: 'nowrap',
                 }}
