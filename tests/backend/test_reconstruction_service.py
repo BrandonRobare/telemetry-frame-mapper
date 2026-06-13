@@ -366,15 +366,20 @@ def test_generate_thumbnail_creates_parent_dir(tmp_path):
 
 
 def test_generate_thumbnail_no_gpu_stack_is_silent(tmp_path):
-    # No patching: the test environment has no torch/gsplat, so the real
-    # trainer render_thumbnail must degrade to None without raising.
+    import sys
+    from unittest.mock import patch
+
     from backend.services.reconstruction import _generate_thumbnail
 
     splat = tmp_path / "splat.ply"
     splat.write_bytes(b"ply data")
     out = tmp_path / "thumb.jpg"
 
-    result = _generate_thumbnail(splat, out)
+    # Blocking the GPU stack (None entries make import raise) proves the real
+    # trainer render_thumbnail degrades to None without raising — regardless of
+    # whether torch is installed on the machine running the suite.
+    with patch.dict(sys.modules, {"torch": None, "gsplat": None}):
+        result = _generate_thumbnail(splat, out)
 
     assert result is None
 
