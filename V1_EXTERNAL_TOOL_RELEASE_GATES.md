@@ -27,11 +27,21 @@ see docs/SETUP.md for the verified install incl. all workarounds). Dataset: 86 f
 | 5 | VRAM watch / max-gaussian cap | ✅ no OOM. Peak 3 918 MiB (COLMAP SiftGPU during feature extraction); training peaked ≈2 119 MiB. Cap (350 k) **not exercised** — quick run densified to 85 635 gaussians; cap freeze remains covered by unit tests only at this scale |
 | 6 | Cancel mid-training | ✅ cancelled at iteration 39 → `status=failed`, `error_msg="Cancelled by user"` (pre-T4 this was mislabeled a successful colmap_only completion) |
 | 7 | Server flythrough MP4 | ✅ 3 keyframes via viewer UI → h264 1920×1080, 181 frames, 6.03 s, rendered in ~10 s |
-| 8 | Overnight full-preset run | ⬜ pending (human-in-the-loop) — record peak VRAM, wall time, final PSNR here |
+| 8 | Full-preset run (rec 6, 2026-06-13/14) | ✅ **complete in 70 min** (COLMAP ~4 min, 30,000 training iters ~66 min). Final **PSNR 27.45 / SSIM 0.794** (vs quick's 23.19 / 0.589); 30 sparkline points (PSNR 22.16→27.45 over training). **gaussian_count 1,015,964 — the 1,000,000 cap fired** (count pins just above the cap; without the densification freeze it would have run away). **Peak VRAM 3,921 MiB, no OOM** on the 4 GB card — peak is COLMAP SiftGPU feature extraction; training itself held ≈2,340 MiB. Artifacts: `splat.ply` 159 MB + `_medium` 79 MB + `_preview` 16 MB + thumbnail |
 
 Step 3 also re-validated along the way: session import progress polling (F5 fix), the
 no-GPS ingest path (images flagged `no_gps`, made usable via Review-tab PATCH), and the
 `/system/resources` `colmap_available`/`gsplat_available` flags flipping live (T12).
+
+**Critical runtime finding (corrects the earlier overnight guidance):** the backend must
+run **inside the VS `vcvars64` environment** (`cl.exe` on PATH) even when gsplat's CUDA
+kernels are already compiled and cached. torch's extension loader re-runs a `where cl`
+compiler-ABI check on **every** load, so a backend started without `cl.exe` fails the
+first training job at "loading COLMAP model" with `Command '['where', 'cl']' returned
+non-zero exit status 1` — COLMAP succeeds, only training dies. Two of the three full-run
+attempts failed this way (rec 4) or on a dirty reused COLMAP workspace (rec 5, bundle
+adjustment); a clean workspace + the vcvars environment produced the clean rec 6 above.
+docs/SETUP.md updated accordingly.
 
 ## Release decision
 

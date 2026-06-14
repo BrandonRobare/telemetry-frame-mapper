@@ -56,8 +56,13 @@ Known issues (all hit during the v1.0 release validation):
   `site-packages/gsplat/cuda/_backend.py` (~line 177):
   `extra_cflags = [opt_level]` on Windows instead of `[opt_level, "-Wno-attributes"]`.
 - The compile takes ~5 minutes on a typical laptop; the cached build under
-  `%LOCALAPPDATA%` is reused afterwards. Run the backend from an environment with the
-  same variables so the cached extension loads cleanly.
+  `%LOCALAPPDATA%` is reused afterwards.
+- **Run the backend itself from a VS x64 Developer Command Prompt** (`cl.exe` on PATH),
+  not just the warm-up. Even with kernels cached, torch's extension loader re-runs a
+  `where cl` compiler-ABI check on every load — a backend started without `cl.exe` fails
+  the first training job at "loading COLMAP model" with
+  `Command '['where', 'cl']' returned non-zero exit status 1` (COLMAP succeeds; only
+  training dies). Validated on the v1.0 full-preset run (gates doc step 8).
 
 ## External Binaries
 
