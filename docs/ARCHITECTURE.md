@@ -34,7 +34,7 @@ FastAPI app (`backend.main:app`), SQLite via SQLAlchemy (PostgreSQL-swappable th
   - `geometry.py` — ground footprint math: UTM projection, FOV-based extent from AGL, yaw rotation (Shapely/pyproj).
   - `mission planning` (`plans` router) — lawnmower path generation over a target area, KML/GPX export.
   - `reconstruction.py` — the heavy pipeline (below).
-  - `colmap_io.py` / `ply_io.py` / `splat_trainer.py` *(checklist T1–T3)* — COLMAP sparse-model loader (numpy), INRIA-layout 3DGS PLY I/O + opacity-prune LODs (numpy), and the gsplat training loop (torch/gsplat, lazily imported so the backend never requires them).
+  - `colmap_io.py` / `ply_io.py` / `splat_trainer.py` — COLMAP sparse-model loader (numpy), INRIA-layout 3DGS PLY I/O + opacity-prune LODs (numpy), and the gsplat training loop (torch/gsplat, lazily imported so the backend never requires them).
 - **Config:** `config.yaml` at repo root → `AppConfig` dataclass; relative directory settings resolve against the config file's location. Reconstruction presets (`quick`/`full`) live under the `reconstruction:` key.
 
 ### Frontend — `frontend/`
