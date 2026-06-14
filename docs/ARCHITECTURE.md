@@ -34,7 +34,7 @@ FastAPI app (`backend.main:app`), SQLite via SQLAlchemy (PostgreSQL-swappable th
   - `geometry.py` — ground footprint math: UTM projection, FOV-based extent from AGL, yaw rotation (Shapely/pyproj).
   - `mission planning` (`plans` router) — lawnmower path generation over a target area, KML/GPX export.
   - `reconstruction.py` — the heavy pipeline (below).
-  - `colmap_io.py` / `ply_io.py` / `splat_trainer.py` *(checklist T1–T3)* — COLMAP sparse-model loader (numpy), INRIA-layout 3DGS PLY I/O + opacity-prune LODs (numpy), and the gsplat training loop (torch/gsplat, lazily imported so the backend never requires them).
+  - `colmap_io.py` / `ply_io.py` / `splat_trainer.py` — COLMAP sparse-model loader (numpy), INRIA-layout 3DGS PLY I/O + opacity-prune LODs (numpy), and the gsplat training loop (torch/gsplat, lazily imported so the backend never requires them).
 - **Config:** `config.yaml` at repo root → `AppConfig` dataclass; relative directory settings resolve against the config file's location. Reconstruction presets (`quick`/`full`) live under the `reconstruction:` key.
 
 ### Frontend — `frontend/`
@@ -78,7 +78,7 @@ exports/     plans, splats, LODs, LAS, diffs (gitignored)  ← exports/{reconstr
 
 ## Design rules that matter when contributing
 
-- **External tools are subprocesses behind gates** — argv lists, never shell; missing binaries must produce install guidance, not tracebacks; CI never gets real binaries ([V1_EXTERNAL_TOOL_RELEASE_GATES.md](../V1_EXTERNAL_TOOL_RELEASE_GATES.md)).
+- **External tools are subprocesses behind gates** — argv lists, never shell; missing binaries must produce install guidance, not tracebacks; CI never gets real binaries (all external tools are mocked).
 - **Heavy Python deps are lazy** — torch/gsplat/SuGaR/laspy import inside functions; `pip install .[backend]` and backend import must always work without them, degrading per the state machine above.
 - **The splat PLY layout is a contract** — exact INRIA property order, channel-major `f_rest`, wxyz quaternions; the browser viewer, LAS colorization, and coverage gaps all parse it.
 - **Paths are `Path` objects; Python 3.10+; `from __future__ import annotations`; ruff E/F/I/UP/B at line length 100.**

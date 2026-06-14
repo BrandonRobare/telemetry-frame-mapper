@@ -5,7 +5,8 @@ Splatting trainer and consumed by ``@mkkellogg/gaussian-splats-3d`` (the
 frontend viewer), the LAS export (``_load_ply_positions_and_colors``), and the
 coverage-gap analysis (``_compute_coverage_gaps``) in
 ``backend/services/reconstruction.py``. The layout written here is a hard
-compatibility contract — see V1_RELEASE_CHECKLIST.md task T2.
+compatibility contract: changing field order or the channel-major ``f_rest``
+packing silently corrupts what those consumers read.
 
 Conventions baked into the format:
 

@@ -2,7 +2,7 @@
 
 This walks the full pipeline on real data: extract frames from a DJI flight video, geotag them from the embedded telemetry, import them into the web app, review coverage and quality, run a 3D reconstruction, and view/export the result.
 
-> **Status note.** Steps 1–6 (geotag → import → review → plan → COLMAP reconstruction → exports) are fully functional today. The gaussian-splat **training** half of step 6 ships with the work tracked in [V1_RELEASE_CHECKLIST.md](../V1_RELEASE_CHECKLIST.md) tasks T1–T6; until those merge, reconstructions complete in `colmap_only` mode (sparse point cloud, no splat). This document describes the intended 1.0 behavior and flags the difference where it matters.
+> **Note.** The full pipeline is functional. Gaussian-splat **training** (the second half of step 6) needs torch + gsplat and a CUDA GPU installed (see [SETUP.md](SETUP.md)); without them, reconstructions complete in `colmap_only` mode — a sparse point cloud with no splat — and everything else still works.
 
 **Prerequisites:** everything in [INSTALL.md](INSTALL.md) — at minimum Python 3.10+, Node 18+, `ffmpeg`, `exiftool`; plus COLMAP and an NVIDIA GPU for reconstruction. When anything fails, check [TROUBLESHOOTING.md](TROUBLESHOOTING.md) first — most errors in this pipeline are missing-binary or path-rule issues with exact known fixes.
 
