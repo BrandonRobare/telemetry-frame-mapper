@@ -1,7 +1,7 @@
 """In-process gaussian-splat training on ``gsplat.rasterization``.
 
 This module is the real trainer behind ``_run_gsplat`` in
-``backend/services/reconstruction.py`` (wired in checklist task T4). It replaces
+``backend/services/reconstruction.py``. It replaces
 the phantom ``gsplat.train`` API the pipeline previously called — the installed
 ``gsplat`` package only provides rasterization primitives and densification
 strategies; the training loop is user-written (see gsplat's

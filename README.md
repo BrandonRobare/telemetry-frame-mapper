@@ -186,7 +186,7 @@ ruff check .  # linter
 cd frontend && npm test -- --run   # frontend unit tests (vitest)
 ```
 
-Tests use inline fixture data and temporary paths — no real flight files required. CI mocks all external binaries; see [V1_EXTERNAL_TOOL_RELEASE_GATES.md](V1_EXTERNAL_TOOL_RELEASE_GATES.md).
+Tests use inline fixture data and temporary paths — no real flight files required. CI mocks all external binaries (no real ffmpeg, exiftool, COLMAP, or GPU).
 
 ## Documentation
 
@@ -198,8 +198,6 @@ Tests use inline fixture data and temporary paths — no real flight files requi
 | [docs/SETUP.md](docs/SETUP.md) | GPU / CUDA / gsplat training setup |
 | [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | Exact error messages → causes → fixes |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Component map, reconstruction state machine, design rules |
-| [docs/release-audit-v1.md](docs/release-audit-v1.md) | The 2026-06-11 v1.0 release audit |
-| [V1_RELEASE_CHECKLIST.md](V1_RELEASE_CHECKLIST.md) | Remaining work to tag 1.0, as self-contained agent tasks |
 | [CHANGELOG.md](CHANGELOG.md) | Release notes |
 
 The backend API is self-documenting at `http://localhost:8000/docs` while running.

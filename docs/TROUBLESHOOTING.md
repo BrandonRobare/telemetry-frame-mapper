@@ -60,12 +60,12 @@ SuGaR has no PyPI package; it's a manual install from the [upstream project](htt
 The in-browser recorder (WebM via MediaRecorder) is the primary path and needs nothing extra — use it. The server MP4 render requires the full GPU training stack.
 
 **Cancel button seems ignored mid-training.**
-Cancellation is polled between steps/iterations; allow a few seconds. If the job ends `complete/colmap_only` after a cancel during training, you're on a pre-T4 build (see V1_RELEASE_CHECKLIST.md) — the cancel landed after training started but before the trainer honored mid-iteration cancels.
+Cancellation is polled between steps and between training iterations; allow a few seconds for the job to stop. A cancel during training ends the job as `failed` with "Cancelled by user".
 
 ## Splat viewer
 
 **Viewer stuck on loading / "Failed to load splat viewer" with a completed reconstruction.**
-1) Confirm the reconstruction actually produced a splat (`exports/{id}/splat.ply` exists; `colmap_only` runs have none). 2) Confirm the build includes the explicit PLY format fix (checklist T5) — without it the library mis-detects the format from the `?lod=preview` URL. 3) WebGL2 must be available (check `chrome://gpu`).
+1) Confirm the reconstruction actually produced a splat (`exports/{id}/splat.ply` exists; `colmap_only` runs have none). 2) Confirm the build passes an explicit PLY format to the viewer — without it the library mis-detects the format from the `?lod=preview` URL. 3) WebGL2 must be available (check `chrome://gpu`).
 
 **Annotations/measurements disabled, GPS readout missing.**
 The reconstruction's geo-transform couldn't be derived (UTM zone unknown) — typically when source frames lacked GPS EXIF. Re-import properly geotagged frames and reconstruct again.
