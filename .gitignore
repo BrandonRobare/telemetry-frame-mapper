@@ -71,7 +71,3 @@ internal/
 # OS files
 .DS_Store
 Thumbs.db
-
-# Dev dashboard
-dashboard/
-tests/test_dashboard.py

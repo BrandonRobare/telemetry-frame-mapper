@@ -31,7 +31,6 @@ src/              CLI package (drone-video-geotagger command)
 backend/          FastAPI app (API server, DB models, services)
 frontend/         Vite + React frontend (11-tab workflow UI)
 tests/            pytest suite (tests/cli/ and tests/backend/)
-dashboard/        Dev-time status dashboard (stdlib only, http://localhost:7000)
 data/             SQLite database (gitignored)
 imports/          Drop folder for raw images and flight logs (gitignored)
 processed/        Thumbnails and processed outputs (gitignored)
@@ -151,13 +150,6 @@ uvicorn backend.main:app --reload
 
 Optional: copy `config.yaml.example` to `config.yaml` and adjust mission parameters (altitude, FOV, overlap, target CRS).
 
-### Dev dashboard
-
-```bash
-python dashboard/server.py
-# http://localhost:7000 — live task progress + Architecture Reference tab
-```
-
 ## CLI inputs
 
 | Flag | Description |
@@ -181,7 +173,7 @@ Upload the geotagged folder to WebODM; it reads GPS EXIF tags on import.
 ## Tests
 
 ```bash
-pytest        # 247 tests (CLI + backend)
+pytest        # 222 tests (CLI + backend)
 ruff check .  # linter
 cd frontend && npm test -- --run   # frontend unit tests (vitest)
 ```
