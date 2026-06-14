@@ -1,0 +1,90 @@
+<svg viewBox="0 0 780 838" xmlns="http://www.w3.org/2000/svg" role="img" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif">
+  <title>How the custom gaussian-splat trainer works</title>
+  <desc>COLMAP (an external binary dependency) produces camera poses and a sparse point cloud. Our custom code reads it, seeds Gaussians from the points, runs a training loop that calls the gsplat library and torch as in-process dependencies, applies a VRAM cap, and writes a splat PLY.</desc>
+
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#8a8a8a"/>
+    </marker>
+  </defs>
+
+  <!-- COLMAP (dependency) -->
+  <rect x="270" y="16" width="240" height="50" rx="9" fill="#FAECE7" stroke="#D85A30" stroke-width="1.5"/>
+  <text x="390" y="38" text-anchor="middle" font-size="13.5" font-weight="600" fill="#712B13">COLMAP binary</text>
+  <text x="390" y="55" text-anchor="middle" font-size="10.5" fill="#9a5236" font-family="ui-monospace, monospace">subprocess · Structure-from-Motion</text>
+
+  <line x1="390" y1="66" x2="390" y2="92" stroke="#8a8a8a" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="398" y="83" font-size="10.5" fill="#6b6b6b">camera poses + sparse 3D points</text>
+
+  <!-- colmap_io (custom) -->
+  <rect x="278" y="96" width="224" height="46" rx="9" fill="#EEEDFE" stroke="#7F77DD" stroke-width="1.5"/>
+  <text x="390" y="116" text-anchor="middle" font-size="12.5" font-weight="600" fill="#26215C" font-family="ui-monospace, monospace">colmap_io.read_model</text>
+  <text x="390" y="132" text-anchor="middle" font-size="10.5" fill="#6f6a86">reads sparse/0 (numpy only)</text>
+
+  <line x1="390" y1="142" x2="390" y2="166" stroke="#8a8a8a" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- Initialize (custom) -->
+  <rect x="232" y="170" width="316" height="64" rx="9" fill="#EEEDFE" stroke="#7F77DD" stroke-width="1.5"/>
+  <text x="390" y="190" text-anchor="middle" font-size="13" font-weight="600" fill="#26215C">Seed Gaussians from the sparse cloud</text>
+  <text x="390" y="208" text-anchor="middle" font-size="10" fill="#6f6a86" font-family="ui-monospace, monospace">means←points · color←RGB→SH · opacity←logit(0.1)</text>
+  <text x="390" y="223" text-anchor="middle" font-size="10" fill="#6f6a86" font-family="ui-monospace, monospace">scale←log(mean 3-NN distance) · quats←identity</text>
+
+  <line x1="390" y1="234" x2="390" y2="258" stroke="#8a8a8a" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- Training loop (custom container) -->
+  <rect x="150" y="262" width="480" height="300" rx="12" fill="#F7F6FE" stroke="#7F77DD" stroke-width="2"/>
+  <text x="390" y="285" text-anchor="middle" font-size="13.5" font-weight="600" fill="#26215C">Training loop — repeat 1,000 (quick) / 30,000 (full)</text>
+
+  <!-- step 1 -->
+  <rect x="170" y="298" width="284" height="34" rx="7" fill="#EEEDFE" stroke="#7F77DD" stroke-width="1.2"/>
+  <text x="184" y="319" font-size="11.5" fill="#26215C">1 · Render a random training view</text>
+  <rect x="470" y="300" width="142" height="30" rx="7" fill="#FAECE7" stroke="#D85A30" stroke-width="1.2"/>
+  <text x="541" y="319" text-anchor="middle" font-size="10" fill="#712B13" font-family="ui-monospace, monospace">gsplat.rasterization</text>
+
+  <!-- step 2 -->
+  <rect x="170" y="338" width="442" height="34" rx="7" fill="#EEEDFE" stroke="#7F77DD" stroke-width="1.2"/>
+  <text x="184" y="359" font-size="11" fill="#26215C" font-family="ui-monospace, monospace">2 · Loss = 0.8·L1 + 0.2·(1 − SSIM)   (SSIM hand-written)</text>
+
+  <!-- step 3 -->
+  <rect x="170" y="378" width="284" height="34" rx="7" fill="#EEEDFE" stroke="#7F77DD" stroke-width="1.2"/>
+  <text x="184" y="399" font-size="11.5" fill="#26215C">3 · Densify &amp; prune Gaussians</text>
+  <rect x="470" y="380" width="142" height="30" rx="7" fill="#FAECE7" stroke="#D85A30" stroke-width="1.2"/>
+  <text x="541" y="399" text-anchor="middle" font-size="10" fill="#712B13" font-family="ui-monospace, monospace">gsplat.DefaultStrategy</text>
+
+  <!-- step 4 -->
+  <rect x="170" y="418" width="284" height="34" rx="7" fill="#EEEDFE" stroke="#7F77DD" stroke-width="1.2"/>
+  <text x="184" y="439" font-size="11.5" fill="#26215C">4 · Adam step · LR decay · SH warmup</text>
+  <rect x="470" y="420" width="142" height="30" rx="7" fill="#FAECE7" stroke="#D85A30" stroke-width="1.2"/>
+  <text x="541" y="439" text-anchor="middle" font-size="10" fill="#712B13" font-family="ui-monospace, monospace">torch (autograd)</text>
+
+  <!-- step 5 highlight -->
+  <rect x="170" y="458" width="442" height="34" rx="7" fill="#EEEDFE" stroke="#534AB7" stroke-width="2.4"/>
+  <text x="184" y="479" font-size="11.5" font-weight="600" fill="#26215C">5 · VRAM cap → freeze densification at max Gaussians (4 GB safe)</text>
+
+  <!-- step 6 -->
+  <rect x="170" y="498" width="442" height="34" rx="7" fill="#EEEDFE" stroke="#7F77DD" stroke-width="1.2"/>
+  <text x="184" y="519" font-size="11.5" fill="#26215C">6 · Every N iters: eval PSNR / SSIM → sparklines   ·   poll cancel</text>
+
+  <text x="390" y="551" text-anchor="middle" font-size="10" fill="#6f6a86">one GPU job at a time (_GPU_LOCK) · empty_cache on exit</text>
+
+  <line x1="390" y1="562" x2="390" y2="586" stroke="#8a8a8a" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- ply_io (custom) -->
+  <rect x="278" y="590" width="224" height="46" rx="9" fill="#EEEDFE" stroke="#7F77DD" stroke-width="1.5"/>
+  <text x="390" y="610" text-anchor="middle" font-size="12.5" font-weight="600" fill="#26215C" font-family="ui-monospace, monospace">ply_io.write_3dgs_ply</text>
+  <text x="390" y="626" text-anchor="middle" font-size="10.5" fill="#6f6a86">INRIA 3DGS layout</text>
+
+  <line x1="390" y1="636" x2="390" y2="660" stroke="#8a8a8a" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- output -->
+  <rect x="252" y="664" width="276" height="48" rx="9" fill="#E3E0FB" stroke="#7F77DD" stroke-width="1.5"/>
+  <text x="390" y="685" text-anchor="middle" font-size="13" font-weight="600" fill="#26215C">splat.ply + preview/medium LODs</text>
+  <text x="390" y="701" text-anchor="middle" font-size="10.5" fill="#6f6a86">+ thumbnail · loads in the browser viewer</text>
+
+  <!-- legend -->
+  <rect x="150" y="744" width="480" height="74" rx="10" fill="none" stroke="#d9d6ea" stroke-width="1"/>
+  <rect x="170" y="760" width="22" height="16" rx="4" fill="#EEEDFE" stroke="#7F77DD" stroke-width="1.4"/>
+  <text x="200" y="772" font-size="11" fill="#26215C">our custom code (the training loop, init, loss, cap, I/O)</text>
+  <rect x="170" y="788" width="22" height="16" rx="4" fill="#FAECE7" stroke="#D85A30" stroke-width="1.4"/>
+  <text x="200" y="800" font-size="11" fill="#712B13">external dependency — gsplat library (in-process) · torch · CUDA · COLMAP (subprocess)</text>
+</svg>
