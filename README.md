@@ -187,6 +187,7 @@ Tests use inline fixture data and temporary paths — no real flight files requi
 
 | Doc | What it covers |
 |---|---|
+| [docs/USER-MANUAL.md](docs/USER-MANUAL.md) | Full reference: capabilities, both data pipelines, and the gaussian-splat trainer |
 | [docs/WORKFLOW.md](docs/WORKFLOW.md) | End-to-end tutorial: DJI video → geotag → import → reconstruct → splat → export |
 | [docs/INSTALL.md](docs/INSTALL.md) | System requirements and per-platform setup (ffmpeg, exiftool, COLMAP) |
 | [docs/SETUP.md](docs/SETUP.md) | GPU / CUDA / gsplat training setup |
