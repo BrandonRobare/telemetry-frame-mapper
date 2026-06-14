@@ -4,7 +4,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [1.0.0] — 2026-06-14
 
-First stable release: a complete drone video → gaussian-splat pipeline. The headline of the 1.0 cycle was replacing a non-functional gsplat hook with a real in-process trainer, validated end-to-end on GPU hardware (PSNR 27.5 / SSIM 0.79 on a full-preset run). Work for the release was tracked in [V1_RELEASE_CHECKLIST.md](V1_RELEASE_CHECKLIST.md).
+First stable release: a complete drone video → gaussian-splat pipeline. The headline of the 1.0 cycle was replacing a non-functional gsplat hook with a real in-process trainer, validated end-to-end on GPU hardware (PSNR 27.5 / SSIM 0.79 on a full-preset run).
 
 ### Added
 - **CLI geotagger** (`drone-video-geotagger`): extracts DJI SRT telemetry from MP4 with ffmpeg, interpolates per-frame GPS positions, writes EXIF via ExifTool, produces an audit CSV. WSL-aware path handling.
@@ -12,7 +12,7 @@ First stable release: a complete drone video → gaussian-splat pipeline. The he
 - **Reconstruction pipeline**: COLMAP SfM orchestration (quick/full presets, target-area crop, manual frame selection), GPS geo-registration (COLMAP↔UTM similarity transform), per-frame reprojection-error reporting, background job management with progress/cancel.
 - **React frontend** (11 tabs): Map, GPS Sync, Review, Plan, Export, Session Log, Reconstruct, Jobs, Storage, Splat Viewer (3D canvas, PSNR/SSIM sparklines, coverage-gap heatmap, GPS annotations, distance/area measurement, ortho/3D split view, flythrough recording), and Compare (voxel change detection between flights).
 - **Exports**: WebODM package, GeoJSON, LAS 1.4 point cloud with UTM CRS, optional SuGaR mesh (GLB/OBJ/MTL with geo-reference sidecar), browser-recorded or server-rendered flythrough video.
-- **Documentation suite** (2026-06-11): end-to-end [workflow tutorial](docs/WORKFLOW.md), [install guide](docs/INSTALL.md), [troubleshooting](docs/TROUBLESHOOTING.md), [architecture overview](docs/ARCHITECTURE.md), [release audit](docs/release-audit-v1.md), and the agent-executable [release checklist](V1_RELEASE_CHECKLIST.md).
+- **Documentation suite**: a [user manual](docs/USER-MANUAL.md), end-to-end [workflow tutorial](docs/WORKFLOW.md), [install guide](docs/INSTALL.md), [GPU setup](docs/SETUP.md), [troubleshooting](docs/TROUBLESHOOTING.md), and [architecture overview](docs/ARCHITECTURE.md).
 
 ### Added (real reconstruction — the 1.0 headline)
 - **In-process gaussian-splat trainer** on `gsplat.rasterization`, replacing the phantom `gsplat.train` API that made splat training impossible. Sparse-cloud initialization, per-attribute Adam, `DefaultStrategy` densification with a VRAM-aware max-gaussian cap, pure-torch SSIM loss, SH-degree warmup, and INRIA-layout PLY export. New stdlib+numpy modules `colmap_io` (sparse-model loader) and `ply_io` (3DGS PLY read/write/prune) underpin it; none of torch/gsplat are required to import the backend.
