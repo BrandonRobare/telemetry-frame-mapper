@@ -357,7 +357,7 @@ await viewer.addSplatScene(splatUrl, { streamView: true, format: SceneFormat.Ply
 
 ## P2 — Release mechanics
 
-### T14 — [ ] Manual GPU smoke (human-in-the-loop; the one task agents cannot finish alone)
+### T14 — [x] Manual GPU smoke (human-in-the-loop; the one task agents cannot finish alone)
 
 **Goal:** Prove the T1–T6 trainer end-to-end on the real RTX 3050 Ti before tagging. Record results in [V1_EXTERNAL_TOOL_RELEASE_GATES.md](V1_EXTERNAL_TOOL_RELEASE_GATES.md).
 
