@@ -1,5 +1,10 @@
 # Drone Video Geotagger
 
+[![CI](https://github.com/BrandonRobare/telemetry-frame-mapper/actions/workflows/ci.yml/badge.svg)](https://github.com/BrandonRobare/telemetry-frame-mapper/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![Latest release](https://img.shields.io/github/v/release/BrandonRobare/telemetry-frame-mapper)](https://github.com/BrandonRobare/telemetry-frame-mapper/releases/latest)
+
 A full pipeline from DJI drone video to a GPS-registered 3D gaussian splat: geotag extracted frames from the embedded telemetry, review coverage on a map, run COLMAP + gaussian-splat reconstruction, and explore/export the result — plus WebODM/OpenDroneMap-ready output at every step.
 
 DJI videos can store GPS telemetry in an embedded subtitle track. Extracted still frames do not keep that location data. The CLI reads the DJI telemetry, lines it up with the extracted frame sequence, and writes GPS EXIF tags into the JPG files; the web app takes it from there:
@@ -176,7 +181,7 @@ Upload the geotagged folder to WebODM; it reads GPS EXIF tags on import.
 ## Tests
 
 ```bash
-pytest        # 204 tests (CLI + backend)
+pytest        # 247 tests (CLI + backend)
 ruff check .  # linter
 cd frontend && npm test -- --run   # frontend unit tests (vitest)
 ```
