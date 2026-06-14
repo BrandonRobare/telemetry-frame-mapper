@@ -111,6 +111,17 @@ Requires Node 18+.
 
 ## Usage
 
+### Quick launch (web app)
+
+Once installed, start the backend + frontend and open the browser with one command:
+
+```bash
+./run.sh      # macOS / Linux
+run.bat       # Windows (enters the VS build environment so GPU training works)
+```
+
+`run.bat`/`run.sh` are for everyday use; `dev.bat`/`dev.sh` do the same but also create the venv and install dependencies on first run.
+
 ### CLI — geotag frames
 
 Extract frames from the video first:
