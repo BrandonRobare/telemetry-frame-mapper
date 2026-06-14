@@ -50,8 +50,9 @@ exports/*
 !exports/.gitkeep
 backend/exports/*
 !backend/exports/.gitkeep
-data/*.db
-data/*/
+# Ignore everything under data/ (DBs, COLMAP workspaces, datasets, run logs like
+# vram_full_run.csv) — only the directory placeholder is tracked.
+data/*
 !data/.gitkeep
 
 # Frontend
