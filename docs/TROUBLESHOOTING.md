@@ -65,7 +65,7 @@ Cancellation is polled between steps and between training iterations; allow a fe
 ## Splat viewer
 
 **Viewer stuck on loading / "Failed to load splat viewer" with a completed reconstruction.**
-1) Confirm the reconstruction actually produced a splat (`exports/{id}/splat.ply` exists; `colmap_only` runs have none). 2) Confirm the build includes the explicit PLY format fix (checklist T5) — without it the library mis-detects the format from the `?lod=preview` URL. 3) WebGL2 must be available (check `chrome://gpu`).
+1) Confirm the reconstruction actually produced a splat (`exports/{id}/splat.ply` exists; `colmap_only` runs have none). 2) Confirm the build passes an explicit PLY format to the viewer — without it the library mis-detects the format from the `?lod=preview` URL. 3) WebGL2 must be available (check `chrome://gpu`).
 
 **Annotations/measurements disabled, GPS readout missing.**
 The reconstruction's geo-transform couldn't be derived (UTM zone unknown) — typically when source frames lacked GPS EXIF. Re-import properly geotagged frames and reconstruct again.

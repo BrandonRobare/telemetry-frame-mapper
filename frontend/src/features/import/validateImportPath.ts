@@ -1,7 +1,7 @@
 // Client-side mirror of the backend import-path rules (backend/routers/sessions.py):
 // the path must be relative and stay inside the server's imports/ directory.
 // The backend remains authoritative — this only gives users an early, clearer error
-// (regression guard for walkthrough finding F4).
+// before an absolute or traversal path is sent and rejected.
 export function validateImportPath(raw: string): string | null {
   const trimmed = raw.trim()
   if (!trimmed) return 'Folder path is required'
