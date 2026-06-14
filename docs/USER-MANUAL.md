@@ -151,6 +151,10 @@ WebODM package.
 
 ## 3. The gaussian-splat trainer
 
+![Data flow of the gaussian-splat trainer: COLMAP produces poses and points; our custom code seeds Gaussians and runs a training loop that calls gsplat and torch, applies a VRAM cap, and exports a splat PLY. Purple boxes are our code; orange boxes are external dependencies.](images/splat-trainer.svg)
+
+*Purple = our custom code (the training loop, initialization, loss, VRAM cap, I/O). Orange = external dependencies it calls — the gsplat library (in-process), torch/CUDA, and the COLMAP binary (subprocess). The logic is custom; it is not dependency-free.*
+
 The 1.0 headline feature. Earlier builds called a `gsplat.train` API that does
 not exist in the real `gsplat` package, so splat training always failed silently.
 1.0 replaces it with a real, in-process training loop
