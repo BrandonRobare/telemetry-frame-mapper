@@ -48,7 +48,10 @@ Training dependencies are missing; the log will show `Gaussian Splatting skipped
 Exactly that. 4 GB cards: use `quick`, reduce the frame selection in the Review tab, or crop to a target area. Close other GPU apps (browsers with WebGL tabs count).
 
 **First training job sits at the start of `running_gsplat` for many minutes.**
-If no prebuilt gsplat wheel matched your torch/CUDA, gsplat JIT-compiles its CUDA kernels on **first import** (5–15 min; needs MSVC `cl.exe` and `nvcc` on PATH on Windows). Warm up once with `python -c "import gsplat"` before starting jobs. See SETUP.md.
+If no prebuilt gsplat wheel matched your torch/CUDA, gsplat JIT-compiles its CUDA kernels on the **first rasterization** (5–15 min; needs MSVC `cl.exe` and `nvcc` on PATH on Windows). Warm up once before starting jobs (see the SETUP.md GPU section).
+
+**Job fails immediately at `running_gsplat` / "loading COLMAP model" with `Command '['where', 'cl']' returned non-zero exit status 1` (Windows).**
+COLMAP succeeded but training can't start because `cl.exe` isn't on PATH. torch's CUDA-extension loader re-runs a compiler check on **every** load, even when the kernels are already compiled and cached — so the **backend process itself** must be launched from a VS x64 Developer Command Prompt (`vcvars64`), not just the one-time warm-up. Restart `uvicorn` from that environment. See SETUP.md.
 
 **Mesh export: `SuGaR is not installed. Install optional reconstruction dependencies.`**
 SuGaR has no PyPI package; it's a manual install from the [upstream project](https://github.com/Anttwo/SuGaR). Mesh export is optional — everything else works without it.
