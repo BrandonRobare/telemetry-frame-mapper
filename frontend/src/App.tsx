@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useMapStore } from './shared/stores/mapStore'
+import { useSettingsStore } from './features/settings/settingsStore'
 import MapTab from './features/map/MapTab'
 import GpsSyncTab from './features/gps-sync/GpsSyncTab'
 import ReviewTab from './features/review/ReviewTab'
@@ -12,6 +13,7 @@ import JobsTab from './features/jobs/JobsTab'
 import StorageTab from './features/storage/StorageTab'
 import SplatViewerTab from './features/splat/SplatViewerTab'
 import CompareTab from './features/compare/CompareTab'
+import SettingsTab from './features/settings/SettingsTab'
 import { ToastStack } from './shared/components/ToastStack'
 import ImportModal from './features/import/ImportModal'
 import SessionPicker from './features/sessions/SessionPicker'
@@ -29,6 +31,7 @@ type Tab =
   | 'storage'
   | 'splat'
   | 'compare'
+  | 'settings'
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'map', label: 'Map' },
@@ -42,6 +45,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'storage', label: 'Storage' },
   { id: 'splat', label: 'Splat Viewer' },
   { id: 'compare', label: 'Compare' },
+  { id: 'settings', label: 'Settings' },
 ]
 
 /** Framing/target mark — fits a mapping + telemetry tool, replaces the emoji logo. */
@@ -68,11 +72,15 @@ function renderTab(tab: Tab) {
     case 'storage': return <StorageTab />
     case 'splat': return <SplatViewerTab />
     case 'compare': return <CompareTab />
+    case 'settings': return <SettingsTab />
   }
 }
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<Tab>('map')
+  const [activeTab, setActiveTab] = useState<Tab>(() => {
+    const d = useSettingsStore.getState().defaultTab
+    return TABS.some((t) => t.id === d) ? (d as Tab) : 'map'
+  })
   const [showImport, setShowImport] = useState(false)
   const { requestedTab, setRequestedTab } = useMapStore()
 

@@ -13,7 +13,7 @@ from pathlib import Path
 from shapely.geometry import Point, shape
 from sqlalchemy.orm import Session as DBSession
 
-from backend.core.config import get_config, get_reconstruction_config
+from backend.core.config import get_config, get_reconstruction_config, get_render_config
 from backend.db.database import SessionLocal
 from backend.db.models import (
     Image,
@@ -62,15 +62,22 @@ def _write_colmap_workspace(colmap_dir: Path, images: list) -> None:
     (colmap_dir / "sparse").mkdir(parents=True, exist_ok=True)
 
     cfg = get_config()
+    recon_cfg = get_reconstruction_config()
+    camera_model = recon_cfg.get("camera_model", "PINHOLE")
     f_px = (cfg.image_width_px / 2) / math.tan(math.radians(cfg.fov_horizontal_deg / 2))
     cx = cfg.image_width_px / 2
     cy = cfg.image_height_px / 2
     cameras_txt = colmap_dir / "cameras.txt"
+    if camera_model == "SIMPLE_PINHOLE":
+        # SIMPLE_PINHOLE: 3 params — f cx cy
+        params_str = f"{f_px:.4f} {cx:.4f} {cy:.4f}"
+    else:
+        # PINHOLE (default): 4 params — fx fy cx cy
+        params_str = f"{f_px:.4f} {f_px:.4f} {cx:.4f} {cy:.4f}"
     cameras_txt.write_text(
         "# Camera list with one line of data per camera:\n"
         "#   CAMERA_ID, MODEL, WIDTH, HEIGHT, PARAMS[]\n"
-        f"1 PINHOLE {cfg.image_width_px} {cfg.image_height_px} "
-        f"{f_px:.4f} {f_px:.4f} {cx:.4f} {cy:.4f}\n"
+        f"1 {camera_model} {cfg.image_width_px} {cfg.image_height_px} {params_str}\n"
     )
 
     for img in images:
@@ -95,19 +102,25 @@ def _run_colmap(colmap_dir: Path, progress_cb, cancel: threading.Event) -> None:
     output_path = str(colmap_dir / "sparse")
     cfg = get_reconstruction_config()
 
+    camera_model = cfg.get("camera_model", "PINHOLE")
+    matcher_key = cfg.get("matcher", "exhaustive")
+    colmap_matcher = (
+        "sequential_matcher" if matcher_key == "sequential" else "exhaustive_matcher"
+    )
+
     steps = [
         (
             ["colmap", "feature_extractor",
              "--database_path", db_path,
              "--image_path", image_path,
              f"--SiftExtraction.max_num_features={cfg['sift_max_features']}",
-             "--ImageReader.camera_model", "PINHOLE",
+             "--ImageReader.camera_model", camera_model,
              "--ImageReader.single_camera", "1"],
             "feature extraction",
             10.0,
         ),
         (
-            ["colmap", "exhaustive_matcher",
+            ["colmap", colmap_matcher,
              "--database_path", db_path],
             "feature matching",
             40.0,
@@ -356,21 +369,28 @@ def _run_gsplat(
 
 
 def _generate_lod(splat_path: Path) -> tuple[Path, Path]:
-    """Return (preview_path, medium_path) — 10% and 50% opacity-pruned variants."""
+    """Return (preview_path, medium_path) — opacity-pruned variants using configured ratios."""
+    render_cfg = get_render_config()
+    preview_ratio = float(render_cfg.get("lod_preview_ratio", 0.10))
+    medium_ratio = float(render_cfg.get("lod_medium_ratio", 0.50))
     preview = splat_path.with_name(splat_path.stem + "_preview.ply")
     medium = splat_path.with_name(splat_path.stem + "_medium.ply")
-    ply_io.prune_by_opacity(splat_path, preview, keep_ratio=0.10)
-    ply_io.prune_by_opacity(splat_path, medium, keep_ratio=0.50)
+    ply_io.prune_by_opacity(splat_path, preview, keep_ratio=preview_ratio)
+    ply_io.prune_by_opacity(splat_path, medium, keep_ratio=medium_ratio)
     return preview, medium
 
 
 def _generate_thumbnail(splat_path: Path, out_path: Path) -> Path | None:
-    """Render a 512×512 JPEG thumbnail of the splat.
+    """Render a JPEG thumbnail of the splat at the configured size/quality.
 
     Best-effort: returns out_path on success, None when the GPU stack is
     unavailable or rendering fails (the trainer never raises here)."""
+    render_cfg = get_render_config()
+    size = int(render_cfg.get("thumbnail_size_px", 512))
+    quality = int(render_cfg.get("thumbnail_quality", 85))
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    return splat_trainer.render_thumbnail(splat_path, out_path)
+    return splat_trainer.render_thumbnail(splat_path, out_path, width=size, height=size,
+                                          quality=quality)
 
 
 def _read_colmap_points3d(points3d_txt: Path) -> tuple:

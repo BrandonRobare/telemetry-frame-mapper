@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import patch
 
+import piexif
 from PIL import Image as PILImage
 
 
@@ -62,3 +63,229 @@ def test_progress_endpoint_returns_pending(client, tmp_path):
     resp = client.get(f"/sessions/{session_id}/progress")
     assert resp.status_code == 200
     assert resp.json()["status"] in ("running", "done", "pending", "unknown")
+
+
+# ---------------------------------------------------------------------------
+# Helpers for _run unit tests
+# ---------------------------------------------------------------------------
+
+def _make_gps_jpg(folder: Path, name: str, lat: float = 35.0, lon: float = -80.0) -> Path:
+    """Create a minimal JPEG with GPS EXIF at given coords."""
+    p = folder / name
+    img = PILImage.new("RGB", (100, 100), color=(128, 128, 128))
+
+    def to_rational(value: float):
+        d = int(abs(value))
+        m = int((abs(value) - d) * 60)
+        s = round(((abs(value) - d) * 60 - m) * 60 * 100)
+        return ((d, 1), (m, 1), (s, 100))
+
+    gps_ifd = {
+        piexif.GPSIFD.GPSLatitudeRef: b"N" if lat >= 0 else b"S",
+        piexif.GPSIFD.GPSLatitude: to_rational(lat),
+        piexif.GPSIFD.GPSLongitudeRef: b"E" if lon >= 0 else b"W",
+        piexif.GPSIFD.GPSLongitude: to_rational(abs(lon)),
+        piexif.GPSIFD.GPSAltitude: (6096, 100),
+        piexif.GPSIFD.GPSAltitudeRef: 0,
+    }
+    exif_dict = {"GPS": gps_ifd}
+    exif_bytes = piexif.dump(exif_dict)
+    img.save(str(p), "JPEG", exif=exif_bytes)
+    return p
+
+
+def _make_no_gps_jpg(folder: Path, name: str) -> Path:
+    """Create a JPEG with zero/no GPS EXIF."""
+    p = folder / name
+    img = PILImage.new("RGB", (100, 100), color=(100, 100, 100))
+    img.save(str(p), "JPEG")
+    return p
+
+
+def _db_factory_for_test():
+    """Return a factory that yields a fresh in-memory test DB session."""
+    from tests.conftest import TestSessionLocal
+    return TestSessionLocal
+
+
+# ---------------------------------------------------------------------------
+# Fix 3: accepted_extensions — PNG is picked up when configured
+# ---------------------------------------------------------------------------
+
+def test_run_accepts_png_when_configured(tmp_path, setup_test_db):
+    """_run picks up .png files when accepted_extensions includes .png."""
+    from backend.db.database import get_db
+    from backend.db.models import Image as ImageModel
+    from backend.db.models import Session as SessionModel
+    from backend.main import app
+    from backend.services.ingest_orchestrator import _run
+    from tests.conftest import TestSessionLocal
+
+    db = next(app.dependency_overrides[get_db]())
+    session = SessionModel(name="png-test", folder_path=str(tmp_path), photo_count=0,
+                           usable_count=0)
+    db.add(session)
+    db.commit()
+    db.refresh(session)
+
+    # Create one PNG and one JPEG in the folder.
+    png_path = tmp_path / "frame.png"
+    PILImage.new("RGB", (100, 100), color=(0, 128, 255)).save(str(png_path), "PNG")
+    _make_no_gps_jpg(tmp_path, "frame.jpg")
+
+    ingest_cfg_with_png = {
+        "accepted_extensions": [".jpg", ".jpeg", ".png"],
+        "filter_zero_gps": False,
+        "thumbnail_size_px": 64,
+        "thumbnail_jpeg_quality": 75,
+    }
+
+    with patch("backend.core.config.get_ingest_config",
+               return_value=ingest_cfg_with_png), \
+         patch("backend.core.config.load_config") as mock_load_cfg:
+        mock_load_cfg.return_value.processed_dir = str(tmp_path)
+        mock_load_cfg.return_value.thumbnail_size_px = 64
+        mock_load_cfg.return_value.fov_horizontal_deg = 83
+        mock_load_cfg.return_value.fov_vertical_deg = 53
+        mock_load_cfg.return_value.target_crs = "EPSG:32617"
+        _run(session.id, tmp_path, TestSessionLocal)
+
+    db.expire_all()
+    images = db.query(ImageModel).filter(ImageModel.session_id == session.id).all()
+    filenames = {img.filename for img in images}
+    # Both PNG and JPEG must have been ingested.
+    assert "frame.png" in filenames
+    assert "frame.jpg" in filenames
+
+
+# ---------------------------------------------------------------------------
+# Fix 4/5: filter_zero_gps skips (0, 0) images; real-coord images still land
+# ---------------------------------------------------------------------------
+
+def test_run_filter_zero_gps_skips_zero_coord_image(tmp_path, setup_test_db):
+    """When filter_zero_gps=True, images with (lat=0, lon=0) must not be inserted."""
+    from backend.db.database import get_db
+    from backend.db.models import Image as ImageModel
+    from backend.db.models import Session as SessionModel
+    from backend.main import app
+    from backend.services.ingest_orchestrator import _run
+    from tests.conftest import TestSessionLocal
+
+    db = next(app.dependency_overrides[get_db]())
+    session = SessionModel(name="zero-gps-test", folder_path=str(tmp_path),
+                           photo_count=0, usable_count=0)
+    db.add(session)
+    db.commit()
+    db.refresh(session)
+
+    # Create one (0, 0) GPS image and one valid-coord image.
+    _make_gps_jpg(tmp_path, "zero.jpg", lat=0.0, lon=0.0)
+    _make_gps_jpg(tmp_path, "valid.jpg", lat=35.0, lon=-80.0)
+
+    ingest_cfg = {
+        "accepted_extensions": [".jpg", ".jpeg"],
+        "filter_zero_gps": True,
+        "thumbnail_size_px": 64,
+        "thumbnail_jpeg_quality": 75,
+    }
+
+    with patch("backend.core.config.get_ingest_config",
+               return_value=ingest_cfg), \
+         patch("backend.core.config.load_config") as mock_load_cfg:
+        mock_load_cfg.return_value.processed_dir = str(tmp_path)
+        mock_load_cfg.return_value.thumbnail_size_px = 64
+        mock_load_cfg.return_value.fov_horizontal_deg = 83
+        mock_load_cfg.return_value.fov_vertical_deg = 53
+        mock_load_cfg.return_value.target_crs = "EPSG:32617"
+        _run(session.id, tmp_path, TestSessionLocal)
+
+    db.expire_all()
+    images = db.query(ImageModel).filter(ImageModel.session_id == session.id).all()
+    filenames = {img.filename for img in images}
+    # (0,0) frame must be absent; valid frame must be present.
+    assert "zero.jpg" not in filenames
+    assert "valid.jpg" in filenames
+
+
+def test_run_filter_zero_gps_false_keeps_zero_coord_image(tmp_path, setup_test_db):
+    """When filter_zero_gps=False, even (0,0) GPS images must be inserted."""
+    from backend.db.database import get_db
+    from backend.db.models import Image as ImageModel
+    from backend.db.models import Session as SessionModel
+    from backend.main import app
+    from backend.services.ingest_orchestrator import _run
+    from tests.conftest import TestSessionLocal
+
+    db = next(app.dependency_overrides[get_db]())
+    session = SessionModel(name="zero-gps-disabled", folder_path=str(tmp_path),
+                           photo_count=0, usable_count=0)
+    db.add(session)
+    db.commit()
+    db.refresh(session)
+
+    _make_gps_jpg(tmp_path, "zero.jpg", lat=0.0, lon=0.0)
+
+    ingest_cfg = {
+        "accepted_extensions": [".jpg", ".jpeg"],
+        "filter_zero_gps": False,
+        "thumbnail_size_px": 64,
+        "thumbnail_jpeg_quality": 75,
+    }
+
+    with patch("backend.core.config.get_ingest_config",
+               return_value=ingest_cfg), \
+         patch("backend.core.config.load_config") as mock_load_cfg:
+        mock_load_cfg.return_value.processed_dir = str(tmp_path)
+        mock_load_cfg.return_value.thumbnail_size_px = 64
+        mock_load_cfg.return_value.fov_horizontal_deg = 83
+        mock_load_cfg.return_value.fov_vertical_deg = 53
+        mock_load_cfg.return_value.target_crs = "EPSG:32617"
+        _run(session.id, tmp_path, TestSessionLocal)
+
+    db.expire_all()
+    images = db.query(ImageModel).filter(ImageModel.session_id == session.id).all()
+    filenames = {img.filename for img in images}
+    assert "zero.jpg" in filenames
+
+
+def test_run_filter_zero_gps_keeps_no_gps_images(tmp_path, setup_test_db):
+    """filter_zero_gps must NOT skip images that have no GPS at all (lat/lon = None)."""
+    from backend.db.database import get_db
+    from backend.db.models import Image as ImageModel
+    from backend.db.models import Session as SessionModel
+    from backend.main import app
+    from backend.services.ingest_orchestrator import _run
+    from tests.conftest import TestSessionLocal
+
+    db = next(app.dependency_overrides[get_db]())
+    session = SessionModel(name="no-gps-preserved", folder_path=str(tmp_path),
+                           photo_count=0, usable_count=0)
+    db.add(session)
+    db.commit()
+    db.refresh(session)
+
+    # Image with no GPS EXIF at all (lat/lon will be None after extract_exif).
+    _make_no_gps_jpg(tmp_path, "nogps.jpg")
+
+    ingest_cfg = {
+        "accepted_extensions": [".jpg", ".jpeg"],
+        "filter_zero_gps": True,
+        "thumbnail_size_px": 64,
+        "thumbnail_jpeg_quality": 75,
+    }
+
+    with patch("backend.core.config.get_ingest_config",
+               return_value=ingest_cfg), \
+         patch("backend.core.config.load_config") as mock_load_cfg:
+        mock_load_cfg.return_value.processed_dir = str(tmp_path)
+        mock_load_cfg.return_value.thumbnail_size_px = 64
+        mock_load_cfg.return_value.fov_horizontal_deg = 83
+        mock_load_cfg.return_value.fov_vertical_deg = 53
+        mock_load_cfg.return_value.target_crs = "EPSG:32617"
+        _run(session.id, tmp_path, TestSessionLocal)
+
+    db.expire_all()
+    images = db.query(ImageModel).filter(ImageModel.session_id == session.id).all()
+    filenames = {img.filename for img in images}
+    # No-GPS images must still be imported (filter only drops confirmed 0,0 coords).
+    assert "nogps.jpg" in filenames
