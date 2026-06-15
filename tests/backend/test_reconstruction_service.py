@@ -345,7 +345,7 @@ def test_generate_thumbnail_delegates_to_trainer(tmp_path):
     with patch("backend.services.reconstruction.splat_trainer.render_thumbnail", mock_render):
         result = _generate_thumbnail(splat, out)
 
-    mock_render.assert_called_once_with(splat, out)
+    mock_render.assert_called_once_with(splat, out, width=512, height=512, quality=85)
     assert result == out
 
 
@@ -1220,3 +1220,107 @@ def test_diff_to_geojson_exports_features():
     lon, lat, _alt = geojson["features"][0]["geometry"]["coordinates"]
     assert -90 < lon < -70
     assert 30 < lat < 40
+
+
+# ---------------------------------------------------------------------------
+# Fix 1: camera_model cameras.txt param count
+# ---------------------------------------------------------------------------
+
+def test_write_colmap_workspace_pinhole_writes_4_params():
+    """PINHOLE camera model must produce exactly 4 trailing params: fx fy cx cy."""
+    from unittest.mock import patch
+
+    from backend.services.reconstruction import _write_colmap_workspace
+
+    with tempfile.TemporaryDirectory() as tmp:
+        colmap_dir = Path(tmp)
+        with patch("backend.services.reconstruction.get_reconstruction_config",
+                   return_value={"camera_model": "PINHOLE", "sift_max_features": 8192,
+                                 "matcher": "exhaustive", "colmap_threads": 8,
+                                 "presets": {}}):
+            _write_colmap_workspace(colmap_dir, [])
+
+        cameras_txt = colmap_dir / "cameras.txt"
+        data_lines = [
+            ln for ln in cameras_txt.read_text().splitlines()
+            if ln.strip() and not ln.startswith("#")
+        ]
+        assert len(data_lines) == 1
+        parts = data_lines[0].split()
+        # Format: CAMERA_ID MODEL WIDTH HEIGHT PARAMS...
+        assert parts[1] == "PINHOLE"
+        # 4 params after width/height
+        assert len(parts) == 8, f"Expected 8 tokens, got: {parts}"
+
+
+def test_write_colmap_workspace_simple_pinhole_writes_3_params():
+    """SIMPLE_PINHOLE camera model must produce exactly 3 trailing params: f cx cy."""
+    from unittest.mock import patch
+
+    from backend.services.reconstruction import _write_colmap_workspace
+
+    with tempfile.TemporaryDirectory() as tmp:
+        colmap_dir = Path(tmp)
+        with patch("backend.services.reconstruction.get_reconstruction_config",
+                   return_value={"camera_model": "SIMPLE_PINHOLE", "sift_max_features": 8192,
+                                 "matcher": "exhaustive", "colmap_threads": 8,
+                                 "presets": {}}):
+            _write_colmap_workspace(colmap_dir, [])
+
+        cameras_txt = colmap_dir / "cameras.txt"
+        data_lines = [
+            ln for ln in cameras_txt.read_text().splitlines()
+            if ln.strip() and not ln.startswith("#")
+        ]
+        assert len(data_lines) == 1
+        parts = data_lines[0].split()
+        assert parts[1] == "SIMPLE_PINHOLE"
+        # 3 params after width/height
+        assert len(parts) == 7, f"Expected 7 tokens, got: {parts}"
+
+
+# ---------------------------------------------------------------------------
+# Fix 2: render config is consumed by _generate_lod and _generate_thumbnail
+# ---------------------------------------------------------------------------
+
+def test_generate_lod_uses_configured_ratios(tmp_path):
+    """A patched lod_preview_ratio reaches prune_by_opacity."""
+    from unittest.mock import call, patch
+
+    from backend.services.reconstruction import _generate_lod
+
+    splat = tmp_path / "splat.ply"
+    splat.write_bytes(b"ply data")
+
+    mock_prune = MagicMock()
+    with patch("backend.services.reconstruction.get_render_config",
+               return_value={"lod_preview_ratio": 0.05, "lod_medium_ratio": 0.30}), \
+         patch("backend.services.reconstruction.ply_io.prune_by_opacity", mock_prune):
+        preview, medium = _generate_lod(splat)
+
+    assert mock_prune.call_count == 2
+    calls = mock_prune.call_args_list
+    # First call: preview with 0.05
+    assert calls[0] == call(splat, preview, keep_ratio=0.05)
+    # Second call: medium with 0.30
+    assert calls[1] == call(splat, medium, keep_ratio=0.30)
+
+
+def test_generate_thumbnail_uses_configured_size_and_quality(tmp_path):
+    """_generate_thumbnail reads thumbnail_size_px and thumbnail_quality from render config."""
+    from unittest.mock import patch
+
+    from backend.services.reconstruction import _generate_thumbnail
+
+    splat = tmp_path / "splat.ply"
+    splat.write_bytes(b"ply data")
+    out = tmp_path / "thumb.jpg"
+
+    mock_render = MagicMock(return_value=out)
+    with patch("backend.services.reconstruction.get_render_config",
+               return_value={"thumbnail_size_px": 256, "thumbnail_quality": 70}), \
+         patch("backend.services.reconstruction.splat_trainer.render_thumbnail", mock_render):
+        result = _generate_thumbnail(splat, out)
+
+    mock_render.assert_called_once_with(splat, out, width=256, height=256, quality=70)
+    assert result == out
