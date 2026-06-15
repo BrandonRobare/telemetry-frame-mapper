@@ -22,44 +22,70 @@ def get_progress(session_id: int) -> dict:
 
 
 def _run(session_id: int, folder: Path, db_factory) -> None:
-    from ..core.config import load_config  # lazy import to avoid circular
+    from ..core.config import get_ingest_config, load_config  # lazy import to avoid circular
 
-    _JPEG_SUFFIXES = {".jpg", ".jpeg"}
+    ingest_cfg = get_ingest_config()
+
+    # Build accepted-suffix set from config (normalise to lowercase with leading dot).
+    _raw_extensions = ingest_cfg.get("accepted_extensions", [".jpg", ".jpeg"])
+    _ACCEPTED_SUFFIXES: set[str] = {
+        ext.lower() if ext.startswith(".") else f".{ext.lower()}"
+        for ext in _raw_extensions
+    } or {".jpg", ".jpeg"}
+
+    filter_zero_gps: bool = bool(ingest_cfg.get("filter_zero_gps", True))
+
     seen: set[str] = set()
-    jpgs: list[Path] = []
+    accepted_files: list[Path] = []
     for p in sorted(folder.iterdir()):
-        if p.is_file() and p.suffix.lower() in _JPEG_SUFFIXES:
+        if p.is_file() and p.suffix.lower() in _ACCEPTED_SUFFIXES:
             key = os.path.normcase(str(p.resolve()))
             if key not in seen:
                 seen.add(key)
-                jpgs.append(p)
-    total = len(jpgs)
+                accepted_files.append(p)
+    total = len(accepted_files)
     with _progress_lock:
         _progress[session_id] = {"processed": 0, "total": total, "status": "running"}
 
     db: DBSession = db_factory()
     try:
         usable = 0
+        imported = 0
         cfg = load_config()
+        ingest_thumbnail_size: int = int(ingest_cfg.get("thumbnail_size_px", cfg.thumbnail_size_px))
 
-        for i, jpg in enumerate(jpgs):
-            exif = extract_exif(str(jpg))
+        for i, accepted_file in enumerate(accepted_files):
+            exif = extract_exif(str(accepted_file))
+
+            # filter_zero_gps: skip images where both lat and lon are exactly 0.0.
+            lat = exif.get("latitude")
+            lon = exif.get("longitude")
+            if (
+                filter_zero_gps
+                and lat is not None
+                and lon is not None
+                and lat == 0.0
+                and lon == 0.0
+            ):
+                with _progress_lock:
+                    _progress[session_id]["processed"] = i + 1
+                continue
 
             # generate thumbnail into processed_dir/<session_id>/thumbs/
             thumb_path = None
             try:
                 thumb_dir = Path(cfg.processed_dir) / str(session_id) / "thumbs"
                 thumb_dir.mkdir(parents=True, exist_ok=True)
-                dest = thumb_dir / jpg.name
-                generate_thumbnail(str(jpg), str(dest), size=cfg.thumbnail_size_px)
+                dest = thumb_dir / accepted_file.name
+                generate_thumbnail(str(accepted_file), str(dest), size=ingest_thumbnail_size)
                 thumb_path = str(dest)
             except Exception:
                 thumb_path = None
 
             img = Image(
                 session_id=session_id,
-                filename=jpg.name,
-                filepath=str(jpg),
+                filename=accepted_file.name,
+                filepath=str(accepted_file),
                 thumb_path=thumb_path,
                 timestamp=exif.get("timestamp"),
                 latitude=exif.get("latitude"),
@@ -78,8 +104,8 @@ def _run(session_id: int, folder: Path, db_factory) -> None:
             db.flush()
 
             try:
-                sharpness = score_sharpness(str(jpg))
-                brightness = score_brightness(str(jpg))
+                sharpness = score_sharpness(str(accepted_file))
+                brightness = score_brightness(str(accepted_file))
                 has_gps = exif.get("latitude") is not None and exif.get("longitude") is not None
                 flag = flag_image(sharpness, brightness, has_gps)
                 img.sharpness_score = sharpness
@@ -89,6 +115,7 @@ def _run(session_id: int, folder: Path, db_factory) -> None:
             except Exception:
                 pass  # quality scoring is best-effort
 
+            imported += 1
             if img.usable:
                 usable += 1
 
@@ -121,13 +148,13 @@ def _run(session_id: int, folder: Path, db_factory) -> None:
 
         session = db.query(SessionModel).filter(SessionModel.id == session_id).first()
         if session:
-            session.photo_count = total
+            session.photo_count = imported
             session.usable_count = usable
             db.add(SessionLogEntry(
                 session_id=session_id,
                 event_type="import_complete",
-                photo_count=total,
-                message=f"Imported {total} images, {usable} usable",
+                photo_count=imported,
+                message=f"Imported {imported} images, {usable} usable",
             ))
             db.commit()
         with _progress_lock:
