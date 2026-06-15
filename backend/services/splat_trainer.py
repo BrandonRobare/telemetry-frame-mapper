@@ -591,7 +591,7 @@ def _evaluate(torch, gsplat, params, views, config: TrainerConfig, device) -> tu
 
 
 def render_thumbnail(
-    splat_path: Path, out_path: Path, width: int = 512, height: int = 512
+    splat_path: Path, out_path: Path, width: int = 512, height: int = 512, quality: int = 85
 ) -> Path | None:
     """Best-effort nadir-ish thumbnail of a splat PLY. Never raises.
 
@@ -639,7 +639,7 @@ def render_thumbnail(
             )
         pixels = (render.cpu().numpy() * 255.0).astype(np.uint8)
         out_path.parent.mkdir(parents=True, exist_ok=True)
-        Image.fromarray(pixels).save(out_path, format="JPEG", quality=85)
+        Image.fromarray(pixels).save(out_path, format="JPEG", quality=quality)
         return out_path
     except Exception:
         return None

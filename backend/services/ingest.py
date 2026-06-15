@@ -129,7 +129,13 @@ def extract_exif(filepath: str) -> dict:
 
 def generate_thumbnail(src_path: str, dest_path: str, size: int = 200) -> None:
     """Generate a thumbnail JPEG preserving aspect ratio. Max dimension = size px."""
+    try:
+        from backend.core.config import get_ingest_config
+
+        quality = int(get_ingest_config().get("thumbnail_jpeg_quality", 75))
+    except Exception:  # pragma: no cover
+        quality = 75
     os.makedirs(os.path.dirname(dest_path) or ".", exist_ok=True)
     with Image.open(src_path) as img:
         img.thumbnail((size, size), Image.LANCZOS)
-        img.save(dest_path, "JPEG", quality=75)
+        img.save(dest_path, "JPEG", quality=quality)
