@@ -20,7 +20,7 @@
     "framer-motion": "^12.40.0",
     "leaflet": "^1.9.4",
     "leaflet-draw": "^1.0.4",
-    "proj4": "^2.20.8",
+    "proj4": "^2.20.9",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "react-leaflet": "^5.0.0",
