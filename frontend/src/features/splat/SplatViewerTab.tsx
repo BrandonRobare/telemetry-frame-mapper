@@ -1357,6 +1357,14 @@ export default function SplatViewerTab() {
 
         {activeId !== null && <GeoTransformPanel reconstructionId={activeId} />}
 
+        {reconstructionDetails && (
+          <p className="text-xs" style={{ color: 'var(--text-muted)', margin: '4px 0 2px' }}>
+            {reconstructionDetails.frames_registered != null
+              ? `${reconstructionDetails.frames_registered}/${reconstructionDetails.frames_used} frames registered`
+              : `${reconstructionDetails.frames_used} frames`}
+          </p>
+        )}
+
         {activeId !== null && selectedJobComplete && (
           <>
             <ViewerToolbar
