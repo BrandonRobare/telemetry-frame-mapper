@@ -117,13 +117,13 @@ def _run_colmap(colmap_dir: Path, progress_cb, cancel: threading.Event) -> None:
              "--ImageReader.camera_model", camera_model,
              "--ImageReader.single_camera", "1"],
             "feature extraction",
-            10.0,
+            8.0,
         ),
         (
             ["colmap", colmap_matcher,
              "--database_path", db_path],
             "feature matching",
-            40.0,
+            20.0,
         ),
         (
             ["colmap", "mapper",
@@ -132,7 +132,7 @@ def _run_colmap(colmap_dir: Path, progress_cb, cancel: threading.Event) -> None:
              "--output_path", output_path,
              f"--Mapper.num_threads={cfg['colmap_threads']}"],
             "bundle adjustment",
-            80.0,
+            38.0,
         ),
         (
             ["colmap", "model_converter",
@@ -140,7 +140,7 @@ def _run_colmap(colmap_dir: Path, progress_cb, cancel: threading.Event) -> None:
              "--output_path", str(colmap_dir / "sparse" / "0"),
              "--output_type", "TXT"],
             "model conversion",
-            90.0,
+            40.0,
         ),
     ]
 
@@ -166,7 +166,7 @@ def _run_colmap(colmap_dir: Path, progress_cb, cancel: threading.Event) -> None:
             "Not enough feature matches — add more overlapping frames or reduce altitude"
         )
 
-    progress_cb("colmap complete", 95.0)
+    progress_cb("colmap complete", 40.0)
 
 
 def _count_registered_images(images_txt: Path) -> int:
@@ -1277,7 +1277,7 @@ def _run_pipeline(
         _update_rec(db, reconstruction_id, geo_transform=json.dumps(geo))
 
         _update_rec(
-            db, reconstruction_id, status="running_gsplat", step="training", progress_pct=95.0,
+            db, reconstruction_id, status="running_gsplat", step="training", progress_pct=40.0,
         )
         _log_rec(reconstruction_id, "Gaussian Splatting: starting")
 
