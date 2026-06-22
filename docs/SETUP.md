@@ -75,6 +75,6 @@ Optional/manual reconstruction tools:
 
 - **colmap** — Structure from Motion for Reconstruct tab jobs. Missing COLMAP should fail the reconstruction job with clear install/PATH guidance, not break backend import.
 - **torch + gsplat** + CUDA-capable GPU — Gaussian splat training and optional server-side video rendering. Manual two-step install (see the GPU section above); intentionally not included in the Python `reconstruction` extra.
-- **SuGaR** (`sugar_scene`/`sugar`) — mesh export only. It is a manual upstream install and is not included in the Python `reconstruction` extra.
+- **SuGaR** (`sugar_scene`/`sugar`) — mesh export only. [SuGaR](https://github.com/Anttwo/SuGaR) has no pip-installable release; it must be installed manually by cloning that repo, and is not included in the Python `reconstruction` extra. Mesh export is optional — splat viewing and the rest of reconstruction work fine without it.
 
 CI should use fakes/mocks for external binaries and optional reconstruction libraries. Real `ffmpeg`/`exiftool` smoke is must-pass for v1.0; real COLMAP/gsplat/SuGaR/video-render smoke is optional/manual unless reconstruction is promoted to production-ready.
