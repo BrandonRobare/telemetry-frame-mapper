@@ -37,6 +37,12 @@ _flythrough_jobs_lock = threading.Lock()
 _comparison_jobs: set[int] = set()
 _comparison_jobs_lock = threading.Lock()
 
+# Cap stored error messages to avoid bloating a DB row or JSON API response
+# with a pathological multi-MB stderr dump, while still keeping enough of the
+# tail to be actionable (the full log remains available via the
+# /reconstruction/{id}/log endpoint).
+_ERROR_MSG_MAX_CHARS = 5000
+
 
 def _log_rec(rec_id: int, msg: str) -> None:
     with _rec_logs_lock:
@@ -117,13 +123,13 @@ def _run_colmap(colmap_dir: Path, progress_cb, cancel: threading.Event) -> None:
              "--ImageReader.camera_model", camera_model,
              "--ImageReader.single_camera", "1"],
             "feature extraction",
-            10.0,
+            8.0,
         ),
         (
             ["colmap", colmap_matcher,
              "--database_path", db_path],
             "feature matching",
-            40.0,
+            20.0,
         ),
         (
             ["colmap", "mapper",
@@ -132,7 +138,7 @@ def _run_colmap(colmap_dir: Path, progress_cb, cancel: threading.Event) -> None:
              "--output_path", output_path,
              f"--Mapper.num_threads={cfg['colmap_threads']}"],
             "bundle adjustment",
-            80.0,
+            38.0,
         ),
         (
             ["colmap", "model_converter",
@@ -140,7 +146,7 @@ def _run_colmap(colmap_dir: Path, progress_cb, cancel: threading.Event) -> None:
              "--output_path", str(colmap_dir / "sparse" / "0"),
              "--output_type", "TXT"],
             "model conversion",
-            90.0,
+            40.0,
         ),
     ]
 
@@ -157,7 +163,7 @@ def _run_colmap(colmap_dir: Path, progress_cb, cancel: threading.Event) -> None:
             ) from exc
         if result.returncode != 0:
             raise RuntimeError(
-                f"COLMAP {step_name} failed: {result.stderr[:500]}"
+                f"COLMAP {step_name} failed: {result.stderr[:_ERROR_MSG_MAX_CHARS]}"
             )
 
     images_txt = colmap_dir / "sparse" / "0" / "images.txt"
@@ -166,7 +172,7 @@ def _run_colmap(colmap_dir: Path, progress_cb, cancel: threading.Event) -> None:
             "Not enough feature matches — add more overlapping frames or reduce altitude"
         )
 
-    progress_cb("colmap complete", 95.0)
+    progress_cb("colmap complete", 40.0)
 
 
 def _count_registered_images(images_txt: Path) -> int:
@@ -697,7 +703,10 @@ def _run_sugar(colmap_dir: Path, splat_path: Path, output_dir: Path) -> dict[str
             from sugar import export_mesh as sugar_export_mesh  # type: ignore[import]
         except ImportError as exc:
             raise RuntimeError(
-                "SuGaR is not installed. Install optional reconstruction dependencies."
+                "SuGaR is not installed. SuGaR (https://github.com/Anttwo/SuGaR) has no "
+                "pip-installable release and must be installed manually by cloning that "
+                "repo. Mesh export is optional; splat viewing and the rest of "
+                "reconstruction work fine without it."
             ) from exc
 
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -783,7 +792,7 @@ def _run_mesh_export_job(reconstruction_id: int) -> None:
     except Exception as exc:
         db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).update({
             "mesh_status": "failed",
-            "mesh_error": str(exc)[:500],
+            "mesh_error": str(exc)[:_ERROR_MSG_MAX_CHARS],
         })
         db.commit()
     finally:
@@ -907,7 +916,7 @@ def _run_flythrough_job(
     except Exception as exc:
         db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).update({
             "flythrough_status": "failed",
-            "flythrough_error": str(exc)[:500],
+            "flythrough_error": str(exc)[:_ERROR_MSG_MAX_CHARS],
         })
         db.commit()
     finally:
@@ -1133,7 +1142,7 @@ def _run_comparison_job(comparison_id: int, voxel_size_m: float) -> None:
     except Exception as exc:
         db.query(SessionComparison).filter(SessionComparison.id == comparison_id).update({
             "status": "failed",
-            "error_msg": str(exc)[:500],
+            "error_msg": str(exc)[:_ERROR_MSG_MAX_CHARS],
             "completed_at": datetime.now(timezone.utc),
         })
         db.commit()
@@ -1277,7 +1286,7 @@ def _run_pipeline(
         _update_rec(db, reconstruction_id, geo_transform=json.dumps(geo))
 
         _update_rec(
-            db, reconstruction_id, status="running_gsplat", step="training", progress_pct=95.0,
+            db, reconstruction_id, status="running_gsplat", step="training", progress_pct=40.0,
         )
         _log_rec(reconstruction_id, "Gaussian Splatting: starting")
 
@@ -1348,7 +1357,9 @@ def _run_pipeline(
     except Exception as exc:
         _update_rec(
             db, reconstruction_id,
-            status="failed", error_msg=str(exc)[:500], completed_at=datetime.now(timezone.utc),
+            status="failed",
+            error_msg=str(exc)[:_ERROR_MSG_MAX_CHARS],
+            completed_at=datetime.now(timezone.utc),
         )
     finally:
         db.close()
