@@ -9,6 +9,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
+from backend.core.config import get_config
 from backend.db.database import init_db
 
 from .routers import annotations as annotations_router
@@ -68,7 +69,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-processed_dir = os.path.abspath("./processed")
+processed_dir = os.path.abspath(get_config().processed_dir)
 os.makedirs(processed_dir, exist_ok=True)
 app.mount("/processed", StaticFiles(directory=processed_dir), name="processed")
 
