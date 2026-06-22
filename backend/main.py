@@ -4,10 +4,15 @@ import logging
 import os
 import shutil
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.responses import Response
+from starlette.routing import Match, Mount
+from starlette.types import Scope
 
 from backend.core.config import get_config
 from backend.db.database import init_db
@@ -77,4 +82,62 @@ app.mount("/processed", StaticFiles(directory=processed_dir), name="processed")
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+class SPAStaticFiles(StaticFiles):
+    """Serve built static assets, falling back to index.html for unmatched
+    paths so client-side routes (e.g. /some/react-route) don't 404."""
+
+    async def get_response(self, path: str, scope: Scope) -> Response:
+        try:
+            return await super().get_response(path, scope)
+        except StarletteHTTPException as exc:
+            if exc.status_code == 404:
+                return await super().get_response("index.html", scope)
+            raise
+
+
+class FrontendMount(Mount):
+    """A "/" mount that defers to API routes and Starlette's redirect-slash
+    handling instead of unconditionally swallowing every path.
+
+    A plain Mount("/") matches every path regardless of HTTP method, which
+    would shadow API routers that rely on Starlette's redirect-slash
+    behavior (e.g. a route declared as "/target-areas/" being reached via
+    a request to "/target-areas" with no trailing slash). Since Mount
+    matching only looks at the path — not the method or whether a redirect
+    would otherwise apply — it would intercept those requests (returning
+    405 for writes, or serving index.html for reads) before the router
+    ever got a chance to redirect to the slash-suffixed route.
+
+    To avoid that, this mount declines (Match.NONE) for any request whose
+    path, with a trailing slash appended, would match one of the app's own
+    routes — letting the normal API route (and its redirect-slash
+    behavior) win instead.
+    """
+
+    def matches(self, scope: Scope) -> tuple[Match, Scope]:
+        if scope.get("type") == "http":
+            if scope.get("method") not in ("GET", "HEAD"):
+                return Match.NONE, {}
+            path = scope.get("path", "")
+            if path and not path.endswith("/"):
+                redirect_scope = {**scope, "path": path + "/"}
+                for route in app.router.routes:
+                    if route is self:
+                        continue
+                    if route.matches(redirect_scope)[0] != Match.NONE:
+                        return Match.NONE, {}
+        return super().matches(scope)
+
+
+frontend_dist = Path(__file__).resolve().parent.parent / "frontend" / "dist"
+if frontend_dist.is_dir():
+    frontend_static = SPAStaticFiles(directory=str(frontend_dist), html=True)
+    app.router.routes.append(FrontendMount("/", app=frontend_static, name="frontend"))
+else:
+    logging.getLogger("backend").info(
+        "frontend/dist not found - run 'npm run build' in frontend/ to serve the UI "
+        "from the backend on one process, or use 'npm run dev' for development."
+    )
 
