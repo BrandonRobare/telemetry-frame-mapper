@@ -65,6 +65,8 @@ pending ──> running_colmap (0–95%) ──> running_gsplat (95–100%) ─�
 4. *Lazy derivatives on first request:* LAS point cloud (laspy), coverage-gap voxelization, voxel diff for Compare — each cached to `exports/{id}/` with its path stored on the record.
 5. *Optional:* SuGaR mesh export (manual upstream install), server-side MP4 flythrough (browser MediaRecorder is the primary path).
 
+**Process isolation (or lack of it):** training runs in a background thread inside the API process, not a subprocess. A Python-level exception during training — OOM, missing deps, cancellation — is already caught in the pipeline thread and reported as a failed (or degraded `colmap_only`) job; it cannot bring down the API, since an uncaught exception in a thread just ends that thread. The one scenario that would still take the whole process down is a genuine native crash (a CUDA driver abort or a segfault inside libtorch/gsplat's C extension), because nothing short of OS-level process isolation stops that. This is a deliberately deferred hardening item: a real fix means moving training into a separate process with pipe-based progress/cancel IPC (today's `progress_cb` closure writes straight to a live DB session and `cancel` is a shared `threading.Event`, neither of which crosses a process boundary as-is) — a rewrite that isn't justified today for a single-user local app with no reported crash incidents.
+
 ## Data layout
 
 ```

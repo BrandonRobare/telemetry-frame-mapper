@@ -322,6 +322,38 @@ def test_run_colmap_zero_registered_images_raises(tmp_path):
             _run_colmap(colmap_dir, lambda *_args: None, threading.Event())
 
 
+def test_run_colmap_progress_callback_sequence_rebalanced(tmp_path):
+    """COLMAP now owns 0-40% of overall progress (was 0-95%) so the much longer
+    gsplat training phase gets a proportional share of the progress bar."""
+    import threading
+    from unittest.mock import MagicMock, patch
+
+    from backend.services.reconstruction import _run_colmap
+
+    colmap_dir = tmp_path / "colmap"
+    sparse_dir = colmap_dir / "sparse" / "0"
+    sparse_dir.mkdir(parents=True)
+    images_txt = sparse_dir / "images.txt"
+    images_txt.write_text(
+        "# comment\n"
+        "1 0 0 0 1 0 0 0 1 source.jpg\n"
+        "1.0 2.0 -1\n"
+    )
+
+    progress_cb = MagicMock()
+    success = MagicMock(returncode=0, stderr="")
+    with patch("backend.services.reconstruction.subprocess.run", return_value=success):
+        _run_colmap(colmap_dir, progress_cb, threading.Event())
+
+    assert progress_cb.call_args_list == [
+        (("feature extraction", 8.0), {}),
+        (("feature matching", 20.0), {}),
+        (("bundle adjustment", 38.0), {}),
+        (("model conversion", 40.0), {}),
+        (("colmap complete", 40.0), {}),
+    ]
+
+
 # ---------------------------------------------------------------------------
 # Target area filter tests
 # ---------------------------------------------------------------------------
@@ -994,8 +1026,10 @@ def test_run_sugar_missing_dependency_reports_optional_install(tmp_path):
     from backend.services.reconstruction import _run_sugar
 
     with patch.dict("sys.modules", {"sugar_scene": None, "sugar": None}):
-        with pytest.raises(RuntimeError, match="SuGaR is not installed"):
+        with pytest.raises(RuntimeError, match="SuGaR is not installed") as exc_info:
             _run_sugar(tmp_path / "colmap", tmp_path / "splat.ply", tmp_path / "exports")
+
+    assert "github.com/Anttwo/SuGaR" in str(exc_info.value)
 
 
 def test_export_mesh_assets_writes_georef_sidecar(tmp_path):
@@ -1114,6 +1148,80 @@ def test_mesh_job_failure_updates_error(setup_test_db):
     db.refresh(rec)
     assert rec.mesh_status == "failed"
     assert "SuGaR" in rec.mesh_error
+
+
+def test_mesh_job_failure_keeps_long_error_unclipped(setup_test_db):
+    from unittest.mock import patch
+
+    from backend.db.database import get_db
+    from backend.main import app
+    from backend.services.reconstruction import _run_mesh_export_job
+    from tests.conftest import TestSessionLocal
+
+    db = next(app.dependency_overrides[get_db]())
+    s = _make_session(db)
+    rec = Reconstruction(
+        session_id=s.id,
+        preset="quick",
+        status="complete",
+        frames_used=1,
+        mesh_status="pending",
+    )
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+
+    long_message = "x" * 600
+
+    with patch("backend.services.reconstruction.SessionLocal", TestSessionLocal), \
+         patch(
+             "backend.services.reconstruction._export_mesh_assets",
+             side_effect=RuntimeError(long_message),
+         ):
+        _run_mesh_export_job(rec.id)
+
+    db.expire_all()
+    db.refresh(rec)
+    assert rec.mesh_status == "failed"
+    assert rec.mesh_error == long_message
+    assert len(rec.mesh_error) == 600
+
+
+def test_mesh_job_failure_caps_very_long_error(setup_test_db):
+    from unittest.mock import patch
+
+    from backend.db.database import get_db
+    from backend.main import app
+    from backend.services.reconstruction import _ERROR_MSG_MAX_CHARS, _run_mesh_export_job
+    from tests.conftest import TestSessionLocal
+
+    db = next(app.dependency_overrides[get_db]())
+    s = _make_session(db)
+    rec = Reconstruction(
+        session_id=s.id,
+        preset="quick",
+        status="complete",
+        frames_used=1,
+        mesh_status="pending",
+    )
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+
+    very_long_message = "y" * 6000
+
+    with patch("backend.services.reconstruction.SessionLocal", TestSessionLocal), \
+         patch(
+             "backend.services.reconstruction._export_mesh_assets",
+             side_effect=RuntimeError(very_long_message),
+         ):
+        _run_mesh_export_job(rec.id)
+
+    db.expire_all()
+    db.refresh(rec)
+    assert rec.mesh_status == "failed"
+    assert len(rec.mesh_error) == _ERROR_MSG_MAX_CHARS
+    assert rec.mesh_error == very_long_message[:_ERROR_MSG_MAX_CHARS]
 
 
 def test_validate_keyframes_rejects_single_frame():
