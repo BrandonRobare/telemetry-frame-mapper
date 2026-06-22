@@ -95,8 +95,11 @@ def _write_colmap_workspace(colmap_dir: Path, images: list) -> None:
 # COLMAP subprocess runner
 # ---------------------------------------------------------------------------
 
-def _run_colmap(colmap_dir: Path, progress_cb, cancel: threading.Event) -> None:
-    """Run COLMAP feature_extractor → exhaustive_matcher → mapper pipeline."""
+def _run_colmap(colmap_dir: Path, progress_cb, cancel: threading.Event) -> int | None:
+    """Run COLMAP feature_extractor → exhaustive_matcher → mapper pipeline.
+
+    Returns the number of registered images, or None if cancelled before completion.
+    """
     db_path = str(colmap_dir / "database.db")
     image_path = str(colmap_dir / "images")
     output_path = str(colmap_dir / "sparse")
@@ -146,7 +149,7 @@ def _run_colmap(colmap_dir: Path, progress_cb, cancel: threading.Event) -> None:
 
     for cmd, step_name, pct in steps:
         if cancel.is_set():
-            return
+            return None
         progress_cb(step_name, pct)
         try:
             result = subprocess.run(cmd, capture_output=True, text=True)
@@ -161,12 +164,14 @@ def _run_colmap(colmap_dir: Path, progress_cb, cancel: threading.Event) -> None:
             )
 
     images_txt = colmap_dir / "sparse" / "0" / "images.txt"
-    if not images_txt.exists() or _count_registered_images(images_txt) == 0:
+    registered_count = _count_registered_images(images_txt) if images_txt.exists() else 0
+    if registered_count == 0:
         raise RuntimeError(
             "Not enough feature matches — add more overlapping frames or reduce altitude"
         )
 
     progress_cb("colmap complete", 95.0)
+    return registered_count
 
 
 def _count_registered_images(images_txt: Path) -> int:
@@ -1260,7 +1265,7 @@ def _run_pipeline(
         def progress_cb(step: str, pct: float) -> None:
             _update_rec(db, reconstruction_id, step=step, progress_pct=pct)
 
-        _run_colmap(colmap_dir, progress_cb, cancel)
+        frames_registered = _run_colmap(colmap_dir, progress_cb, cancel)
         _log_rec(reconstruction_id, "COLMAP: complete")
         _store_reprojection_errors(db, reconstruction_id, colmap_dir)
 
@@ -1274,7 +1279,11 @@ def _run_pipeline(
             return
 
         geo = _extract_geo_transform(colmap_dir)
-        _update_rec(db, reconstruction_id, geo_transform=json.dumps(geo))
+        _update_rec(
+            db, reconstruction_id,
+            geo_transform=json.dumps(geo),
+            frames_registered=frames_registered,
+        )
 
         _update_rec(
             db, reconstruction_id, status="running_gsplat", step="training", progress_pct=95.0,
