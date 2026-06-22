@@ -272,6 +272,56 @@ def test_run_colmap_missing_binary_reports_install_guidance(tmp_path):
             _run_colmap(tmp_path / "colmap", lambda *_args: None, threading.Event())
 
 
+def _write_fake_images_txt(colmap_dir: Path, num_images: int) -> None:
+    """Seed a sparse/0/images.txt in COLMAP's TXT format with N registered images."""
+    sparse_dir = colmap_dir / "sparse" / "0"
+    sparse_dir.mkdir(parents=True, exist_ok=True)
+    lines = [
+        "# Image list with two lines of data per image:",
+        "#   IMAGE_ID, QW, QX, QY, QZ, TX, TY, TZ, CAMERA_ID, NAME",
+        "#   POINTS2D[] as (X, Y, POINT3D_ID)",
+    ]
+    for i in range(1, num_images + 1):
+        lines.append(f"{i} 1.0 0.0 0.0 0.0 0.0 0.0 0.0 1 frame_{i:04d}.jpg")
+        lines.append("100.0 200.0 -1")
+    (sparse_dir / "images.txt").write_text("\n".join(lines) + "\n")
+
+
+def test_run_colmap_returns_registered_image_count(tmp_path):
+    """_run_colmap should return the count instead of discarding it."""
+    import threading
+    from unittest.mock import MagicMock, patch
+
+    from backend.services.reconstruction import _run_colmap
+
+    colmap_dir = tmp_path / "colmap"
+    colmap_dir.mkdir()
+    _write_fake_images_txt(colmap_dir, 3)
+
+    success = MagicMock(returncode=0, stderr="")
+    with patch("backend.services.reconstruction.subprocess.run", return_value=success):
+        result = _run_colmap(colmap_dir, lambda *_args: None, threading.Event())
+
+    assert result == 3
+
+
+def test_run_colmap_zero_registered_images_raises(tmp_path):
+    """COLMAP completing but registering zero images is still a failure."""
+    import threading
+    from unittest.mock import MagicMock, patch
+
+    from backend.services.reconstruction import _run_colmap
+
+    colmap_dir = tmp_path / "colmap"
+    colmap_dir.mkdir()
+    _write_fake_images_txt(colmap_dir, 0)
+
+    success = MagicMock(returncode=0, stderr="")
+    with patch("backend.services.reconstruction.subprocess.run", return_value=success):
+        with pytest.raises(RuntimeError, match="Not enough feature matches"):
+            _run_colmap(colmap_dir, lambda *_args: None, threading.Event())
+
+
 def test_run_colmap_progress_callback_sequence_rebalanced(tmp_path):
     """COLMAP now owns 0-40% of overall progress (was 0-95%) so the much longer
     gsplat training phase gets a proportional share of the progress bar."""
@@ -443,7 +493,7 @@ def test_run_pipeline_calls_generate_thumbnail(setup_test_db):
         colmap_dir.mkdir()
 
         mock_workspace = MagicMock()
-        mock_colmap = MagicMock()
+        mock_colmap = MagicMock(return_value=1)
         mock_gsplat = MagicMock(return_value={"gaussian_count": 100, "psnr": 25.0, "ssim": 0.9})
         mock_lod = MagicMock(return_value=(Path(tmp) / "p.ply", Path(tmp) / "m.ply"))
         mock_thumb = MagicMock(return_value=None)
@@ -496,7 +546,7 @@ def _pipeline_fixture(db, tmp):
     return rec, img, colmap_dir
 
 
-def _run_pipeline_with_gsplat(db, tmp, rec, img, colmap_dir, gsplat_mock):
+def _run_pipeline_with_gsplat(db, tmp, rec, img, colmap_dir, gsplat_mock, colmap_mock=None):
     """Run _run_pipeline with COLMAP mocked out and a given _run_gsplat stand-in."""
     import threading
     from unittest.mock import MagicMock, patch
@@ -504,8 +554,11 @@ def _run_pipeline_with_gsplat(db, tmp, rec, img, colmap_dir, gsplat_mock):
     from backend.services.reconstruction import _run_pipeline
     from tests.conftest import TestSessionLocal
 
+    if colmap_mock is None:
+        colmap_mock = MagicMock(return_value=1)
+
     with patch("backend.services.reconstruction._write_colmap_workspace", MagicMock()), \
-         patch("backend.services.reconstruction._run_colmap", MagicMock()), \
+         patch("backend.services.reconstruction._run_colmap", colmap_mock), \
          patch("backend.services.reconstruction._run_gsplat", gsplat_mock), \
          patch("backend.services.reconstruction.SessionLocal", TestSessionLocal), \
          patch("backend.services.reconstruction.get_config") as mock_cfg:
@@ -565,6 +618,27 @@ def test_run_pipeline_oom_maps_to_preset_hint(setup_test_db):
     assert "switch to 'quick' preset" in rec.error_msg
 
 
+def test_run_pipeline_persists_frames_registered_from_colmap(setup_test_db):
+    """The count _run_colmap returns should land on the reconstruction record."""
+    from unittest.mock import MagicMock
+
+    from backend.db.database import get_db
+    from backend.main import app
+
+    db = next(app.dependency_overrides[get_db]())
+    with tempfile.TemporaryDirectory() as tmp:
+        rec, img, colmap_dir = _pipeline_fixture(db, tmp)
+        gsplat_missing = MagicMock(side_effect=RuntimeError(
+            "Gaussian-splat training dependencies (torch + gsplat) are not installed — "
+            "see docs/SETUP.md for the GPU install. "
+            "The reconstruction will complete with COLMAP sparse cloud only."
+        ))
+        colmap_mock = MagicMock(return_value=3)
+        _run_pipeline_with_gsplat(db, tmp, rec, img, colmap_dir, gsplat_missing, colmap_mock)
+
+    assert rec.frames_registered == 3
+
+
 def test_run_pipeline_trainer_result_persisted_and_lod_generated(setup_test_db):
     """Mocked-trainer orchestration: a real PLY flows through the real _generate_lod."""
     import threading
@@ -600,7 +674,7 @@ def test_run_pipeline_trainer_result_persisted_and_lod_generated(setup_test_db):
     with tempfile.TemporaryDirectory() as tmp:
         rec, img, colmap_dir = _pipeline_fixture(db, tmp)
         with patch("backend.services.reconstruction._write_colmap_workspace", MagicMock()), \
-             patch("backend.services.reconstruction._run_colmap", MagicMock()), \
+             patch("backend.services.reconstruction._run_colmap", MagicMock(return_value=4)), \
              patch("backend.services.splat_trainer.train_splats", fake_train), \
              patch("backend.services.reconstruction.SessionLocal", TestSessionLocal), \
              patch("backend.services.reconstruction.get_config") as mock_cfg:
