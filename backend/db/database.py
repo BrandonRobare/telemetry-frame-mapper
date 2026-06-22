@@ -1,9 +1,15 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
-from sqlalchemy import create_engine, inspect, text
+from alembic import command
+from alembic.config import Config
+from sqlalchemy import create_engine, inspect
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+ALEMBIC_INI_PATH = REPO_ROOT / "alembic.ini"
 
 DATABASE_URL = os.environ.get(
     "DATABASE_URL",
@@ -30,37 +36,27 @@ def get_db():
         db.close()
 
 
+def _alembic_config() -> Config:
+    cfg = Config(str(ALEMBIC_INI_PATH))
+    cfg.set_main_option("sqlalchemy.url", DATABASE_URL)
+    return cfg
+
+
 def init_db():
     from backend.db import models  # noqa: F401
-    Base.metadata.create_all(bind=engine)
-    _ensure_sqlite_schema()
-
-
-def _ensure_sqlite_schema() -> None:
-    """Add nullable columns needed by newer local builds to existing SQLite DBs."""
-    if engine.dialect.name != "sqlite":
-        return
 
     inspector = inspect(engine)
-    if "reconstructions" not in inspector.get_table_names():
-        return
+    is_fresh = "reconstructions" not in inspector.get_table_names()
+    cfg = _alembic_config()
 
-    existing = {col["name"] for col in inspector.get_columns("reconstructions")}
-    column_specs = {
-        "mesh_glb_path": "VARCHAR",
-        "mesh_obj_path": "VARCHAR",
-        "mesh_mtl_path": "VARCHAR",
-        "mesh_status": "VARCHAR",
-        "mesh_error": "VARCHAR",
-        "flythrough_path": "VARCHAR",
-        "flythrough_status": "VARCHAR",
-        "flythrough_error": "VARCHAR",
-    }
-
-    missing = [(name, spec) for name, spec in column_specs.items() if name not in existing]
-    if not missing:
-        return
-
-    with engine.begin() as conn:
-        for name, spec in missing:
-            conn.execute(text(f"ALTER TABLE reconstructions ADD COLUMN {name} {spec}"))
+    if is_fresh:
+        # Genuinely new database: create the full schema directly, then mark
+        # it as already up to date so a later `alembic upgrade head` doesn't
+        # try to replay the baseline against tables that already exist.
+        Base.metadata.create_all(bind=engine)
+        command.stamp(cfg, "head")
+    else:
+        # Pre-existing database (legacy create_all/_ensure_sqlite_schema DB,
+        # or one already managed by Alembic): upgrading is safe in both
+        # cases because the baseline migration is idempotent.
+        command.upgrade(cfg, "head")
