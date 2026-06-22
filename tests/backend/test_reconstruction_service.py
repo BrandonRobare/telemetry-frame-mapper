@@ -920,8 +920,10 @@ def test_run_sugar_missing_dependency_reports_optional_install(tmp_path):
     from backend.services.reconstruction import _run_sugar
 
     with patch.dict("sys.modules", {"sugar_scene": None, "sugar": None}):
-        with pytest.raises(RuntimeError, match="SuGaR is not installed"):
+        with pytest.raises(RuntimeError, match="SuGaR is not installed") as exc_info:
             _run_sugar(tmp_path / "colmap", tmp_path / "splat.ply", tmp_path / "exports")
+
+    assert "github.com/Anttwo/SuGaR" in str(exc_info.value)
 
 
 def test_export_mesh_assets_writes_georef_sidecar(tmp_path):
