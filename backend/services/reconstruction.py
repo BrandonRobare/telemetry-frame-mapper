@@ -697,7 +697,10 @@ def _run_sugar(colmap_dir: Path, splat_path: Path, output_dir: Path) -> dict[str
             from sugar import export_mesh as sugar_export_mesh  # type: ignore[import]
         except ImportError as exc:
             raise RuntimeError(
-                "SuGaR is not installed. Install optional reconstruction dependencies."
+                "SuGaR is not installed. SuGaR (https://github.com/Anttwo/SuGaR) has no "
+                "pip-installable release and must be installed manually by cloning that "
+                "repo. Mesh export is optional; splat viewing and the rest of "
+                "reconstruction work fine without it."
             ) from exc
 
     output_dir.mkdir(parents=True, exist_ok=True)
