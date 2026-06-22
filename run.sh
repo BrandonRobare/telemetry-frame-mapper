@@ -26,6 +26,9 @@ if [ -d frontend ] && command -v npm >/dev/null 2>&1; then
   echo "Starting frontend on http://localhost:5173 ..."
   (cd frontend && npm run dev) &
   URL="http://localhost:5173"
+elif [ -d frontend/dist ]; then
+  echo "Node/npm not found, but frontend/dist is built — serving it from the backend on http://localhost:8000."
+  URL="http://localhost:8000"
 else
   echo "Node/npm or frontend/ not found — running backend only (API docs at $URL)."
 fi

@@ -41,6 +41,10 @@ if not errorlevel 1 if exist "frontend\" (
     start "Frontend" cmd /k "cd frontend && npm run dev"
     timeout /t 3 >nul
     start "" "http://localhost:5173"
+) else if exist "frontend\dist\" (
+    echo Node/npm not found, but frontend\dist is built - serving it from the backend on http://localhost:8000.
+    timeout /t 2 >nul
+    start "" "http://localhost:8000"
 ) else (
     echo Node/npm or frontend not found - backend only. Opening API docs.
     timeout /t 2 >nul
