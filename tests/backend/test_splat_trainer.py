@@ -132,3 +132,16 @@ def test_smoothstep_keyframe_interpolation_endpoints():
         assert smoothstep(t) == pytest.approx(t * t * (3 - 2 * t), abs=1e-12)
     assert smoothstep(0.1) < 0.1
     assert smoothstep(0.9) > 0.9
+
+
+def test_training_pct_maps_into_rebalanced_window():
+    # COLMAP now owns 0-40%, so training's window starts at 40.0 and ends at 99.0
+    # (leaving headroom at the end for LOD/thumbnail generation).
+    from backend.services.splat_trainer import _training_pct
+
+    assert splat_trainer._PROGRESS_START == 40.0
+    assert splat_trainer._PROGRESS_END == 99.0
+    assert _training_pct(0, 1000) == pytest.approx(40.0)
+    assert _training_pct(1000, 1000) == pytest.approx(99.0)
+    midpoint = _training_pct(500, 1000)
+    assert 40.0 < midpoint < 99.0

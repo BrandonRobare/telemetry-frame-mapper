@@ -23,7 +23,7 @@ Contracts honored for the reconstruction pipeline:
   :class:`ReconstructionCancelled`.
 - ``progress_cb(step, pct)`` performs a DB UPDATE + commit per call, so calls
   are throttled to at most one per 2 wall-clock seconds and progress is mapped
-  into the 95.0 -> 99.5 window (COLMAP owns 0-95).
+  into the 40.0 -> 99.0 window (COLMAP owns 0-40).
 - :func:`render_thumbnail` is best-effort and never raises.
 - :func:`render_flythrough` keyframe interpolation uses :func:`smoothstep`,
   which must stay identical to the frontend preview formula
@@ -57,9 +57,10 @@ class ReconstructionCancelled(RuntimeError):
 # One GPU job at a time — the target card (RTX 3050 Ti) has 4 GB of VRAM.
 _GPU_LOCK = threading.Lock()
 
-# Progress window owned by training: COLMAP reports 0-95, the UI completes at 100.
-_PROGRESS_START = 95.0
-_PROGRESS_END = 99.5
+# Progress window owned by training: COLMAP reports 0-40, the UI completes at 100
+# (the 99.0-100 tail covers LOD/thumbnail generation, which has no progress callbacks).
+_PROGRESS_START = 40.0
+_PROGRESS_END = 99.0
 _PROGRESS_MIN_INTERVAL_S = 2.0
 
 # Rendered thumbnails/flythroughs use a 60 degree vertical field of view; the

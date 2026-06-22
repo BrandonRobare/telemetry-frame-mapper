@@ -272,6 +272,38 @@ def test_run_colmap_missing_binary_reports_install_guidance(tmp_path):
             _run_colmap(tmp_path / "colmap", lambda *_args: None, threading.Event())
 
 
+def test_run_colmap_progress_callback_sequence_rebalanced(tmp_path):
+    """COLMAP now owns 0-40% of overall progress (was 0-95%) so the much longer
+    gsplat training phase gets a proportional share of the progress bar."""
+    import threading
+    from unittest.mock import MagicMock, patch
+
+    from backend.services.reconstruction import _run_colmap
+
+    colmap_dir = tmp_path / "colmap"
+    sparse_dir = colmap_dir / "sparse" / "0"
+    sparse_dir.mkdir(parents=True)
+    images_txt = sparse_dir / "images.txt"
+    images_txt.write_text(
+        "# comment\n"
+        "1 0 0 0 1 0 0 0 1 source.jpg\n"
+        "1.0 2.0 -1\n"
+    )
+
+    progress_cb = MagicMock()
+    success = MagicMock(returncode=0, stderr="")
+    with patch("backend.services.reconstruction.subprocess.run", return_value=success):
+        _run_colmap(colmap_dir, progress_cb, threading.Event())
+
+    assert progress_cb.call_args_list == [
+        (("feature extraction", 8.0), {}),
+        (("feature matching", 20.0), {}),
+        (("bundle adjustment", 38.0), {}),
+        (("model conversion", 40.0), {}),
+        (("colmap complete", 40.0), {}),
+    ]
+
+
 # ---------------------------------------------------------------------------
 # Target area filter tests
 # ---------------------------------------------------------------------------
