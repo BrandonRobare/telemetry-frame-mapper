@@ -1042,6 +1042,80 @@ def test_mesh_job_failure_updates_error(setup_test_db):
     assert "SuGaR" in rec.mesh_error
 
 
+def test_mesh_job_failure_keeps_long_error_unclipped(setup_test_db):
+    from unittest.mock import patch
+
+    from backend.db.database import get_db
+    from backend.main import app
+    from backend.services.reconstruction import _run_mesh_export_job
+    from tests.conftest import TestSessionLocal
+
+    db = next(app.dependency_overrides[get_db]())
+    s = _make_session(db)
+    rec = Reconstruction(
+        session_id=s.id,
+        preset="quick",
+        status="complete",
+        frames_used=1,
+        mesh_status="pending",
+    )
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+
+    long_message = "x" * 600
+
+    with patch("backend.services.reconstruction.SessionLocal", TestSessionLocal), \
+         patch(
+             "backend.services.reconstruction._export_mesh_assets",
+             side_effect=RuntimeError(long_message),
+         ):
+        _run_mesh_export_job(rec.id)
+
+    db.expire_all()
+    db.refresh(rec)
+    assert rec.mesh_status == "failed"
+    assert rec.mesh_error == long_message
+    assert len(rec.mesh_error) == 600
+
+
+def test_mesh_job_failure_caps_very_long_error(setup_test_db):
+    from unittest.mock import patch
+
+    from backend.db.database import get_db
+    from backend.main import app
+    from backend.services.reconstruction import _ERROR_MSG_MAX_CHARS, _run_mesh_export_job
+    from tests.conftest import TestSessionLocal
+
+    db = next(app.dependency_overrides[get_db]())
+    s = _make_session(db)
+    rec = Reconstruction(
+        session_id=s.id,
+        preset="quick",
+        status="complete",
+        frames_used=1,
+        mesh_status="pending",
+    )
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+
+    very_long_message = "y" * 6000
+
+    with patch("backend.services.reconstruction.SessionLocal", TestSessionLocal), \
+         patch(
+             "backend.services.reconstruction._export_mesh_assets",
+             side_effect=RuntimeError(very_long_message),
+         ):
+        _run_mesh_export_job(rec.id)
+
+    db.expire_all()
+    db.refresh(rec)
+    assert rec.mesh_status == "failed"
+    assert len(rec.mesh_error) == _ERROR_MSG_MAX_CHARS
+    assert rec.mesh_error == very_long_message[:_ERROR_MSG_MAX_CHARS]
+
+
 def test_validate_keyframes_rejects_single_frame():
     from backend.services.reconstruction import _validate_keyframes
 
