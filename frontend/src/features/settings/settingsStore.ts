@@ -23,6 +23,7 @@ export type CoordFormat = 'decimal' | 'dms'
 
 interface SettingsStore {
   defaultTab: SettingsTab
+  lastActiveTab: SettingsTab | null
   units: Units
   coordFormat: CoordFormat
   coordPrecision: number
@@ -30,6 +31,7 @@ interface SettingsStore {
   apiBaseUrl: string
 
   setDefaultTab: (tab: SettingsTab) => void
+  setLastActiveTab: (tab: SettingsTab) => void
   setUnits: (units: Units) => void
   setCoordFormat: (fmt: CoordFormat) => void
   setCoordPrecision: (n: number) => void
@@ -41,6 +43,7 @@ const STORAGE_KEY = 'gui-settings'
 
 interface StoredPrefs {
   defaultTab?: SettingsTab
+  lastActiveTab?: SettingsTab | null
   units?: Units
   coordFormat?: CoordFormat
   coordPrecision?: number
@@ -69,6 +72,7 @@ const saved = loadPrefs()
 
 export const useSettingsStore = create<SettingsStore>((set, get) => ({
   defaultTab: saved.defaultTab ?? 'map',
+  lastActiveTab: saved.lastActiveTab ?? null,
   units: saved.units ?? 'feet',
   coordFormat: saved.coordFormat ?? 'decimal',
   coordPrecision: saved.coordPrecision ?? 6,
@@ -78,6 +82,10 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
   setDefaultTab: (defaultTab) => {
     set({ defaultTab })
     savePrefs({ ...get(), defaultTab })
+  },
+  setLastActiveTab: (lastActiveTab) => {
+    set({ lastActiveTab })
+    savePrefs({ ...get(), lastActiveTab })
   },
   setUnits: (units) => {
     set({ units })

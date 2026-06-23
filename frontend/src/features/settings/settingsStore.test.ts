@@ -21,6 +21,7 @@ describe('settingsStore', () => {
     // Reset store state to defaults
     useSettingsStore.setState({
       defaultTab: 'map',
+      lastActiveTab: null,
       units: 'feet',
       coordFormat: 'decimal',
       coordPrecision: 6,
@@ -32,6 +33,7 @@ describe('settingsStore', () => {
   it('initializes with sensible defaults', () => {
     const s = useSettingsStore.getState()
     expect(s.defaultTab).toBe('map')
+    expect(s.lastActiveTab).toBe(null)
     expect(s.units).toBe('feet')
     expect(s.coordFormat).toBe('decimal')
     expect(s.coordPrecision).toBe(6)
@@ -77,6 +79,14 @@ describe('settingsStore', () => {
     expect(useSettingsStore.getState().defaultTab).toBe('jobs')
     const stored = JSON.parse(localStorageMock.getItem('gui-settings') ?? '{}')
     expect(stored.defaultTab).toBe('jobs')
+  })
+
+  it('setLastActiveTab persists to localStorage', () => {
+    const { setLastActiveTab } = useSettingsStore.getState()
+    setLastActiveTab('review')
+    expect(useSettingsStore.getState().lastActiveTab).toBe('review')
+    const stored = JSON.parse(localStorageMock.getItem('gui-settings') ?? '{}')
+    expect(stored.lastActiveTab).toBe('review')
   })
 
   it('setApiBaseUrl persists to localStorage', () => {
