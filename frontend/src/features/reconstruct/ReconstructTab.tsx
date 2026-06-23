@@ -4,6 +4,7 @@ import { get, post } from '../../shared/api/client'
 import { useMapStore } from '../../shared/stores/mapStore'
 import { useToast } from '../../shared/hooks/useToast'
 import { Button } from '../../shared/components/Button'
+import { formatEta } from '../../shared/time'
 import type { Job } from '../../types/api'
 
 const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
@@ -90,6 +91,7 @@ export default function ReconstructTab() {
     ['pending', 'running_colmap', 'running_gsplat'].includes(j.status)
   )
   const selectedCount = frameSelection?.image_ids.length ?? 0
+  const activeEta = activeJob ? formatEta(activeJob.started_at, activeJob.progress_pct) : null
 
   const startMutation = useMutation({
     mutationFn: () =>
@@ -241,6 +243,7 @@ export default function ReconstructTab() {
               {activeJob.progress_pct.toFixed(1)}%
               {' · '}{activeJob.frames_used} frames
               {activeJob.started_at && ` · elapsed ${formatDuration(activeJob.started_at, null)}`}
+              {activeEta && ` · ${activeEta}`}
             </p>
           </section>
         )}
