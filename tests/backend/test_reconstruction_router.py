@@ -9,6 +9,7 @@ import pytest
 
 from backend.db.models import Image, Reconstruction
 from backend.db.models import Session as SessionModel
+from backend.routers.reconstruction import _status_sse_payload
 
 
 def _make_session_with_images(db, count=3):
@@ -91,6 +92,33 @@ def test_get_reconstruction_status(client):
 
 def test_get_reconstruction_status_not_found(client):
     resp = client.get("/reconstruction/999999/status")
+    assert resp.status_code == 404
+
+
+def test_status_sse_payload_serializes_reconstruction_status(client):
+    db = _get_db(client)
+    s = _make_session_with_images(db)
+    rec = Reconstruction(
+        session_id=s.id, preset="quick", status="running_colmap",
+        progress_pct=42.0, frames_used=3, step="feature matching",
+    )
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+
+    event = _status_sse_payload(rec)
+    event_lines = event.splitlines()
+    assert event_lines[0] == "event: status"
+    data_line = event_lines[1]
+    assert data_line.startswith("data: ")
+    data = _json.loads(data_line.removeprefix("data: "))
+    assert data["id"] == rec.id
+    assert data["status"] == "running_colmap"
+    assert data["progress_pct"] == 42.0
+
+
+def test_stream_reconstruction_status_events_not_found(client):
+    resp = client.get("/reconstruction/999999/status/events")
     assert resp.status_code == 404
 
 
