@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from unittest.mock import patch
+
+from backend.db.models import Image, Reconstruction
 from backend.db.models import Session as SessionModel
 
 
@@ -44,3 +47,62 @@ def test_delete_session(client):
 def test_delete_session_not_found(client):
     resp = client.delete("/sessions/999999")
     assert resp.status_code == 404
+
+
+def test_delete_session_removes_thumbnails_and_reconstruction_artifacts(client, tmp_path):
+    from backend.db.database import get_db
+    from backend.main import app
+    db = next(app.dependency_overrides[get_db]())
+
+    exports_dir = tmp_path / "exports"
+    processed_dir = tmp_path / "processed"
+    data_dir = tmp_path / "data"
+    s = SessionModel(name="WithArtifacts", folder_path="/tmp/test", photo_count=1, usable_count=1)
+    db.add(s)
+    db.commit()
+    db.refresh(s)
+
+    image_thumb = processed_dir / str(s.id) / "thumbs" / "frame.jpg"
+    image_thumb.parent.mkdir(parents=True)
+    image_thumb.write_bytes(b"thumb")
+    colmap_dir = data_dir / "colmap" / str(s.id)
+    colmap_dir.mkdir(parents=True)
+
+    db.add(Image(
+        session_id=s.id,
+        filename="frame.jpg",
+        filepath="/tmp/test/frame.jpg",
+        thumb_path=str(image_thumb),
+    ))
+    db.commit()
+
+    rec = Reconstruction(
+        session_id=s.id, status="complete", preset="quick",
+        progress_pct=100.0, frames_used=1, colmap_dir=str(colmap_dir),
+    )
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+    rec_id = rec.id
+    export_dir = exports_dir / str(rec.id)
+    export_dir.mkdir(parents=True)
+    splat = export_dir / "splat.ply"
+    splat.write_bytes(b"splat")
+    rec.splat_path = str(splat)
+    db.commit()
+
+    cfg = type("Cfg", (), {
+        "processed_dir": str(processed_dir),
+        "exports_dir": str(exports_dir),
+        "data_dir": str(data_dir),
+    })()
+    with patch("backend.routers.sessions.get_config", return_value=cfg), \
+         patch("backend.routers.sessions.cancel_reconstruction") as mock_cancel:
+        resp = client.delete(f"/sessions/{s.id}")
+
+    assert resp.status_code == 200
+    mock_cancel.assert_called_once_with(rec_id)
+    assert not image_thumb.exists()
+    assert not export_dir.exists()
+    assert not colmap_dir.exists()
+    assert client.get(f"/sessions/{s.id}").status_code == 404

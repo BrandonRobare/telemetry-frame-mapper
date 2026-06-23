@@ -9,8 +9,11 @@ from sqlalchemy.orm import Session as DBSession
 
 from ..core.config import get_config
 from ..db.database import SessionLocal, get_db
+from ..db.models import Image, Reconstruction
 from ..db.models import Session as SessionModel
+from ..services.artifact_cleanup import cleanup_session_artifacts
 from ..services.ingest_orchestrator import get_progress, start_import
+from ..services.reconstruction import cancel_reconstruction
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 
@@ -48,6 +51,13 @@ def delete_session(session_id: int, db: DBSession = Depends(get_db)):
     s = db.query(SessionModel).filter(SessionModel.id == session_id).first()
     if not s:
         raise HTTPException(status_code=404, detail="Session not found")
+    reconstructions = db.query(Reconstruction).filter(
+        Reconstruction.session_id == session_id
+    ).all()
+    images = db.query(Image).filter(Image.session_id == session_id).all()
+    for rec in reconstructions:
+        cancel_reconstruction(rec.id)
+    cleanup_session_artifacts(session_id, images, reconstructions, get_config())
     db.delete(s)
     db.commit()
     return {"ok": True}
