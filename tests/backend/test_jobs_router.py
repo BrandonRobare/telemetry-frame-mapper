@@ -89,3 +89,37 @@ def test_list_jobs_orders_by_started_at_desc(client):
     assert len(session_jobs) == 3
     ids = [j["id"] for j in session_jobs]
     assert ids == sorted(ids, reverse=True)
+
+
+def test_list_jobs_supports_skip_limit_and_status_filter(client):
+    db = _get_db(client)
+    s = _make_session(db)
+    base = datetime.now(timezone.utc)
+    recs = []
+    for i, status in enumerate(["complete", "failed", "complete", "failed"]):
+        rec = Reconstruction(
+            session_id=s.id,
+            preset="quick",
+            status=status,
+            progress_pct=100.0 if status == "complete" else 25.0,
+            frames_used=i + 1,
+            started_at=base + timedelta(seconds=i),
+        )
+        db.add(rec)
+        recs.append(rec)
+    db.commit()
+    for r in recs:
+        db.refresh(r)
+
+    resp = client.get("/jobs/?status=complete&skip=1&limit=1")
+
+    assert resp.status_code == 200
+    jobs = resp.json()
+    assert len(jobs) == 1
+    assert jobs[0]["status"] == "complete"
+    assert jobs[0]["id"] == recs[0].id
+
+
+def test_list_jobs_validates_pagination_params(client):
+    resp = client.get("/jobs/?skip=-1&limit=0")
+    assert resp.status_code == 422

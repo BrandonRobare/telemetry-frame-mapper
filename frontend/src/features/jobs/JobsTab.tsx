@@ -7,10 +7,19 @@ import { Button } from '../../shared/components/Button'
 import { useToast } from '../../shared/hooks/useToast'
 import { filterReconstructionLogLines } from './logPanel'
 
-function useAllJobs() {
+const HISTORY_PAGE_SIZE = 10
+type JobStatusFilter = 'all' | Job['status']
+
+function jobsPath(skip: number, limit: number, status: JobStatusFilter) {
+  const params = new URLSearchParams({ skip: String(skip), limit: String(limit) })
+  if (status !== 'all') params.set('status', status)
+  return `/jobs/?${params.toString()}`
+}
+
+function useJobs(skip = 0, limit = 50, status: JobStatusFilter = 'all') {
   return useQuery<Job[]>({
-    queryKey: ['jobs'],
-    queryFn: () => get<Job[]>('/jobs/'),
+    queryKey: ['jobs', skip, limit, status],
+    queryFn: () => get<Job[]>(jobsPath(skip, limit, status)),
     refetchInterval: (query) => {
       const jobs = query.state.data ?? []
       const hasRunning = jobs.some((j) =>
@@ -165,7 +174,16 @@ function formatDuration(start: string, end: string | null): string {
 }
 
 export default function JobsTab() {
-  const { data: jobs, isLoading } = useAllJobs()
+  const [historyPage, setHistoryPage] = useState(0)
+  const [statusFilter, setStatusFilter] = useState<JobStatusFilter>('all')
+  const [search, setSearch] = useState('')
+  const { data: activeJobs, isLoading: isLoadingActive } = useJobs(0, 50, 'all')
+  const { data: historyJobs, isLoading: isLoadingHistory } = useJobs(
+    historyPage * HISTORY_PAGE_SIZE,
+    HISTORY_PAGE_SIZE + 1,
+    statusFilter
+  )
+  const isLoading = isLoadingActive && isLoadingHistory
 
   if (isLoading) {
     return (
@@ -181,9 +199,12 @@ export default function JobsTab() {
     )
   }
 
-  const list = jobs ?? []
+  const activeList = activeJobs ?? []
+  const historyPageJobs = historyJobs ?? []
+  const hasNextHistoryPage = historyPageJobs.length > HISTORY_PAGE_SIZE
+  const searchNeedle = search.trim().toLowerCase()
 
-  if (list.length === 0) {
+  if (activeList.length === 0 && historyPageJobs.length === 0 && !searchNeedle && statusFilter === 'all') {
     return (
       <div className="flex-1 flex items-center justify-center" style={{ color: 'var(--text-muted)' }}>
         No jobs yet. Start a reconstruction from the Reconstruct tab.
@@ -191,10 +212,23 @@ export default function JobsTab() {
     )
   }
 
-  const running = list.filter((j) =>
+  const running = activeList.filter((j) =>
     ['pending', 'running_colmap', 'running_gsplat'].includes(j.status)
   )
-  const done = list.filter((j) => !['pending', 'running_colmap', 'running_gsplat'].includes(j.status))
+  const done = historyPageJobs
+    .filter((j) => !['pending', 'running_colmap', 'running_gsplat'].includes(j.status))
+    .slice(0, HISTORY_PAGE_SIZE)
+    .filter((job) => {
+      if (!searchNeedle) return true
+      return [
+        String(job.id),
+        job.status,
+        String(job.session_id),
+        job.preset,
+        job.step,
+        job.error_msg ?? '',
+      ].some((value) => value.toLowerCase().includes(searchNeedle))
+    })
 
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
@@ -258,57 +292,113 @@ export default function JobsTab() {
         )}
 
         <section>
-          <h2 className="text-sm font-semibold" style={{ color: 'var(--text)', marginBottom: 12 }}>
-            History
-          </h2>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-            <thead>
-              <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                {['#', 'Status', 'Session', 'Preset', 'Frames', 'Duration', 'Step / Error'].map((h) => (
-                  <th
-                    key={h}
-                    className="text-left text-xs font-medium"
-                    style={{ padding: '6px 10px', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}
-                  >
-                    {h}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {done.map((job) => {
-                const s = STATUS_BADGE[job.status] ?? { bg: 'var(--surface)', text: 'var(--text)', label: job.status }
-                return (
-                  <tr key={job.id} style={{ borderBottom: '1px solid var(--border)' }}>
-                    <td style={{ padding: '8px 10px', color: 'var(--text-muted)' }}>{job.id}</td>
-                    <td style={{ padding: '8px 10px' }}>
-                      <span
-                        className="text-xs rounded"
-                        style={{ padding: '2px 7px', background: s.bg, color: s.text }}
-                      >
-                        {s.label}
-                      </span>
-                    </td>
-                    <td style={{ padding: '8px 10px', color: 'var(--text-muted)' }}>{job.session_id}</td>
-                    <td style={{ padding: '8px 10px', color: 'var(--text-muted)' }}>{job.preset}</td>
-                    <td style={{ padding: '8px 10px', color: 'var(--text-muted)' }}>{job.frames_used}</td>
-                    <td style={{ padding: '8px 10px', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
-                      {job.started_at ? formatDuration(job.started_at, job.completed_at) : '—'}
-                    </td>
-                    <td
-                      style={{
-                        padding: '8px 10px',
-                        color: job.status === 'failed' ? 'var(--danger, #f85149)' : 'var(--text-muted)',
-                        maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                      }}
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12, flexWrap: 'wrap' }}>
+            <h2 className="text-sm font-semibold" style={{ color: 'var(--text)', margin: 0, marginRight: 'auto' }}>
+              History
+            </h2>
+            <input
+              aria-label="Search job history"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Search jobs…"
+              style={{
+                minWidth: 180, padding: '6px 8px', borderRadius: 'var(--radius-sm)',
+                border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)',
+                fontSize: 12,
+              }}
+            />
+            <select
+              aria-label="Filter job history by status"
+              value={statusFilter}
+              onChange={(event) => {
+                setStatusFilter(event.target.value as JobStatusFilter)
+                setHistoryPage(0)
+              }}
+              style={{
+                padding: '6px 8px', borderRadius: 'var(--radius-sm)',
+                border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)',
+                fontSize: 12,
+              }}
+            >
+              <option value="all">All statuses</option>
+              <option value="complete">Complete</option>
+              <option value="failed">Failed</option>
+              <option value="pending">Pending</option>
+              <option value="running_colmap">COLMAP</option>
+              <option value="running_gsplat">Gaussian</option>
+            </select>
+          </div>
+          {done.length === 0 ? (
+            <div style={{ padding: '16px 10px', color: 'var(--text-muted)', fontSize: 13 }}>
+              No history jobs match the current search and status filter.
+            </div>
+          ) : (
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+              <thead>
+                <tr style={{ borderBottom: '1px solid var(--border)' }}>
+                  {['#', 'Status', 'Session', 'Preset', 'Frames', 'Duration', 'Step / Error'].map((h) => (
+                    <th
+                      key={h}
+                      className="text-left text-xs font-medium"
+                      style={{ padding: '6px 10px', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}
                     >
-                      {job.error_msg ?? job.step ?? '—'}
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {done.map((job) => {
+                  const s = STATUS_BADGE[job.status] ?? { bg: 'var(--surface)', text: 'var(--text)', label: job.status }
+                  return (
+                    <tr key={job.id} style={{ borderBottom: '1px solid var(--border)' }}>
+                      <td style={{ padding: '8px 10px', color: 'var(--text-muted)' }}>{job.id}</td>
+                      <td style={{ padding: '8px 10px' }}>
+                        <span
+                          className="text-xs rounded"
+                          style={{ padding: '2px 7px', background: s.bg, color: s.text }}
+                        >
+                          {s.label}
+                        </span>
+                      </td>
+                      <td style={{ padding: '8px 10px', color: 'var(--text-muted)' }}>{job.session_id}</td>
+                      <td style={{ padding: '8px 10px', color: 'var(--text-muted)' }}>{job.preset}</td>
+                      <td style={{ padding: '8px 10px', color: 'var(--text-muted)' }}>{job.frames_used}</td>
+                      <td style={{ padding: '8px 10px', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
+                        {job.started_at ? formatDuration(job.started_at, job.completed_at) : '—'}
+                      </td>
+                      <td
+                        style={{
+                          padding: '8px 10px',
+                          color: job.status === 'failed' ? 'var(--danger, #f85149)' : 'var(--text-muted)',
+                          maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {job.error_msg ?? job.step ?? '—'}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          )}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 12, color: 'var(--text-muted)', fontSize: 12 }}>
+            <button
+              disabled={historyPage === 0}
+              onClick={() => setHistoryPage((page) => Math.max(0, page - 1))}
+              style={{ padding: '5px 10px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)' }}
+            >
+              Previous
+            </button>
+            <span>Page {historyPage + 1}</span>
+            <button
+              disabled={!hasNextHistoryPage}
+              onClick={() => setHistoryPage((page) => page + 1)}
+              style={{ padding: '5px 10px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)' }}
+            >
+              Next
+            </button>
+          </div>
         </section>
       </div>
     </div>
