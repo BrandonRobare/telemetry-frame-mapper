@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import json
 import zipfile
+from collections.abc import Iterator
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session as DBSession
 
@@ -20,10 +21,12 @@ from ..services.reconstruction import (
     _safe_export_path,
     _write_mesh_georef,
     cancel_reconstruction,
+    current_reconstruction_status_version,
     get_rec_log,
     start_flythrough_render,
     start_mesh_export,
     start_reconstruction,
+    wait_for_reconstruction_status_change,
 )
 
 router = APIRouter(prefix="/reconstruction", tags=["reconstruction"])
@@ -224,6 +227,42 @@ def get_status(reconstruction_id: int, db: DBSession = Depends(get_db)):
     if not rec:
         raise HTTPException(status_code=404, detail="Reconstruction not found")
     return rec
+
+
+def _status_sse_payload(rec: Reconstruction) -> str:
+    body = ReconstructionOut.model_validate(rec).model_dump(mode="json")
+    return f"event: status\ndata: {json.dumps(body, separators=(',', ':'))}\n\n"
+
+
+@router.get("/{reconstruction_id}/status/events")
+def stream_status_events(reconstruction_id: int, db: DBSession = Depends(get_db)):
+    rec = db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Reconstruction not found")
+
+    def events() -> Iterator[str]:
+        version = current_reconstruction_status_version(reconstruction_id)
+        while True:
+            db.expire_all()
+            rec = db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).first()
+            if rec is None:
+                yield "event: deleted\ndata: {}\n\n"
+                return
+            yield _status_sse_payload(rec)
+            new_version = wait_for_reconstruction_status_change(reconstruction_id, version)
+            if new_version == version:
+                yield ": keepalive\n\n"
+            else:
+                version = new_version
+
+    return StreamingResponse(
+        events(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.delete("/{reconstruction_id}")

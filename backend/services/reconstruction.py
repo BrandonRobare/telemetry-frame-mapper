@@ -7,6 +7,7 @@ import re
 import shutil
 import subprocess
 import threading
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -36,6 +37,8 @@ _flythrough_jobs: set[int] = set()
 _flythrough_jobs_lock = threading.Lock()
 _comparison_jobs: set[int] = set()
 _comparison_jobs_lock = threading.Lock()
+_rec_status_condition = threading.Condition()
+_rec_status_versions: dict[int, int] = {}
 
 # Cap stored error messages to avoid bloating a DB row or JSON API response
 # with a pathological multi-MB stderr dump, while still keeping enough of the
@@ -55,6 +58,32 @@ def _log_rec(rec_id: int, msg: str) -> None:
 def get_rec_log(rec_id: int) -> list[str]:
     with _rec_logs_lock:
         return list(_rec_logs.get(rec_id, []))
+
+
+def notify_reconstruction_status_changed(rec_id: int) -> None:
+    with _rec_status_condition:
+        _rec_status_versions[rec_id] = _rec_status_versions.get(rec_id, 0) + 1
+        _rec_status_condition.notify_all()
+
+
+def current_reconstruction_status_version(rec_id: int) -> int:
+    with _rec_status_condition:
+        return _rec_status_versions.get(rec_id, 0)
+
+
+def wait_for_reconstruction_status_change(
+    rec_id: int,
+    last_version: int,
+    timeout_s: float = 15.0,
+) -> int:
+    deadline = time.monotonic() + timeout_s
+    with _rec_status_condition:
+        while _rec_status_versions.get(rec_id, 0) <= last_version:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return last_version
+            _rec_status_condition.wait(timeout=remaining)
+        return _rec_status_versions.get(rec_id, 0)
 
 
 # ---------------------------------------------------------------------------
@@ -1240,6 +1269,7 @@ def cancel_reconstruction(reconstruction_id: int) -> None:
 def _update_rec(db: DBSession, rec_id: int, **kwargs) -> None:
     db.query(Reconstruction).filter(Reconstruction.id == rec_id).update(kwargs)
     db.commit()
+    notify_reconstruction_status_changed(rec_id)
 
 
 def _run_pipeline(
