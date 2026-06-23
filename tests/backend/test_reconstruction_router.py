@@ -108,6 +108,57 @@ def test_cancel_reconstruction(client):
         resp = client.delete(f"/reconstruction/{rec.id}")
     assert resp.status_code == 200
     mock_cancel.assert_called_once_with(rec.id)
+    assert db.query(Reconstruction).filter(Reconstruction.id == rec.id).first() is None
+
+
+def test_delete_reconstruction_removes_artifacts(client, tmp_path):
+    db = _get_db(client)
+    s = _make_session_with_images(db)
+    exports_dir = tmp_path / "exports"
+    processed_dir = tmp_path / "processed"
+    data_dir = tmp_path / "data"
+    colmap_dir = data_dir / "colmap" / str(s.id)
+    export_dir = exports_dir / "pending"
+    colmap_dir.mkdir(parents=True)
+    export_dir.mkdir(parents=True)
+    splat = export_dir / "splat.ply"
+    preview = export_dir / "splat_preview.ply"
+    pointcloud = export_dir / "pointcloud.las"
+    thumb = processed_dir / "thumbs" / "splat_pending.jpg"
+    for path in (splat, preview, pointcloud, thumb):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"artifact")
+
+    rec = Reconstruction(
+        session_id=s.id, preset="quick", status="complete",
+        progress_pct=100.0, frames_used=3,
+        colmap_dir=str(colmap_dir), splat_path=str(splat),
+        splat_preview_path=str(preview), pointcloud_path=str(pointcloud),
+        thumb_path=str(thumb),
+    )
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+    actual_export_dir = exports_dir / str(rec.id)
+    export_dir.rename(actual_export_dir)
+    rec.splat_path = str(actual_export_dir / "splat.ply")
+    rec.splat_preview_path = str(actual_export_dir / "splat_preview.ply")
+    rec.pointcloud_path = str(actual_export_dir / "pointcloud.las")
+    db.commit()
+
+    cfg = type("Cfg", (), {
+        "processed_dir": str(processed_dir),
+        "exports_dir": str(exports_dir),
+        "data_dir": str(data_dir),
+    })()
+    with patch("backend.routers.reconstruction.get_config", return_value=cfg), \
+         patch("backend.routers.reconstruction.cancel_reconstruction"):
+        resp = client.delete(f"/reconstruction/{rec.id}")
+
+    assert resp.status_code == 200
+    assert not colmap_dir.exists()
+    assert not actual_export_dir.exists()
+    assert not thumb.exists()
 
 
 def test_start_reconstruction_with_target_area(client):
