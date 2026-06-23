@@ -98,6 +98,22 @@ CI should use fakes/mocks for these tools. Real `ffmpeg`/`exiftool` CLI smoke is
 
 The backend creates a SQLite database at `data/drone_mapping.db` on first run.
 
+### Docker single-container app
+
+Build and run a CPU-only image that serves the FastAPI backend and built frontend from one container:
+
+```bash
+docker build -t telemetry-frame-mapper .
+docker run --rm -p 8000:8000 \
+  -v "$PWD/data:/app/data" \
+  -v "$PWD/imports:/app/imports" \
+  -v "$PWD/processed:/app/processed" \
+  -v "$PWD/exports:/app/exports" \
+  telemetry-frame-mapper
+```
+
+Open `http://localhost:8000`. The image installs `ffmpeg`, `exiftool`, and COLMAP for CPU-only reconstruction. CUDA/torch/gsplat GPU training is intentionally out of scope for this image; use the manual GPU setup in `docs/SETUP.md` when needed.
+
 ### Frontend
 
 ```bash
