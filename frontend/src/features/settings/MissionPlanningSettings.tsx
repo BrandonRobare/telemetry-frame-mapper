@@ -2,13 +2,15 @@ import { useState } from 'react'
 import { Button } from '../../shared/components/Button'
 import { useSettings, useUpdateSettings } from './api'
 import type { MissionSettings } from './api'
+import { hasValidationErrors, validateMissionSettings } from './settingsValidation'
 
 interface FieldProps {
   label: string
   hint?: string
+  error?: string
   children: React.ReactNode
 }
-function Field({ label, hint, children }: FieldProps) {
+function Field({ label, hint, error, children }: FieldProps) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
       <label className="text-xs font-medium" style={{ color: 'var(--text)' }}>
@@ -18,6 +20,11 @@ function Field({ label, hint, children }: FieldProps) {
       {hint && (
         <span className="text-xs" style={{ color: 'var(--text-faint)' }}>
           {hint}
+        </span>
+      )}
+      {error && (
+        <span className="text-xs" style={{ color: 'var(--danger)' }}>
+          {error}
         </span>
       )}
     </div>
@@ -59,12 +66,15 @@ export default function MissionPlanningSettings() {
 
   const server = settings?.mission ?? DEFAULT
   const form: MissionSettings = { ...server, ...edits }
+  const validationErrors = validateMissionSettings(form)
+  const hasErrors = hasValidationErrors(validationErrors)
 
   function updateForm<K extends keyof MissionSettings>(key: K, value: MissionSettings[K]) {
     setEdits((e) => ({ ...e, [key]: value }))
   }
 
   function handleSave() {
+    if (hasErrors) return
     updateMutation.mutate(
       { mission: form },
       { onSuccess: () => setEdits({}) }
@@ -137,7 +147,7 @@ export default function MissionPlanningSettings() {
           />
         </Field>
 
-        <Field label="Side Overlap" hint="0–1 (e.g. 0.70 = 70%)">
+        <Field label="Side Overlap" hint="0–1 (e.g. 0.70 = 70%)" error={validationErrors.desired_side_overlap}>
           <input
             type="number"
             step={0.01}
@@ -149,7 +159,7 @@ export default function MissionPlanningSettings() {
           />
         </Field>
 
-        <Field label="Forward Overlap" hint="0–1 (e.g. 0.80 = 80%)">
+        <Field label="Forward Overlap" hint="0–1 (e.g. 0.80 = 80%)" error={validationErrors.desired_forward_overlap}>
           <input
             type="number"
             step={0.01}
@@ -172,7 +182,7 @@ export default function MissionPlanningSettings() {
           />
         </Field>
 
-        <Field label="Default Video FPS">
+        <Field label="Default Video FPS" error={validationErrors.default_video_fps}>
           <input
             type="number"
             step={0.5}
@@ -194,7 +204,7 @@ export default function MissionPlanningSettings() {
           />
         </Field>
 
-        <Field label="Mission Buffer" hint="0–1 safety margin on battery range">
+        <Field label="Mission Buffer" hint="0–1 safety margin on battery range" error={validationErrors.mission_buffer_pct}>
           <input
             type="number"
             step={0.01}
@@ -223,7 +233,7 @@ export default function MissionPlanningSettings() {
           <Button
             variant="primary"
             size="sm"
-            disabled={updateMutation.isPending}
+            disabled={updateMutation.isPending || hasErrors}
             onClick={handleSave}
           >
             {updateMutation.isPending ? 'Saving…' : 'Save changes'}
