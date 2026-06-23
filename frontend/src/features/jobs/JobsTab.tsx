@@ -3,6 +3,9 @@ import { useQuery } from '@tanstack/react-query'
 import { get } from '../../shared/api/client'
 import type { Job, SystemResources } from '../../types/api'
 import { SkeletonRow } from '../../shared/components/Skeleton'
+import { Button } from '../../shared/components/Button'
+import { useToast } from '../../shared/hooks/useToast'
+import { filterReconstructionLogLines } from './logPanel'
 
 function useAllJobs() {
   return useQuery<Job[]>({
@@ -71,8 +74,21 @@ function useReconstructionLog(id: number, enabled: boolean, limit = 100) {
 
 function LogPanel({ recId, isActive }: { recId: number; isActive: boolean }) {
   const [open, setOpen] = useState(false)
+  const [filter, setFilter] = useState('')
+  const { addToast } = useToast()
   const { data } = useReconstructionLog(recId, open && isActive)
   const lines = data?.lines ?? []
+  const filteredLines = filterReconstructionLogLines(lines, filter)
+  const hasFilter = filter.trim().length > 0
+
+  async function copyLog() {
+    try {
+      await navigator.clipboard.writeText(filteredLines.join('\n'))
+      addToast(hasFilter ? 'Filtered log copied' : 'Log copied', 'success')
+    } catch {
+      addToast('Failed to copy log', 'error')
+    }
+  }
 
   return (
     <div style={{ marginTop: 6 }}>
@@ -87,19 +103,45 @@ function LogPanel({ recId, isActive }: { recId: number; isActive: boolean }) {
         {open ? '▾' : '▸'} {open ? 'Hide' : 'Show'} log ({lines.length} lines)
       </button>
       {open && (
-        <div
-          style={{
-            marginTop: 4, padding: '6px 8px', borderRadius: 'var(--radius-sm)',
-            background: 'var(--surface-2)', maxHeight: 180, overflowY: 'auto',
-            fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text)',
-            border: '1px solid var(--border)',
-          }}
-        >
-          {lines.length === 0 ? (
-            <span style={{ color: 'var(--text-muted)' }}>No log entries yet.</span>
-          ) : (
-            lines.map((line, i) => <div key={`${i}-${line.slice(0, 8)}`}>{line}</div>)
-          )}
+        <div style={{ marginTop: 4 }}>
+          <div style={{ display: 'flex', gap: 8, marginBottom: 4, alignItems: 'center' }}>
+            <input
+              aria-label="Filter reconstruction log"
+              placeholder="Filter log..."
+              value={filter}
+              onChange={(event) => setFilter(event.target.value)}
+              style={{
+                flex: 1,
+                minWidth: 0,
+                border: '1px solid var(--border)',
+                borderRadius: 'var(--radius-sm)',
+                background: 'var(--surface)',
+                color: 'var(--text)',
+                fontFamily: 'inherit',
+                fontSize: 11,
+                padding: '4px 6px',
+              }}
+            />
+            <Button size="sm" variant="ghost" onClick={copyLog} disabled={filteredLines.length === 0}>
+              Copy {hasFilter ? 'filtered' : 'log'}
+            </Button>
+          </div>
+          <div
+            style={{
+              padding: '6px 8px', borderRadius: 'var(--radius-sm)',
+              background: 'var(--surface-2)', maxHeight: 180, overflowY: 'auto',
+              fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text)',
+              border: '1px solid var(--border)',
+            }}
+          >
+            {lines.length === 0 ? (
+              <span style={{ color: 'var(--text-muted)' }}>No log entries yet.</span>
+            ) : filteredLines.length === 0 ? (
+              <span style={{ color: 'var(--text-muted)' }}>No log entries match “{filter}”.</span>
+            ) : (
+              filteredLines.map((line, i) => <div key={`${i}-${line.slice(0, 8)}`}>{line}</div>)
+            )}
+          </div>
         </div>
       )}
     </div>
