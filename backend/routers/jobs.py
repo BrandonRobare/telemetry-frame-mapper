@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session as DBSession
 
 from ..db.database import get_db
@@ -10,11 +10,20 @@ router = APIRouter(prefix="/jobs", tags=["jobs"])
 
 
 @router.get("/")
-def list_jobs(db: DBSession = Depends(get_db)):
+def list_jobs(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=200),
+    status: str | None = Query(None, min_length=1),
+    db: DBSession = Depends(get_db),
+):
+    query = db.query(Reconstruction)
+    if status is not None:
+        query = query.filter(Reconstruction.status == status)
+
     reconstructions = (
-        db.query(Reconstruction)
-        .order_by(Reconstruction.started_at.desc())
-        .limit(50)
+        query.order_by(Reconstruction.started_at.desc())
+        .offset(skip)
+        .limit(limit)
         .all()
     )
     return [
