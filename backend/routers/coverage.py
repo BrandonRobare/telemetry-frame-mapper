@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import json
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 from shapely.geometry import mapping
 from shapely.wkt import loads as wkt_loads
@@ -12,6 +13,13 @@ from ..db.database import get_db
 from ..db.models import CoverageRun, Footprint, Image, TargetArea
 from ..db.models import Session as SessionModel
 from ..services.coverage import run_coverage
+from ..services.geometry_exports import (
+    feature_collection,
+    geojson_to_kml,
+    geometry_feature,
+    kml_to_kmz,
+    parse_geojson_geometry,
+)
 
 router = APIRouter(prefix="/coverage", tags=["coverage"])
 
@@ -95,3 +103,79 @@ def get_coverage_results(session_id: int, db: DBSession = Depends(get_db)):
         "gap_geojson": run.gap_geojson,
         "overlap_geojson": run.overlap_geojson,
     }
+
+
+@router.get("/results/export")
+def export_latest_coverage_results(
+    session_id: int,
+    format: str = Query("geojson", pattern="^(geojson|kml|kmz)$"),
+    db: DBSession = Depends(get_db),
+):
+    run = (
+        db.query(CoverageRun)
+        .filter(CoverageRun.session_ids == str(session_id))
+        .order_by(CoverageRun.run_at.desc())
+        .first()
+    )
+    if run is None:
+        raise HTTPException(status_code=404, detail="Coverage run not found")
+    return _coverage_export_response(run, format)
+
+
+@router.get("/{run_id}/export")
+def export_coverage_run(
+    run_id: int,
+    format: str = Query("geojson", pattern="^(geojson|kml|kmz)$"),
+    db: DBSession = Depends(get_db),
+):
+    run = db.query(CoverageRun).filter(CoverageRun.id == run_id).first()
+    if run is None:
+        raise HTTPException(status_code=404, detail="Coverage run not found")
+    return _coverage_export_response(run, format)
+
+
+def _coverage_export_response(run: CoverageRun, format: str):
+    features = []
+    for name, raw_geojson in (
+        ("coverage_gap", run.gap_geojson),
+        ("coverage_overlap", run.overlap_geojson),
+    ):
+        feature = geometry_feature(
+            parse_geojson_geometry(raw_geojson),
+            name=name,
+            properties={
+                "coverage_run_id": run.id,
+                "target_area_id": run.target_area_id,
+                "session_ids": run.session_ids,
+                "covered_area_m2": run.covered_area_m2,
+                "coverage_pct": run.coverage_pct,
+                "kind": name,
+            },
+        )
+        if feature:
+            features.append(feature)
+
+    if not features:
+        raise HTTPException(status_code=404, detail="No coverage geometry found for run")
+
+    collection = feature_collection(features)
+    filename = f"coverage_run_{run.id}"
+    if format == "geojson":
+        return JSONResponse(
+            collection,
+            media_type="application/geo+json",
+            headers={"Content-Disposition": f'attachment; filename="{filename}.geojson"'},
+        )
+
+    kml = geojson_to_kml(collection, f"Coverage run {run.id}")
+    if format == "kml":
+        return Response(
+            kml,
+            media_type="application/vnd.google-earth.kml+xml",
+            headers={"Content-Disposition": f'attachment; filename="{filename}.kml"'},
+        )
+    return Response(
+        kml_to_kmz(kml, f"{filename}.kml"),
+        media_type="application/vnd.google-earth.kmz",
+        headers={"Content-Disposition": f'attachment; filename="{filename}.kmz"'},
+    )
