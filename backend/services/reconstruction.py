@@ -1366,10 +1366,21 @@ def _run_pipeline(
         except ReconstructionCancelled:
             # Must precede the RuntimeError branch (it is a RuntimeError subclass):
             # a mid-training cancel is a failure, not a colmap_only completion.
+            checkpoint_saved = splat_path.exists()
+            if checkpoint_saved:
+                _log_rec(
+                    reconstruction_id,
+                    f"Gaussian Splatting: cancellation checkpoint saved to {splat_path}",
+                )
             _update_rec(
                 db, reconstruction_id,
                 status="failed",
-                error_msg="Cancelled by user",
+                step="cancelled_checkpoint" if checkpoint_saved else "cancelled",
+                splat_path=str(splat_path) if checkpoint_saved else None,
+                error_msg=(
+                    f"Cancelled by user; checkpoint saved to {splat_path}"
+                    if checkpoint_saved else "Cancelled by user"
+                ),
                 completed_at=datetime.now(timezone.utc),
             )
         except RuntimeError as exc:

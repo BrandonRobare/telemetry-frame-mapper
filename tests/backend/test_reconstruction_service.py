@@ -604,6 +604,33 @@ def test_run_pipeline_cancel_during_training_marks_failed(setup_test_db):
     assert rec.step != "colmap_only"
 
 
+def test_run_pipeline_cancel_during_training_persists_checkpoint_path(setup_test_db):
+    from backend.db.database import get_db
+    from backend.main import app
+    from backend.services.splat_trainer import ReconstructionCancelled
+
+    db = next(app.dependency_overrides[get_db]())
+    with tempfile.TemporaryDirectory() as tmp:
+        rec, img, colmap_dir = _pipeline_fixture(db, tmp)
+
+        def cancel_after_checkpoint(_colmap_dir, output_path, _preset_cfg, _progress_cb, _cancel):
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_bytes(b"checkpoint ply")
+            output_path.with_suffix(output_path.suffix + ".checkpoint.json").write_text(
+                '{"reason":"cancelled_by_user","completed_iterations":12}',
+                encoding="utf-8",
+            )
+            raise ReconstructionCancelled("Cancelled by user")
+
+        _run_pipeline_with_gsplat(db, tmp, rec, img, colmap_dir, cancel_after_checkpoint)
+
+        assert rec.status == "failed"
+        assert rec.step == "cancelled_checkpoint"
+        assert rec.splat_path.endswith("splat.ply")
+        assert Path(rec.splat_path).exists()
+        assert "checkpoint saved" in rec.error_msg
+
+
 def test_run_pipeline_oom_maps_to_preset_hint(setup_test_db):
     from backend.db.database import get_db
     from backend.main import app
