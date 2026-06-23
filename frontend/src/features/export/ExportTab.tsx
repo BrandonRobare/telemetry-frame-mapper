@@ -394,6 +394,61 @@ export default function ExportTab() {
           </Button>
         </section>
 
+        {/* ---- Geometry Export card ---- */}
+        <section
+          className="rounded-lg p-5 flex flex-col gap-4"
+          style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}
+        >
+          <div>
+            <h2
+              className="text-base font-semibold"
+              style={{ color: 'var(--text)', margin: 0 }}
+            >
+              Footprint & Coverage Geometry
+            </h2>
+            <p
+              className="text-sm mt-1"
+              style={{ color: 'var(--text-muted)', margin: '4px 0 0' }}
+            >
+              Download footprint polygons and latest coverage gaps/overlaps for QGIS or Google Earth.
+            </p>
+          </div>
+
+          <div className="flex flex-col gap-3">
+            <div className="flex items-center gap-3 flex-wrap">
+              <span className="text-sm" style={{ color: 'var(--text)', minWidth: 82 }}>
+                Footprints
+              </span>
+              {(['geojson', 'kml', 'kmz'] as const).map((format) => (
+                <a
+                  key={format}
+                  href={`${BASE_URL}/footprints/export?session_id=${selectedSessionId}&format=${format}`}
+                  download={`session_${selectedSessionId}_footprints.${format}`}
+                  style={downloadLinkStyle}
+                >
+                  {format.toUpperCase()} ↓
+                </a>
+              ))}
+            </div>
+
+            <div className="flex items-center gap-3 flex-wrap">
+              <span className="text-sm" style={{ color: 'var(--text)', minWidth: 82 }}>
+                Coverage
+              </span>
+              {(['geojson', 'kml', 'kmz'] as const).map((format) => (
+                <a
+                  key={format}
+                  href={`${BASE_URL}/coverage/results/export?session_id=${selectedSessionId}&format=${format}`}
+                  download={`session_${selectedSessionId}_coverage.${format}`}
+                  style={downloadLinkStyle}
+                >
+                  {format.toUpperCase()} ↓
+                </a>
+              ))}
+            </div>
+          </div>
+        </section>
+
         {/* ---- Point Cloud Export card ---- */}
         <section
           className="rounded-lg p-5 flex flex-col gap-4"
