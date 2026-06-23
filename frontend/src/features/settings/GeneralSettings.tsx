@@ -129,10 +129,10 @@ export default function GeneralSettings() {
                   fontFamily: 'inherit',
                 }}
               >
-                Toggle
+                Switch to {theme === 'light' ? 'dark' : 'light'}
               </button>
               <span className="text-xs" style={{ color: 'var(--text-faint)' }}>
-                Light (Dark coming soon)
+                Saved on this device
               </span>
             </div>
           </Field>
