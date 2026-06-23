@@ -1,6 +1,10 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { get } from '../../shared/api/client'
+import {
+  isLiveReconstructionStatus,
+  useReconstructionStatusEvents,
+} from '../../shared/api/reconstructionStatusEvents'
 import { formatEta } from '../../shared/time'
 import type { Job, SystemResources } from '../../types/api'
 import { SkeletonRow } from '../../shared/components/Skeleton'
@@ -17,16 +21,21 @@ function jobsPath(skip: number, limit: number, status: JobStatusFilter) {
   return `/jobs/?${params.toString()}`
 }
 
-function useJobs(skip = 0, limit = 50, status: JobStatusFilter = 'all') {
+function useJobs(
+  skip = 0,
+  limit = 50,
+  status: JobStatusFilter = 'all',
+  sseConnectedIds: ReadonlySet<number> = new Set()
+) {
   return useQuery<Job[]>({
     queryKey: ['jobs', skip, limit, status],
     queryFn: () => get<Job[]>(jobsPath(skip, limit, status)),
     refetchInterval: (query) => {
       const jobs = query.state.data ?? []
-      const hasRunning = jobs.some((j) =>
-        ['pending', 'running_colmap', 'running_gsplat'].includes(j.status)
+      const needsPollingFallback = jobs.some((j) =>
+        isLiveReconstructionStatus(j.status) && !sseConnectedIds.has(j.id)
       )
-      return hasRunning ? 3000 : 30_000
+      return needsPollingFallback ? 3000 : 30_000
     },
   })
 }
@@ -178,12 +187,15 @@ export default function JobsTab() {
   const [historyPage, setHistoryPage] = useState(0)
   const [statusFilter, setStatusFilter] = useState<JobStatusFilter>('all')
   const [search, setSearch] = useState('')
-  const { data: activeJobs, isLoading: isLoadingActive } = useJobs(0, 50, 'all')
+  const [sseConnectedIds, setSseConnectedIds] = useState<ReadonlySet<number>>(new Set())
+  const { data: activeJobs, isLoading: isLoadingActive } = useJobs(0, 50, 'all', sseConnectedIds)
   const { data: historyJobs, isLoading: isLoadingHistory } = useJobs(
     historyPage * HISTORY_PAGE_SIZE,
     HISTORY_PAGE_SIZE + 1,
-    statusFilter
+    statusFilter,
+    sseConnectedIds
   )
+  useReconstructionStatusEvents(activeJobs, setSseConnectedIds)
   const isLoading = isLoadingActive && isLoadingHistory
 
   if (isLoading) {
@@ -213,11 +225,9 @@ export default function JobsTab() {
     )
   }
 
-  const running = activeList.filter((j) =>
-    ['pending', 'running_colmap', 'running_gsplat'].includes(j.status)
-  )
+  const running = activeList.filter((j) => isLiveReconstructionStatus(j.status))
   const done = historyPageJobs
-    .filter((j) => !['pending', 'running_colmap', 'running_gsplat'].includes(j.status))
+    .filter((j) => !isLiveReconstructionStatus(j.status))
     .slice(0, HISTORY_PAGE_SIZE)
     .filter((job) => {
       if (!searchNeedle) return true
