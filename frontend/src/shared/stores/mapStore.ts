@@ -1,5 +1,7 @@
 import { create } from 'zustand'
 
+export type Theme = 'dark' | 'light'
+
 interface ActiveLayers {
   footprints: boolean
   coverage: boolean
@@ -17,7 +19,7 @@ interface SyncedViewport {
 interface MapStore {
   selectedSessionId: number | null
   activeLayers: ActiveLayers
-  theme: 'dark' | 'light'
+  theme: Theme
   sidebarOpen: boolean
   setSession: (id: number | null) => void
   toggleLayer: (key: keyof ActiveLayers) => void
@@ -33,14 +35,34 @@ interface MapStore {
   setSyncedViewport: (vp: SyncedViewport) => void
 }
 
-function applyTheme(theme: 'dark' | 'light') {
-  document.documentElement.dataset.theme = theme
-  localStorage.setItem('theme', theme)
+function isTheme(value: string | null): value is Theme {
+  return value === 'dark' || value === 'light'
 }
 
-// Light-only for now — the warm-dark theme is a later follow-up, so we ignore any
-// previously-saved 'dark' preference and always start in the new warm-light theme.
-const savedTheme: 'dark' | 'light' = 'light'
+export function getSavedTheme(): Theme {
+  try {
+    if (typeof localStorage === 'undefined') return 'light'
+    const saved = localStorage.getItem('theme')
+    return isTheme(saved) ? saved : 'light'
+  } catch {
+    return 'light'
+  }
+}
+
+function applyTheme(theme: Theme) {
+  if (typeof document !== 'undefined') {
+    document.documentElement.dataset.theme = theme
+  }
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem('theme', theme)
+    }
+  } catch {
+    // Ignore storage failures; the in-memory store still reflects the user's choice.
+  }
+}
+
+const savedTheme = getSavedTheme()
 applyTheme(savedTheme)
 
 export const useMapStore = create<MapStore>((set) => ({

@@ -3,13 +3,15 @@ import { Button } from '../../shared/components/Button'
 import { AdvancedDisclosure } from './AdvancedDisclosure'
 import { useSettings, useUpdateSettings } from './api'
 import type { IngestSettings as IngestSettingsType } from './api'
+import { hasValidationErrors, validateIngestSettings } from './settingsValidation'
 
 interface FieldProps {
   label: string
   hint?: string
+  error?: string
   children: React.ReactNode
 }
-function Field({ label, hint, children }: FieldProps) {
+function Field({ label, hint, error, children }: FieldProps) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
       <label className="text-xs font-medium" style={{ color: 'var(--text)' }}>
@@ -19,6 +21,11 @@ function Field({ label, hint, children }: FieldProps) {
       {hint && (
         <span className="text-xs" style={{ color: 'var(--text-faint)' }}>
           {hint}
+        </span>
+      )}
+      {error && (
+        <span className="text-xs" style={{ color: 'var(--danger)' }}>
+          {error}
         </span>
       )}
     </div>
@@ -57,6 +64,8 @@ export default function IngestSettings() {
 
   const server = settings?.ingest ?? DEFAULT
   const form: IngestSettingsType = { ...server, ...edits }
+  const validationErrors = validateIngestSettings(form)
+  const hasErrors = hasValidationErrors(validationErrors)
 
   // Effective extensions to display
   const displayExtStr = extStr ?? form.accepted_extensions.join(', ')
@@ -75,6 +84,7 @@ export default function IngestSettings() {
   }
 
   function handleSave() {
+    if (hasErrors) return
     updateMutation.mutate(
       { ingest: form },
       {
@@ -89,7 +99,11 @@ export default function IngestSettings() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-        <Field label="Thumbnail Size (px)" hint="Pixel width/height of generated preview thumbnails">
+        <Field
+          label="Thumbnail Size (px)"
+          hint="Pixel width/height of generated preview thumbnails"
+          error={validationErrors.thumbnail_size_px}
+        >
           <input
             type="number"
             min={64}
@@ -102,7 +116,11 @@ export default function IngestSettings() {
       </div>
 
       <AdvancedDisclosure>
-        <Field label="Accepted Extensions" hint="Comma-separated list (e.g. .jpg, .jpeg, .tif)">
+        <Field
+          label="Accepted Extensions"
+          hint="Comma-separated list (e.g. .jpg, .jpeg, .tif)"
+          error={validationErrors.accepted_extensions}
+        >
           <input
             type="text"
             value={displayExtStr}
@@ -111,11 +129,15 @@ export default function IngestSettings() {
           />
         </Field>
 
-        <Field label="Thumbnail JPEG Quality" hint="1–95; higher = larger file, better quality">
+        <Field
+          label="Thumbnail JPEG Quality"
+          hint="1–100; higher = larger file, better quality"
+          error={validationErrors.thumbnail_jpeg_quality}
+        >
           <input
             type="number"
             min={1}
-            max={95}
+            max={100}
             value={form.thumbnail_jpeg_quality}
             onChange={(e) => updateForm('thumbnail_jpeg_quality', Number(e.target.value))}
             style={{ ...inputStyle, maxWidth: 120 }}
@@ -176,7 +198,7 @@ export default function IngestSettings() {
           <Button
             variant="primary"
             size="sm"
-            disabled={updateMutation.isPending}
+            disabled={updateMutation.isPending || hasErrors}
             onClick={handleSave}
           >
             {updateMutation.isPending ? 'Saving…' : 'Save changes'}
