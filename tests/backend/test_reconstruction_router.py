@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json as _json
+import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
@@ -496,6 +497,177 @@ def test_download_mesh_running_returns_202(client):
 
     resp = client.get(f"/reconstruction/{rec.id}/mesh?format=obj")
     assert resp.status_code == 202
+
+
+def test_download_bundle_returns_zip_with_mesh_thumbnail_georef_and_metadata(client, tmp_path):
+    db = _get_db(client)
+    s = _make_session_with_images(db)
+    exports_dir = tmp_path / "exports"
+    processed_dir = tmp_path / "processed"
+    rec_dir = exports_dir / "1"
+    rec_dir.mkdir(parents=True)
+    processed_dir.mkdir()
+    glb = rec_dir / "custom-name.glb"
+    glb.write_bytes(b"glb bytes")
+    thumb = processed_dir / "thumb.jpg"
+    thumb.write_bytes(b"jpeg bytes")
+    georef = rec_dir / "mesh_georef.json"
+    georef.write_text('{"geo_transform":{"scale":1.0}}')
+
+    rec = Reconstruction(
+        id=1,
+        session_id=s.id,
+        preset="quick",
+        status="complete",
+        progress_pct=100.0,
+        frames_used=12,
+        frames_registered=10,
+        psnr=18.5,
+        ssim=0.72,
+        mesh_status="complete",
+        mesh_glb_path=str(glb),
+        thumb_path=str(thumb),
+    )
+    db.add(rec)
+    db.commit()
+
+    with patch("backend.routers.reconstruction.get_config") as mock_cfg:
+        mock_cfg.return_value.exports_dir = str(exports_dir)
+        mock_cfg.return_value.processed_dir = str(processed_dir)
+        resp = client.get("/reconstruction/1/download-bundle")
+
+    assert resp.status_code == 200
+    assert resp.headers["content-type"] == "application/zip"
+    bundle_path = rec_dir / "reconstruction_1_bundle.zip"
+    assert bundle_path.exists()
+    with zipfile.ZipFile(bundle_path) as zf:
+        assert sorted(zf.namelist()) == [
+            "mesh.glb",
+            "mesh_georef.json",
+            "metadata.json",
+            "thumbnail.jpg",
+        ]
+        assert zf.read("mesh.glb") == b"glb bytes"
+        assert zf.read("thumbnail.jpg") == b"jpeg bytes"
+        assert _json.loads(zf.read("mesh_georef.json"))["geo_transform"]["scale"] == 1.0
+        metadata = _json.loads(zf.read("metadata.json"))
+    assert metadata["id"] == 1
+    assert metadata["session_id"] == s.id
+    assert metadata["frames_used"] == 12
+    assert metadata["frames_registered"] == 10
+    assert metadata["psnr"] == 18.5
+    assert metadata["ssim"] == 0.72
+    assert metadata["files"]["glb"] == "mesh.glb"
+    assert metadata["files"]["thumbnail"] == "thumbnail.jpg"
+
+
+def test_download_bundle_regenerates_georef_when_missing(client, tmp_path):
+    db = _get_db(client)
+    s = _make_session_with_images(db)
+    exports_dir = tmp_path / "exports"
+    processed_dir = tmp_path / "processed"
+    glb = exports_dir / "1" / "mesh.glb"
+    glb.parent.mkdir(parents=True)
+    glb.write_bytes(b"glb")
+    geo = {
+        "scale": 2.0,
+        "rotation": [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
+        "translation": [1.0, 2.0, 3.0],
+        "utm_zone": "17N",
+        "utm_origin": [500000.0, 3869000.0],
+    }
+    rec = Reconstruction(
+        id=1,
+        session_id=s.id,
+        preset="quick",
+        status="complete",
+        progress_pct=100.0,
+        frames_used=3,
+        mesh_status="complete",
+        mesh_glb_path=str(glb),
+        geo_transform=_json.dumps(geo),
+    )
+    db.add(rec)
+    db.commit()
+
+    with patch("backend.routers.reconstruction.get_config") as mock_cfg:
+        mock_cfg.return_value.exports_dir = str(exports_dir)
+        mock_cfg.return_value.processed_dir = str(processed_dir)
+        resp = client.get("/reconstruction/1/download-bundle")
+
+    assert resp.status_code == 200
+    georef = _json.loads((exports_dir / "1" / "mesh_georef.json").read_text())
+    assert georef["reconstruction_id"] == 1
+    assert georef["geo_transform"] == geo
+
+
+def test_download_bundle_not_found(client):
+    resp = client.get("/reconstruction/999999/download-bundle")
+    assert resp.status_code == 404
+
+
+def test_download_bundle_reconstruction_still_running(client):
+    db = _get_db(client)
+    s = _make_session_with_images(db)
+    rec = Reconstruction(
+        session_id=s.id,
+        preset="quick",
+        status="running_gsplat",
+        progress_pct=50.0,
+        frames_used=3,
+    )
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+
+    resp = client.get(f"/reconstruction/{rec.id}/download-bundle")
+    assert resp.status_code == 202
+
+
+def test_download_bundle_missing_glb_returns_404(client):
+    db = _get_db(client)
+    s = _make_session_with_images(db)
+    rec = Reconstruction(
+        session_id=s.id,
+        preset="quick",
+        status="complete",
+        progress_pct=100.0,
+        frames_used=3,
+        mesh_status="complete",
+    )
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+
+    resp = client.get(f"/reconstruction/{rec.id}/download-bundle")
+    assert resp.status_code == 404
+
+
+def test_download_bundle_rejects_glb_path_outside_exports(client, tmp_path):
+    db = _get_db(client)
+    s = _make_session_with_images(db)
+    outside = tmp_path / "outside" / "mesh.glb"
+    outside.parent.mkdir()
+    outside.write_bytes(b"glb")
+    rec = Reconstruction(
+        session_id=s.id,
+        preset="quick",
+        status="complete",
+        progress_pct=100.0,
+        frames_used=3,
+        mesh_status="complete",
+        mesh_glb_path=str(outside),
+    )
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+
+    with patch("backend.routers.reconstruction.get_config") as mock_cfg:
+        mock_cfg.return_value.exports_dir = str(tmp_path / "exports")
+        mock_cfg.return_value.processed_dir = str(tmp_path / "processed")
+        resp = client.get(f"/reconstruction/{rec.id}/download-bundle")
+
+    assert resp.status_code == 403
 
 
 def test_render_video_validates_keyframes(client):
