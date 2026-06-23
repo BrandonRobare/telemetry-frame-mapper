@@ -3,7 +3,6 @@ from __future__ import annotations
 import io
 import zipfile
 
-
 _POLYGON = '{"type":"Polygon","coordinates":[[[0,0],[1,0],[1,1],[0,1],[0,0]]]}'
 
 
