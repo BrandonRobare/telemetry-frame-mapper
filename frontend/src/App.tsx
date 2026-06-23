@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useMapStore } from './shared/stores/mapStore'
 import { useSettingsStore } from './features/settings/settingsStore'
@@ -78,20 +78,27 @@ function renderTab(tab: Tab) {
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<Tab>(() => {
-    const d = useSettingsStore.getState().defaultTab
-    return TABS.some((t) => t.id === d) ? (d as Tab) : 'map'
+    const { defaultTab, lastActiveTab } = useSettingsStore.getState()
+    const initialTab = lastActiveTab ?? defaultTab
+    return TABS.some((t) => t.id === initialTab) ? (initialTab as Tab) : 'map'
   })
   const [showImport, setShowImport] = useState(false)
   const { requestedTab, setRequestedTab } = useMapStore()
+  const setLastActiveTab = useSettingsStore((s) => s.setLastActiveTab)
+
+  const selectTab = useCallback((tab: Tab) => {
+    setActiveTab(tab)
+    setLastActiveTab(tab)
+  }, [setLastActiveTab])
 
   useEffect(() => {
     if (!requestedTab || !TABS.some((t) => t.id === requestedTab)) return
 
     queueMicrotask(() => {
-      setActiveTab(requestedTab as Tab)
+      selectTab(requestedTab as Tab)
       setRequestedTab(null)
     })
-  }, [requestedTab, setRequestedTab])
+  }, [requestedTab, selectTab, setRequestedTab])
 
   return (
     <div className="flex flex-col" style={{ height: '100vh', background: 'var(--bg)' }}>
@@ -115,7 +122,7 @@ export default function App() {
             return (
               <button
                 key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
+                onClick={() => selectTab(tab.id)}
                 className="relative px-4 text-sm cursor-pointer border-none bg-transparent h-full"
                 style={{
                   color: active ? 'var(--text)' : 'var(--text-muted)',
