@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session as DBSession
 from ..core.config import get_config, get_render_config
 from ..db.database import get_db
 from ..db.models import Reconstruction, SessionFrameSelection, TargetArea
+from ..services.artifact_cleanup import cleanup_reconstruction_artifacts
 from ..services.reconstruction import (
     _compute_coverage_gaps,
     _export_point_cloud,
@@ -201,6 +202,9 @@ def cancel(reconstruction_id: int, db: DBSession = Depends(get_db)):
     if not rec:
         raise HTTPException(status_code=404, detail="Reconstruction not found")
     cancel_reconstruction(reconstruction_id)
+    cleanup_reconstruction_artifacts(rec, get_config())
+    db.delete(rec)
+    db.commit()
     return {"ok": True}
 
 
