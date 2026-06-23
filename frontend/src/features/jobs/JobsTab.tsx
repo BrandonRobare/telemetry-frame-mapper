@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { get } from '../../shared/api/client'
+import { formatEta } from '../../shared/time'
 import type { Job, SystemResources } from '../../types/api'
 import { SkeletonRow } from '../../shared/components/Skeleton'
 
@@ -168,6 +169,7 @@ export default function JobsTab() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {running.map((job) => {
                 const s = STATUS_BADGE[job.status]
+                const eta = formatEta(job.started_at, job.progress_pct)
                 return (
                   <div
                     key={job.id}
@@ -206,6 +208,7 @@ export default function JobsTab() {
                     </div>
                     <p className="text-xs" style={{ color: 'var(--text-muted)', marginTop: 6, marginBottom: 0 }}>
                       {job.progress_pct.toFixed(1)}% · {job.step || 'Initializing…'}
+                      {eta && ` · ${eta}`}
                     </p>
                     <LogPanel recId={job.id} isActive={true} />
                   </div>
