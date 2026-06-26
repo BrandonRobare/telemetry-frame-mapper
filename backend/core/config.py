@@ -29,6 +29,7 @@ class AppConfig:
     processed_dir: str = "./processed"
     exports_dir: str = "./exports"
     data_dir: str = "./data"
+    flight_log_max_upload_size_mb: int = 10
 
     altitude_m: float = field(init=False)
     ground_width_m: float = field(init=False)

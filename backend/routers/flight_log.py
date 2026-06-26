@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import calendar
 from datetime import datetime, timezone
+from typing import Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy.orm import Session as DBSession
 
+from ..core.config import get_config
 from ..db.database import get_db
 from ..db.models import FlightLog, FlightLogPoint, Image
 from ..db.models import Session as SessionModel
@@ -82,7 +84,27 @@ async def upload_flight_log(
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
+    # Get upload size limit from settings
+    config = get_config()
+    max_size_mb = config.flight_log_max_upload_size_mb
+    max_size_bytes = max_size_mb * 1024 * 1024
+    
+    # Check file size before reading
+    if file.size is not None and file.size > max_size_bytes:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Flight log file too large. Maximum allowed size is {max_size_mb} MB"
+        )
+    
     content = await file.read()
+    
+    # If file size was not provided, check again after reading
+    if file.size is None and len(content) > max_size_bytes:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Flight log file too large. Maximum allowed size is {max_size_mb} MB"
+        )
+        
     points = parse_dji_csv(content)
 
     if not points:

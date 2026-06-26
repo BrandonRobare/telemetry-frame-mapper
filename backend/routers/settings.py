@@ -43,6 +43,7 @@ class GeneralSettings(BaseModel):
     processed_dir: str | None = None
     exports_dir: str | None = None
     data_dir: str | None = None
+    flight_log_max_upload_size_mb: int | None = Field(default=None, ge=1)
 
 
 class MissionSettings(BaseModel):
@@ -202,7 +203,7 @@ def _build_full_response() -> dict:
 
     # General + mission keys come from AppConfig init fields (exclude derived).
     general_keys = {"default_basemap", "target_crs", "imports_dir", "processed_dir",
-                    "exports_dir", "data_dir"}
+                    "exports_dir", "data_dir", "flight_log_max_upload_size_mb"}
     mission_keys = {
         "altitude_ft", "fov_horizontal_deg", "fov_vertical_deg",
         "image_width_px", "image_height_px",
