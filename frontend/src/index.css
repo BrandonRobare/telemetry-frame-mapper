@@ -313,7 +313,7 @@ body {
   }
 }
 .fm-trio-pulse {
-  transform-box: fill-box;
+  transform-box: view-box;
   transform-origin: center;
   animation: fm-trio-pulse 1.6s ease-in-out infinite;
 }
