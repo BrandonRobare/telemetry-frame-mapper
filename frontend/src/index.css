@@ -3,8 +3,7 @@
 /* ---------------------------------------------------------------------------
    Warm Light — design tokens
    Built out from four base colors: cream #F7F1DE, terracotta #B87C4C,
-   tan #C4A484, sage #A8BBA3. Light is the default theme; a warm-dark theme
-   is a later follow-up (parked under [data-theme="dark"] below).
+   tan #C4A484, sage #A8BBA3. Light-only; a warm-dark theme is a later follow-up.
 --------------------------------------------------------------------------- */
 :root {
   /* surfaces */
@@ -17,13 +16,14 @@
   /* text */
   --text: #2E2A22;          /* warm near-black (never pure black) */
   --text-muted: #6B6456;    /* secondary text */
-  --text-faint: #9A9078;    /* hints */
+  --text-faint: #756A52;    /* hints — darkened to clear WCAG AA on warm surfaces */
 
   /* terracotta accent — brand vs. accessible variants */
   --accent: #B87C4C;        /* brand accent (base): underlines, bars, focus, UI chrome */
   --accent-strong: #9A5E32; /* accessible terracotta: filled buttons (white text) + text links */
   --accent-hover: #874F29;  /* hover for strong fills / links */
   --accent-soft: #F0DEC9;   /* terracotta tint — active backgrounds, badges */
+  --on-accent: #FFFDF7;     /* readable text/icon on filled accent surfaces */
 
   /* sage (success / complete) */
   --sage: #A8BBA3;          /* raw sage indicator / bar fill (base) */
@@ -47,47 +47,50 @@
 
   /* typography */
   --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  --font-mono: ui-monospace, 'SF Mono', Menlo, 'Cascadia Code', Consolas, monospace;
+  --font-display: 'Space Grotesk', var(--font-sans);  /* UI labels / nav / headings */
+  --font-mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace; /* instrument readouts */
 
-  /* radii */
-  --radius-sm: 6px;
-  --radius-md: 9px;
-  --radius-lg: 12px;
+  /* radii — sharp editorial: rectangular surfaces are near-flat (2px). One
+     source of truth; the sized aliases stay for call-site intent. Pills and
+     node dots stay round via explicit 50% / 999px, not these tokens. */
+  --radius: 2px;
+  --edge: var(--radius);
+  --radius-sm: var(--radius);
+  --radius-md: var(--radius);
+  --radius-lg: var(--radius);
 
   /* motion */
   --ease: cubic-bezier(0.22, 1, 0.36, 1);
   --dur-fast: 120ms;
   --dur: 180ms;
   --dur-slow: 280ms;
-}
 
-/* Parked: previous cold palette. The theme toggle is removed for now; a proper
-   warm-dark theme is a follow-up. Kept so [data-theme] wiring stays intact. */
-[data-theme="dark"] {
-  --bg: #0d1117;
-  --surface: #161b22;
-  --surface-2: #21262d;
-  --border: #30363d;
-  --border-strong: #444c56;
-  --text: #e6edf3;
-  --text-muted: #8b949e;
-  --text-faint: #6e7681;
-  --accent: #d8915e;
-  --accent-strong: #d8915e;
-  --accent-hover: #e0a373;
-  --accent-soft: rgba(216, 145, 94, 0.15);
-  --sage: #7fa37a;
-  --success: #7fa37a;
-  --success-soft: rgba(127, 163, 122, 0.15);
-  --tan: #c4a484;
-  --tan-text: #c4a484;
-  --tan-soft: rgba(196, 164, 132, 0.15);
-  --warning: #e3b341;
-  --warning-accent: #e3b341;
-  --warning-soft: rgba(227, 179, 65, 0.15);
-  --danger: #f0816d;
-  --danger-accent: #f0816d;
-  --danger-soft: rgba(240, 129, 109, 0.15);
+  /* ---- Terrain glass: liquid-glass surfaces + elevation -------------------
+     Translucent warm-white panels that blur/refract the earthy content behind
+     them. Reserve full refraction (url(#glassDisplace)) for hero surfaces. */
+  --glass-bg: rgba(255, 253, 247, 0.34);    /* warm-white frost */
+  --glass-border: rgba(255, 255, 255, 0.55);/* bright top edge */
+  --glass-spec: rgba(255, 255, 255, 0.65);  /* cursor specular highlight */
+  --glass-blur: 9px;
+
+  /* warm-tinted elevation (none existed before — flat surfaces only) */
+  --shadow-1: 0 2px 6px -2px rgba(74, 52, 30, 0.28);
+  --shadow-2: 0 14px 34px -16px rgba(74, 52, 30, 0.5), 0 2px 6px -2px rgba(74, 52, 30, 0.32);
+  --shadow-3: 0 22px 48px -18px rgba(74, 52, 30, 0.58), 0 4px 10px -4px rgba(74, 52, 30, 0.4);
+
+  /* survey motifs (topographic contour + grid for hero/empty backdrops) */
+  --contour: rgba(154, 94, 50, 0.3);
+  --grid: rgba(110, 100, 84, 0.16);
+
+  /* ---- Gaussian-splat glow: the app's light ------------------------------
+     A soft off-axis highlight over a terracotta body reads like a splat's
+     anisotropic falloff — the decorative language for primary actions, the
+     active nav pill and focus glows (replaces flat same-family gradients). */
+  --grad-splat: radial-gradient(125% 145% at 28% 16%, rgba(255, 255, 255, 0.24), rgba(255, 255, 255, 0) 46%),
+    linear-gradient(176deg, var(--accent-strong), var(--accent-hover));
+  --grad-splat-hover: radial-gradient(125% 145% at 28% 16%, rgba(255, 255, 255, 0.2), rgba(255, 255, 255, 0) 44%),
+    linear-gradient(176deg, var(--accent-hover), var(--accent-hover));
+  --splat-soft: radial-gradient(120% 150% at 30% 12%, color-mix(in srgb, var(--accent) 26%, transparent), transparent 60%);
 }
 
 * {
@@ -101,6 +104,13 @@ body {
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+/* Visible keyboard focus, app-wide. Controls that previously set inline
+   outline:none have had it removed so this can show through. */
+:focus-visible {
+  outline: 2px solid var(--accent-strong);
+  outline-offset: 2px;
 }
 
 /* Leaflet's default attribution links are cold blue — warm them.
@@ -121,6 +131,165 @@ body {
   animation: fm-pulse 1.6s var(--ease) infinite;
 }
 
+/* ---------------------------------------------------------------------------
+   Terrain glass — cursor-reactive liquid-glass panel.
+   Pseudo-elements (rim light + cursor specular) require a stylesheet, so the
+   surface lives here; GlassSurface.tsx sets --glass-radius / --refract and,
+   when interactive, drives --tx/--ty/--lift/--mx/--my from the pointer.
+--------------------------------------------------------------------------- */
+.tg-glass {
+  position: relative;
+  border-radius: var(--glass-radius, 0);
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  backdrop-filter: blur(var(--glass-blur)) saturate(1.35) var(--refract, );
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.35);
+  contain: paint;
+  isolation: isolate;
+}
+/* rim light — bright top edge + warm inner shadow at the base, like real glass */
+.tg-glass::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.5),
+    inset 0 -10px 24px -12px rgba(120, 70, 30, 0.35);
+}
+/* cursor-tracked specular — slides to (--mx,--my), fades in with engagement */
+.tg-glass::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: radial-gradient(170px circle at var(--mx, 50%) var(--my, 50%), var(--glass-spec), transparent 62%);
+  opacity: calc(var(--lift, 0) * 0.9);
+  mix-blend-mode: screen;
+  transition: opacity var(--dur-slow) var(--ease);
+}
+/* interactive: subtle 3D tilt + lift toward the cursor (no corner re-round —
+   sharp panes stay sharp). The cursor specular still tracks via ::after. */
+.tg-glass--interactive {
+  transform: perspective(820px) rotateX(calc(var(--ty, 0) * 1deg)) rotateY(calc(var(--tx, 0) * 1deg))
+    translateY(calc(var(--lift, 0) * -4px)) scale(calc(1 + var(--lift, 0) * 0.015));
+  transition: border-color var(--dur-slow) var(--ease);
+  will-change: transform;
+}
+.tg-glass--interactive:hover {
+  border-color: var(--accent);
+}
+
+/* Horizontally-scrollable strip without a visible scrollbar (nav tabs). */
+.tg-noscrollbar {
+  scrollbar-width: none;
+}
+.tg-noscrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* Indeterminate progress bar (work in progress with no known percentage). */
+@keyframes tg-indeterminate {
+  0% { transform: translateX(-110%); }
+  100% { transform: translateX(320%); }
+}
+.tg-indeterminate {
+  animation: tg-indeterminate 1.3s var(--ease) infinite;
+}
+
+/* Pipeline overview — pulsing ring on the active step dot. */
+@keyframes pl-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(184, 124, 76, 0.4); }
+  50% { box-shadow: 0 0 0 7px rgba(184, 124, 76, 0); }
+}
+.pl-step-active span:first-child {
+  animation: pl-pulse 1.7s var(--ease) infinite;
+}
+
+/* Faint topographic + grid backdrop for hero / empty surfaces — gives the
+   glass something earthy to refract. Set as a background layer behind glass. */
+.tg-topo-backdrop {
+  background-image:
+    repeating-linear-gradient(0deg, transparent 0 79px, var(--grid) 79px 80px),
+    repeating-linear-gradient(90deg, transparent 0 119px, var(--grid) 119px 120px),
+    radial-gradient(120% 120% at 30% 0%, #f2e7cb, #e4cfa4);
+}
+
+/* Fine engineering grid for blueprint-accent surfaces (overview / empty / framed). */
+.tg-grid {
+  background-color: var(--bg);
+  background-image:
+    linear-gradient(var(--grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+/* ---------------------------------------------------------------------------
+   Domain materials — the visual language is derived from the data this tool
+   produces: point clouds, gaussian splats, camera frustums.
+--------------------------------------------------------------------------- */
+
+/* Point-cloud field — a sparse dot layer that reads as a sparse reconstruction.
+   Sits as an absolute background behind hero / empty / loader surfaces. */
+.fm-pointfield circle {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+/* ambient parallax twinkle for resting fields (hero backdrops) */
+@keyframes fm-pf-drift {
+  0%, 100% { transform: translate3d(0, 0.6%, 0); }
+  50% { transform: translate3d(0, -0.9%, 0); }
+}
+.fm-pointfield--drift {
+  animation: fm-pf-drift 16s ease-in-out infinite;
+}
+
+/* sparse → dense: points bloom in, staggered, then settle — the reconstruction
+   metaphor as a loading state. Per-point animation-delay is set inline. */
+@keyframes fm-pf-build {
+  0% { opacity: 0; transform: scale(0.2); }
+  55% { opacity: 1; transform: scale(1); }
+  92% { opacity: 1; transform: scale(1); }
+  100% { opacity: 0.85; transform: scale(1); }
+}
+.fm-pointfield--reconstruct circle {
+  opacity: 0;
+  animation: fm-pf-build 2s var(--ease) infinite;
+}
+
+/* Splat glow — soft elliptical focus light for active/selected surfaces. */
+.fm-splat-soft {
+  background-image: var(--splat-soft);
+}
+
+
+@media (prefers-reduced-motion: reduce) {
+  .tg-glass--interactive {
+    transform: none !important;
+  }
+  .tg-glass::after {
+    opacity: 0 !important;
+  }
+}
+
+/* In-app "Reduced motion" toggle (settingsStore) — mirrors the media query so
+   the setting actually governs motion app-wide, including the glass effects. */
+[data-reduced-motion='true'] *,
+[data-reduced-motion='true'] *::before,
+[data-reduced-motion='true'] *::after {
+  animation-duration: 0.001ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.001ms !important;
+}
+[data-reduced-motion='true'] .tg-glass--interactive {
+  transform: none !important;
+}
+[data-reduced-motion='true'] .tg-glass::after {
+  opacity: 0 !important;
+}
+
 /* Respect reduced-motion: disable animations and transitions */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
@@ -129,4 +298,22 @@ body {
     transition-duration: 0.001ms !important;
     scroll-behavior: auto !important;
   }
+}
+
+/* Splat-trio nav mark: gentle pulse while a stage is active. The global
+   reduced-motion rules above (the wildcard animation-duration overrides) disable
+   this automatically — no extra gating needed here. */
+@keyframes fm-trio-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.05);
+  }
+}
+.fm-trio-pulse {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: fm-trio-pulse 1.6s ease-in-out infinite;
 }
