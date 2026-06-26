@@ -33,17 +33,41 @@ def _extract_xmp_dji(filepath: str) -> dict:
     except OSError:
         return {}
     result: dict = {}
-    for key, pattern in (
-        ("altitude_m", rb'RelativeAltitude="([+-]?\d+\.?\d*)"'),
-        ("yaw", rb'FlightYawDegree="([+-]?\d+\.?\d*)"'),
-        ("gimbal_pitch", rb'GimbalPitchDegree="([+-]?\d+\.?\d*)"'),
+    
+    # Support various XMP variants including:
+    # 1. Quoted attributes (legacy): RelativeAltitude="123"
+    # 2. Namespace-prefixed: drone-dji:RelativeAltitude="123"
+    # 3. Unquoted values: RelativeAltitude=123
+    # 4. XML format with tags: <drone-dji:RelativeAltitude>123</drone-dji:RelativeAltitude>
+    
+    for key, patterns in (
+        ("altitude_m", (
+            rb'RelativeAltitude="([+-]?\d+\.?\d*)"',
+            rb'drone-dji:RelativeAltitude="([+-]?\d+\.?\d*)"',
+            rb'RelativeAltitude=([+-]?\d+\.?\d*)',
+            rb'<drone-dji:RelativeAltitude>([+-]?\d+\.?\d*)</drone-dji:RelativeAltitude>',
+        )),
+        ("yaw", (
+            rb'FlightYawDegree="([+-]?\d+\.?\d*)"',
+            rb'drone-dji:FlightYawDegree="([+-]?\d+\.?\d*)"',
+            rb'FlightYawDegree=([+-]?\d+\.?\d*)',
+            rb'<drone-dji:FlightYawDegree>([+-]?\d+\.?\d*)</drone-dji:FlightYawDegree>',
+        )),
+        ("gimbal_pitch", (
+            rb'GimbalPitchDegree="([+-]?\d+\.?\d*)"',
+            rb'drone-dji:GimbalPitchDegree="([+-]?\d+\.?\d*)"',
+            rb'GimbalPitchDegree=([+-]?\d+\.?\d*)',
+            rb'<drone-dji:GimbalPitchDegree>([+-]?\d+\.?\d*)</drone-dji:GimbalPitchDegree>',
+        )),
     ):
-        m = re.search(pattern, data)
-        if m:
-            try:
-                result[key] = float(m.group(1))
-            except ValueError:
-                pass
+        for pattern in patterns:
+            m = re.search(pattern, data)
+            if m:
+                try:
+                    result[key] = float(m.group(1))
+                except ValueError:
+                    pass
+                break # Found match, move to next key
     return result
 
 
