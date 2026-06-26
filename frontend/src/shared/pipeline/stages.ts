@@ -58,7 +58,7 @@ export const PIPELINE_STAGES: PipelineStage[] = [
 ]
 
 // Stage status colors — kept as literal hex (not CSS vars) because they feed
-// Three.js materials in HexPrismLogo3D, which can't resolve var(). They mirror
+// Three.js materials in ReconstructionLogo3D, which can't resolve var(). They mirror
 // --tan / --accent / --sage / --danger-accent in index.css — keep in sync.
 const STAGE_COLORS: Record<StageState, string> = {
   pending: '#C4A484',
