@@ -1,4 +1,4 @@
-import { deriveLogoMotion, logoRampColor } from '../pipeline/stages'
+import { deriveLogoMotion, logoRampColor, stageColor } from '../pipeline/stages'
 import type { StageKey, StageState } from '../pipeline/stages'
 
 interface LogoMarkProps {
@@ -16,8 +16,7 @@ interface LogoMarkProps {
    stageStates it tints via logoRampColor, scales with bloom, pulses on the active
    stage, and flares brick on failure (see deriveLogoMotion). */
 
-const BRICK = '#B5503C'
-const CORE = '#9A5E32'
+const BRICK = stageColor('failed')
 
 export function LogoMark({ size = 22, stageStates, title = 'Telemetry Frame Mapper' }: LogoMarkProps) {
   const m = stageStates ? deriveLogoMotion(stageStates) : null
@@ -27,14 +26,15 @@ export function LogoMark({ size = 22, stageStates, title = 'Telemetry Frame Mapp
   const fills: [string, string, string] = m
     ? m.failed
       ? [BRICK, BRICK, BRICK]
-      : [
+      : // Three offset ramp positions for variety; they converge to sage at completion (settled = done).
+        [
           logoRampColor(m.organization + 0.12),
           logoRampColor(m.organization),
           logoRampColor(m.organization - 0.15),
         ]
     : ['var(--accent)', 'var(--sage)', 'var(--tan)']
 
-  const coreFill = m ? (m.failed ? BRICK : CORE) : 'var(--accent-strong)'
+  const coreFill = m && m.failed ? BRICK : 'var(--accent-strong)'
   const scale = m ? 0.82 + m.bloom * 0.3 : 1
   const pulse = !!m && m.activeIndex >= 0 && !m.failed
 
