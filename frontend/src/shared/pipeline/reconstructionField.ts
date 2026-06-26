@@ -47,9 +47,9 @@ export function generateReconstructionField(count: number, seed: number): Recons
     scatter[j + 2] = (rand() * 2 - 1) * 1.15
     // target: a point on the terrain disc (sqrt for uniform area distribution)
     const r = Math.sqrt(rand()) * FIELD_RADIUS
-    const a = rand() * Math.PI * 2
-    const tx = r * Math.cos(a)
-    const tz = r * Math.sin(a)
+    const angle = rand() * Math.PI * 2
+    const tx = r * Math.cos(angle)
+    const tz = r * Math.sin(angle)
     target[j] = tx
     target[j + 1] = heightAt(tx, tz)
     target[j + 2] = tz

@@ -29,7 +29,7 @@ describe('generateReconstructionField', () => {
       const y = f.target[i * 3 + 1]
       const z = f.target[i * 3 + 2]
       expect(Math.hypot(x, z)).toBeLessThanOrEqual(FIELD_RADIUS + 1e-6)
-      expect(y).toBeGreaterThan(-0.3)
+      expect(y).toBeGreaterThan(-0.2)
       expect(y).toBeLessThan(0.7)
       expect(Number.isFinite(y)).toBe(true)
     }
@@ -43,6 +43,8 @@ describe('generateReconstructionField', () => {
       expect(hh).toBeGreaterThan(-0.3)
       expect(hh).toBeLessThan(0.7)
     }
+    expect(heightAt(0.15, -0.1)).toBeGreaterThan(0.35)
+    expect(heightAt(0.15, -0.1)).toBeLessThan(0.7)
   })
 
   it('tint values are in 0..1', () => {
