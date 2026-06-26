@@ -9,7 +9,7 @@ interface Props {
   onImport?: () => void
 }
 
-/* The Map no-session landing. The earthy backdrop + 3D hex-prism logo (which
+/* The Map no-session landing. The earthy backdrop + point-cloud reconstruction logo (which
    color-tracks pipeline progress) replace the old rotating icosahedron, and a
    compact pipeline overview replaces the marketing catchphrase. With no session
    loaded the pipeline reads "Import" as the active next step. */
