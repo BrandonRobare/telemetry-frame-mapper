@@ -14,8 +14,8 @@ router = APIRouter(prefix="/export", tags=["export"])
 EXPORTS_DIR = Path(__file__).parent.parent / "exports"
 
 
-@router.post("/webodm")
-def export_webodm(session_id: int, db: DBSession = Depends(get_db)):
+@router.post("/georeferencing-csv")
+def export_georeferencing_csv(session_id: int, db: DBSession = Depends(get_db)):
     session = db.query(SessionModel).filter(SessionModel.id == session_id).first()
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -25,7 +25,7 @@ def export_webodm(session_id: int, db: DBSession = Depends(get_db)):
         .all()
     )
     EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
-    zip_path = EXPORTS_DIR / f"webodm_{session_id}.zip"
+    zip_path = EXPORTS_DIR / f"georeferencing_csv_{session_id}.zip"
     with zipfile.ZipFile(zip_path, "w") as zf:
         csv_rows = "filename,latitude,longitude,altitude\n"
         for img in images:

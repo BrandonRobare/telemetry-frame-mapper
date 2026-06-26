@@ -17,7 +17,7 @@ def build_parser() -> argparse.ArgumentParser:
         prog="drone-video-geotagger",
         description=(
             "Geotag extracted DJI video frames with GPS EXIF metadata for "
-            "WebODM/OpenDroneMap processing."
+            "WebODM/OpenDroneMap-ready output. This export creates a zip with georeferencing CSV that can be used for ODM processing."
         ),
     )
     parser.add_argument("--video", type=Path, required=True, help="Path to the source DJI video.")

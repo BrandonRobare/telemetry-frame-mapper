@@ -49,7 +49,7 @@ exports/          KML/GPX mission plan exports (gitignored)
 - REST API for image import, quality scoring (sharpness + brightness via OpenCV), and ground footprint computation from DJI XMP altitude/yaw (Shapely/UTM).
 - Coverage analysis, lawnmower mission planning with KML/GPX export, and flight-log sync.
 - Reconstruction job pipeline: COLMAP SfM (quick/full presets, target-area crop, frame selection), GPS geo-registration, gaussian-splat training, LOD generation, and per-frame reprojection-error reporting.
-- Exports: WebODM package, GeoJSON, LAS 1.4 point cloud, optional SuGaR mesh, flythrough video.
+- Exports: GeoJSON, LAS 1.4 point cloud, optional SuGaR mesh (GLB/OBJ/MTL), flythrough video, georeferencing CSV export.
 - SQLite database via SQLAlchemy (swappable for PostgreSQL via `DATABASE_URL`).
 
 ### Frontend (11 tabs, all functional)

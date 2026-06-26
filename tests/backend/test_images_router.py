@@ -60,9 +60,9 @@ def test_session_log_empty(client):
     assert resp.json() == []
 
 
-def test_webodm_export(client):
+def test_georeferencing_csv_export(client):
     s, _ = _insert_session_and_image(client)
-    resp = client.post(f"/export/webodm?session_id={s.id}")
+    resp = client.post(f"/export/georeferencing-csv?session_id={s.id}")
     assert resp.status_code == 200
     data = resp.json()
     assert "zip_path" in data
