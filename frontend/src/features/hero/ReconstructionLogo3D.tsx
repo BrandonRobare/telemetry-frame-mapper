@@ -16,7 +16,7 @@ const SEED = 7
    (Import/Review), converge as COLMAP solves (Align, with orbiting camera
    frustums), bloom into splats (Train), and resolve onto a terrain landform
    (View/Export). Colors track live pipeline state via deriveLogoMotion; failed
-   flares brick. Reuses the proven three.js lifecycle from the old HexPrismLogo3D
+   flares brick. Reuses the proven three.js lifecycle from the previous hex-prism 3D hero
    — lazy import, earthy env, DPR cap, visibility-pause, full disposal,
    reduced-motion + WebGL fallback (the earthy backdrop behind the canvas remains
    the fallback). */
