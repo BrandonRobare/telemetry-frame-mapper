@@ -135,7 +135,7 @@ export interface LogoMotion {
   bloom: number
   /** 0..1 — terrain landform resolve (View/Export). */
   solid: number
-  /** Index of the active stage in PIPELINE_STAGES, or -1 if none is active. */
+  /** Index of the active stage in PIPELINE_STAGES, or -1 if no stage is active (including when a stage is failed). */
   activeIndex: number
   failed: boolean
 }
@@ -185,7 +185,7 @@ function rampMix(c1: string, c2: string, t: number): string {
   return `rgb(${Math.round(rampLerp(a[0], b[0], t))}, ${Math.round(rampLerp(a[1], b[1], t))}, ${Math.round(rampLerp(a[2], b[2], t))})`
 }
 
-export function logoRampColor(o: number): string {
-  const c = Math.max(0, Math.min(1, o))
+export function logoRampColor(organization: number): string {
+  const c = Math.max(0, Math.min(1, organization))
   return c < 0.5 ? rampMix(RAMP_TAN, RAMP_AMBER, c / 0.5) : rampMix(RAMP_AMBER, RAMP_SAGE, (c - 0.5) / 0.5)
 }

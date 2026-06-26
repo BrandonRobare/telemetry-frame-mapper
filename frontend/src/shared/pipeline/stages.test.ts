@@ -18,6 +18,7 @@ describe('deriveLogoMotion', () => {
   it('all pending → low organization, no active stage', () => {
     const m = deriveLogoMotion(states({}))
     expect(m.organization).toBeCloseTo(0.04)
+    expect(m.bloom).toBeCloseTo(0.18)
     expect(m.solid).toBe(0)
     expect(m.activeIndex).toBe(-1)
     expect(m.failed).toBe(false)
@@ -45,6 +46,7 @@ describe('deriveLogoMotion', () => {
       states({ import: 'done', review: 'done', align: 'done', train: 'done', view: 'done', export: 'done' }),
     )
     expect(m.organization).toBe(1)
+    expect(m.bloom).toBe(0.5)
     expect(m.solid).toBe(1)
     expect(m.activeIndex).toBe(-1)
   })
