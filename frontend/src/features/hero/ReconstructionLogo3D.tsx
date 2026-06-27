@@ -28,8 +28,9 @@ function lerp(a: number, b: number, t: number): number {
 export default function ReconstructionLogo3D({ stageStates, className }: Props) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const pointer = useRef({ x: 0, y: 0 })
+  // Mount-time states for the one-shot build effect; live updates flow through
+  // the [stageStates] effect below (so we never write a ref during render).
   const statesRef = useRef(stageStates)
-  statesRef.current = stageStates
   const applyRef = useRef<((s: Record<StageKey, StageState>) => void) | null>(null)
 
   useEffect(() => {
