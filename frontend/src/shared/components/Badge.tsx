@@ -5,6 +5,9 @@ type BadgeColor = 'sage' | 'amber' | 'red' | 'terracotta' | 'tan' | 'muted';
 interface BadgeProps {
   color: BadgeColor;
   children: React.ReactNode;
+  /** Opt-in glossy sheen. Off by default: the flat tint reads cleaner and the
+   *  white highlight looks too bright over dark-theme surfaces. */
+  sheen?: boolean;
 }
 
 // Warm-light token pairs: readable text on a soft tint of the same family.
@@ -17,7 +20,7 @@ const colorMap: Record<BadgeColor, { text: string; bg: string }> = {
   muted:      { text: 'var(--text-muted)', bg: 'var(--surface-2)' },
 };
 
-export function Badge({ color, children }: BadgeProps) {
+export function Badge({ color, children, sheen = false }: BadgeProps) {
   const c = colorMap[color];
   return (
     <span
@@ -25,7 +28,9 @@ export function Badge({ color, children }: BadgeProps) {
       style={{
         color: c.text,
         background: c.bg,
-        backgroundImage: 'radial-gradient(110% 150% at 28% -10%, rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0) 55%)',
+        ...(sheen
+          ? { backgroundImage: 'radial-gradient(110% 150% at 28% -10%, rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0) 55%)' }
+          : {}),
       }}
     >
       {children}
