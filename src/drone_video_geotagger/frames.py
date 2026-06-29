@@ -24,18 +24,46 @@ class FrameTag:
 
 def collect_frames(frame_dir: Path) -> list[tuple[Path, int]]:
     frames = []
-    for path in sorted(frame_dir.glob("*.jpg")):
+    for path in sorted(
+        (p for p in frame_dir.iterdir() if p.is_file() and p.suffix.lower() in {".jpg", ".jpeg"}),
+        key=lambda p: p.name.lower(),
+    ):
         # Frame index = the LAST number in the filename, so prefixed names like
         # DJI_0081_frame_42.jpg index as 42, not 81. Files without digits are skipped.
         digit_groups = re.findall(r"\d+", path.stem)
         if digit_groups:
             frames.append((path, int(digit_groups[-1])))
     if not frames:
-        raise ValueError(f"No .jpg frames found in {frame_dir}")
+        raise ValueError(f"No .jpg/.jpeg frames found in {frame_dir}")
     return frames
 
 
+def frame_numbering_gap_summary(frames: list[tuple[Path, int]]) -> str | None:
+    """Return a short gap summary when frame numbering is not contiguous."""
+    if len(frames) < 2:
+        return None
+
+    previous = frames[0][1]
+    for _, current in frames[1:]:
+        if current <= previous:
+            previous = current
+            continue
+        if current - previous != 1:
+            missing = current - previous - 1
+            plural = "" if missing == 1 else "s"
+            return f"missing {missing} frame number{plural} between {previous} and {current}"
+        previous = current
+    return None
+
+
 def infer_frame_rate(frames: list[tuple[Path, int]], telemetry_end_s: float) -> float:
+    gap_summary = frame_numbering_gap_summary(frames)
+    if gap_summary:
+        raise ValueError(
+            "Cannot safely infer frame rate from non-contiguous frame numbering "
+            f"({gap_summary}). Re-run with --frame-rate set to the extraction rate."
+        )
+
     if telemetry_end_s <= 0:
         return 8.0
 

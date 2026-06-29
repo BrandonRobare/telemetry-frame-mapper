@@ -126,7 +126,7 @@ export default function ImportModal({ open, onClose }: ImportModalProps) {
   const errorMessage = isError
     ? (error as Error)?.message ?? 'Import failed. Check the folder path and that the backend is running.'
     : progress?.status === 'error'
-    ? 'Import pipeline failed on the server. Check the backend logs and try again.'
+    ? progress.error || 'Import pipeline failed on the server. Check the backend logs and try again.'
     : null
 
   if (!open) return null

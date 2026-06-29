@@ -65,6 +65,13 @@ def test_infer_frame_rate_returns_default_without_telemetry() -> None:
     assert infer_frame_rate(frames, telemetry_end_s=0) == 8.0
 
 
+def test_infer_frame_rate_requires_explicit_rate_for_numbering_gaps() -> None:
+    frames = [(Path("frame_00001.jpg"), 1), (Path("frame_00005.jpg"), 5)]
+
+    with pytest.raises(ValueError, match="--frame-rate"):
+        infer_frame_rate(frames, telemetry_end_s=1)
+
+
 def test_collect_frames_uses_last_digit_group(tmp_path: Path) -> None:
     (tmp_path / "DJI_0081_frame_42.jpg").touch()
     (tmp_path / "DJI_0081_frame_43.jpg").touch()
@@ -80,6 +87,15 @@ def test_collect_frames_plain_frame_names(tmp_path: Path) -> None:
     frames = collect_frames(tmp_path)
 
     assert frames == [(tmp_path / "frame_00042.jpg", 42)]
+
+
+def test_collect_frames_accepts_jpeg_case_insensitive(tmp_path: Path) -> None:
+    (tmp_path / "frame_00001.jpeg").touch()
+    (tmp_path / "frame_00002.JPG").touch()
+
+    frames = collect_frames(tmp_path)
+
+    assert frames == [(tmp_path / "frame_00001.jpeg", 1), (tmp_path / "frame_00002.JPG", 2)]
 
 
 def test_collect_frames_skips_files_without_digits(tmp_path: Path) -> None:
