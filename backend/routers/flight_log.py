@@ -6,10 +6,12 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy.orm import Session as DBSession
 
+from ..core.config import load_config
 from ..db.database import get_db
-from ..db.models import FlightLog, FlightLogPoint, Image
+from ..db.models import FlightLog, FlightLogPoint, Footprint, Image
 from ..db.models import Session as SessionModel
 from ..services.flight_log_sync import match_images_to_log, parse_dji_csv
+from ..services.geometry import compute_footprint
 
 router = APIRouter(prefix="/flight-logs", tags=["flight-logs"])
 
@@ -132,6 +134,7 @@ def apply_sync(session_id: int, db: DBSession = Depends(get_db)):
     matches = match_images_to_log(images, log_points_dicts, tolerance_s=2.0)
 
     match_map = {m["image_id"]: m for m in matches}
+    cfg = load_config()
     applied = 0
     for img in images:
         if img.id in match_map:
@@ -139,6 +142,34 @@ def apply_sync(session_id: int, db: DBSession = Depends(get_db)):
             img.latitude = m["latitude"]
             img.longitude = m["longitude"]
             img.altitude_m = m["altitude_m"]
+
+            if img.footprint is not None:
+                db.delete(img.footprint)
+                db.flush()
+
+            if (
+                img.latitude is not None
+                and img.longitude is not None
+                and img.altitude_m is not None
+            ):
+                fp = compute_footprint(
+                    lat=img.latitude,
+                    lon=img.longitude,
+                    altitude_m=img.altitude_m,
+                    fov_horizontal_deg=cfg.fov_horizontal_deg,
+                    fov_vertical_deg=cfg.fov_vertical_deg,
+                    yaw_deg=img.yaw,
+                    target_crs=cfg.target_crs,
+                )
+                if fp:
+                    db.add(Footprint(
+                        image_id=img.id,
+                        geom_wkt=fp.get("geom_wkt"),
+                        geom_geojson=fp.get("geom_geojson"),
+                        ground_width_m=fp.get("ground_width_m"),
+                        ground_height_m=fp.get("ground_height_m"),
+                        heading_estimated=fp.get("heading_estimated", True),
+                    ))
             applied += 1
 
     db.commit()
