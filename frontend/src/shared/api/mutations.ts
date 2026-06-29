@@ -23,8 +23,9 @@ export function useApplyFlightSync() {
   const qc = useQueryClient()
   const { addToast } = useToast()
   return useMutation({
-    mutationFn: (sessionId: number) => post(`/flight-logs/apply?session_id=${sessionId}`),
-    onSuccess: (_, sessionId) => {
+    mutationFn: ({ sessionId, offsetS, toleranceS }: { sessionId: number; offsetS: number; toleranceS: number }) =>
+      post(`/flight-logs/apply?session_id=${sessionId}&offset_s=${offsetS}&tolerance_s=${toleranceS}`),
+    onSuccess: (_, { sessionId }) => {
       qc.invalidateQueries({ queryKey: ['session', sessionId] })
       qc.invalidateQueries({ queryKey: ['footprints', sessionId] })
       addToast('GPS sync applied', 'success')

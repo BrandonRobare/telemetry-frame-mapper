@@ -98,6 +98,49 @@ def test_match_preview_returns_list(client):
     assert isinstance(resp.json(), list)
 
 
+def test_match_preview_uses_offset_and_interpolation(client):
+    from backend.db.database import get_db
+    from backend.db.models import Image
+    from backend.main import app
+
+    s = _make_session(client)
+    db = next(app.dependency_overrides[get_db]())
+    img = Image(
+        session_id=s.id,
+        filename="frame.jpg",
+        filepath="/tmp/frame.jpg",
+        timestamp=datetime.fromtimestamp(0.5),
+    )
+    db.add(img)
+    db.commit()
+
+    _upload_log(client, s.id)
+    resp = client.get(
+        f"/flight-logs/match-preview?session_id={s.id}&offset_s=1.0&tolerance_s=0.1"
+    )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data) == 1
+    assert data[0]["interpolated"] is True
+    assert data[0]["latitude"] == 35.0005
+    assert data[0]["longitude"] == -80.0005
+    assert data[0]["altitude_m"] == 100.5
+
+
+def test_offset_preview_returns_graph_rows(client):
+    s = _make_session(client)
+    _upload_log(client, s.id)
+    resp = client.get(
+        f"/flight-logs/offset-preview?session_id={s.id}&offset_s=0&tolerance_s=2&window_s=2&step_s=1"
+    )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert [row["offset_s"] for row in data] == [-2.0, -1.0, 0.0, 1.0, 2.0]
+    assert all({"matched", "total", "mean_abs_delta_s"} <= set(row) for row in data)
+
+
 # ---------------------------------------------------------------------------
 # Apply-sync tests
 # ---------------------------------------------------------------------------
@@ -119,7 +162,7 @@ def test_apply_sync_returns_applied_count(client):
     assert isinstance(data["applied"], int)
 
 
-def test_apply_sync_replaces_stale_footprint(client):
+def test_apply_sync_preserves_stale_footprint(client):
     from backend.db.database import get_db
     from backend.db.models import Footprint, Image
     from backend.main import app
@@ -157,11 +200,18 @@ def test_apply_sync_replaces_stale_footprint(client):
     db.expire_all()
     footprints = db.query(Footprint).filter(Footprint.image_id == img.id).all()
     assert len(footprints) == 1
-    assert footprints[0].geom_wkt != "STALE"
-    assert footprints[0].ground_width_m > 1.0
+    assert footprints[0].geom_wkt == "STALE"
+    refreshed = db.query(Image).filter(Image.id == img.id).one()
+    assert refreshed.original_latitude == 10.0
+    assert refreshed.original_longitude == 20.0
+    assert refreshed.original_altitude_m == 50.0
+    assert refreshed.synced_latitude == 35.0
+    assert refreshed.synced_longitude == -80.0
+    assert refreshed.synced_altitude_m == 100.0
+    assert refreshed.gps_source == "flight_log"
 
 
-def test_apply_sync_creates_missing_footprint(client):
+def test_apply_sync_does_not_create_missing_footprint(client):
     from backend.db.database import get_db
     from backend.db.models import Footprint, Image
     from backend.main import app
@@ -187,5 +237,4 @@ def test_apply_sync_creates_missing_footprint(client):
     assert resp.status_code == 200
     db.expire_all()
     footprint = db.query(Footprint).filter(Footprint.image_id == img.id).one_or_none()
-    assert footprint is not None
-    assert footprint.ground_width_m > 0
+    assert footprint is None

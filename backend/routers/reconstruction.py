@@ -14,12 +14,14 @@ from ..core.config import get_config, get_render_config
 from ..db.database import get_db
 from ..db.models import Reconstruction, SessionFrameSelection, TargetArea
 from ..services.artifact_cleanup import cleanup_reconstruction_artifacts
+from ..services.preflight_quality import build_preflight_quality_report
 from ..services.reconstruction import (
     _compute_coverage_gaps,
     _export_point_cloud,
     _load_geo_transform_for_reconstruction,
     _safe_export_path,
     _write_mesh_georef,
+    build_reconstruction_diagnostics,
     cancel_reconstruction,
     current_reconstruction_status_version,
     get_rec_log,
@@ -123,6 +125,109 @@ class ReconstructionOut(BaseModel):
         return v  # type: ignore[return-value]
 
 
+class HistogramBin(BaseModel):
+    min: float
+    max: float
+    count: int
+
+
+class PreflightCompletenessOut(BaseModel):
+    missing: int
+    completeness_pct: float
+
+
+class PreflightTimestampOut(PreflightCompletenessOut):
+    duplicate_groups: int
+    duplicate_frames: int
+    gap_count: int
+    max_gap_s: float
+    typical_gap_s: float | None
+    gap_threshold_s: float | None
+
+
+class PreflightImageQualityOut(BaseModel):
+    blur_threshold: float
+    dark_threshold: float
+    bright_threshold: float
+    blur_count: int
+    dark_count: int
+    bright_count: int
+    blur_pct: float
+    dark_pct: float
+    bright_pct: float
+    flag_counts: dict[str, int]
+    sharpness_histogram: list[HistogramBin]
+    brightness_histogram: list[HistogramBin]
+
+
+class PreflightCoverageOut(BaseModel):
+    footprint_count: int
+    footprint_coverage_pct: float
+    estimated_overlap_pct: float | None
+    union_area: float
+    summed_footprint_area: float
+    warnings: list[str]
+
+
+class PreflightReportOut(BaseModel):
+    session_id: int
+    total_frames: int
+    usable_frames: int
+    gps: PreflightCompletenessOut
+    timestamps: PreflightTimestampOut
+    quality: PreflightImageQualityOut
+    coverage: PreflightCoverageOut
+    warnings: list[str]
+    safe_to_reconstruct: str
+    score: int
+    recommended_action: str
+
+class ReconstructionImageDiagnostic(BaseModel):
+    id: int
+    filename: str
+    timestamp: str | None = None
+    latitude: float | None = None
+    longitude: float | None = None
+    altitude_m: float | None = None
+    colmap_error_px: float | None = None
+    registered: bool
+
+
+class ReconstructionTimelineBucket(BaseModel):
+    bucket: int
+    start_index: int
+    end_index: int
+    total: int
+    unregistered: int
+    unregistered_pct: float
+
+
+class ReconstructionMapHeatPoint(BaseModel):
+    id: int
+    filename: str
+    latitude: float
+    longitude: float
+    weight: int
+
+
+class ReconstructionSuggestion(BaseModel):
+    code: str
+    title: str
+    detail: str
+    setting: dict | None = None
+
+
+class ReconstructionDiagnosticsOut(BaseModel):
+    reconstruction_id: int
+    summary: dict
+    registered_images: list[ReconstructionImageDiagnostic]
+    unregistered_images: list[ReconstructionImageDiagnostic]
+    timeline_heatmap: list[ReconstructionTimelineBucket]
+    map_heatmap: list[ReconstructionMapHeatPoint]
+    suggestions: list[ReconstructionSuggestion]
+
+
+
 class MeshStatusOut(BaseModel):
     id: int
     mesh_status: str | None = None
@@ -198,6 +303,14 @@ def _raise_start_error(exc: ValueError) -> None:
     raise HTTPException(status_code=422, detail=msg) from exc
 
 
+@router.get("/preflight/{session_id}", response_model=PreflightReportOut)
+def get_preflight_report(session_id: int, db: DBSession = Depends(get_db)):
+    try:
+        return build_preflight_quality_report(session_id, db)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
 @router.post("/start", response_model=ReconstructionOut, status_code=201)
 def start(body: StartIn, db: DBSession = Depends(get_db)):
     target_area_geojson: str | None = None
@@ -227,6 +340,14 @@ def get_status(reconstruction_id: int, db: DBSession = Depends(get_db)):
     if not rec:
         raise HTTPException(status_code=404, detail="Reconstruction not found")
     return rec
+
+
+@router.get("/{reconstruction_id}/diagnostics", response_model=ReconstructionDiagnosticsOut)
+def get_diagnostics(reconstruction_id: int, db: DBSession = Depends(get_db)):
+    rec = db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Reconstruction not found")
+    return build_reconstruction_diagnostics(db, rec)
 
 
 def _status_sse_payload(rec: Reconstruction) -> str:

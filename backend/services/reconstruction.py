@@ -61,6 +61,11 @@ def get_rec_log(rec_id: int) -> list[str]:
         return list(_rec_logs.get(rec_id, []))
 
 
+def clear_rec_logs() -> None:
+    with _rec_logs_lock:
+        _rec_logs.clear()
+
+
 def notify_reconstruction_status_changed(rec_id: int) -> None:
     with _rec_status_condition:
         _rec_status_versions[rec_id] = _rec_status_versions.get(rec_id, 0) + 1
@@ -144,8 +149,19 @@ def _write_colmap_workspace(colmap_dir: Path, images: list) -> None:
 # COLMAP subprocess runner
 # ---------------------------------------------------------------------------
 
+def _colmap_matcher_command(matcher_key: str) -> tuple[str, bool]:
+    """Return (COLMAP matcher subcommand, guided_matching_enabled)."""
+    presets = {
+        "sequential": ("sequential_matcher", False),
+        "sequential_guided": ("sequential_matcher", True),
+        "exhaustive": ("exhaustive_matcher", False),
+        "exhaustive_guided": ("exhaustive_matcher", True),
+    }
+    return presets.get(matcher_key, presets["exhaustive"])
+
+
 def _run_colmap(colmap_dir: Path, progress_cb, cancel: threading.Event) -> int | None:
-    """Run COLMAP feature_extractor → exhaustive_matcher → mapper pipeline.
+    """Run COLMAP feature_extractor → matcher → mapper pipeline.
 
     Returns the number of registered images, or None if cancelled before completion.
     """
@@ -156,9 +172,10 @@ def _run_colmap(colmap_dir: Path, progress_cb, cancel: threading.Event) -> int |
 
     camera_model = cfg.get("camera_model", "PINHOLE")
     matcher_key = cfg.get("matcher", "exhaustive")
-    colmap_matcher = (
-        "sequential_matcher" if matcher_key == "sequential" else "exhaustive_matcher"
-    )
+    colmap_matcher, guided_matching = _colmap_matcher_command(matcher_key)
+    matcher_cmd = ["colmap", colmap_matcher, "--database_path", db_path]
+    if guided_matching:
+        matcher_cmd.append("--SiftMatching.guided_matching=1")
 
     steps = [
         (
@@ -171,12 +188,7 @@ def _run_colmap(colmap_dir: Path, progress_cb, cancel: threading.Event) -> int |
             "feature extraction",
             8.0,
         ),
-        (
-            ["colmap", colmap_matcher,
-             "--database_path", db_path],
-            "feature matching",
-            20.0,
-        ),
+        (matcher_cmd, "feature matching", 20.0),
         (
             ["colmap", "mapper",
              "--database_path", db_path,
@@ -229,6 +241,172 @@ def _count_registered_images(images_txt: Path) -> int:
         if line and not line.startswith("#") and not line.startswith(" "):
             count += 1
     return count // 2  # each image is 2 lines in COLMAP TXT format
+
+
+def _registered_image_names(colmap_dir: Path) -> set[str]:
+    """Return image filenames present in COLMAP sparse/0/images.txt."""
+    images_txt = colmap_dir / "sparse" / "0" / "images.txt"
+    if not images_txt.exists():
+        return set()
+    names: set[str] = set()
+    for line in images_txt.read_text(encoding="utf-8", errors="replace").splitlines():
+        if not line or line.startswith("#") or line.startswith(" "):
+            continue
+        parts = line.split()
+        if len(parts) >= 10:
+            names.add(parts[9])
+    return names
+
+
+def build_reconstruction_diagnostics(db: DBSession, rec: Reconstruction) -> dict:
+    """Build post-COLMAP diagnostics for registered/unregistered frames."""
+    frames = db.query(ReconstructionFrame).filter(
+        ReconstructionFrame.reconstruction_id == rec.id
+    ).all()
+    image_ids = [frame.image_id for frame in frames]
+    images = []
+    if image_ids:
+        images = (
+            db.query(Image)
+            .filter(Image.id.in_(image_ids))
+            .order_by(Image.timestamp, Image.id)
+            .all()
+        )
+    frame_by_image_id = {frame.image_id: frame for frame in frames}
+    registered_names = _registered_image_names(Path(rec.colmap_dir)) if rec.colmap_dir else set()
+
+    def image_payload(img: Image, registered: bool) -> dict:
+        frame = frame_by_image_id.get(img.id)
+        return {
+            "id": img.id,
+            "filename": img.filename,
+            "timestamp": img.timestamp.isoformat() if img.timestamp else None,
+            "latitude": img.latitude,
+            "longitude": img.longitude,
+            "altitude_m": img.altitude_m,
+            "colmap_error_px": frame.colmap_error_px if frame else None,
+            "registered": registered,
+        }
+
+    registered = [image_payload(img, True) for img in images if img.filename in registered_names]
+    unregistered = [
+        image_payload(img, False) for img in images if img.filename not in registered_names
+    ]
+    total = len(images)
+    registered_count = len(registered)
+    unregistered_count = len(unregistered)
+    registration_pct = (registered_count / total * 100.0) if total else 0.0
+
+    timeline = []
+    bucket_count = min(12, max(1, total))
+    if total:
+        for bucket_idx in range(bucket_count):
+            start = math.floor(bucket_idx * total / bucket_count)
+            end = math.floor((bucket_idx + 1) * total / bucket_count)
+            chunk = images[start:end]
+            unreg = [img for img in chunk if img.filename not in registered_names]
+            timeline.append({
+                "bucket": bucket_idx,
+                "start_index": start,
+                "end_index": max(start, end - 1),
+                "total": len(chunk),
+                "unregistered": len(unreg),
+                "unregistered_pct": (len(unreg) / len(chunk) * 100.0) if chunk else 0.0,
+            })
+
+    map_heatmap = [
+        {
+            "id": item["id"],
+            "filename": item["filename"],
+            "latitude": item["latitude"],
+            "longitude": item["longitude"],
+            "weight": 1,
+        }
+        for item in unregistered
+        if item["latitude"] is not None and item["longitude"] is not None
+    ]
+
+    suggestions = []
+    if total == 0:
+        suggestions.append({
+            "code": "no_frames",
+            "title": "No frames were selected",
+            "detail": "Select usable frames before starting reconstruction.",
+            "setting": None,
+        })
+    elif registered_count == 0:
+        suggestions.extend([
+            {
+                "code": "try_exhaustive_guided",
+                "title": "Run exhaustive guided matching",
+                "detail": (
+                    "No images registered. Exhaustive guided matching often recovers weak "
+                    "overlap at the cost of runtime."
+                ),
+                "setting": {"matcher": "exhaustive_guided"},
+            },
+            {
+                "code": "more_overlap",
+                "title": "Increase overlap or reduce frame stride",
+                "detail": (
+                    "Extract frames more frequently or fly with higher forward/side overlap "
+                    "so adjacent views share more features."
+                ),
+                "setting": {"default_video_fps": "increase"},
+            },
+        ])
+    elif unregistered_count:
+        suggestions.append({
+            "code": "retry_guided",
+            "title": "Retry with guided matching",
+            "detail": (
+                "Some frames did not register. Guided matching can add geometrically "
+                "consistent correspondences after the first match pass."
+            ),
+            "setting": {"matcher": "sequential_guided"},
+        })
+        if registration_pct < 70.0:
+            suggestions.append({
+                "code": "increase_features",
+                "title": "Extract more SIFT features",
+                "detail": (
+                    "Raise SIFT max features for texture-poor or high-altitude footage, "
+                    "then rerun reconstruction."
+                ),
+                "setting": {"sift_max_features": "increase"},
+            })
+        suggestions.append({
+            "code": "higher_overlap",
+            "title": "Use higher overlap / lower frame stride",
+            "detail": (
+                "Clusters of unregistered frames usually indicate insufficient overlap, "
+                "motion blur, or abrupt viewpoint changes."
+            ),
+            "setting": {"frame_stride": "reduce"},
+        })
+    else:
+        suggestions.append({
+            "code": "all_registered",
+            "title": "All selected frames registered",
+            "detail": "No matching changes are suggested for this run.",
+            "setting": None,
+        })
+
+    return {
+        "reconstruction_id": rec.id,
+        "summary": {
+            "frames_used": total,
+            "registered_count": registered_count,
+            "unregistered_count": unregistered_count,
+            "registration_pct": registration_pct,
+            "matcher": get_reconstruction_config().get("matcher", "exhaustive"),
+        },
+        "registered_images": registered,
+        "unregistered_images": unregistered,
+        "timeline_heatmap": timeline,
+        "map_heatmap": map_heatmap,
+        "suggestions": suggestions,
+    }
 
 
 def _store_reprojection_errors(db: DBSession, reconstruction_id: int, colmap_dir: Path) -> None:
