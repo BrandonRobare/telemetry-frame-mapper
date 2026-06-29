@@ -1,0 +1,288 @@
+from __future__ import annotations
+
+import datetime
+import shutil
+import uuid
+from pathlib import Path, PurePosixPath, PureWindowsPath
+
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from pydantic import BaseModel, Field
+from sqlalchemy.orm import Session as DBSession
+
+from ..core.config import get_browser_upload_config, get_config
+from ..db.database import SessionLocal, get_db
+from ..db.models import Session as SessionModel
+from ..services.ingest_orchestrator import start_import
+
+router = APIRouter(prefix="/uploads/imports", tags=["uploads"])
+
+_UPLOADS: dict[str, dict] = {}
+
+
+class UploadFilePlan(BaseModel):
+    path: str
+    size: int = Field(ge=0)
+
+
+class StartUploadRequest(BaseModel):
+    name: str
+    total_bytes: int = Field(ge=0)
+    files: list[UploadFilePlan]
+
+
+class StartUploadResponse(BaseModel):
+    upload_id: str
+    chunk_size: int
+    max_file_bytes: int
+    max_total_bytes: int
+    quota_bytes: int
+
+
+class UploadProgress(BaseModel):
+    upload_id: str
+    status: str
+    uploaded_bytes: int
+    total_bytes: int
+    file_count: int
+    session_id: int | None = None
+    error: str | None = None
+
+
+class CompleteUploadResponse(UploadProgress):
+    session: dict | None = None
+
+
+def _limits() -> dict:
+    cfg = get_browser_upload_config()
+    return {
+        "chunk_size_bytes": int(cfg["chunk_size_bytes"]),
+        "max_file_bytes": int(cfg["max_file_bytes"]),
+        "max_total_bytes": int(cfg["max_total_bytes"]),
+        "quota_bytes": int(cfg["quota_bytes"]),
+        "cleanup_after_hours": int(cfg["cleanup_after_hours"]),
+        "accepted_extensions": {
+            ext.lower() if str(ext).startswith(".") else f".{str(ext).lower()}"
+            for ext in cfg["accepted_extensions"]
+        },
+    }
+
+
+def _upload_root() -> Path:
+    root = Path(get_config().imports_dir).resolve() / ".browser_uploads"
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
+def _dir_size(path: Path) -> int:
+    if not path.exists():
+        return 0
+    return sum(p.stat().st_size for p in path.rglob("*") if p.is_file())
+
+
+def _cleanup_old_uploads(root: Path, cleanup_after_hours: int) -> None:
+    cutoff = datetime.datetime.now(datetime.timezone.utc).timestamp() - cleanup_after_hours * 3600
+    for child in root.iterdir():
+        if child.is_dir() and child.stat().st_mtime < cutoff:
+            shutil.rmtree(child, ignore_errors=True)
+
+
+def _safe_upload_path(raw: str) -> PurePosixPath:
+    text = raw.strip().replace("\\", "/")
+    posix = PurePosixPath(text)
+    windows = PureWindowsPath(raw.strip())
+    if (
+        not text
+        or posix.is_absolute()
+        or windows.is_absolute()
+        or ":" in raw
+        or any(part in ("", ".", "..") for part in posix.parts)
+    ):
+        raise HTTPException(status_code=400, detail=f"Invalid upload path: {raw}")
+    return posix
+
+
+def _validate_plan(req: StartUploadRequest, limits: dict) -> dict[str, UploadFilePlan]:
+    name = req.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Session name is required")
+    if not req.files:
+        raise HTTPException(status_code=400, detail="At least one file is required")
+    if req.total_bytes > limits["max_total_bytes"]:
+        raise HTTPException(status_code=413, detail="Upload exceeds total browser import limit")
+
+    seen: set[str] = set()
+    planned_total = 0
+    by_path: dict[str, UploadFilePlan] = {}
+    for item in req.files:
+        rel = _safe_upload_path(item.path)
+        normalized = rel.as_posix()
+        if normalized in seen:
+            raise HTTPException(status_code=400, detail=f"Duplicate upload path: {normalized}")
+        seen.add(normalized)
+        if rel.suffix.lower() not in limits["accepted_extensions"]:
+            raise HTTPException(status_code=400, detail=f"Unsupported upload type: {normalized}")
+        if item.size > limits["max_file_bytes"]:
+            raise HTTPException(
+                status_code=413,
+                detail=f"File exceeds browser import limit: {normalized}",
+            )
+        planned_total += item.size
+        by_path[normalized] = item
+
+    if planned_total != req.total_bytes:
+        raise HTTPException(status_code=400, detail="File sizes do not match declared total")
+    return by_path
+
+
+def _state(upload_id: str) -> dict:
+    state = _UPLOADS.get(upload_id)
+    if state is None:
+        raise HTTPException(status_code=404, detail="Upload not found")
+    if state.get("status") == "cancelled":
+        raise HTTPException(status_code=409, detail="Upload was cancelled")
+    if state.get("status") == "error":
+        raise HTTPException(status_code=409, detail=state.get("error") or "Upload failed")
+    return state
+
+
+@router.post("/start", response_model=StartUploadResponse)
+def start_browser_import_upload(req: StartUploadRequest):
+    limits = _limits()
+    root = _upload_root()
+    _cleanup_old_uploads(root, limits["cleanup_after_hours"])
+    by_path = _validate_plan(req, limits)
+    if _dir_size(root) + req.total_bytes > limits["quota_bytes"]:
+        raise HTTPException(status_code=507, detail="Browser upload storage quota exceeded")
+
+    upload_id = uuid.uuid4().hex
+    dest = root / upload_id
+    dest.mkdir(parents=True)
+    _UPLOADS[upload_id] = {
+        "id": upload_id,
+        "name": req.name.strip(),
+        "root": dest,
+        "files": {path: {"size": plan.size, "received": 0} for path, plan in by_path.items()},
+        "uploaded_bytes": 0,
+        "total_bytes": req.total_bytes,
+        "status": "uploading",
+        "session_id": None,
+    }
+    return StartUploadResponse(
+        upload_id=upload_id,
+        chunk_size=limits["chunk_size_bytes"],
+        max_file_bytes=limits["max_file_bytes"],
+        max_total_bytes=limits["max_total_bytes"],
+        quota_bytes=limits["quota_bytes"],
+    )
+
+
+@router.post("/{upload_id}/chunk", response_model=UploadProgress)
+async def upload_import_chunk(
+    upload_id: str,
+    path: str = Form(...),
+    offset: int = Form(...),
+    chunk: UploadFile = File(...),
+):
+    state = _state(upload_id)
+    if state["status"] != "uploading":
+        raise HTTPException(status_code=409, detail="Upload is not accepting chunks")
+    rel = _safe_upload_path(path).as_posix()
+    planned = state["files"].get(rel)
+    if planned is None:
+        raise HTTPException(status_code=400, detail="Chunk path was not in upload plan")
+    if offset != planned["received"]:
+        raise HTTPException(status_code=409, detail="Chunk offset does not match server state")
+
+    data = await chunk.read()
+    limits = _limits()
+    if len(data) > limits["chunk_size_bytes"]:
+        raise HTTPException(status_code=413, detail="Chunk exceeds configured size")
+    if planned["received"] + len(data) > planned["size"]:
+        raise HTTPException(status_code=413, detail="Chunk exceeds planned file size")
+
+    dest = (state["root"] / rel).resolve()
+    if not dest.is_relative_to(state["root"].resolve()):
+        raise HTTPException(status_code=400, detail="Invalid upload path")
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    with dest.open("ab") as f:
+        f.write(data)
+
+    planned["received"] += len(data)
+    state["uploaded_bytes"] += len(data)
+    return UploadProgress(
+        upload_id=upload_id,
+        status=state["status"],
+        uploaded_bytes=state["uploaded_bytes"],
+        total_bytes=state["total_bytes"],
+        file_count=len(state["files"]),
+        session_id=state.get("session_id"),
+    )
+
+
+@router.post("/{upload_id}/complete", response_model=CompleteUploadResponse)
+def complete_browser_import_upload(upload_id: str, db: DBSession = Depends(get_db)):
+    state = _state(upload_id)
+    incomplete = [p for p, meta in state["files"].items() if meta["received"] != meta["size"]]
+    if incomplete:
+        raise HTTPException(status_code=409, detail=f"Upload is incomplete: {incomplete[0]}")
+
+    state["status"] = "importing"
+    session = SessionModel(
+        name=state["name"],
+        folder_path=str(state["root"]),
+        imported_at=datetime.datetime.now(datetime.timezone.utc),
+        photo_count=0,
+        usable_count=0,
+    )
+    db.add(session)
+    db.commit()
+    db.refresh(session)
+    state["session_id"] = session.id
+    start_import(session.id, state["root"], SessionLocal)
+    return CompleteUploadResponse(
+        upload_id=upload_id,
+        status=state["status"],
+        uploaded_bytes=state["uploaded_bytes"],
+        total_bytes=state["total_bytes"],
+        file_count=len(state["files"]),
+        session_id=session.id,
+        session={
+            "id": session.id,
+            "name": session.name,
+            "folder_path": session.folder_path,
+            "imported_at": session.imported_at,
+            "photo_count": session.photo_count,
+            "usable_count": session.usable_count,
+        },
+    )
+
+
+@router.post("/{upload_id}/cancel", response_model=UploadProgress)
+def cancel_browser_import_upload(upload_id: str):
+    state = _UPLOADS.get(upload_id)
+    if state is None:
+        raise HTTPException(status_code=404, detail="Upload not found")
+    state["status"] = "cancelled"
+    shutil.rmtree(state["root"], ignore_errors=True)
+    return UploadProgress(
+        upload_id=upload_id,
+        status="cancelled",
+        uploaded_bytes=state["uploaded_bytes"],
+        total_bytes=state["total_bytes"],
+        file_count=len(state["files"]),
+        session_id=state.get("session_id"),
+    )
+
+
+@router.get("/{upload_id}", response_model=UploadProgress)
+def get_browser_import_upload(upload_id: str):
+    state = _state(upload_id)
+    return UploadProgress(
+        upload_id=upload_id,
+        status=state["status"],
+        uploaded_bytes=state["uploaded_bytes"],
+        total_bytes=state["total_bytes"],
+        file_count=len(state["files"]),
+        session_id=state.get("session_id"),
+        error=state.get("error"),
+    )
