@@ -96,7 +96,7 @@ If a job fails, the Jobs tab's log panel has the stage-specific error; match it 
 ## 8. Export
 
 **Export tab:**
-- **WebODM package** — zip of geotagged frames ready for ODM processing,
+- **WebODM georeferencing CSV** — zip containing only `odm_georeferencing.csv` for ODM processing,
 - **GeoJSON** — frame positions/footprints,
 - **Point cloud (LAS 1.4)** — from the COLMAP sparse model, colorized from the splat when present, UTM CRS embedded,
 - **Mesh (GLB/OBJ/MTL)** — optional, requires a manual [SuGaR](https://github.com/Anttwo/SuGaR) install (not on PyPI); always writes `mesh_georef.json` so the mesh keeps its UTM transform.
