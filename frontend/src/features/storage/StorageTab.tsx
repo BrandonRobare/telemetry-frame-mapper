@@ -120,7 +120,7 @@ function FileBrowser() {
 const DIR_META: Record<string, { label: string; color: string; description: string }> = {
   imports:   { label: 'Imports',   color: 'var(--accent)', description: 'Raw imported session folders' },
   processed: { label: 'Processed', color: 'var(--tan)', description: 'Thumbnails and COLMAP workspaces' },
-  exports:   { label: 'Exports',   color: 'var(--sage)', description: 'WebODM zips and GeoJSON files' },
+  exports:   { label: 'Exports',   color: 'var(--sage)', description: 'WebODM CSV zips and GeoJSON files' },
   data:      { label: 'Data',      color: 'var(--warning-accent)', description: 'SQLite database and config files' },
 }
 

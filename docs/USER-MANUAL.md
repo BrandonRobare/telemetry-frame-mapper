@@ -50,7 +50,7 @@ across 17 routers.
   training, run as cancellable background jobs with live progress and logs.
 - **Geo-registration:** a COLMAP↔UTM similarity transform so reconstructions
   carry real-world coordinates.
-- **Exports:** WebODM package, GeoJSON, LAS 1.4 point cloud, optional SuGaR mesh
+- **Exports:** WebODM georeferencing CSV-only zip, GeoJSON, LAS 1.4 point cloud, optional SuGaR mesh
   (GLB/OBJ/MTL), and flythrough video.
 - **System reporting:** CPU/RAM/GPU/VRAM resource readout and
   `colmap_available` / `gsplat_available` tool-presence flags.
@@ -63,7 +63,7 @@ across 17 routers.
 | **GPS Sync** | DJI FlightRecord CSV matching with timing deltas |
 | **Review** | Thumbnail grid, quality flags, COLMAP reprojection-error badges, per-session frame selection for reconstruction |
 | **Plan** | Target-area drawing, lawnmower plan generation, KML/GPX export |
-| **Export** | WebODM zip, GeoJSON, LAS point cloud, mesh (GLB/OBJ/MTL) |
+| **Export** | WebODM georeferencing CSV-only zip, GeoJSON, LAS point cloud, mesh (GLB/OBJ/MTL) |
 | **Session Log** | Event history per session |
 | **Reconstruct** | Start quick/full reconstruction jobs |
 | **Jobs** | Resource monitor (CPU/RAM/GPU) with live job logs |
@@ -145,7 +145,7 @@ data, just no splat.
 **Outputs you can download** (Splat Viewer / Export tab / API):
 `splat.ply` and its `_preview`/`_medium` LODs, LAS 1.4 point cloud, optional
 SuGaR mesh, a server-rendered or browser-recorded flythrough MP4, GeoJSON, and a
-WebODM package.
+WebODM/OpenDroneMap georeferencing CSV-only zip.
 
 ---
 

@@ -182,19 +182,19 @@ export default function ExportTab() {
   const { data: completedReconstructions, isLoading: reconstructionsLoading } =
     useCompletedReconstructions(selectedSessionId)
 
-  // WebODM export state
+  // WebODM georeferencing CSV-only export state
   const [webodmResult, setWebodmResult] = useState<{ zip_path: string; image_count: number } | null>(null)
 
   const webodmMutation = useMutation({
     mutationFn: () =>
       post<{ zip_path: string; image_count: number }>(
-        `/export/webodm?session_id=${selectedSessionId}`
+        `/export/webodm-georeferencing-csv?session_id=${selectedSessionId}`
       ),
     onSuccess: (data) => {
       setWebodmResult(data)
     },
     onError: (err: Error) => {
-      addToast(`WebODM export failed: ${err.message}`, 'error')
+      addToast(`WebODM georeferencing CSV export failed: ${err.message}`, 'error')
     },
   })
 
@@ -322,7 +322,7 @@ export default function ExportTab() {
           )}
         </section>
 
-        {/* ---- WebODM Export card ---- */}
+        {/* ---- WebODM georeferencing CSV-only export card ---- */}
         <section
           className="p-5 flex flex-col gap-4"
           style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}
@@ -332,13 +332,13 @@ export default function ExportTab() {
               className="text-base font-semibold"
               style={{ color: 'var(--text)', margin: 0 }}
             >
-              WebODM Package
+              WebODM georeferencing CSV
             </h2>
             <p
               className="text-sm mt-1"
               style={{ color: 'var(--text-muted)', margin: '4px 0 0' }}
             >
-              Bundle usable frames into a zip for WebODM processing.
+              Build a zip containing only odm_georeferencing.csv for WebODM/OpenDroneMap.
             </p>
           </div>
 
@@ -351,7 +351,7 @@ export default function ExportTab() {
                 webodmMutation.mutate()
               }}
             >
-              {webodmMutation.isPending ? 'Building…' : 'Download WebODM Package'}
+              {webodmMutation.isPending ? 'Building…' : 'Download georeferencing CSV zip'}
             </Button>
 
             {webodmResult && (

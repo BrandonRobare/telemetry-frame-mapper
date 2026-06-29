@@ -39,6 +39,14 @@ def make_gps_jpeg(
     img.save(out_path, "JPEG", exif=exif_bytes)
 
 
+def make_xmp_jpeg(out_path: str, xmp: bytes):
+    img = Image.new("RGB", (100, 100), color=(100, 150, 200))
+    exif_bytes = piexif.dump({"0th": {piexif.ImageIFD.Make: b"DJI"}})
+    img.save(out_path, "JPEG", exif=exif_bytes)
+    with open(out_path, "ab") as f:
+        f.write(xmp)
+
+
 def test_extract_exif_with_gps():
     fd, path = tempfile.mkstemp(suffix=".jpg")
     os.close(fd)
@@ -57,6 +65,44 @@ def test_extract_exif_honors_below_sea_level_altitude_ref():
     make_gps_jpeg(31.5, 35.5, 430.5, path, altitude_ref=1)
     data = extract_exif(path)
     assert data["altitude_m"] == pytest.approx(-430.5, abs=0.01)
+    os.unlink(path)
+
+
+def test_extract_exif_parses_dji_xmp_namespace_attributes():
+    fd, path = tempfile.mkstemp(suffix=".jpg")
+    os.close(fd)
+    make_xmp_jpeg(
+        path,
+        b"""
+        <rdf:Description
+          drone-dji:RelativeAltitude='+123.45'
+          drone-dji:FlightYawDegree='-89.5'
+          drone-dji:GimbalPitchDegree='-42.25' />
+        """,
+    )
+    data = extract_exif(path)
+    assert data["altitude_m"] == pytest.approx(123.45)
+    assert data["yaw"] == pytest.approx(-89.5)
+    assert data["gimbal_pitch"] == pytest.approx(-42.25)
+    os.unlink(path)
+
+
+def test_extract_exif_parses_dji_xmp_elements_and_plain_attributes():
+    fd, path = tempfile.mkstemp(suffix=".jpg")
+    os.close(fd)
+    make_xmp_jpeg(
+        path,
+        b"""
+        <rdf:Description RelativeAltitude="36.0">
+          <drone-dji:FlightYawDegree>179.9</drone-dji:FlightYawDegree>
+          <drone-dji:GimbalPitchDegree>-90</drone-dji:GimbalPitchDegree>
+        </rdf:Description>
+        """,
+    )
+    data = extract_exif(path)
+    assert data["altitude_m"] == pytest.approx(36.0)
+    assert data["yaw"] == pytest.approx(179.9)
+    assert data["gimbal_pitch"] == pytest.approx(-90.0)
     os.unlink(path)
 
 
