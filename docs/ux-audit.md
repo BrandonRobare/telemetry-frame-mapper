@@ -131,3 +131,25 @@ Verified: production build passes · 48/48 tests · lint clean (1 pre-existing u
 - **B8** URL/deep-link state — needs a router; feature-sized.
 - Full responsive breakpoint sweep (hero/overview), type-scale tokens, touch-target enlargement, `--shadow-tint`, Badge sheen opt-in, remaining Title-Case labels, curly quotes, `window.confirm` → styled modal — polish/large; tracked here for a later pass.
 - Pre-existing `react-hooks/refs` lint error in `HexPrismLogo3D.tsx` (untouched; fixing it re-times a ref the Three.js recolor effect depends on).
+
+---
+
+## Taste-skill pass + merge-readiness — 2026-06-28
+
+Ran the Leonxlnx/taste-skill suite (`design-taste-frontend`) against the live UI to ready the redesign for a PR. This app is a multi-tab **product UI**, which is out of the skill's landing-page core scope, so its cross-cutting lenses were applied (AI-tells, contrast/a11y, color/shape/**theme** consistency locks, motion discipline, the Section 14 pre-flight); the `PipelineOverview` hero got the landing-page treatment.
+
+**Context:** the branch was merged up onto current `origin/main` first. Upstream had since shipped a **dark theme** (`[data-theme="dark"]` token set in `index.css`, `theme`/`toggleTheme` in `mapStore`, a toggle in General settings), `lastActiveTab` persistence, and per-field settings validation. The merge unioned those with the redesign (glass system, tooltips, StatusHud, bulk-edit).
+
+**Done:**
+- **Dark mode completed.** Upstream's dark tokens didn't cover the redesign's additions, so the hero band and glass surfaces stayed light in dark mode (a Page-Theme-Lock violation). Added dark variants for `--glass-bg/border/spec`, `--shadow-1/2/3`, `--contour`, `--grid`, and tokenized the hero wash as `--topo-grad` (was hardcoded cream `#f2e7cb/#e4cfa4`). Verified both modes live; the toggle flips instantly with no reload.
+- **Em-dash / en-dash sweep.** Replaced 20 visible-prose em-dashes (labels, errors, hints, options, toasts) with periods/colons/commas and 9 en-dashes in number ranges with hyphens. Kept the `—` empty-value placeholder in data tables (a standard data-UI convention; the skill scopes out data tables) and left non-visible code comments alone.
+- **URL / deep-link state (audit B8).** New lightweight `shared/hooks/useUrlState.ts` (URLSearchParams + `history.replaceState`, no router). Wired `?tab=`, Review `?flag=`/`?sort=`, and Settings `?section=`. Bookmarkable + reload-safe; e.g. `?tab=review&flag=blurry`.
+- **Badge sheen opt-in.** The universal radial gloss (flagged as mild slop, and too bright on dark badges) is now `sheen` opt-in, off by default.
+- **InfoHint touch target.** Hit area enlarged to 24×24 while the visible "?" stays 14px.
+
+**Verified green:** `npm run build` (tsc + vite), `npm run lint`, 73 frontend tests, 11 backend tests, console clean, both themes, deep-links, tablet width.
+
+**Deferred (rationale):**
+- **Button/badge full consolidation (B5)** — large cross-cutting refactor across 13 tabs; focus-parity is already solved globally by A1, so low risk/reward to rush. Badge sheen de-slop landed; full routing tracked for a focused follow-up.
+- **Full mobile responsive** — the app degrades acceptably at tablet+ (max-width centering, auto-fit grids, scroll-on-overflow nav); a phone layout for a Leaflet-heavy desktop tool is low-value.
+- **Polish** — `window.confirm` → styled modal (Settings reset), `--shadow-tint` extraction, type-scale tokens, `Button` loading state. Small, independent; tracked for a later polish pass.
