@@ -322,6 +322,33 @@ def test_run_colmap_zero_registered_images_raises(tmp_path):
             _run_colmap(colmap_dir, lambda *_args: None, threading.Event())
 
 
+def test_run_colmap_supports_guided_matcher(tmp_path):
+    """Guided matcher presets should enable COLMAP guided matching."""
+    import threading
+    from unittest.mock import MagicMock, patch
+
+    from backend.services.reconstruction import _run_colmap
+
+    colmap_dir = tmp_path / "colmap"
+    colmap_dir.mkdir()
+    _write_fake_images_txt(colmap_dir, 1)
+
+    success = MagicMock(returncode=0, stderr="")
+    cfg = {
+        "camera_model": "PINHOLE",
+        "matcher": "exhaustive_guided",
+        "sift_max_features": 8192,
+        "colmap_threads": 8,
+    }
+    with patch("backend.services.reconstruction.get_reconstruction_config", return_value=cfg), \
+         patch("backend.services.reconstruction.subprocess.run", return_value=success) as run:
+        _run_colmap(colmap_dir, lambda *_args: None, threading.Event())
+
+    matcher_cmd = run.call_args_list[1].args[0]
+    assert matcher_cmd[1] == "exhaustive_matcher"
+    assert "--SiftMatching.guided_matching=1" in matcher_cmd
+
+
 def test_run_colmap_progress_callback_sequence_rebalanced(tmp_path):
     """COLMAP now owns 0-40% of overall progress (was 0-95%) so the much longer
     gsplat training phase gets a proportional share of the progress bar."""
@@ -352,6 +379,85 @@ def test_run_colmap_progress_callback_sequence_rebalanced(tmp_path):
         (("model conversion", 40.0), {}),
         (("colmap complete", 40.0), {}),
     ]
+
+
+def test_build_reconstruction_diagnostics_reports_unregistered_frames(setup_test_db, tmp_path):
+    from backend.db.database import get_db
+    from backend.db.models import Image
+    from backend.main import app
+    from backend.services.reconstruction import build_reconstruction_diagnostics
+
+    db = next(app.dependency_overrides[get_db]())
+    session = _make_session(db)
+    images = []
+    for idx in range(3):
+        img = Image(
+            session_id=session.id,
+            filename=f"frame_{idx:04d}.jpg",
+            filepath=f"/tmp/frame_{idx:04d}.jpg",
+            usable=True,
+            latitude=35.0 + idx * 0.001,
+            longitude=-80.0,
+            altitude_m=100.0,
+        )
+        db.add(img)
+        images.append(img)
+    db.commit()
+    for img in images:
+        db.refresh(img)
+
+    colmap_dir = tmp_path / "colmap"
+    sparse_dir = colmap_dir / "sparse" / "0"
+    sparse_dir.mkdir(parents=True)
+    (sparse_dir / "images.txt").write_text(
+        "# comments\n"
+        "1 1 0 0 0 0 0 0 1 frame_0000.jpg\n"
+        "10 20 -1\n"
+        "2 1 0 0 0 0 0 0 1 frame_0002.jpg\n"
+        "10 20 -1\n"
+    )
+
+    rec = Reconstruction(
+        session_id=session.id,
+        preset="quick",
+        status="complete",
+        frames_used=3,
+        frames_registered=2,
+        colmap_dir=str(colmap_dir),
+    )
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+    for idx, img in enumerate(images):
+        db.add(
+            ReconstructionFrame(
+                reconstruction_id=rec.id,
+                image_id=img.id,
+                colmap_error_px=0.5 + idx,
+            )
+        )
+    db.commit()
+
+    diagnostics = build_reconstruction_diagnostics(db, rec)
+
+    assert diagnostics["summary"]["frames_used"] == 3
+    assert diagnostics["summary"]["registered_count"] == 2
+    assert diagnostics["summary"]["unregistered_count"] == 1
+    assert diagnostics["unregistered_images"][0]["filename"] == "frame_0001.jpg"
+    assert diagnostics["unregistered_images"][0]["colmap_error_px"] == pytest.approx(1.5)
+    assert diagnostics["map_heatmap"] == [
+        {
+            "id": images[1].id,
+            "filename": "frame_0001.jpg",
+            "latitude": pytest.approx(35.001),
+            "longitude": -80.0,
+            "weight": 1,
+        }
+    ]
+    assert {suggestion["code"] for suggestion in diagnostics["suggestions"]} >= {
+        "retry_guided",
+        "higher_overlap",
+    }
 
 
 # ---------------------------------------------------------------------------
