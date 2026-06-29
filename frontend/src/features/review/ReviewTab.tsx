@@ -8,6 +8,7 @@ import InfoHint from '../../shared/components/InfoHint'
 import { FrustumCard, FrustumMark } from '../../shared/components/FrustumCard'
 import { ReconstructLoader } from '../../shared/components/Skeleton'
 import { useToast } from '../../shared/hooks/useToast'
+import { getUrlParam, setUrlParam } from '../../shared/hooks/useUrlState'
 import type { Image } from '../../types/api'
 
 const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
@@ -189,7 +190,7 @@ function StatsBar({ images, activeFlag, onFlagClick, visibleCount, selectedCount
       >
         ⊕ reproj
       </button>
-      <InfoHint text="Reprojection error: how far COLMAP's solved 3D point lands from where the camera actually saw it. Lower is better — under 1px is good." />
+      <InfoHint text="Reprojection error: how far COLMAP's solved 3D point lands from where the camera actually saw it. Lower is better. Under 1px is good." />
       <span style={{ marginLeft: 'auto', color: 'var(--text-muted)', fontSize: 12 }}>
         {selectedCount > 0 && (
           <span style={{ color: 'var(--accent-strong)', fontWeight: 600, marginRight: 8 }}>
@@ -333,7 +334,7 @@ function ImageCard({ img, sessionId, isSelected, onSelect }: CardProps) {
             <span title="Sharpness (Laplacian variance)">◈ {img.sharpness_score.toFixed(0)}</span>
           )}
           {img.brightness_score != null && (
-            <span title="Brightness (mean pixel 0–255)">☀ {img.brightness_score.toFixed(0)}</span>
+            <span title="Brightness (mean pixel 0-255)">☀ {img.brightness_score.toFixed(0)}</span>
           )}
           {img.colmap_error_px != null && (
             <span
@@ -480,8 +481,17 @@ export default function ReviewTab() {
   const { data: selectionData } = useFrameSelection(selectedSessionId)
   const setSelectionMutation = useSetFrameSelection(selectedSessionId)
   const bulkMutation = useBulkPatch(selectedSessionId)
-  const [activeFlag, setActiveFlag] = useState<Image['flag'] | null>(null)
-  const [sortBy, setSortBy] = useState<'none' | 'reproj'>('none')
+  const [activeFlag, setActiveFlag] = useState<Image['flag'] | null>(() => {
+    const f = getUrlParam('flag')
+    return f ? (f as Image['flag']) : null
+  })
+  const [sortBy, setSortBy] = useState<'none' | 'reproj'>(() =>
+    getUrlParam('sort') === 'reproj' ? 'reproj' : 'none',
+  )
+
+  // Deep-link the Review filters (e.g. ?tab=review&flag=blurry&sort=reproj).
+  useEffect(() => { setUrlParam('flag', activeFlag ?? null) }, [activeFlag])
+  useEffect(() => { setUrlParam('sort', sortBy === 'reproj' ? 'reproj' : null) }, [sortBy])
 
   if (selectedSessionId === null) {
     return (

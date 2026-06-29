@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Panel } from '../../shared/components/Panel'
 import GeneralSettings from './GeneralSettings'
@@ -9,6 +9,7 @@ import SplatSettings from './SplatSettings'
 import RenderExportSettings from './RenderExportSettings'
 import { useResetSettings } from './api'
 import { useToast } from '../../shared/hooks/useToast'
+import { getUrlParam, setUrlParam } from '../../shared/hooks/useUrlState'
 
 // ---------------------------------------------------------------------------
 // Sub-nav definition
@@ -53,9 +54,15 @@ function renderSection(id: SettingsSection) {
 // ---------------------------------------------------------------------------
 
 export default function SettingsTab() {
-  const [active, setActive] = useState<SettingsSection>('general')
+  const [active, setActive] = useState<SettingsSection>(() => {
+    const fromUrl = getUrlParam('section')
+    return SECTIONS.some((s) => s.id === fromUrl) ? (fromUrl as SettingsSection) : 'general'
+  })
   const resetMutation = useResetSettings()
   const { addToast } = useToast()
+
+  // Deep-link the settings section (e.g. ?tab=settings&section=reconstruction).
+  useEffect(() => { setUrlParam('section', active) }, [active])
 
   function handleReset() {
     if (!confirm('Reset ALL settings to defaults? This cannot be undone.')) return

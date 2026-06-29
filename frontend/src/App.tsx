@@ -23,6 +23,7 @@ import { usePipelineStatus } from './shared/pipeline/usePipelineStatus'
 import ImportModal from './features/import/ImportModal'
 import SessionPicker from './features/sessions/SessionPicker'
 import { splatBloom, reducedFade, bloomTransition, easeOut } from './shared/motion'
+import { getUrlParam, setUrlParam } from './shared/hooks/useUrlState'
 
 type Tab =
   | 'overview'
@@ -81,7 +82,7 @@ function renderTab(tab: Tab, onImport: () => void) {
 export default function App() {
   const [activeTab, setActiveTab] = useState<Tab>(() => {
     const { defaultTab, lastActiveTab } = useSettingsStore.getState()
-    const initialTab = lastActiveTab ?? defaultTab
+    const initialTab = getUrlParam('tab') ?? lastActiveTab ?? defaultTab
     return TABS.some((t) => t.id === initialTab) ? (initialTab as Tab) : 'overview'
   })
   const [showImport, setShowImport] = useState(false)
@@ -98,7 +99,22 @@ export default function App() {
   const selectTab = useCallback((tab: Tab) => {
     setActiveTab(tab)
     setLastActiveTab(tab)
+    setUrlParam('tab', tab)
   }, [setLastActiveTab])
+
+  // Keep the active tab linkable: reflect it in the URL and respond to
+  // browser back/forward (or a hand-edited ?tab= param).
+  useEffect(() => {
+    setUrlParam('tab', activeTab)
+    const onPop = () => {
+      const fromUrl = getUrlParam('tab')
+      if (fromUrl && TABS.some((t) => t.id === fromUrl)) setActiveTab(fromUrl as Tab)
+    }
+    window.addEventListener('popstate', onPop)
+    return () => window.removeEventListener('popstate', onPop)
+    // Mount-only: subsequent URL writes flow through selectTab.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   useEffect(() => {
     if (!requestedTab || !TABS.some((t) => t.id === requestedTab)) return
@@ -148,7 +164,7 @@ export default function App() {
           onClick={() => selectTab('overview')}
           className="flex items-center gap-2 shrink-0 cursor-pointer bg-transparent border-none"
           style={{ padding: '0 20px 0 16px' }}
-          title="Pipeline status — open Overview"
+          title="Pipeline status, open Overview"
         >
           <LogoMark stageStates={selectedSessionId !== null ? status.states : undefined} />
           <span className="text-sm font-semibold whitespace-nowrap" style={{ color: 'var(--text)', fontFamily: 'var(--font-display)', letterSpacing: '0.01em' }}>
