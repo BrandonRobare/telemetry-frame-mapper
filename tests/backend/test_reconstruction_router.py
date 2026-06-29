@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
-from backend.db.models import Image, Reconstruction
+from backend.db.models import Image, Reconstruction, ReconstructionFrame
 from backend.db.models import Session as SessionModel
 from backend.routers.reconstruction import _status_sse_payload
 
@@ -92,6 +92,55 @@ def test_get_reconstruction_status(client):
 
 def test_get_reconstruction_status_not_found(client):
     resp = client.get("/reconstruction/999999/status")
+    assert resp.status_code == 404
+
+
+def test_get_reconstruction_diagnostics(client, tmp_path):
+    db = _get_db(client)
+    session = _make_session_with_images(db)
+    images = db.query(Image).filter_by(session_id=session.id).order_by(Image.id).all()
+
+    colmap_dir = tmp_path / "colmap"
+    sparse_dir = colmap_dir / "sparse" / "0"
+    sparse_dir.mkdir(parents=True)
+    (sparse_dir / "images.txt").write_text(
+        "# comments\n"
+        f"1 1 0 0 0 0 0 0 1 {images[0].filename}\n"
+        "10 20 -1\n"
+        f"2 1 0 0 0 0 0 0 1 {images[2].filename}\n"
+        "10 20 -1\n"
+    )
+    rec = Reconstruction(
+        session_id=session.id,
+        preset="quick",
+        status="complete",
+        progress_pct=100.0,
+        frames_used=3,
+        frames_registered=2,
+        colmap_dir=str(colmap_dir),
+    )
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+    for image in images:
+        db.add(ReconstructionFrame(reconstruction_id=rec.id, image_id=image.id))
+    db.commit()
+
+    resp = client.get(f"/reconstruction/{rec.id}/diagnostics")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["reconstruction_id"] == rec.id
+    assert data["summary"]["frames_used"] == 3
+    assert data["summary"]["registered_count"] == 2
+    assert data["summary"]["unregistered_count"] == 1
+    assert [img["filename"] for img in data["unregistered_images"]] == [images[1].filename]
+    assert data["map_heatmap"][0]["filename"] == images[1].filename
+    assert any(suggestion["code"] == "retry_guided" for suggestion in data["suggestions"])
+
+
+def test_get_reconstruction_diagnostics_not_found(client):
+    resp = client.get("/reconstruction/999999/diagnostics")
     assert resp.status_code == 404
 
 

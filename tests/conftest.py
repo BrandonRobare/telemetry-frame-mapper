@@ -8,6 +8,7 @@ from sqlalchemy.pool import NullPool
 
 from backend.db.database import Base, get_db
 from backend.main import app
+from backend.services.reconstruction import clear_rec_logs
 
 TEST_DB_URL = "sqlite:///./data/test_drone_mapping.db"
 
@@ -39,7 +40,9 @@ def setup_test_db():
 
 @pytest.fixture(autouse=True)
 def clean_tables(setup_test_db):
+    clear_rec_logs()
     yield
+    clear_rec_logs()
     with TestSessionLocal() as db:
         for table in reversed(Base.metadata.sorted_tables):
             db.execute(table.delete())
