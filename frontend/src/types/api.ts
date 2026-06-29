@@ -148,6 +148,30 @@ export interface SystemResources {
   gpu_pct: number | null
   vram_used_gb: number | null
   vram_total_gb: number | null
+  gpu_name: string | null
+  gpu_available: boolean
+  colmap_available: boolean
+  gsplat_available: boolean
+  tools: SystemTool[]
+  workflows: WorkflowStatus[]
+}
+
+export interface SystemTool {
+  key: 'ffmpeg' | 'exiftool' | 'colmap' | 'torch' | 'gsplat' | 'sugar'
+  label: string
+  available: boolean
+  path: string | null
+  version: string | null
+  cuda_available?: boolean
+  install_commands: Record<string, string>
+  error: string | null
+}
+
+export interface WorkflowStatus {
+  key: string
+  label: string
+  available: boolean
+  missing: string[]
 }
 
 export interface GeoTransform {
