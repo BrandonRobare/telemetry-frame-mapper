@@ -3,6 +3,8 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { del, get } from '../../shared/api/client'
 import type { StorageStats, StorageFileItem, StorageFileList } from '../../types/api'
 import { formatBytes } from './formatBytes'
+import TabHeader from '../../shared/components/TabHeader'
+import { useToast } from '../../shared/hooks/useToast'
 
 function useStorageSummary() {
   return useQuery<StorageStats>({
@@ -25,6 +27,7 @@ function useStorageFiles(directory: Directory) {
 
 function FileBrowser() {
   const qc = useQueryClient()
+  const addToast = useToast((s) => s.addToast)
   const [dir, setDir] = useState<Directory>('imports')
   const [deleting, setDeleting] = useState<string | null>(null)
   const { data, isLoading } = useStorageFiles(dir)
@@ -35,7 +38,7 @@ function FileBrowser() {
     try {
       await del(`/storage/file?directory=${dir}&filename=${encodeURIComponent(file.name)}`)
     } catch (e) {
-      alert(`Failed to delete ${file.name}: ${e instanceof Error ? e.message : 'Unknown error'}`)
+      addToast(`Couldn't delete ${file.name}: ${e instanceof Error ? e.message : 'unknown error'}`, 'error')
       return
     } finally {
       setDeleting(null)
@@ -115,10 +118,10 @@ function FileBrowser() {
 
 // Categorical colors from the warm palette: terracotta / tan / sage / amber.
 const DIR_META: Record<string, { label: string; color: string; description: string }> = {
-  imports:   { label: 'Imports',   color: '#B87C4C', description: 'Raw imported session folders' },
-  processed: { label: 'Processed', color: '#C4A484', description: 'Thumbnails and COLMAP workspaces' },
-  exports:   { label: 'Exports',   color: '#A8BBA3', description: 'WebODM zips and GeoJSON files' },
-  data:      { label: 'Data',      color: '#C8902F', description: 'SQLite database and config files' },
+  imports:   { label: 'Imports',   color: 'var(--accent)', description: 'Raw imported session folders' },
+  processed: { label: 'Processed', color: 'var(--tan)', description: 'Thumbnails and COLMAP workspaces' },
+  exports:   { label: 'Exports',   color: 'var(--sage)', description: 'WebODM zips and GeoJSON files' },
+  data:      { label: 'Data',      color: 'var(--warning-accent)', description: 'SQLite database and config files' },
 }
 
 export default function StorageTab() {
@@ -134,8 +137,8 @@ export default function StorageTab() {
 
   if (error || !data) {
     return (
-      <div className="flex-1 flex items-center justify-center" style={{ color: 'var(--danger, #f85149)' }}>
-        Failed to load storage info.
+      <div className="flex-1 flex items-center justify-center" style={{ color: 'var(--danger)' }}>
+        Couldn't load storage usage. Reload to try again.
       </div>
     )
   }
@@ -144,12 +147,17 @@ export default function StorageTab() {
   const entries = Object.entries(data.by_type) as [string, number][]
 
   return (
-    <div className="flex-1 overflow-y-auto p-6" style={{ color: 'var(--text)' }}>
+    <div className="flex flex-col flex-1 overflow-hidden">
+      <TabHeader
+        title="Storage"
+        description="Disk usage by category; browse and clean up files."
+      />
+      <div className="flex-1 overflow-y-auto p-6" style={{ color: 'var(--text)' }}>
       <div className="mx-auto" style={{ maxWidth: 600 }}>
 
         {/* Total */}
         <section
-          className="rounded-lg p-5 flex flex-col gap-3"
+          className="p-5 flex flex-col gap-3"
           style={{ background: 'var(--surface)', border: '1px solid var(--border)', marginBottom: 20 }}
         >
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
@@ -183,11 +191,11 @@ export default function StorageTab() {
 
         {/* Per-directory breakdown */}
         <section
-          className="rounded-lg overflow-hidden"
+          className="overflow-hidden"
           style={{ border: '1px solid var(--border)' }}
         >
           {entries.map(([key, bytes], i) => {
-            const meta = DIR_META[key] ?? { label: key, color: '#9A9078', description: '' }
+            const meta = DIR_META[key] ?? { label: key, color: 'var(--text-faint)', description: '' }
             const pct = total > 0 ? (bytes / total) * 100 : 0
             return (
               <div
@@ -235,6 +243,7 @@ export default function StorageTab() {
 
         <FileBrowser />
       </div>
+    </div>
     </div>
   )
 }

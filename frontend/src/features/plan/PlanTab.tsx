@@ -3,6 +3,7 @@ import { useMutation } from '@tanstack/react-query'
 import { post } from '../../shared/api/client'
 import { useToast } from '../../shared/hooks/useToast'
 import { Button } from '../../shared/components/Button'
+import TabHeader from '../../shared/components/TabHeader'
 import FlightSettingsPanel, { type FlightSettings } from './FlightSettingsPanel'
 import PlanMap from './PlanMap'
 
@@ -90,7 +91,12 @@ export default function PlanTab() {
   }
 
   return (
-    <div className="flex flex-1 overflow-hidden">
+    <div className="flex flex-col flex-1 overflow-hidden">
+      <TabHeader
+        title="Plan"
+        description="Draw a target area and generate a flight plan (KML/GPX)."
+      />
+      <div className="flex flex-1 overflow-hidden">
       {/* Left panel */}
       <div
         className="flex flex-col shrink-0 overflow-y-auto"
@@ -115,7 +121,7 @@ export default function PlanTab() {
         >
           {targetAreaId
             ? '✓ Target area saved. Adjust settings and generate plan.'
-            : 'Use the ✏ polygon tool on the map to draw your target area.'}
+            : 'Use the polygon tool (top-left of the map) to draw your target area.'}
         </div>
 
         <FlightSettingsPanel settings={settings} onChange={setSettings} disabled={isBusy} />
@@ -135,7 +141,6 @@ export default function PlanTab() {
         {/* Plan summary */}
         {plan && (
           <div
-            className="rounded"
             style={{
               marginTop: 20,
               padding: '12px 14px',
@@ -191,10 +196,11 @@ export default function PlanTab() {
             className="absolute inset-0 flex items-center justify-center"
             style={{ background: 'rgba(0,0,0,0.3)', zIndex: 999 }}
           >
-            <span className="text-sm" style={{ color: '#fff' }}>Working…</span>
+            <span className="text-sm" style={{ color: 'var(--on-accent)' }}>Working…</span>
           </div>
         )}
       </div>
+    </div>
     </div>
   )
 }

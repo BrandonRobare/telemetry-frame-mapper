@@ -1,6 +1,8 @@
 import { useQuery } from '@tanstack/react-query'
 import { get } from '../../shared/api/client'
 import { useMapStore } from '../../shared/stores/mapStore'
+import TabHeader from '../../shared/components/TabHeader'
+import EmptyState from '../../shared/components/EmptyState'
 import { formatLogTimestamp } from './formatLogTimestamp'
 
 interface SessionLogEntry {
@@ -45,51 +47,45 @@ function EventBadge({ type }: { type: string }) {
 }
 
 export default function SessionLogTab() {
-  const { selectedSessionId } = useMapStore()
+  const { selectedSessionId, setRequestedTab } = useMapStore()
   const { data: entries, isLoading, error } = useSessionLog(selectedSessionId)
-
-  if (selectedSessionId === null) {
-    return (
-      <div className="flex-1 flex items-center justify-center" style={{ color: 'var(--text-muted)' }}>
-        <p>Select a session first.</p>
-      </div>
-    )
-  }
-
-  if (isLoading) {
-    return (
-      <div className="flex-1 flex items-center justify-center" style={{ color: 'var(--text-muted)' }}>
-        <p>Loading log…</p>
-      </div>
-    )
-  }
-
-  if (error) {
-    return (
-      <div className="flex-1 flex items-center justify-center" style={{ color: 'var(--danger, #f85149)' }}>
-        <p>Failed to load session log.</p>
-      </div>
-    )
-  }
 
   const sorted = (entries ?? [])
     .slice()
     .sort((a, b) => new Date(b.timestamp ?? '').getTime() - new Date(a.timestamp ?? '').getTime())
 
-  if (sorted.length === 0) {
-    return (
+  let body: React.ReactNode
+  if (selectedSessionId === null) {
+    body = (
+      <EmptyState
+        title="No session selected"
+        description="Choose a session to see its timeline of imports, coverage runs, and jobs."
+        actionLabel="Open Overview"
+        onAction={() => setRequestedTab('overview')}
+      />
+    )
+  } else if (isLoading) {
+    body = (
+      <div className="flex-1 flex items-center justify-center" style={{ color: 'var(--text-muted)' }}>
+        <p>Loading log…</p>
+      </div>
+    )
+  } else if (error) {
+    body = (
+      <div className="flex-1 flex items-center justify-center" style={{ color: 'var(--danger, #f85149)' }}>
+        <p>Failed to load session log.</p>
+      </div>
+    )
+  } else if (sorted.length === 0) {
+    body = (
       <div className="flex-1 flex items-center justify-center" style={{ color: 'var(--text-muted)' }}>
         <p>No log entries yet.</p>
       </div>
     )
-  }
-
-  return (
-    <div className="flex-1 overflow-auto" style={{ padding: 24 }}>
-      <h2 className="text-sm font-semibold" style={{ color: 'var(--text)', marginBottom: 16 }}>
-        Session Log
-      </h2>
-      <table
+  } else {
+    body = (
+      <div className="flex-1 overflow-auto" style={{ padding: 24 }}>
+        <table
         style={{
           width: '100%',
           borderCollapse: 'collapse',
@@ -135,6 +131,17 @@ export default function SessionLogTab() {
           ))}
         </tbody>
       </table>
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex flex-col flex-1 overflow-hidden">
+      <TabHeader
+        title="Session Log"
+        description="A timeline of imports, coverage runs, and jobs for this session."
+      />
+      {body}
     </div>
   )
 }

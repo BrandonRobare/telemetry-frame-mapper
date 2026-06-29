@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Button } from '../../shared/components/Button'
+import InfoHint from '../../shared/components/InfoHint'
 import { AdvancedDisclosure } from './AdvancedDisclosure'
 import { useSettings, useUpdateSettings } from './api'
 import type { ReconstructionSettings as ReconstructionSettingsType } from './api'
@@ -8,14 +9,16 @@ import { hasValidationErrors, validateReconstructionSettings } from './settingsV
 interface FieldProps {
   label: string
   hint?: string
+  info?: string
   error?: string
   children: React.ReactNode
 }
-function Field({ label, hint, error, children }: FieldProps) {
+function Field({ label, hint, info, error, children }: FieldProps) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-      <label className="text-xs font-medium" style={{ color: 'var(--text)' }}>
+      <label className="text-xs font-medium" style={{ color: 'var(--text)', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
         {label}
+        {info && <InfoHint text={info} />}
       </label>
       {children}
       {hint && (
@@ -91,7 +94,7 @@ export default function ReconstructionSettings() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
       <p className="text-xs" style={{ color: 'var(--text-faint)', margin: 0 }}>
-        Applies to new reconstruction jobs only — running jobs are not affected.
+        Applies to new reconstruction jobs only. Running jobs are not affected.
       </p>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -127,6 +130,7 @@ export default function ReconstructionSettings() {
         <Field
           label="SIFT Max Features"
           hint="Maximum features extracted per image"
+          info="More features = more detail and slower matching. 8192 is a good default."
           error={validationErrors.sift_max_features}
         >
           <input
@@ -141,7 +145,11 @@ export default function ReconstructionSettings() {
       </div>
 
       <AdvancedDisclosure>
-        <Field label="Feature Matcher" error={validationErrors.matcher}>
+        <Field
+          label="Feature Matcher"
+          info="Sequential matches neighbouring frames (fast, for video); Exhaustive matches all pairs (slower, more robust)."
+          error={validationErrors.matcher}
+        >
           <select
             value={form.matcher}
             onChange={(e) => updateTop('matcher', e.target.value)}
@@ -152,7 +160,11 @@ export default function ReconstructionSettings() {
           </select>
         </Field>
 
-        <Field label="Camera Model" error={validationErrors.camera_model}>
+        <Field
+          label="Camera Model"
+          info="PINHOLE solves focal length + principal point; SIMPLE_PINHOLE assumes a centered principal point."
+          error={validationErrors.camera_model}
+        >
           <select
             value={form.camera_model}
             onChange={(e) => updateTop('camera_model', e.target.value)}

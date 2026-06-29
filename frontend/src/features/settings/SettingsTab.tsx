@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Panel } from '../../shared/components/Panel'
 import GeneralSettings from './GeneralSettings'
@@ -9,6 +9,7 @@ import SplatSettings from './SplatSettings'
 import RenderExportSettings from './RenderExportSettings'
 import { useResetSettings } from './api'
 import { useToast } from '../../shared/hooks/useToast'
+import { getUrlParam, setUrlParam } from '../../shared/hooks/useUrlState'
 
 // ---------------------------------------------------------------------------
 // Sub-nav definition
@@ -53,9 +54,15 @@ function renderSection(id: SettingsSection) {
 // ---------------------------------------------------------------------------
 
 export default function SettingsTab() {
-  const [active, setActive] = useState<SettingsSection>('general')
+  const [active, setActive] = useState<SettingsSection>(() => {
+    const fromUrl = getUrlParam('section')
+    return SECTIONS.some((s) => s.id === fromUrl) ? (fromUrl as SettingsSection) : 'general'
+  })
   const resetMutation = useResetSettings()
   const { addToast } = useToast()
+
+  // Deep-link the settings section (e.g. ?tab=settings&section=reconstruction).
+  useEffect(() => { setUrlParam('section', active) }, [active])
 
   function handleReset() {
     if (!confirm('Reset ALL settings to defaults? This cannot be undone.')) return
@@ -96,11 +103,12 @@ export default function SettingsTab() {
                 key={sec.id}
                 onClick={() => setActive(sec.id)}
                 data-testid={`settings-nav-${sec.id}`}
-                className="text-left rounded cursor-pointer border-none"
+                className="text-left cursor-pointer border-none"
                 style={{
                   padding: '8px 10px',
                   background: isActive ? 'var(--accent-soft)' : 'transparent',
                   color: isActive ? 'var(--accent-strong)' : 'var(--text-muted)',
+                  borderLeft: isActive ? '2px solid var(--accent)' : '2px solid transparent',
                   fontSize: 13,
                   fontFamily: 'inherit',
                   fontWeight: isActive ? 500 : 400,
@@ -131,7 +139,7 @@ export default function SettingsTab() {
             type="button"
             onClick={handleReset}
             disabled={resetMutation.isPending}
-            className="text-left rounded cursor-pointer border-none w-full"
+            className="text-left cursor-pointer border-none w-full"
             style={{
               padding: '7px 10px',
               background: 'transparent',

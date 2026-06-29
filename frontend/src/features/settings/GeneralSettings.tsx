@@ -52,6 +52,7 @@ const selectStyle: React.CSSProperties = {
 }
 
 const TABS: { id: SettingsTab; label: string }[] = [
+  { id: 'overview', label: 'Overview' },
   { id: 'map', label: 'Map' },
   { id: 'gps-sync', label: 'GPS Sync' },
   { id: 'review', label: 'Review' },
@@ -83,11 +84,11 @@ const GENERAL_DEFAULTS: GeneralSettingsType = {
 }
 
 export default function GeneralSettings() {
-  const { theme, toggleTheme } = useMapStore()
   const {
     defaultTab, units, coordFormat, coordPrecision, reducedMotion, apiBaseUrl,
     setDefaultTab, setUnits, setCoordFormat, setCoordPrecision, setReducedMotion, setApiBaseUrl,
   } = useSettingsStore()
+  const { theme, toggleTheme } = useMapStore()
 
   const { data: settings } = useSettings()
   const updateMutation = useUpdateSettings()
@@ -119,7 +120,7 @@ export default function GeneralSettings() {
       {/* -- GUI-only prefs (localStorage) -- */}
       <section>
         <h3 className="text-sm font-semibold" style={{ color: 'var(--text)', margin: '0 0 14px' }}>
-          Appearance &amp; Display
+          Display
         </h3>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           <Field label="Theme">
@@ -175,7 +176,7 @@ export default function GeneralSettings() {
             </select>
           </Field>
 
-          <Field label="Units" hint="Display-only — does not affect stored data">
+          <Field label="Units" hint="Display-only. Does not affect stored data">
             <select
               value={units}
               onChange={(e) => setUnits(e.target.value as Units)}

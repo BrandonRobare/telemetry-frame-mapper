@@ -65,6 +65,11 @@ node_modules/
 .internal/
 internal/
 
+# AI skill installs (local tooling, never committed)
+.agents/
+.claude/skills/
+skills-lock.json
+
 # Editor config (keep local)
 .vscode/
 
