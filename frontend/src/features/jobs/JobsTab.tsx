@@ -6,7 +6,7 @@ import {
   useReconstructionStatusEvents,
 } from '../../shared/api/reconstructionStatusEvents'
 import { formatEta } from '../../shared/time'
-import type { Job, SystemResources } from '../../types/api'
+import type { Job, SystemResources, SystemTool, WorkflowStatus } from '../../types/api'
 import { SkeletonRow } from '../../shared/components/Skeleton'
 import TabHeader from '../../shared/components/TabHeader'
 import { Button } from '../../shared/components/Button'
@@ -55,31 +55,151 @@ function ResourceBar() {
   const ramPct = ((res.ram_used_gb / res.ram_total_gb) * 100).toFixed(0)
   const diskPct = ((res.disk_used_gb / res.disk_total_gb) * 100).toFixed(0)
   return (
+    <>
+      <div
+        style={{
+          display: 'flex', gap: 20, padding: '7px 16px',
+          background: 'var(--surface)', borderBottom: '1px solid var(--border)',
+          fontSize: 11, color: 'var(--text-muted)', alignItems: 'center', flexShrink: 0,
+        }}
+      >
+        <span>CPU <strong style={{ color: 'var(--text)' }}>{res.cpu_pct.toFixed(0)}%</strong></span>
+        <span>
+          RAM{' '}
+          <strong style={{ color: 'var(--text)' }}>{res.ram_used_gb.toFixed(1)}</strong>
+          {' / '}{res.ram_total_gb.toFixed(0)} GB ({ramPct}%)
+        </span>
+        {res.gpu_pct != null && (
+          <span>GPU <strong style={{ color: 'var(--success)' }}>{res.gpu_pct.toFixed(0)}%</strong></span>
+        )}
+        {res.vram_used_gb != null && res.vram_total_gb != null && (
+          <span>
+            VRAM{' '}
+            <strong style={{ color: 'var(--success)' }}>{res.vram_used_gb.toFixed(1)}</strong>
+            {' / '}{res.vram_total_gb.toFixed(0)} GB
+          </span>
+        )}
+        {res.gpu_name && <span title={res.gpu_name}>GPU {res.gpu_name}</span>}
+        <span style={{ marginLeft: 'auto' }}>Disk {diskPct}% used</span>
+      </div>
+      <SystemHealthDashboard resources={res} />
+    </>
+  )
+}
+
+function formatInstallCommands(tool: SystemTool) {
+  return Object.entries(tool.install_commands)
+    .map(([platform, command]) => `${platform}: ${command}`)
+    .join('\n')
+}
+
+function ToolStatusCard({ tool }: { tool: SystemTool }) {
+  const { addToast } = useToast()
+  const installText = formatInstallCommands(tool)
+  async function copyInstallCommands() {
+    try {
+      await navigator.clipboard.writeText(installText)
+      addToast(`${tool.label} install commands copied`, 'success')
+    } catch {
+      addToast(`Failed to copy ${tool.label} install commands`, 'error')
+    }
+  }
+
+  return (
     <div
       style={{
-        display: 'flex', gap: 20, padding: '7px 16px',
-        background: 'var(--surface)', borderBottom: '1px solid var(--border)',
-        fontSize: 11, color: 'var(--text-muted)', alignItems: 'center', flexShrink: 0,
+        minWidth: 0, padding: 10, borderRadius: 'var(--radius-md)',
+        border: '1px solid var(--border)', background: 'var(--surface)',
       }}
     >
-      <span>CPU <strong style={{ color: 'var(--text)' }}>{res.cpu_pct.toFixed(0)}%</strong></span>
-      <span>
-        RAM{' '}
-        <strong style={{ color: 'var(--text)' }}>{res.ram_used_gb.toFixed(1)}</strong>
-        {' / '}{res.ram_total_gb.toFixed(0)} GB ({ramPct}%)
-      </span>
-      {res.gpu_pct != null && (
-        <span>GPU <strong style={{ color: 'var(--success)' }}>{res.gpu_pct.toFixed(0)}%</strong></span>
-      )}
-      {res.vram_used_gb != null && res.vram_total_gb != null && (
-        <span>
-          VRAM{' '}
-          <strong style={{ color: 'var(--success)' }}>{res.vram_used_gb.toFixed(1)}</strong>
-          {' / '}{res.vram_total_gb.toFixed(0)} GB
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+        <span className="text-xs font-semibold" style={{ color: 'var(--text)' }}>{tool.label}</span>
+        <span
+          className="text-xs rounded"
+          style={{
+            padding: '1px 6px',
+            background: tool.available ? 'var(--success-soft)' : 'var(--danger-soft)',
+            color: tool.available ? 'var(--success)' : 'var(--danger)',
+            marginLeft: 'auto',
+          }}
+        >
+          {tool.available ? 'Available' : 'Unavailable'}
         </span>
-      )}
-      <span style={{ marginLeft: 'auto' }}>Disk {diskPct}% used</span>
+      </div>
+      <div style={{ color: 'var(--text-muted)', fontSize: 11, lineHeight: 1.5 }}>
+        <div title={tool.path ?? undefined} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          Path: {tool.path ?? 'Not found'}
+        </div>
+        <div title={tool.version ?? undefined} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          Version: {tool.version ?? 'Unknown'}
+        </div>
+        {tool.cuda_available != null && <div>CUDA: {tool.cuda_available ? 'Yes' : 'No'}</div>}
+        {tool.error && <div style={{ color: 'var(--danger)' }}>Error: {tool.error}</div>}
+      </div>
+      <button
+        onClick={copyInstallCommands}
+        className="text-xs cursor-pointer"
+        style={{
+          marginTop: 8, padding: '4px 8px', borderRadius: 'var(--radius-sm)',
+          border: '1px solid var(--border)', background: 'var(--surface-2)', color: 'var(--text)',
+        }}
+      >
+        Copy install
+      </button>
     </div>
+  )
+}
+
+function WorkflowStatusPill({ workflow }: { workflow: WorkflowStatus }) {
+  return (
+    <div
+      title={workflow.missing.length > 0 ? `Missing: ${workflow.missing.join(', ')}` : undefined}
+      style={{
+        display: 'flex', alignItems: 'center', gap: 6, padding: '6px 8px',
+        borderRadius: 'var(--radius-sm)', background: workflow.available ? 'var(--success-soft)' : 'var(--surface)',
+        border: '1px solid var(--border)', color: workflow.available ? 'var(--success)' : 'var(--text-muted)',
+        fontSize: 11,
+      }}
+    >
+      <span>{workflow.available ? '●' : '○'}</span>
+      <span>{workflow.label}</span>
+      {!workflow.available && workflow.missing.length > 0 && <span>({workflow.missing.length} missing)</span>}
+    </div>
+  )
+}
+
+function SystemHealthDashboard({ resources }: { resources: SystemResources }) {
+  return (
+    <section
+      style={{
+        padding: '12px 16px', borderBottom: '1px solid var(--border)', background: 'var(--surface-2)',
+        flexShrink: 0,
+      }}
+      aria-label="System health dashboard"
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10, flexWrap: 'wrap' }}>
+        <h2 className="text-sm font-semibold" style={{ color: 'var(--text)', margin: 0, marginRight: 'auto' }}>
+          System Health
+        </h2>
+        <span className="text-xs" style={{ color: resources.gpu_available ? 'var(--success)' : 'var(--text-muted)' }}>
+          {resources.gpu_available
+            ? `${resources.gpu_name ?? 'NVIDIA GPU'} · ${resources.vram_total_gb ?? '?'} GB VRAM`
+            : 'No NVIDIA GPU detected'}
+        </span>
+      </div>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
+        {resources.workflows.map((workflow) => (
+          <WorkflowStatusPill key={workflow.key} workflow={workflow} />
+        ))}
+      </div>
+      <div
+        style={{
+          display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 8,
+        }}
+      >
+        {resources.tools.map((tool) => <ToolStatusCard key={tool.key} tool={tool} />)}
+      </div>
+    </section>
   )
 }
 
