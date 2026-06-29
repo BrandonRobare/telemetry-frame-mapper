@@ -50,6 +50,26 @@ def test_upload_flight_log_missing_session(client):
     assert resp.status_code == 404
 
 
+def test_upload_flight_log_rejects_oversized_file(client, monkeypatch):
+    import backend.routers.flight_log as flight_log_mod
+
+    s = _make_session(client)
+    monkeypatch.setattr(
+        flight_log_mod,
+        "get_upload_limits_config",
+        lambda: {"flight_log_max_bytes": len(CSV_BYTES) - 1},
+    )
+
+    resp = client.post(
+        "/flight-logs/upload",
+        files={"file": ("log.csv", CSV_BYTES, "text/csv")},
+        data={"session_id": str(s.id)},
+    )
+
+    assert resp.status_code == 413
+    assert "Flight log upload exceeds" in resp.json()["detail"]
+
+
 def test_upload_flight_log_success(client):
     s = _make_session(client)
     data = _upload_log(client, s.id)
@@ -119,13 +139,15 @@ def test_apply_sync_replaces_stale_footprint(client):
     db.add(img)
     db.commit()
     db.refresh(img)
-    db.add(Footprint(
-        image_id=img.id,
-        geom_wkt="STALE",
-        geom_geojson='{"type":"Polygon","coordinates":[]}',
-        ground_width_m=1.0,
-        ground_height_m=1.0,
-    ))
+    db.add(
+        Footprint(
+            image_id=img.id,
+            geom_wkt="STALE",
+            geom_geojson='{"type":"Polygon","coordinates":[]}',
+            ground_width_m=1.0,
+            ground_height_m=1.0,
+        )
+    )
     db.commit()
 
     _upload_log(client, s.id)
