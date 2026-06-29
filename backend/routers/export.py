@@ -47,3 +47,28 @@ def export_webodm_georeferencing_csv(session_id: int, db: DBSession = Depends(ge
         "contents": ["odm_georeferencing.csv"],
         "export_type": "webodm_georeferencing_csv_only",
     }
+
+
+@router.post("/webodm-package")
+def export_webodm_package(
+    session_id: int,
+    mode: str = "exif",
+    include_images: bool = True,
+    include_gcp: bool = False,
+    db: DBSession = Depends(get_db),
+):
+    """Build a complete WebODM/OpenDroneMap package with images and options manifest."""
+    from ..services.webodm_package import WebodmPackageOptions, build_webodm_package
+
+    session = db.query(SessionModel).filter(SessionModel.id == session_id).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    images = db.query(Image).filter(Image.session_id == session_id, Image.usable == True).all()  # noqa: E712
+    try:
+        return build_webodm_package(
+            Path(get_config().exports_dir) / f"webodm_package_{session_id}_{mode}.zip",
+            images,
+            WebodmPackageOptions(mode=mode, include_images=include_images, include_gcp=include_gcp),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
