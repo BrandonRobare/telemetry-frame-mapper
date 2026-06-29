@@ -5,9 +5,23 @@ import 'leaflet/dist/leaflet.css'
 import type { Footprint, CoverageResult } from '../../types/api'
 import { useMapStore } from '../../shared/stores/mapStore'
 
-const ESRI_SATELLITE =
-  'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
-const OSM = 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png'
+const BASEMAPS = {
+  esri_satellite: {
+    label: 'Esri Satellite',
+    url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+    attribution: '© Esri',
+  },
+  osm: {
+    label: 'OpenStreetMap',
+    url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+    attribution: '© OpenStreetMap contributors',
+  },
+  offline_mbtiles: {
+    label: 'Offline tiles',
+    url: '/tiles/{z}/{x}/{y}.png',
+    attribution: 'Local offline tiles',
+  },
+} as const
 
 // Leaflet sets these as SVG presentation attributes, so they must be literal
 // hex (CSS vars don't resolve there). Kept in sync with the warm-light tokens:
@@ -36,7 +50,9 @@ function FitBounds({ footprints }: { footprints: Footprint[] }) {
           const flat = (geom.coordinates as number[][][]).flat(2)
           for (let i = 0; i < flat.length; i += 2) coords.push([flat[i + 1], flat[i]])
         }
-      } catch { /* skip malformed */ }
+      } catch {
+        // skip malformed footprints
+      }
     })
     if (coords.length > 0) {
       map.fitBounds(coords as LatLngBoundsExpression, { padding: [20, 20] })
@@ -48,7 +64,8 @@ function FitBounds({ footprints }: { footprints: Footprint[] }) {
 }
 
 export default function LeafletMapView({ footprints, coverage, isLoading, error }: Props) {
-  const { activeLayers } = useMapStore()
+  const { activeLayers, basemapId, setBasemapId } = useMapStore()
+  const basemap = BASEMAPS[basemapId as keyof typeof BASEMAPS] ?? BASEMAPS.esri_satellite
 
   if (error) {
     return (
@@ -80,9 +97,19 @@ export default function LeafletMapView({ footprints, coverage, isLoading, error 
   const footprintGeoJSON = footprints.length > 0
     ? {
         type: 'FeatureCollection' as const,
-        features: footprints.reduce<{ type: 'Feature'; geometry: unknown; properties: { id: number } }[]>((acc, fp) => {
+        features: footprints.reduce<
+          { type: 'Feature'; geometry: unknown; properties: { id: number } }[]
+        >((acc, fp) => {
           if (!fp.geom_geojson) return acc
-          try { acc.push({ type: 'Feature', geometry: JSON.parse(fp.geom_geojson), properties: { id: fp.id } }) } catch { /* skip malformed */ }
+          try {
+            acc.push({
+              type: 'Feature',
+              geometry: JSON.parse(fp.geom_geojson),
+              properties: { id: fp.id },
+            })
+          } catch {
+            // skip malformed footprints
+          }
           return acc
         }, []),
       }
@@ -92,6 +119,51 @@ export default function LeafletMapView({ footprints, coverage, isLoading, error 
 
   return (
     <div className="relative w-full h-full">
+      <label
+        className="absolute z-20 flex items-center gap-2 text-xs"
+        style={{
+          top: 12,
+          right: 12,
+          background: 'var(--surface)',
+          border: '1px solid var(--border)',
+          borderRadius: 'var(--radius-sm)',
+          padding: '6px 8px',
+          color: 'var(--text)',
+        }}
+      >
+        Basemap
+        <select
+          value={basemapId}
+          onChange={(event) => setBasemapId(event.target.value)}
+          style={{
+            background: 'var(--bg)',
+            color: 'var(--text)',
+            border: '1px solid var(--border)',
+          }}
+        >
+          {Object.entries(BASEMAPS).map(([id, provider]) => (
+            <option key={id} value={id}>{provider.label}</option>
+          ))}
+        </select>
+      </label>
+
+      {basemapId === 'offline_mbtiles' && (
+        <div
+          className="absolute z-20 text-xs"
+          style={{
+            top: 54,
+            right: 12,
+            background: 'var(--surface)',
+            border: '1px solid var(--accent)',
+            borderRadius: 'var(--radius-sm)',
+            padding: '6px 8px',
+            color: 'var(--text-muted)',
+          }}
+        >
+          Offline mode expects local tiles at /tiles/{'{z}'}/{'{x}'}/{'{y}'}.png.
+        </div>
+      )}
+
       {isLoading && (
         <div
           className="absolute inset-0 z-10 flex items-center justify-center"
@@ -107,15 +179,20 @@ export default function LeafletMapView({ footprints, coverage, isLoading, error 
         style={{ height: '100%', width: '100%' }}
       >
         <TileLayer
-          url={activeLayers.footprints ? ESRI_SATELLITE : OSM}
-          attribution="© Esri"
+          url={basemap.url}
+          attribution={basemap.attribution}
         />
 
         {activeLayers.footprints && footprintGeoJSON && (
           <GeoJSON
             key={JSON.stringify(footprintGeoJSON).length}
             data={footprintGeoJSON}
-            style={{ color: FOOTPRINT_COLOR, fillColor: FOOTPRINT_COLOR, fillOpacity: 0.13, weight: 1.5 }}
+            style={{
+              color: FOOTPRINT_COLOR,
+              fillColor: FOOTPRINT_COLOR,
+              fillOpacity: 0.13,
+              weight: 1.5,
+            }}
             onEachFeature={onEachFootprint}
           />
         )}
@@ -124,7 +201,12 @@ export default function LeafletMapView({ footprints, coverage, isLoading, error 
           <GeoJSON
             key={`cov-${coverage?.id}`}
             data={gapGeoJSON}
-            style={{ color: COVERAGE_COLOR, fillColor: COVERAGE_COLOR, fillOpacity: 0.12, weight: 1.5 }}
+            style={{
+              color: COVERAGE_COLOR,
+              fillColor: COVERAGE_COLOR,
+              fillOpacity: 0.12,
+              weight: 1.5,
+            }}
           />
         )}
 

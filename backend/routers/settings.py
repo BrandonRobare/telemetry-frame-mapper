@@ -42,6 +42,7 @@ class GeneralSettings(BaseModel):
     processed_dir: str | None = None
     exports_dir: str | None = None
     data_dir: str | None = None
+    basemap_providers: list[dict] | None = None
 
     @field_validator("imports_dir", "processed_dir", "exports_dir", "data_dir")
     @classmethod
@@ -262,6 +263,7 @@ def _build_full_response() -> dict:
         "processed_dir",
         "exports_dir",
         "data_dir",
+        "basemap_providers",
     }
     mission_keys = {
         "altitude_ft",
