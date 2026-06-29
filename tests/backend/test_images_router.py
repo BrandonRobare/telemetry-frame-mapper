@@ -54,6 +54,47 @@ def test_patch_image_not_found(client):
     assert resp.status_code == 404
 
 
+def _add_second_image(client, session_id, flag="good"):
+    from backend.db.database import get_db
+    from backend.db.models import Image
+    from backend.main import app
+
+    db = next(app.dependency_overrides[get_db]())
+    img = Image(session_id=session_id, filename="b.jpg", filepath="/tmp/b.jpg", flag=flag, usable=True)
+    db.add(img)
+    db.commit()
+    db.refresh(img)
+    return img
+
+
+def test_bulk_patch_images_flag_and_usable(client):
+    s, img1 = _insert_session_and_image(client)
+    img2 = _add_second_image(client, s.id)
+    resp = client.patch(
+        "/images/bulk",
+        json={"image_ids": [img1.id, img2.id], "flag": "blurry", "usable": False},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["updated"] == 2
+
+    rows = client.get(f"/images?session_id={s.id}&flag=blurry").json()
+    ids = {r["id"] for r in rows}
+    assert {img1.id, img2.id} <= ids
+    assert all(r["usable"] is False for r in rows if r["id"] in {img1.id, img2.id})
+
+
+def test_bulk_patch_images_empty_ids(client):
+    resp = client.patch("/images/bulk", json={"image_ids": []})
+    assert resp.status_code == 200
+    assert resp.json()["updated"] == 0
+
+
+def test_bulk_patch_images_requires_a_field(client):
+    _, img = _insert_session_and_image(client)
+    resp = client.patch("/images/bulk", json={"image_ids": [img.id]})
+    assert resp.status_code == 400
+
+
 def test_session_log_empty(client):
     resp = client.get("/session-log?session_id=999999")
     assert resp.status_code == 200

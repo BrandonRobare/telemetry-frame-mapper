@@ -45,6 +45,12 @@ class ImagePatch(BaseModel):
     usable: bool | None = None
 
 
+class ImageBulkPatch(BaseModel):
+    image_ids: list[int]
+    flag: str | None = None
+    usable: bool | None = None
+
+
 @router.get("", response_model=list[ImageOut])
 def list_images(
     session_id: int,
@@ -83,6 +89,31 @@ def list_images(
         ImageOut.model_validate(img).model_copy(update={"colmap_error_px": reproj_map.get(img.id)})
         for img in images
     ]
+
+
+@router.patch("/bulk")
+def bulk_patch_images(body: ImageBulkPatch, db: DBSession = Depends(get_db)) -> dict:
+    """Apply a flag and/or usable change to many images in one request.
+
+    Defined before ``/{image_id}`` so the literal ``bulk`` path is not parsed as
+    an id. Returns the number of rows updated.
+    """
+    if not body.image_ids:
+        return {"updated": 0}
+    if body.flag is None and body.usable is None:
+        raise HTTPException(status_code=400, detail="Provide flag and/or usable")
+    values: dict = {}
+    if body.flag is not None:
+        values["flag"] = body.flag
+    if body.usable is not None:
+        values["usable"] = body.usable
+    updated = (
+        db.query(Image)
+        .filter(Image.id.in_(body.image_ids))
+        .update(values, synchronize_session=False)
+    )
+    db.commit()
+    return {"updated": updated}
 
 
 @router.patch("/{image_id}", response_model=ImageOut)
