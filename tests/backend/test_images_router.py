@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import zipfile
+
 import pytest
 
 
@@ -109,11 +111,33 @@ def test_session_log_empty(client):
 
 def test_webodm_export(client):
     s, _ = _insert_session_and_image(client)
-    resp = client.post(f"/export/webodm?session_id={s.id}")
+    resp = client.post(f"/export/webodm-georeferencing-csv?session_id={s.id}")
     assert resp.status_code == 200
     data = resp.json()
     assert "zip_path" in data
     assert data["image_count"] == 1
+    assert data["export_type"] == "webodm_georeferencing_csv_only"
+    with zipfile.ZipFile(data["zip_path"]) as zf:
+        assert zf.namelist() == ["odm_georeferencing.csv"]
+
+
+def test_webodm_georeferencing_csv_export_uses_configured_exports_dir(client, tmp_path):
+    from unittest.mock import patch
+
+    s, _ = _insert_session_and_image(client)
+    configured_exports_dir = tmp_path / "configured-exports"
+
+    with patch("backend.routers.export.get_config") as mock_cfg:
+        mock_cfg.return_value.exports_dir = str(configured_exports_dir)
+        resp = client.post(f"/export/webodm-georeferencing-csv?session_id={s.id}")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    zip_path = data["zip_path"]
+    assert zip_path == str(configured_exports_dir / f"webodm_georeferencing_csv_{s.id}.zip")
+    assert configured_exports_dir.is_dir()
+    with zipfile.ZipFile(zip_path) as zf:
+        assert zf.namelist() == ["odm_georeferencing.csv"]
 
 
 def test_image_list_includes_colmap_error_when_reconstruction_complete(client):

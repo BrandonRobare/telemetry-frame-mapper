@@ -49,7 +49,7 @@ exports/          KML/GPX mission plan exports (gitignored)
 - REST API for image import, quality scoring (sharpness + brightness via OpenCV), and ground footprint computation from DJI XMP altitude/yaw (Shapely/UTM).
 - Coverage analysis, lawnmower mission planning with KML/GPX export, and flight-log sync.
 - Reconstruction job pipeline: COLMAP SfM (quick/full presets, target-area crop, frame selection), GPS geo-registration, gaussian-splat training, LOD generation, and per-frame reprojection-error reporting.
-- Exports: WebODM package, GeoJSON, LAS 1.4 point cloud, optional SuGaR mesh, flythrough video.
+- Exports: WebODM georeferencing CSV-only zip, GeoJSON, LAS 1.4 point cloud, optional SuGaR mesh, flythrough video.
 - SQLite database via SQLAlchemy (swappable for PostgreSQL via `DATABASE_URL`).
 
 ### Frontend (11 tabs, all functional)
@@ -57,7 +57,7 @@ exports/          KML/GPX mission plan exports (gitignored)
 - **GPS Sync** — DJI FlightRecord CSV matching with timing deltas.
 - **Review** — thumbnail grid, quality flags, COLMAP reprojection-error badges, reconstruction frame selection.
 - **Plan** — target-area drawing, lawnmower plan generation, KML/GPX export.
-- **Export** — WebODM zip, GeoJSON, LAS point cloud, mesh GLB/OBJ/MTL.
+- **Export** — WebODM georeferencing CSV-only zip, GeoJSON, LAS point cloud, mesh GLB/OBJ/MTL.
 - **Session Log · Reconstruct · Jobs · Storage** — event history, preset-based job start, resource monitor with live logs, disk usage + file browser.
 - **Splat Viewer** — in-browser gaussian-splat rendering, PSNR/SSIM sparklines, coverage-gap heatmap, GPS-pinned annotations, distance/area measurement, ortho/3D split view, flythrough recording.
 - **Compare** — voxel change detection between two reconstructions of the same site.
