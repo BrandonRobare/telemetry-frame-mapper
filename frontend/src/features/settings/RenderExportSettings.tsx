@@ -3,13 +3,15 @@ import { Button } from '../../shared/components/Button'
 import { AdvancedDisclosure } from './AdvancedDisclosure'
 import { useSettings, useUpdateSettings } from './api'
 import type { RenderSettings } from './api'
+import { hasValidationErrors, validateRenderSettings } from './settingsValidation'
 
 interface FieldProps {
   label: string
   hint?: string
+  error?: string
   children: React.ReactNode
 }
-function Field({ label, hint, children }: FieldProps) {
+function Field({ label, hint, error, children }: FieldProps) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
       <label className="text-xs font-medium" style={{ color: 'var(--text)' }}>
@@ -19,6 +21,11 @@ function Field({ label, hint, children }: FieldProps) {
       {hint && (
         <span className="text-xs" style={{ color: 'var(--text-faint)' }}>
           {hint}
+        </span>
+      )}
+      {error && (
+        <span className="text-xs" style={{ color: 'var(--danger)' }}>
+          {error}
         </span>
       )}
     </div>
@@ -55,12 +62,15 @@ export default function RenderExportSettings() {
 
   const server = settings?.render ?? DEFAULT
   const form: RenderSettings = { ...server, ...edits }
+  const validationErrors = validateRenderSettings(form)
+  const hasErrors = hasValidationErrors(validationErrors)
 
   function updateForm<K extends keyof RenderSettings>(key: K, value: RenderSettings[K]) {
     setEdits((e) => ({ ...e, [key]: value }))
   }
 
   function handleSave() {
+    if (hasErrors) return
     updateMutation.mutate(
       { render: form },
       { onSuccess: () => setEdits({}) }
@@ -74,18 +84,18 @@ export default function RenderExportSettings() {
       </p>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-        <Field label="Flythrough FPS">
+        <Field label="Flythrough FPS" error={validationErrors.flythrough_fps}>
           <input
             type="number"
             min={1}
-            max={120}
+            max={60}
             value={form.flythrough_fps}
             onChange={(e) => updateForm('flythrough_fps', Number(e.target.value))}
             style={inputStyle}
           />
         </Field>
 
-        <Field label="Flythrough Width (px)">
+        <Field label="Flythrough Width (px)" error={validationErrors.flythrough_width}>
           <input
             type="number"
             min={320}
@@ -96,7 +106,7 @@ export default function RenderExportSettings() {
           />
         </Field>
 
-        <Field label="Flythrough Height (px)">
+        <Field label="Flythrough Height (px)" error={validationErrors.flythrough_height}>
           <input
             type="number"
             min={240}
@@ -107,7 +117,7 @@ export default function RenderExportSettings() {
           />
         </Field>
 
-        <Field label="Thumbnail Size (px)">
+        <Field label="Thumbnail Size (px)" error={validationErrors.thumbnail_size_px}>
           <input
             type="number"
             min={64}
@@ -118,11 +128,11 @@ export default function RenderExportSettings() {
           />
         </Field>
 
-        <Field label="Thumbnail Quality" hint="JPEG quality 1–95">
+        <Field label="Thumbnail Quality" hint="JPEG quality 1–100" error={validationErrors.thumbnail_quality}>
           <input
             type="number"
             min={1}
-            max={95}
+            max={100}
             value={form.thumbnail_quality}
             onChange={(e) => updateForm('thumbnail_quality', Number(e.target.value))}
             style={inputStyle}
@@ -131,7 +141,11 @@ export default function RenderExportSettings() {
       </div>
 
       <AdvancedDisclosure>
-        <Field label="LOD Preview Ratio" hint="0–1 fraction of gaussians shown in preview LOD">
+        <Field
+          label="LOD Preview Ratio"
+          hint="0–1 fraction of gaussians shown in preview LOD"
+          error={validationErrors.lod_preview_ratio}
+        >
           <input
             type="number"
             step={0.01}
@@ -143,7 +157,11 @@ export default function RenderExportSettings() {
           />
         </Field>
 
-        <Field label="LOD Medium Ratio" hint="0–1 fraction of gaussians shown in medium LOD">
+        <Field
+          label="LOD Medium Ratio"
+          hint="0–1 fraction of gaussians shown in medium LOD"
+          error={validationErrors.lod_medium_ratio}
+        >
           <input
             type="number"
             step={0.01}
@@ -161,7 +179,7 @@ export default function RenderExportSettings() {
           <Button
             variant="primary"
             size="sm"
-            disabled={updateMutation.isPending}
+            disabled={updateMutation.isPending || hasErrors}
             onClick={handleSave}
           >
             {updateMutation.isPending ? 'Saving…' : 'Save changes'}

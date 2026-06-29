@@ -5,6 +5,8 @@ import { get } from '../../shared/api/client'
 import { Skeleton } from '../../shared/components/Skeleton'
 import GlassSurface from '../../shared/components/GlassSurface'
 
+const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
+
 interface Props {
   session: Session | undefined
   coverage: CoverageResult | null | undefined
@@ -102,6 +104,10 @@ export default function SessionSidebar({ session, coverage, frameCount, isLoadin
     ? new Date(session.imported_at).toLocaleDateString()
     : '—'
 
+  function downloadFile(path: string) {
+    window.open(`${BASE_URL}${path}`, '_blank')
+  }
+
   return (
     <aside
       className="shrink-0 flex flex-col overflow-y-auto"
@@ -156,6 +162,49 @@ export default function SessionSidebar({ session, coverage, frameCount, isLoadin
             <span style={{ color: 'var(--warning)' }}>● Blurry/Dark</span>
             <span style={{ color: 'var(--text)' }}>{Math.max(0, session.photo_count - session.usable_count)}</span>
           </div>
+        </div>
+      </div>
+
+      {/* Downloads */}
+      <div className="px-3 py-2" style={{ borderBottom: '1px solid var(--border)' }}>
+        <div className="text-xs uppercase tracking-wide mb-2" style={{ color: 'var(--text-muted)' }}>
+          Downloads
+        </div>
+        <div className="grid grid-cols-3 gap-1.5">
+          {(['geojson', 'kml', 'kmz'] as const).map((format) => (
+            <button
+              key={`footprints-${format}`}
+              onClick={() => downloadFile(`/footprints/export?session_id=${session.id}&format=${format}`)}
+              disabled={frameCount === 0}
+              className="rounded text-xs cursor-pointer transition-all duration-150 active:scale-[0.98]"
+              style={{
+                padding: '5px 3px',
+                background: 'transparent',
+                color: 'var(--text)',
+                border: '1px solid var(--border-strong)',
+                opacity: frameCount === 0 ? 0.5 : 1,
+              }}
+            >
+              FP {format.toUpperCase()}
+            </button>
+          ))}
+          {(['geojson', 'kml', 'kmz'] as const).map((format) => (
+            <button
+              key={`coverage-${format}`}
+              onClick={() => downloadFile(`/coverage/results/export?session_id=${session.id}&format=${format}`)}
+              disabled={!coverage?.id}
+              className="rounded text-xs cursor-pointer transition-all duration-150 active:scale-[0.98]"
+              style={{
+                padding: '5px 3px',
+                background: 'transparent',
+                color: 'var(--text)',
+                border: '1px solid var(--border-strong)',
+                opacity: !coverage?.id ? 0.5 : 1,
+              }}
+            >
+              Cov {format.toUpperCase()}
+            </button>
+          ))}
         </div>
       </div>
 

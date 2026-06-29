@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 import threading
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import numpy as np
 import pytest
 
 from backend.services import splat_trainer
@@ -145,3 +147,48 @@ def test_training_pct_maps_into_rebalanced_window():
     assert _training_pct(1000, 1000) == pytest.approx(99.0)
     midpoint = _training_pct(500, 1000)
     assert 40.0 < midpoint < 99.0
+
+
+class _ArrayTensor:
+    def __init__(self, value):
+        self._value = np.asarray(value)
+
+    def detach(self):
+        return self
+
+    def cpu(self):
+        return self
+
+    def numpy(self):
+        return self._value
+
+
+def test_write_cancel_checkpoint_persists_ply_and_sidecar(tmp_path: Path):
+    params = {
+        "means": _ArrayTensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]),
+        "sh0": _ArrayTensor([[[0.1, 0.2, 0.3]], [[0.4, 0.5, 0.6]]]),
+        "shN": _ArrayTensor(np.zeros((2, 0, 3), dtype=np.float32)),
+        "opacities": _ArrayTensor([0.0, 1.0]),
+        "scales": _ArrayTensor(np.zeros((2, 3), dtype=np.float32)),
+        "quats": _ArrayTensor([[1.0, 0.0, 0.0, 0.0], [1.0, 0.0, 0.0, 0.0]]),
+    }
+    output_path = tmp_path / "splat.ply"
+
+    result = splat_trainer._write_cancel_checkpoint(
+        output_path,
+        params,
+        completed_iterations=125,
+        metrics=[{"iter": 100, "psnr": 12.3, "ssim": 0.45}],
+    )
+
+    assert result == output_path
+    assert output_path.exists()
+    cloud = splat_trainer.ply_io.read_3dgs_ply(output_path)
+    assert cloud.means.shape == (2, 3)
+    sidecar = json.loads((tmp_path / "splat.ply.checkpoint.json").read_text())
+    assert sidecar == {
+        "reason": "cancelled_by_user",
+        "completed_iterations": 125,
+        "gaussian_count": 2,
+        "training_metrics": [{"iter": 100, "psnr": 12.3, "ssim": 0.45}],
+    }

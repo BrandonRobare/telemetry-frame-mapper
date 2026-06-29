@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useMapStore } from './shared/stores/mapStore'
 import { useSettingsStore } from './features/settings/settingsStore'
@@ -80,8 +80,9 @@ function renderTab(tab: Tab, onImport: () => void) {
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<Tab>(() => {
-    const d = useSettingsStore.getState().defaultTab
-    return TABS.some((t) => t.id === d) ? (d as Tab) : 'overview'
+    const { defaultTab, lastActiveTab } = useSettingsStore.getState()
+    const initialTab = lastActiveTab ?? defaultTab
+    return TABS.some((t) => t.id === initialTab) ? (initialTab as Tab) : 'overview'
   })
   const [showImport, setShowImport] = useState(false)
   const { requestedTab, setRequestedTab } = useMapStore()
@@ -92,15 +93,21 @@ export default function App() {
   const toolsBtnRef = useRef<HTMLButtonElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
   const reducedMotion = useSettingsStore((s) => s.reducedMotion)
+  const setLastActiveTab = useSettingsStore((s) => s.setLastActiveTab)
+
+  const selectTab = useCallback((tab: Tab) => {
+    setActiveTab(tab)
+    setLastActiveTab(tab)
+  }, [setLastActiveTab])
 
   useEffect(() => {
     if (!requestedTab || !TABS.some((t) => t.id === requestedTab)) return
 
     queueMicrotask(() => {
-      setActiveTab(requestedTab as Tab)
+      selectTab(requestedTab as Tab)
       setRequestedTab(null)
     })
-  }, [requestedTab, setRequestedTab])
+  }, [requestedTab, selectTab, setRequestedTab])
 
   // Reflect the in-app "Reduced motion" setting onto the root so CSS (and the
   // glass effects) honor it, not just the OS-level prefers-reduced-motion.
@@ -138,7 +145,7 @@ export default function App() {
       >
         {/* Logo — a live pipeline hex meter; click to open Overview */}
         <button
-          onClick={() => setActiveTab('overview')}
+          onClick={() => selectTab('overview')}
           className="flex items-center gap-2 shrink-0 cursor-pointer bg-transparent border-none"
           style={{ padding: '0 20px 0 16px' }}
           title="Pipeline status — open Overview"
@@ -156,7 +163,7 @@ export default function App() {
             return (
               <button
                 key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
+                onClick={() => selectTab(tab.id)}
                 className="relative px-3 text-sm cursor-pointer border-none bg-transparent h-full flex items-center whitespace-nowrap"
                 style={{
                   color: active ? 'var(--text)' : 'var(--text-muted)',
@@ -225,7 +232,7 @@ export default function App() {
                     <button
                       key={tab.id}
                       role="menuitem"
-                      onClick={() => { setActiveTab(tab.id); setToolsOpen(false) }}
+                      onClick={() => { selectTab(tab.id); setToolsOpen(false) }}
                       className="w-full text-left text-sm cursor-pointer border-none flex items-center"
                       style={{
                         padding: '7px 10px',
@@ -273,7 +280,7 @@ export default function App() {
 
       {/* Telemetry HUD — persistent pipeline status when a session is loaded */}
       {selectedSessionId !== null && (
-        <StatusHud status={status} onGoToTab={(tab) => setActiveTab(tab as Tab)} />
+        <StatusHud status={status} onGoToTab={(tab) => selectTab(tab as Tab)} />
       )}
 
       {/* Tab content */}

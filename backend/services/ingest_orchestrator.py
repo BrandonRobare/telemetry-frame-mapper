@@ -119,7 +119,11 @@ def _run(session_id: int, folder: Path, db_factory) -> None:
             if img.usable:
                 usable += 1
 
-            if img.latitude and img.longitude and img.altitude_m:
+            if (
+                img.latitude is not None
+                and img.longitude is not None
+                and img.altitude_m is not None
+            ):
                 try:
                     fp = compute_footprint(
                         lat=img.latitude,

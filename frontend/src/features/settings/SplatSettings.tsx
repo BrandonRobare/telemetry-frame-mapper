@@ -4,14 +4,16 @@ import InfoHint from '../../shared/components/InfoHint'
 import { AdvancedDisclosure } from './AdvancedDisclosure'
 import { useSettings, useUpdateSettings } from './api'
 import type { ReconstructionSettings, PresetConfig } from './api'
+import { hasValidationErrors, validatePresetConfig } from './settingsValidation'
 
 interface FieldProps {
   label: string
   hint?: string
   info?: string
+  error?: string
   children: React.ReactNode
 }
-function Field({ label, hint, info, children }: FieldProps) {
+function Field({ label, hint, info, error, children }: FieldProps) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
       <label className="text-xs font-medium" style={{ color: 'var(--text)', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
@@ -22,6 +24,11 @@ function Field({ label, hint, info, children }: FieldProps) {
       {hint && (
         <span className="text-xs" style={{ color: 'var(--text-faint)' }}>
           {hint}
+        </span>
+      )}
+      {error && (
+        <span className="text-xs" style={{ color: 'var(--danger)' }}>
+          {error}
         </span>
       )}
     </div>
@@ -71,6 +78,10 @@ export default function SplatSettings() {
       { ...cfg, ...(presetEdits[name] ?? {}) },
     ])
   )
+  const validationErrors: Record<string, ReturnType<typeof validatePresetConfig>> = Object.fromEntries(
+    Object.entries(displayPresets).map(([name, cfg]) => [name, validatePresetConfig(cfg)])
+  )
+  const hasErrors = Object.values(validationErrors).some(hasValidationErrors)
 
   function updatePreset<K extends keyof PresetConfig>(
     name: string,
@@ -84,6 +95,7 @@ export default function SplatSettings() {
   }
 
   function handleSave() {
+    if (hasErrors) return
     const existing = settings?.reconstruction ?? DEFAULT_RECONSTRUCTION
     const updatedPresets: Record<string, PresetConfig> = Object.fromEntries(
       Object.entries(serverPresets).map(([name, cfg]) => [
@@ -117,7 +129,7 @@ export default function SplatSettings() {
               {name} preset
             </h4>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              <Field label="Iterations">
+              <Field label="Iterations" error={validationErrors[name]?.iterations}>
                 <input
                   type="number"
                   min={100}
@@ -128,7 +140,11 @@ export default function SplatSettings() {
                 />
               </Field>
 
-              <Field label="Max Frames" hint="Leave blank for no limit (full preset)">
+              <Field
+                label="Max Frames"
+                hint="Leave blank for no limit (full preset)"
+                error={validationErrors[name]?.max_frames}
+              >
                 <input
                   type="number"
                   min={1}
@@ -150,6 +166,7 @@ export default function SplatSettings() {
                 <Field
                   label="Max Gaussians"
                   info="Caps the splat count; higher is sharper but uses more VRAM."
+                  error={validationErrors[name]?.max_gaussians}
                 >
                   <input
                     type="number"
@@ -163,12 +180,13 @@ export default function SplatSettings() {
 
                 <Field
                   label="SH Degree"
-                  hint="Spherical harmonics degree (0–3)"
+                  hint="Spherical harmonics degree (1-3)"
                   info="Higher captures more view-dependent colour at higher memory cost."
+                  error={validationErrors[name]?.sh_degree}
                 >
                   <input
                     type="number"
-                    min={0}
+                    min={1}
                     max={3}
                     value={p.sh_degree}
                     onChange={(e) => updatePreset(name, 'sh_degree', Number(e.target.value))}
@@ -180,6 +198,7 @@ export default function SplatSettings() {
                   label="Downscale Factor"
                   hint="Image downscaling before training (1 = full res)"
                   info="Trains on downscaled images for speed; 1 = full resolution."
+                  error={validationErrors[name]?.downscale_factor}
                 >
                   <input
                     type="number"
@@ -201,7 +220,7 @@ export default function SplatSettings() {
           <Button
             variant="primary"
             size="sm"
-            disabled={updateMutation.isPending}
+            disabled={updateMutation.isPending || hasErrors}
             onClick={handleSave}
           >
             {updateMutation.isPending ? 'Saving…' : 'Save changes'}

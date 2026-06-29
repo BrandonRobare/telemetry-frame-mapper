@@ -170,3 +170,19 @@ def get_render_config(path: str = "config.yaml") -> dict:
     }
     render = data.get("render", {})
     return {**defaults, **render}
+
+
+def get_upload_limits_config(path: str = "config.yaml") -> dict:
+    """Return upload size limits from config.yaml with defaults applied."""
+    try:
+        with open(path) as f:
+            data = yaml.safe_load(f) or {}
+    except FileNotFoundError:
+        data = {}
+
+    defaults = {
+        "flight_log_max_bytes": 10 * 1024 * 1024,
+        "srt_max_bytes": 10 * 1024 * 1024,
+    }
+    upload_limits = data.get("upload_limits", {})
+    return {**defaults, **upload_limits}

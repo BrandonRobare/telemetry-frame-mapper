@@ -4,14 +4,16 @@ import InfoHint from '../../shared/components/InfoHint'
 import { AdvancedDisclosure } from './AdvancedDisclosure'
 import { useSettings, useUpdateSettings } from './api'
 import type { ReconstructionSettings as ReconstructionSettingsType } from './api'
+import { hasValidationErrors, validateReconstructionSettings } from './settingsValidation'
 
 interface FieldProps {
   label: string
   hint?: string
   info?: string
+  error?: string
   children: React.ReactNode
 }
-function Field({ label, hint, info, children }: FieldProps) {
+function Field({ label, hint, info, error, children }: FieldProps) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
       <label className="text-xs font-medium" style={{ color: 'var(--text)', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
@@ -22,6 +24,11 @@ function Field({ label, hint, info, children }: FieldProps) {
       {hint && (
         <span className="text-xs" style={{ color: 'var(--text-faint)' }}>
           {hint}
+        </span>
+      )}
+      {error && (
+        <span className="text-xs" style={{ color: 'var(--danger)' }}>
+          {error}
         </span>
       )}
     </div>
@@ -66,6 +73,8 @@ export default function ReconstructionSettings() {
   const server = settings?.reconstruction ?? DEFAULT
   const form: ReconstructionSettingsType = { ...server, ...edits }
   const presetKeys = Object.keys(form.presets)
+  const validationErrors = validateReconstructionSettings(form)
+  const hasErrors = hasValidationErrors(validationErrors)
 
   function updateTop<K extends keyof Omit<ReconstructionSettingsType, 'presets'>>(
     key: K,
@@ -75,6 +84,7 @@ export default function ReconstructionSettings() {
   }
 
   function handleSave() {
+    if (hasErrors) return
     updateMutation.mutate(
       { reconstruction: form },
       { onSuccess: () => setEdits({}) }
@@ -88,7 +98,7 @@ export default function ReconstructionSettings() {
       </p>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-        <Field label="Default Preset">
+        <Field label="Default Preset" error={validationErrors.default_preset}>
           <select
             value={form.default_preset}
             onChange={(e) => updateTop('default_preset', e.target.value)}
@@ -102,7 +112,11 @@ export default function ReconstructionSettings() {
           </select>
         </Field>
 
-        <Field label="COLMAP Threads" hint="Number of parallel threads for COLMAP feature extraction">
+        <Field
+          label="COLMAP Threads"
+          hint="Number of parallel threads for COLMAP feature extraction"
+          error={validationErrors.colmap_threads}
+        >
           <input
             type="number"
             min={1}
@@ -117,6 +131,7 @@ export default function ReconstructionSettings() {
           label="SIFT Max Features"
           hint="Maximum features extracted per image"
           info="More features = more detail and slower matching. 8192 is a good default."
+          error={validationErrors.sift_max_features}
         >
           <input
             type="number"
@@ -133,6 +148,7 @@ export default function ReconstructionSettings() {
         <Field
           label="Feature Matcher"
           info="Sequential matches neighbouring frames (fast, for video); Exhaustive matches all pairs (slower, more robust)."
+          error={validationErrors.matcher}
         >
           <select
             value={form.matcher}
@@ -147,6 +163,7 @@ export default function ReconstructionSettings() {
         <Field
           label="Camera Model"
           info="PINHOLE solves focal length + principal point; SIMPLE_PINHOLE assumes a centered principal point."
+          error={validationErrors.camera_model}
         >
           <select
             value={form.camera_model}
@@ -164,7 +181,7 @@ export default function ReconstructionSettings() {
           <Button
             variant="primary"
             size="sm"
-            disabled={updateMutation.isPending}
+            disabled={updateMutation.isPending || hasErrors}
             onClick={handleSave}
           >
             {updateMutation.isPending ? 'Saving…' : 'Save changes'}
