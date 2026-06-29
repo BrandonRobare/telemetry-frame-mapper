@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Button } from '../../shared/components/Button'
+import InfoHint from '../../shared/components/InfoHint'
 import { AdvancedDisclosure } from './AdvancedDisclosure'
 import { useSettings, useUpdateSettings } from './api'
 import type { ReconstructionSettings, PresetConfig } from './api'
@@ -8,14 +9,16 @@ import { hasValidationErrors, validatePresetConfig } from './settingsValidation'
 interface FieldProps {
   label: string
   hint?: string
+  info?: string
   error?: string
   children: React.ReactNode
 }
-function Field({ label, hint, error, children }: FieldProps) {
+function Field({ label, hint, info, error, children }: FieldProps) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-      <label className="text-xs font-medium" style={{ color: 'var(--text)' }}>
+      <label className="text-xs font-medium" style={{ color: 'var(--text)', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
         {label}
+        {info && <InfoHint text={info} />}
       </label>
       {children}
       {hint && (
@@ -112,7 +115,7 @@ export default function SplatSettings() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
       <p className="text-xs" style={{ color: 'var(--text-faint)', margin: 0 }}>
-        Applies to new splat training jobs only — running jobs are not affected.
+        Applies to new splat training jobs only. Running jobs are not affected.
       </p>
 
       {presetKeys.map((name) => {
@@ -160,7 +163,11 @@ export default function SplatSettings() {
               </Field>
 
               <AdvancedDisclosure>
-                <Field label="Max Gaussians" error={validationErrors[name]?.max_gaussians}>
+                <Field
+                  label="Max Gaussians"
+                  info="Caps the splat count; higher is sharper but uses more VRAM."
+                  error={validationErrors[name]?.max_gaussians}
+                >
                   <input
                     type="number"
                     min={1000}
@@ -173,7 +180,8 @@ export default function SplatSettings() {
 
                 <Field
                   label="SH Degree"
-                  hint="Spherical harmonics degree (1–3)"
+                  hint="Spherical harmonics degree (1-3)"
+                  info="Higher captures more view-dependent colour at higher memory cost."
                   error={validationErrors[name]?.sh_degree}
                 >
                   <input
@@ -189,6 +197,7 @@ export default function SplatSettings() {
                 <Field
                   label="Downscale Factor"
                   hint="Image downscaling before training (1 = full res)"
+                  info="Trains on downscaled images for speed; 1 = full resolution."
                   error={validationErrors[name]?.downscale_factor}
                 >
                   <input

@@ -147,7 +147,7 @@ export default function MissionPlanningSettings() {
           />
         </Field>
 
-        <Field label="Side Overlap" hint="0–1 (e.g. 0.70 = 70%)" error={validationErrors.desired_side_overlap}>
+        <Field label="Side Overlap" hint="0-1 (e.g. 0.70 = 70%)" error={validationErrors.desired_side_overlap}>
           <input
             type="number"
             step={0.01}
@@ -159,7 +159,7 @@ export default function MissionPlanningSettings() {
           />
         </Field>
 
-        <Field label="Forward Overlap" hint="0–1 (e.g. 0.80 = 80%)" error={validationErrors.desired_forward_overlap}>
+        <Field label="Forward Overlap" hint="0-1 (e.g. 0.80 = 80%)" error={validationErrors.desired_forward_overlap}>
           <input
             type="number"
             step={0.01}
@@ -204,7 +204,7 @@ export default function MissionPlanningSettings() {
           />
         </Field>
 
-        <Field label="Mission Buffer" hint="0–1 safety margin on battery range" error={validationErrors.mission_buffer_pct}>
+        <Field label="Mission Buffer" hint="0-1 safety margin on battery range" error={validationErrors.mission_buffer_pct}>
           <input
             type="number"
             step={0.01}

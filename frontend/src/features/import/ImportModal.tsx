@@ -50,14 +50,30 @@ export default function ImportModal({ open, onClose }: ImportModalProps) {
   const { mutate, isPending, isImporting, progress, data: importedSession, isError, error, reset } = useImportSession()
   const { setSession } = useMapStore()
   const nameRef = useRef<HTMLInputElement>(null)
+  const dialogRef = useRef<HTMLDivElement>(null)
+  const prevFocusRef = useRef<HTMLElement | null>(null)
   const backendStatus = useBackendHealth(open)
 
-  // Auto-focus name input when modal opens
+  // Auto-focus name input when modal opens; remember what to restore focus to.
   useEffect(() => {
     if (open) {
+      prevFocusRef.current = document.activeElement as HTMLElement
       setTimeout(() => nameRef.current?.focus(), 50)
     }
   }, [open])
+
+  // Keep Tab focus inside the dialog.
+  function trapTab(e: React.KeyboardEvent) {
+    if (e.key !== 'Tab' || !dialogRef.current) return
+    const nodes = dialogRef.current.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), input:not([disabled]), [href], select, textarea, [tabindex]:not([tabindex="-1"])',
+    )
+    if (nodes.length === 0) return
+    const first = nodes[0]
+    const last = nodes[nodes.length - 1]
+    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus() }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus() }
+  }
 
   // When the background import finishes successfully, switch session and close
   useEffect(() => {
@@ -86,6 +102,7 @@ export default function ImportModal({ open, onClose }: ImportModalProps) {
     setPathError(null)
     reset()
     onClose()
+    prevFocusRef.current?.focus?.()
   }
 
   function handleSubmit(e: React.FormEvent) {
@@ -107,9 +124,9 @@ export default function ImportModal({ open, onClose }: ImportModalProps) {
   const isBusy = isPending || isImporting
   const backendDown = backendStatus === 'down'
   const errorMessage = isError
-    ? (error as Error)?.message ?? 'Import failed'
+    ? (error as Error)?.message ?? 'Import failed. Check the folder path and that the backend is running.'
     : progress?.status === 'error'
-    ? 'Import pipeline failed on the server'
+    ? 'Import pipeline failed on the server. Check the backend logs and try again.'
     : null
 
   if (!open) return null
@@ -129,14 +146,16 @@ export default function ImportModal({ open, onClose }: ImportModalProps) {
     >
       {/* Dialog box */}
       <div
+        ref={dialogRef}
+        onKeyDown={trapTab}
         style={{
           background: 'var(--surface)',
-          border: '1px solid var(--border)',
-          borderRadius: 8,
+          border: '1px solid var(--border-strong)',
+          borderRadius: 2,
           width: 440,
           maxWidth: 'calc(100vw - 32px)',
           padding: '24px 28px',
-          boxShadow: '0 20px 60px rgba(0,0,0,0.4)',
+          boxShadow: '0 24px 60px -20px rgba(74,52,30,0.55)',
           position: 'relative',
         }}
       >
@@ -209,9 +228,12 @@ export default function ImportModal({ open, onClose }: ImportModalProps) {
               id="import-name"
               ref={nameRef}
               type="text"
+              name="session-name"
+              autoComplete="off"
+              spellCheck={false}
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. Field A — 2026-05-02"
+              placeholder="e.g. Field A, 2026-05-02"
               disabled={isBusy}
               style={{
                 width: '100%', boxSizing: 'border-box',
@@ -222,7 +244,6 @@ export default function ImportModal({ open, onClose }: ImportModalProps) {
                 color: 'var(--text)',
                 fontSize: 13,
                 fontFamily: 'inherit',
-                outline: 'none',
                 opacity: isBusy ? 0.6 : 1,
               }}
             />
@@ -239,6 +260,9 @@ export default function ImportModal({ open, onClose }: ImportModalProps) {
             <input
               id="import-folder"
               type="text"
+              name="folder-path"
+              autoComplete="off"
+              spellCheck={false}
               value={folderPath}
               onChange={(e) => { setFolderPath(e.target.value); setPathError(null) }}
               placeholder="e.g. 2026-05-02-field-a"
@@ -252,15 +276,14 @@ export default function ImportModal({ open, onClose }: ImportModalProps) {
                 color: 'var(--text)',
                 fontSize: 13,
                 fontFamily: 'inherit',
-                outline: 'none',
                 opacity: isBusy ? 0.6 : 1,
               }}
             />
             <p className="text-xs" style={{ color: 'var(--text-muted)', marginTop: 5 }}>
-              Relative path inside the server's imports/ folder — copy your JPEG files there first.
+              Relative path inside the server's imports/ folder. Copy your JPEG files there first.
             </p>
             {pathError && (
-              <p className="text-xs" style={{ color: 'var(--danger, #f85149)', marginTop: 4 }}>
+              <p className="text-xs" style={{ color: 'var(--danger)', marginTop: 4 }}>
                 {pathError}
               </p>
             )}

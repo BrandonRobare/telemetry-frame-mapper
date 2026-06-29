@@ -1,4 +1,5 @@
 import type { CSSProperties } from 'react'
+import PointField from './PointField'
 
 interface SkeletonProps {
   width?: number | string
@@ -61,6 +62,53 @@ export function SkeletonCard({ style }: { style?: CSSProperties }) {
       <Skeleton width="50%" height={11} />
       <div style={{ height: 10 }} />
       <SkeletonText lines={2} />
+    </div>
+  )
+}
+
+/** Reconstruction loader — a point cloud that builds sparse→dense, mirroring
+    what the pipeline does. The loading state for substantial fetches/jobs. */
+export function ReconstructLoader({
+  label = 'Reconstructing…',
+  height = 160,
+  count = 150,
+  style,
+}: {
+  label?: string
+  height?: number | string
+  count?: number
+  style?: CSSProperties
+}) {
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      aria-label={label}
+      style={{
+        position: 'relative',
+        height,
+        background: 'var(--surface-2)',
+        border: '1px solid var(--border)',
+        overflow: 'hidden',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        ...style,
+      }}
+    >
+      <PointField count={count} seed={19} animate="reconstruct" />
+      <span
+        style={{
+          position: 'relative',
+          zIndex: 1,
+          fontFamily: 'var(--font-mono)',
+          fontSize: 12,
+          letterSpacing: '0.02em',
+          color: 'var(--text-muted)',
+        }}
+      >
+        {label}
+      </span>
     </div>
   )
 }

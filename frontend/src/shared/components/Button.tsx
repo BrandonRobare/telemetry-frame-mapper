@@ -17,13 +17,13 @@ interface VariantStyle {
 
 const variantStyles: Record<ButtonVariant, VariantStyle> = {
   primary: {
-    bg: 'var(--accent-strong)',
-    hoverBg: 'var(--accent-hover)',
-    color: '#FFFDF7',
-    border: 'none',
+    bg: 'var(--grad-splat)',
+    hoverBg: 'var(--grad-splat-hover)',
+    color: 'var(--on-accent)',
+    border: '1px solid var(--accent-hover)',
   },
   ghost: {
-    bg: 'transparent',
+    bg: 'var(--surface)',
     hoverBg: 'var(--surface-2)',
     color: 'var(--text)',
     border: '1px solid var(--border-strong)',
@@ -51,14 +51,17 @@ export function Button({
 }: ButtonProps) {
   const [hover, setHover] = useState(false);
   const v = variantStyles[variant];
+  const lifted = !disabled && hover;
   return (
     <button
       disabled={disabled}
-      className={`rounded font-medium transition-all duration-150 active:scale-[0.98] ${sizeClasses[size]} ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'} ${className}`}
+      className={`font-medium transition-colors duration-150 active:scale-[0.98] ${sizeClasses[size]} ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'} ${className}`}
       style={{
-        background: !disabled && hover ? v.hoverBg : v.bg,
+        background: lifted ? v.hoverBg : v.bg,
         color: v.color,
         border: v.border,
+        borderRadius: 'var(--edge)',
+        fontFamily: 'var(--font-display)',
       }}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}

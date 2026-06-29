@@ -6,6 +6,7 @@ import { useToast } from '../../shared/hooks/useToast'
 import { useMapStore } from '../../shared/stores/mapStore'
 import type { ComparisonCell, ComparisonDiff, Job, Session, SessionComparison } from '../../types/api'
 import { formatComparisonSummary, normalizeCellsForOverlay, visibleComparisonCells } from './formatDiff'
+import TabHeader from '../../shared/components/TabHeader'
 
 const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
 
@@ -148,10 +149,15 @@ export default function CompareTab() {
   const canCompare = !!recA && !!recB && recA.id !== recB.id
 
   return (
-    <div className="flex-1 overflow-y-auto p-6" style={{ color: 'var(--text)' }}>
+    <div className="flex flex-col flex-1 overflow-hidden">
+      <TabHeader
+        title="Compare"
+        description="Diff two completed reconstructions to see what changed."
+      />
+      <div className="flex-1 overflow-y-auto p-6" style={{ color: 'var(--text)' }}>
       <div className="mx-auto flex flex-col gap-6" style={{ maxWidth: 980 }}>
         <section
-          className="rounded-lg p-5 flex flex-col gap-4"
+          className="p-5 flex flex-col gap-4"
           style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}
         >
           <h2 className="text-base font-semibold" style={{ color: 'var(--text)', margin: 0 }}>
@@ -211,7 +217,7 @@ export default function CompareTab() {
         </section>
 
         <section
-          className="rounded-lg p-5 flex flex-col gap-4"
+          className="p-5 flex flex-col gap-4"
           style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}
         >
           <div className="flex items-center justify-between gap-4">
@@ -264,6 +270,7 @@ export default function CompareTab() {
           <DiffOverlay cells={visibleCells} />
         </section>
       </div>
+    </div>
     </div>
   )
 }

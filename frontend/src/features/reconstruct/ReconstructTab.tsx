@@ -8,6 +8,8 @@ import {
 import { useMapStore } from '../../shared/stores/mapStore'
 import { useToast } from '../../shared/hooks/useToast'
 import { Button } from '../../shared/components/Button'
+import TabHeader from '../../shared/components/TabHeader'
+import EmptyState from '../../shared/components/EmptyState'
 import { formatEta } from '../../shared/time'
 import type { Job } from '../../types/api'
 
@@ -79,7 +81,7 @@ function StatusBadge({ status }: { status: string }) {
 // ---- main component ----
 
 export default function ReconstructTab() {
-  const { selectedSessionId } = useMapStore()
+  const { selectedSessionId, setRequestedTab } = useMapStore()
   const { addToast } = useToast()
   const qc = useQueryClient()
 
@@ -123,19 +125,29 @@ export default function ReconstructTab() {
 
   if (selectedSessionId === null) {
     return (
-      <div className="flex-1 flex items-center justify-center" style={{ color: 'var(--text-muted)' }}>
-        Select a session first
-      </div>
+      <EmptyState
+        title="No session selected"
+        description="Choose a session to run COLMAP alignment and Gaussian-splat training."
+        actionLabel="Open Overview"
+        onAction={() => setRequestedTab('overview')}
+      />
     )
   }
 
   return (
-    <div className="flex-1 overflow-y-auto p-6" style={{ color: 'var(--text)' }}>
+    <div className="flex flex-col flex-1 overflow-hidden">
+      <TabHeader
+        title="Reconstruct"
+        description="Run COLMAP alignment and Gaussian-splat training for this session."
+        nextTab="splat"
+        nextLabel="View result"
+      />
+      <div className="flex-1 overflow-y-auto p-6" style={{ color: 'var(--text)' }}>
       <div className="mx-auto flex flex-col gap-6" style={{ maxWidth: 720 }}>
 
         {/* ---- Start card ---- */}
         <section
-          className="rounded-lg p-5 flex flex-col gap-4"
+          className="p-5 flex flex-col gap-4"
           style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}
         >
           <h2 className="text-base font-semibold" style={{ color: 'var(--text)', margin: 0 }}>
@@ -161,7 +173,7 @@ export default function ReconstructTab() {
                   style={{ accentColor: 'var(--accent)' }}
                 />
                 <span style={{ color: preset === p ? 'var(--text)' : 'var(--text-muted)' }}>
-                  {p === 'quick' ? 'Quick — fewer iterations, faster' : 'Full — best quality, slower'}
+                  {p === 'quick' ? 'Quick: fewer iterations, faster' : 'Full: best quality, slower'}
                 </span>
               </label>
             ))}
@@ -170,7 +182,7 @@ export default function ReconstructTab() {
           {/* Target area */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             <label className="text-xs" style={{ color: 'var(--text-muted)' }}>
-              Target area (optional — crops images to polygon before COLMAP)
+              Target area (optional, crops images to polygon before COLMAP)
             </label>
             <select
               value={targetAreaId ?? ''}
@@ -181,7 +193,7 @@ export default function ReconstructTab() {
                 fontSize: 13, fontFamily: 'inherit', maxWidth: 280,
               }}
             >
-              <option value="">No crop — use all usable frames</option>
+              <option value="">No crop: use all usable frames</option>
               {(targetAreas ?? []).map((ta) => (
                 <option key={ta.id} value={ta.id}>{ta.name}</option>
               ))}
@@ -205,12 +217,12 @@ export default function ReconstructTab() {
         {/* ---- Active job progress ---- */}
         {activeJob && (
           <section
-            className="rounded-lg p-5 flex flex-col gap-3"
+            className="p-5 flex flex-col gap-3"
             style={{ background: 'var(--surface)', border: '1px solid var(--accent)' }}
           >
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <h2 className="text-base font-semibold" style={{ color: 'var(--text)', margin: 0 }}>
-                Reconstruction #{activeJob.id} — In Progress
+                Reconstruction #{activeJob.id}: In Progress
               </h2>
               <button
                 onClick={() => cancelMutation.mutate(activeJob.id)}
@@ -255,20 +267,20 @@ export default function ReconstructTab() {
         {/* ---- History ---- */}
         {sessionJobs.length > 0 && (
           <section
-            className="rounded-lg p-5 flex flex-col gap-3"
+            className="p-5 flex flex-col gap-3"
             style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}
           >
             <h2 className="text-base font-semibold" style={{ color: 'var(--text)', margin: 0 }}>
               History
             </h2>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {sessionJobs.map((job) => (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 0, borderTop: '1px solid var(--border)' }}>
+              {sessionJobs.map((job, idx) => (
                 <div
                   key={job.id}
                   style={{
                     display: 'flex', alignItems: 'center', gap: 10,
-                    background: 'var(--surface-2)', border: '1px solid var(--border)',
-                    borderRadius: 'var(--radius-md)', padding: '10px 12px',
+                    padding: '10px 2px',
+                    borderBottom: idx < sessionJobs.length - 1 ? '1px solid var(--border)' : 'none',
                   }}
                 >
                   <span className="text-xs" style={{ color: 'var(--text-muted)', minWidth: 28 }}>
@@ -314,6 +326,7 @@ export default function ReconstructTab() {
           </p>
         )}
       </div>
+    </div>
     </div>
   )
 }

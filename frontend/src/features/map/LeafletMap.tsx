@@ -62,7 +62,7 @@ export default function LeafletMapView({ footprints, coverage, isLoading, error 
             color: 'var(--danger)',
           }}
         >
-          Could not load footprints — is the backend running?
+          Couldn't load the map. Check that the backend is running, then reload.
         </div>
       </div>
     )

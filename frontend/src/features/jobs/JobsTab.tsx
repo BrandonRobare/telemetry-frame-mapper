@@ -8,6 +8,7 @@ import {
 import { formatEta } from '../../shared/time'
 import type { Job, SystemResources } from '../../types/api'
 import { SkeletonRow } from '../../shared/components/Skeleton'
+import TabHeader from '../../shared/components/TabHeader'
 import { Button } from '../../shared/components/Button'
 import { useToast } from '../../shared/hooks/useToast'
 import { filterReconstructionLogLines } from './logPanel'
@@ -243,6 +244,10 @@ export default function JobsTab() {
 
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
+      <TabHeader
+        title="Jobs"
+        description="Every reconstruction job across all sessions, with live system resources."
+      />
       <ResourceBar />
       <div className="flex-1 overflow-y-auto p-6" style={{ color: 'var(--text)' }}>
         <div className="mx-auto" style={{ maxWidth: 800 }}>
