@@ -96,11 +96,12 @@ export default function SettingsTab() {
                 key={sec.id}
                 onClick={() => setActive(sec.id)}
                 data-testid={`settings-nav-${sec.id}`}
-                className="text-left rounded cursor-pointer border-none"
+                className="text-left cursor-pointer border-none"
                 style={{
                   padding: '8px 10px',
                   background: isActive ? 'var(--accent-soft)' : 'transparent',
                   color: isActive ? 'var(--accent-strong)' : 'var(--text-muted)',
+                  borderLeft: isActive ? '2px solid var(--accent)' : '2px solid transparent',
                   fontSize: 13,
                   fontFamily: 'inherit',
                   fontWeight: isActive ? 500 : 400,
@@ -131,7 +132,7 @@ export default function SettingsTab() {
             type="button"
             onClick={handleReset}
             disabled={resetMutation.isPending}
-            className="text-left rounded cursor-pointer border-none w-full"
+            className="text-left cursor-pointer border-none w-full"
             style={{
               padding: '7px 10px',
               background: 'transparent',

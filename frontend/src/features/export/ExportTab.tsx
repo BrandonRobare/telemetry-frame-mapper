@@ -4,6 +4,8 @@ import { get, post } from '../../shared/api/client'
 import { useMapStore } from '../../shared/stores/mapStore'
 import { useToast } from '../../shared/hooks/useToast'
 import { Button } from '../../shared/components/Button'
+import TabHeader from '../../shared/components/TabHeader'
+import EmptyState from '../../shared/components/EmptyState'
 import type { Session, Image, Job, MeshStatus } from '../../types/api'
 
 const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
@@ -80,8 +82,8 @@ function MeshExportCard({ job }: { job: Job }) {
 
   return (
     <div
-      className="rounded px-3 py-3 flex flex-col gap-3"
-      style={{ background: 'var(--surface-2)', border: '1px solid var(--border)' }}
+      className="py-3 flex flex-col gap-3"
+      style={{ borderBottom: '1px solid var(--border)' }}
     >
       <div className="flex items-center gap-3">
         <div style={{ flex: 1, minWidth: 0 }}>
@@ -105,10 +107,12 @@ function MeshExportCard({ job }: { job: Job }) {
 
       {running && (
         <div style={{ height: 5, background: 'var(--surface-2)', borderRadius: 3, overflow: 'hidden' }}>
+          {/* Mesh export reports no percentage — show an indeterminate bar. */}
           <div
+            className="tg-indeterminate"
             style={{
               height: '100%',
-              width: '55%',
+              width: '40%',
               background: 'var(--accent)',
               borderRadius: 3,
             }}
@@ -171,7 +175,7 @@ const downloadLinkStyle: CSSProperties = {
 // ---- main component ----
 
 export default function ExportTab() {
-  const { selectedSessionId } = useMapStore()
+  const { selectedSessionId, setRequestedTab } = useMapStore()
   const { addToast } = useToast()
 
   const { data: session, isLoading: sessionLoading } = useSession(selectedSessionId)
@@ -243,12 +247,12 @@ export default function ExportTab() {
   // ---- guard: no session selected ----
   if (selectedSessionId === null) {
     return (
-      <div
-        className="flex-1 flex items-center justify-center"
-        style={{ color: 'var(--text-muted)' }}
-      >
-        Select a session first
-      </div>
+      <EmptyState
+        title="No session selected"
+        description="Choose a session to export its orthophoto, point cloud, mesh, or flythrough."
+        actionLabel="Open Overview"
+        onAction={() => setRequestedTab('overview')}
+      />
     )
   }
 
@@ -270,17 +274,22 @@ export default function ExportTab() {
     : null
 
   return (
-    <div
-      className="flex-1 overflow-y-auto p-6"
-      style={{ color: 'var(--text)' }}
-    >
+    <div className="flex flex-col flex-1 overflow-hidden">
+      <TabHeader
+        title="Export"
+        description="Download orthophotos, point clouds, meshes, and flythroughs."
+      />
+      <div
+        className="flex-1 overflow-y-auto p-6"
+        style={{ color: 'var(--text)' }}
+      >
       <div
         className="mx-auto flex flex-col gap-6"
         style={{ maxWidth: 720 }}
       >
         {/* ---- Session summary card ---- */}
         <section
-          className="rounded-lg p-5 flex flex-col gap-3"
+          className="p-5 flex flex-col gap-3"
           style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}
         >
           <h2
@@ -315,7 +324,7 @@ export default function ExportTab() {
 
         {/* ---- WebODM Export card ---- */}
         <section
-          className="rounded-lg p-5 flex flex-col gap-4"
+          className="p-5 flex flex-col gap-4"
           style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}
         >
           <div>
@@ -347,7 +356,7 @@ export default function ExportTab() {
 
             {webodmResult && (
               <div
-                className="rounded px-3 py-2 text-sm flex flex-col gap-0.5"
+                className="px-3 py-2 text-sm flex flex-col gap-0.5"
                 style={{ background: 'var(--surface-2)', border: '1px solid var(--border)' }}
               >
                 <span style={{ color: 'var(--success)', fontWeight: 600 }}>
@@ -366,7 +375,7 @@ export default function ExportTab() {
 
         {/* ---- GeoJSON Export card ---- */}
         <section
-          className="rounded-lg p-5 flex flex-col gap-4"
+          className="p-5 flex flex-col gap-4"
           style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}
         >
           <div>
@@ -396,7 +405,7 @@ export default function ExportTab() {
 
         {/* ---- Point Cloud Export card ---- */}
         <section
-          className="rounded-lg p-5 flex flex-col gap-4"
+          className="p-5 flex flex-col gap-4"
           style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}
         >
           <div>
@@ -426,11 +435,13 @@ export default function ExportTab() {
             </p>
           )}
 
-          {(completedReconstructions ?? []).map((job) => (
+          {(completedReconstructions ?? []).length > 0 && (
+          <div style={{ borderTop: '1px solid var(--border)' }}>
+          {(completedReconstructions ?? []).map((job, idx, arr) => (
             <div
               key={job.id}
-              className="rounded px-3 py-2 flex items-center gap-3"
-              style={{ background: 'var(--surface-2)', border: '1px solid var(--border)' }}
+              className="py-2.5 flex items-center gap-3"
+              style={{ borderBottom: idx < arr.length - 1 ? '1px solid var(--border)' : 'none' }}
             >
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div className="text-sm" style={{ color: 'var(--text)', fontWeight: 600 }}>
@@ -458,11 +469,13 @@ export default function ExportTab() {
               </a>
             </div>
           ))}
+          </div>
+          )}
         </section>
 
         {/* ---- Mesh Export card ---- */}
         <section
-          className="rounded-lg p-5 flex flex-col gap-4"
+          className="p-5 flex flex-col gap-4"
           style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}
         >
           <div>
@@ -492,10 +505,15 @@ export default function ExportTab() {
             </p>
           )}
 
+          {(completedReconstructions ?? []).length > 0 && (
+          <div style={{ borderTop: '1px solid var(--border)' }}>
           {(completedReconstructions ?? []).map((job) => (
             <MeshExportCard key={job.id} job={job} />
           ))}
+          </div>
+          )}
         </section>
+      </div>
       </div>
     </div>
   )

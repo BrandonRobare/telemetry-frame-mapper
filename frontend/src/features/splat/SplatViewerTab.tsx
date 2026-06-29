@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { get, post, del } from '../../shared/api/client'
 import { useMapStore } from '../../shared/stores/mapStore'
 import { Skeleton } from '../../shared/components/Skeleton'
+import EmptyState from '../../shared/components/EmptyState'
 import { easeOut } from '../../shared/motion'
 import type {
   Job,
@@ -260,7 +261,7 @@ function LabelPopover({ screenX, screenY, onSave, onCancel }: LabelPopoverProps)
         zIndex: 100,
         background: 'var(--surface)',
         border: '1px solid var(--border)',
-        borderRadius: 6,
+        borderRadius: 2,
         padding: '10px 12px',
         display: 'flex',
         flexDirection: 'column',
@@ -280,9 +281,8 @@ function LabelPopover({ screenX, screenY, onSave, onCancel }: LabelPopoverProps)
         }}
         placeholder="Label…"
         style={{
-          background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 4,
+          background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 2,
           color: 'var(--text)', fontSize: 12, padding: '4px 6px', fontFamily: 'inherit',
-          outline: 'none',
         }}
       />
       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -301,7 +301,7 @@ function LabelPopover({ screenX, screenY, onSave, onCancel }: LabelPopoverProps)
           style={{
             flex: 1, padding: '4px 0', borderRadius: 'var(--radius-sm)', border: 'none',
             background: label.trim() ? 'var(--accent-strong)' : 'var(--surface-2)',
-            color: label.trim() ? '#FFFDF7' : 'var(--text-muted)',
+            color: label.trim() ? 'var(--on-accent)' : 'var(--text-muted)',
             cursor: label.trim() ? 'pointer' : 'default',
             fontSize: 11, fontFamily: 'inherit',
           }}
@@ -311,7 +311,7 @@ function LabelPopover({ screenX, screenY, onSave, onCancel }: LabelPopoverProps)
         <button
           onClick={onCancel}
           style={{
-            flex: 1, padding: '4px 0', borderRadius: 4,
+            flex: 1, padding: '4px 0', borderRadius: 2,
             border: '1px solid var(--border)', background: 'none',
             color: 'var(--text-muted)', cursor: 'pointer', fontSize: 11, fontFamily: 'inherit',
           }}
@@ -506,7 +506,7 @@ function FlythroughControls({
   // dark-warm surface with light text rather than the light theme tokens.
   const btnStyle = {
     padding: '4px 8px',
-    borderRadius: 6,
+    borderRadius: 2,
     border: '1px solid rgba(255,255,255,0.18)',
     background: 'rgba(255,255,255,0.06)',
     color: '#D8D2C7',
@@ -1101,7 +1101,7 @@ function ViewerToolbar({
         title={title}
         onClick={() => onToolChange(active ? 'none' : tool)}
         style={{
-          padding: '4px 8px', borderRadius: 4, fontSize: 11,
+          padding: '4px 8px', borderRadius: 2, fontSize: 11,
           border: active ? '1px solid var(--accent)' : '1px solid var(--border)',
           background: active ? 'var(--accent-soft)' : 'var(--surface-2)',
           color: active ? 'var(--accent-strong)' : 'var(--text-muted)',
@@ -1214,7 +1214,7 @@ function AnnotationsList({ reconstructionId, annotations }: AnnotationsListProps
 // ---------------------------------------------------------------------------
 
 export default function SplatViewerTab() {
-  const { selectedSessionId, targetSessionId, setTargetSessionId, splitPaneActive, toggleSplitPane } = useMapStore()
+  const { selectedSessionId, targetSessionId, setTargetSessionId, splitPaneActive, toggleSplitPane, setRequestedTab } = useMapStore()
   const { data: allJobs, isLoading } = useAllJobsForSession(selectedSessionId)
   const [selectedJobId, setSelectedJobId] = useState<number | null>(null)
   const [showCoverageGaps, setShowCoverageGaps] = useState(false)
@@ -1285,9 +1285,12 @@ export default function SplatViewerTab() {
 
   if (selectedSessionId === null) {
     return (
-      <div className="flex-1 flex items-center justify-center" style={{ color: 'var(--text-muted)' }}>
-        Select a session first
-      </div>
+      <EmptyState
+        title="No session selected"
+        description="Choose a session with a completed reconstruction to explore it in 3D."
+        actionLabel="Open Overview"
+        onAction={() => setRequestedTab('overview')}
+      />
     )
   }
 

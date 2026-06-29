@@ -5,6 +5,7 @@ import { create } from 'zustand'
 // ---------------------------------------------------------------------------
 
 export type SettingsTab =
+  | 'overview'
   | 'map'
   | 'gps-sync'
   | 'review'

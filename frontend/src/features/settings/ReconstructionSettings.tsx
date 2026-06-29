@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Button } from '../../shared/components/Button'
+import InfoHint from '../../shared/components/InfoHint'
 import { AdvancedDisclosure } from './AdvancedDisclosure'
 import { useSettings, useUpdateSettings } from './api'
 import type { ReconstructionSettings as ReconstructionSettingsType } from './api'
@@ -7,13 +8,15 @@ import type { ReconstructionSettings as ReconstructionSettingsType } from './api
 interface FieldProps {
   label: string
   hint?: string
+  info?: string
   children: React.ReactNode
 }
-function Field({ label, hint, children }: FieldProps) {
+function Field({ label, hint, info, children }: FieldProps) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-      <label className="text-xs font-medium" style={{ color: 'var(--text)' }}>
+      <label className="text-xs font-medium" style={{ color: 'var(--text)', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
         {label}
+        {info && <InfoHint text={info} />}
       </label>
       {children}
       {hint && (
@@ -110,7 +113,11 @@ export default function ReconstructionSettings() {
           />
         </Field>
 
-        <Field label="SIFT Max Features" hint="Maximum features extracted per image">
+        <Field
+          label="SIFT Max Features"
+          hint="Maximum features extracted per image"
+          info="More features = more detail and slower matching. 8192 is a good default."
+        >
           <input
             type="number"
             min={256}
@@ -123,7 +130,10 @@ export default function ReconstructionSettings() {
       </div>
 
       <AdvancedDisclosure>
-        <Field label="Feature Matcher">
+        <Field
+          label="Feature Matcher"
+          info="Sequential matches neighbouring frames (fast, for video); Exhaustive matches all pairs (slower, more robust)."
+        >
           <select
             value={form.matcher}
             onChange={(e) => updateTop('matcher', e.target.value)}
@@ -134,7 +144,10 @@ export default function ReconstructionSettings() {
           </select>
         </Field>
 
-        <Field label="Camera Model">
+        <Field
+          label="Camera Model"
+          info="PINHOLE solves focal length + principal point; SIMPLE_PINHOLE assumes a centered principal point."
+        >
           <select
             value={form.camera_model}
             onChange={(e) => updateTop('camera_model', e.target.value)}

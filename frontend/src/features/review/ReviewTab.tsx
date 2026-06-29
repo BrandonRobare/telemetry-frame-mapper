@@ -1,7 +1,13 @@
-import { useState } from 'react'
+import { useState, useEffect, type CSSProperties } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { get, patch, post } from '../../shared/api/client'
 import { useMapStore } from '../../shared/stores/mapStore'
+import TabHeader from '../../shared/components/TabHeader'
+import EmptyState from '../../shared/components/EmptyState'
+import InfoHint from '../../shared/components/InfoHint'
+import { FrustumCard, FrustumMark } from '../../shared/components/FrustumCard'
+import { ReconstructLoader } from '../../shared/components/Skeleton'
+import { useToast } from '../../shared/hooks/useToast'
 import type { Image } from '../../types/api'
 
 const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
@@ -29,6 +35,36 @@ function useSetFrameSelection(sessionId: number | null) {
     mutationFn: (imageIds: number[]) =>
       post<void>('/reconstruction/frame-selection', { session_id: sessionId, image_ids: imageIds }),
     onSettled: () => qc.invalidateQueries({ queryKey: ['frame-selection', sessionId] }),
+  })
+}
+
+// Bulk flag/usable edit over many images in a single request (backend /images/bulk).
+function useBulkPatch(sessionId: number | null) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (body: { image_ids: number[]; flag?: string; usable?: boolean }) =>
+      patch<{ updated: number }>('/images/bulk', body),
+    onMutate: async (body) => {
+      await qc.cancelQueries({ queryKey: ['images', sessionId] })
+      const previous = qc.getQueryData<Image[]>(['images', sessionId])
+      const ids = new Set(body.image_ids)
+      qc.setQueryData<Image[]>(['images', sessionId], (old) =>
+        old?.map((im) =>
+          ids.has(im.id)
+            ? {
+                ...im,
+                ...(body.flag != null ? { flag: body.flag as Image['flag'] } : {}),
+                ...(body.usable != null ? { usable: body.usable } : {}),
+              }
+            : im,
+        ),
+      )
+      return { previous }
+    },
+    onError: (_e, _v, ctx) => {
+      if (ctx?.previous) qc.setQueryData(['images', sessionId], ctx.previous)
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey: ['images', sessionId] }),
   })
 }
 
@@ -82,11 +118,11 @@ function StatsBar({ images, activeFlag, onFlagClick, visibleCount, selectedCount
   const usableCount = images.filter((img) => img.usable).length
 
   const items: { label: string; flag: Image['flag']; count: number; color: string }[] = [
-    { label: 'Good',   flag: 'good',   count: counts.good,   color: '#4F6349' },
-    { label: 'Blurry', flag: 'blurry', count: counts.blurry, color: '#C8902F' },
-    { label: 'No GPS', flag: 'no_gps', count: counts.no_gps, color: '#7A6A4F' },
-    { label: 'Dark',   flag: 'dark',   count: counts.dark,   color: '#9A9078' },
-    { label: 'Bright', flag: 'bright', count: counts.bright, color: '#9A9078' },
+    { label: 'Good',   flag: 'good',   count: counts.good,   color: 'var(--success)' },
+    { label: 'Blurry', flag: 'blurry', count: counts.blurry, color: 'var(--warning-accent)' },
+    { label: 'No GPS', flag: 'no_gps', count: counts.no_gps, color: 'var(--tan-text)' },
+    { label: 'Dark',   flag: 'dark',   count: counts.dark,   color: 'var(--text-faint)' },
+    { label: 'Bright', flag: 'bright', count: counts.bright, color: 'var(--text-faint)' },
   ]
 
   return (
@@ -94,8 +130,9 @@ function StatsBar({ images, activeFlag, onFlagClick, visibleCount, selectedCount
       className="flex gap-6 items-center shrink-0 px-5 py-3 text-sm"
       style={{ background: 'var(--surface)', borderBottom: '1px solid var(--border)' }}
     >
-      <span style={{ color: 'var(--text-muted)', fontWeight: 500 }}>
-        {activeFlag ? `${visibleCount} / ${images.length}` : `${images.length}`} images
+      <span className="flex items-center gap-2" style={{ color: 'var(--text-muted)', fontWeight: 500 }}>
+        <FrustumMark size={15} color="var(--accent)" />
+        {activeFlag ? `${visibleCount} / ${images.length}` : `${images.length}`} frames
       </span>
       {items.map(({ label, flag, count, color }) => {
         const active = activeFlag === flag
@@ -112,7 +149,6 @@ function StatsBar({ images, activeFlag, onFlagClick, visibleCount, selectedCount
               cursor: 'pointer',
               fontFamily: 'inherit',
               fontSize: 'inherit',
-              outline: 'none',
               opacity: activeFlag && !active ? 0.45 : 1,
             }}
           >
@@ -148,12 +184,12 @@ function StatsBar({ images, activeFlag, onFlagClick, visibleCount, selectedCount
           fontFamily: 'inherit',
           fontSize: 'inherit',
           color: sortBy === 'reproj' ? 'var(--text)' : 'var(--text-muted)',
-          outline: 'none',
         }}
         title="Sort by reprojection error (ascending)"
       >
         ⊕ reproj
       </button>
+      <InfoHint text="Reprojection error: how far COLMAP's solved 3D point lands from where the camera actually saw it. Lower is better — under 1px is good." />
       <span style={{ marginLeft: 'auto', color: 'var(--text-muted)', fontSize: 12 }}>
         {selectedCount > 0 && (
           <span style={{ color: 'var(--accent-strong)', fontWeight: 600, marginRight: 8 }}>
@@ -177,6 +213,7 @@ interface CardProps {
 
 function ImageCard({ img, sessionId, isSelected, onSelect }: CardProps) {
   const qc = useQueryClient()
+  const addToast = useToast((s) => s.addToast)
 
   const flagMutation = useMutation({
     mutationFn: ({ id, flag }: { id: number; flag: string }) =>
@@ -216,7 +253,7 @@ function ImageCard({ img, sessionId, isSelected, onSelect }: CardProps) {
 
   return (
     <div
-      className="flex flex-col rounded overflow-hidden"
+      className="flex flex-col overflow-hidden"
       style={{
         background: 'var(--surface)',
         border: isSelected
@@ -226,7 +263,8 @@ function ImageCard({ img, sessionId, isSelected, onSelect }: CardProps) {
         minHeight: 152,
       }}
     >
-      {/* thumbnail */}
+      {/* thumbnail — framed as a camera frustum (the near image plane) */}
+      <FrustumCard opacity={img.usable ? 0.5 : 0.28}>
       <div
         className="flex items-center justify-center text-sm font-bold"
         style={{ height: 120, background: 'var(--surface-2)', overflow: 'hidden' }}
@@ -255,11 +293,26 @@ function ImageCard({ img, sessionId, isSelected, onSelect }: CardProps) {
           </span>
         )}
       </div>
+      </FrustumCard>
 
       {/* flag badge — top-right, clickable */}
       <button
-        onClick={() => flagMutation.mutate({ id: img.id, flag: nextFlag(img.flag) })}
+        onClick={() => {
+          const prev = img.flag
+          const next = nextFlag(prev)
+          flagMutation.mutate(
+            { id: img.id, flag: next },
+            {
+              onSuccess: () =>
+                addToast(`${img.filename} → ${FLAG_BADGE[next].label}`, 'info', {
+                  label: 'Undo',
+                  onClick: () => flagMutation.mutate({ id: img.id, flag: prev }),
+                }),
+            },
+          )
+        }}
         title="Click to cycle flag"
+        aria-label={`Flag: ${badge.label}, click to cycle`}
         disabled={flagMutation.isPending}
         style={{
           position: 'absolute', top: 6, right: 6,
@@ -319,7 +372,19 @@ function ImageCard({ img, sessionId, isSelected, onSelect }: CardProps) {
 
       {/* usable toggle */}
       <button
-        onClick={() => usableMutation.mutate({ id: img.id, usable: !img.usable })}
+        onClick={() => {
+          const prev = img.usable
+          usableMutation.mutate(
+            { id: img.id, usable: !prev },
+            {
+              onSuccess: () =>
+                addToast(`${img.filename} → ${!prev ? 'Usable' : 'Skip'}`, 'info', {
+                  label: 'Undo',
+                  onClick: () => usableMutation.mutate({ id: img.id, usable: prev }),
+                }),
+            },
+          )
+        }}
         disabled={usableMutation.isPending}
         style={{
           margin: '4px 8px 8px', padding: '3px 0', borderRadius: 'var(--radius-sm)',
@@ -329,6 +394,7 @@ function ImageCard({ img, sessionId, isSelected, onSelect }: CardProps) {
           opacity: usableMutation.isPending ? 0.6 : 1, fontFamily: 'inherit',
           width: 'calc(100% - 16px)',
         }}
+        aria-pressed={img.usable}
         title={img.usable ? 'Mark as skip' : 'Mark as usable'}
       >
         {img.usable ? '✓ Usable' : '✗ Skip'}
@@ -337,27 +403,101 @@ function ImageCard({ img, sessionId, isSelected, onSelect }: CardProps) {
   )
 }
 
+// ---- batch selection toolbar ----
+function BatchToolbar({
+  shownCount,
+  usableCount,
+  selectedCount,
+  onSelectAllShown,
+  onSelectUsable,
+  onClear,
+  onMarkUsable,
+  onMarkSkip,
+  onSetFlag,
+}: {
+  shownCount: number
+  usableCount: number
+  selectedCount: number
+  onSelectAllShown: () => void
+  onSelectUsable: () => void
+  onClear: () => void
+  onMarkUsable: () => void
+  onMarkSkip: () => void
+  onSetFlag: (flag: Image['flag']) => void
+}) {
+  // Keyboard shortcuts for fast selection on large flights (ignored while typing).
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      const t = e.target as HTMLElement | null
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return
+      if (e.metaKey || e.ctrlKey || e.altKey) return
+      if (e.key === 'a') { e.preventDefault(); onSelectAllShown() }
+      else if (e.key === 'u') { onSelectUsable() }
+      else if (e.key === 'Escape') { onClear() }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onSelectAllShown, onSelectUsable, onClear])
+
+  const btn: CSSProperties = {
+    background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)',
+    padding: '3px 9px', cursor: 'pointer', color: 'var(--text)', fontFamily: 'var(--font-display)', fontSize: 12,
+  }
+  const groupLabel: CSSProperties = {
+    fontSize: 11, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)', letterSpacing: '0.06em', textTransform: 'uppercase',
+  }
+  const divider = <span aria-hidden="true" style={{ width: 1, height: 14, background: 'var(--border)', margin: '0 2px', flexShrink: 0 }} />
+  return (
+    <div
+      className="flex items-center gap-2 px-5 py-1.5 shrink-0 overflow-x-auto tg-noscrollbar"
+      style={{ background: 'var(--surface)', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap' }}
+    >
+      <span style={groupLabel}>Select</span>
+      <button style={btn} onClick={onSelectAllShown}>All shown ({shownCount})</button>
+      <button style={btn} onClick={onSelectUsable}>Usable ({usableCount})</button>
+      <button style={{ ...btn, opacity: selectedCount === 0 ? 0.5 : 1, cursor: selectedCount === 0 ? 'default' : 'pointer' }} onClick={onClear} disabled={selectedCount === 0}>
+        Clear
+      </button>
+      {divider}
+      <span style={groupLabel}>Edit {shownCount} shown</span>
+      <button style={btn} onClick={onMarkUsable}>✓ Usable</button>
+      <button style={btn} onClick={onMarkSkip}>✗ Skip</button>
+      <span style={{ ...groupLabel, textTransform: 'none' }}>flag →</span>
+      <button style={btn} onClick={() => onSetFlag('good')}>Good</button>
+      <button style={btn} onClick={() => onSetFlag('blurry')}>Blurry</button>
+      <button style={btn} onClick={() => onSetFlag('no_gps')}>No GPS</button>
+      <span style={{ marginLeft: 'auto', paddingLeft: 12, fontSize: 11, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>
+        {selectedCount} selected · a · u · esc
+      </span>
+    </div>
+  )
+}
+
 // ---- main export ----
 export default function ReviewTab() {
-  const { selectedSessionId } = useMapStore()
+  const { selectedSessionId, setRequestedTab } = useMapStore()
   const { data: images, isLoading } = useImages(selectedSessionId)
   const { data: selectionData } = useFrameSelection(selectedSessionId)
   const setSelectionMutation = useSetFrameSelection(selectedSessionId)
+  const bulkMutation = useBulkPatch(selectedSessionId)
   const [activeFlag, setActiveFlag] = useState<Image['flag'] | null>(null)
   const [sortBy, setSortBy] = useState<'none' | 'reproj'>('none')
 
   if (selectedSessionId === null) {
     return (
-      <div className="flex-1 flex items-center justify-center" style={{ color: 'var(--text-muted)' }}>
-        Select a session first
-      </div>
+      <EmptyState
+        title="No session selected"
+        description="Pick a session from the top bar, or use + Import to add a flight. Review lets you flag frames and choose what to reconstruct."
+        actionLabel="Open Overview"
+        onAction={() => setRequestedTab('overview')}
+      />
     )
   }
 
   if (isLoading) {
     return (
-      <div className="flex-1 flex items-center justify-center" style={{ color: 'var(--text-muted)' }}>
-        Loading images…
+      <div className="flex-1 flex items-center justify-center p-6" style={{ background: 'var(--bg)' }}>
+        <ReconstructLoader label="Loading frames…" height={200} style={{ width: 'min(440px, 80%)' }} />
       </div>
     )
   }
@@ -373,9 +513,31 @@ export default function ReviewTab() {
     })
   }
   const selectedSet = new Set(selectionData?.image_ids ?? [])
+  const usableIds = list.filter((img) => img.usable).map((img) => img.id)
 
   function handleFlagClick(flag: Image['flag']) {
     setActiveFlag((prev) => (prev === flag ? null : flag))
+  }
+
+  function selectAllShown() {
+    setSelectionMutation.mutate(filtered.map((img) => img.id))
+  }
+  function selectUsable() {
+    setSelectionMutation.mutate(usableIds)
+  }
+  function clearSelection() {
+    setSelectionMutation.mutate([])
+  }
+
+  const shownIds = filtered.map((img) => img.id)
+  function markShownUsable() {
+    bulkMutation.mutate({ image_ids: shownIds, usable: true })
+  }
+  function markShownSkip() {
+    bulkMutation.mutate({ image_ids: shownIds, usable: false })
+  }
+  function setShownFlag(flag: Image['flag']) {
+    bulkMutation.mutate({ image_ids: shownIds, flag: flag ?? undefined })
   }
 
   function handleSelect(id: number, checked: boolean) {
@@ -387,6 +549,12 @@ export default function ReviewTab() {
 
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
+      <TabHeader
+        title="Review"
+        description="Flag blurry or no-GPS frames and choose which to reconstruct."
+        nextTab="reconstruct"
+        nextLabel="Reconstruct"
+      />
       <StatsBar
         images={list}
         activeFlag={activeFlag}
@@ -396,11 +564,22 @@ export default function ReviewTab() {
         sortBy={sortBy}
         onSortChange={setSortBy}
       />
+      <BatchToolbar
+        shownCount={filtered.length}
+        usableCount={usableIds.length}
+        selectedCount={selectedSet.size}
+        onSelectAllShown={selectAllShown}
+        onSelectUsable={selectUsable}
+        onClear={clearSelection}
+        onMarkUsable={markShownUsable}
+        onMarkSkip={markShownSkip}
+        onSetFlag={setShownFlag}
+      />
       <div
         className="flex-1 overflow-y-auto p-4"
         style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(4, 1fr)',
+          gridTemplateColumns: 'repeat(auto-fill, minmax(190px, 1fr))',
           gap: 12,
           alignContent: 'start',
         }}
