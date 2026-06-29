@@ -22,23 +22,38 @@ export function InfoHint({ text, label = 'More info' }: InfoHintProps) {
         onBlur={() => setOpen(false)}
         className="cursor-help"
         style={{
-          width: 14,
-          height: 14,
-          borderRadius: '50%',
-          border: '1px solid var(--border-strong)',
-          background: 'var(--surface-2)',
-          color: 'var(--text-muted)',
-          fontSize: 10,
-          fontWeight: 600,
-          lineHeight: 1,
+          // 24px hit target for touch / pointer accuracy; the visible mark
+          // stays a compact 14px circle inside.
+          width: 24,
+          height: 24,
+          padding: 0,
+          border: 'none',
+          background: 'transparent',
           display: 'inline-flex',
           alignItems: 'center',
           justifyContent: 'center',
-          padding: 0,
-          fontFamily: 'var(--font-display)',
         }}
       >
-        ?
+        <span
+          aria-hidden="true"
+          style={{
+            width: 14,
+            height: 14,
+            borderRadius: '50%',
+            border: '1px solid var(--border-strong)',
+            background: 'var(--surface-2)',
+            color: 'var(--text-muted)',
+            fontSize: 10,
+            fontWeight: 600,
+            lineHeight: 1,
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontFamily: 'var(--font-display)',
+          }}
+        >
+          ?
+        </span>
       </button>
       {open && (
         <span
