@@ -23,6 +23,7 @@ from .routers import coverage as coverage_router
 from .routers import export as export_router
 from .routers import flight_log as flight_log_router
 from .routers import footprints as footprints_router
+from .routers import georeferencing as georeferencing_router
 from .routers import images as images_router
 from .routers import jobs as jobs_router
 from .routers import plans as plans_router
@@ -57,6 +58,7 @@ app.include_router(srt_router.router)
 app.include_router(plans_router.router)
 app.include_router(images_router.router)
 app.include_router(export_router.router)
+app.include_router(georeferencing_router.router)
 app.include_router(session_log_router.router)
 app.include_router(footprints_router.router)
 app.include_router(reconstruction_router.router)
@@ -142,4 +144,3 @@ else:
         "frontend/dist not found - run 'npm run build' in frontend/ to serve the UI "
         "from the backend on one process, or use 'npm run dev' for development."
     )
-
