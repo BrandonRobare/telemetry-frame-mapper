@@ -42,6 +42,28 @@ def test_parse_srt_text_reads_gps_and_height() -> None:
     assert points[1].rel_alt_m == 102
 
 
+def test_parse_srt_text_reads_key_value_dji_format() -> None:
+    points = parse_srt_text(
+        """
+1
+00:00:00,000 --> 00:00:01,000
+[latitude: 41.1000] [longitude: -81.1000] [rel_alt: 100.0]
+
+2
+00:00:01,000 --> 00:00:02,000
+Lat: 41.2000 Lon: -81.0000 Alt: 102.0
+"""
+    )
+
+    assert len(points) == 2
+    assert points[0].lat == 41.1
+    assert points[0].lon == -81.1
+    assert points[0].rel_alt_m == 100
+    assert points[1].lat == 41.2
+    assert points[1].lon == -81.0
+    assert points[1].rel_alt_m == 102
+
+
 def test_interpolate_between_srt_points() -> None:
     points = parse_srt_text(SRT_TEXT)
 
@@ -53,5 +75,5 @@ def test_interpolate_between_srt_points() -> None:
 
 
 def test_parse_srt_text_rejects_missing_gps() -> None:
-    with pytest.raises(ValueError, match="Not enough GPS telemetry"):
+    with pytest.raises(ValueError, match="Supported DJI formats"):
         parse_srt_text("1\n00:00:00,000 --> 00:00:01,000\nno gps")

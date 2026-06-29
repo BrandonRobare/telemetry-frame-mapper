@@ -8,6 +8,7 @@ from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session as DBSession
 
+from ..core.config import get_config
 from ..db.database import get_db
 from ..db.models import Footprint, Image, Reconstruction, ReconstructionFrame
 
@@ -137,4 +138,11 @@ def get_thumb(image_id: int, db: DBSession = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Image not found")
     if not img.thumb_path:
         raise HTTPException(status_code=404, detail="Thumbnail not found")
-    return RedirectResponse(f"/{Path(img.thumb_path).as_posix()}")
+    thumb_path = Path(img.thumb_path)
+    if thumb_path.is_absolute():
+        processed_dir = Path(get_config().processed_dir).resolve()
+        try:
+            thumb_path = Path("processed") / thumb_path.resolve().relative_to(processed_dir)
+        except ValueError:
+            thumb_path = Path("processed") / thumb_path.name
+    return RedirectResponse(f"/{thumb_path.as_posix()}")

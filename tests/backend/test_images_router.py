@@ -178,3 +178,44 @@ def test_image_list_colmap_error_null_when_no_reconstruction(client):
     data = resp.json()
     target = next(d for d in data if d["filename"] == "lone.jpg")
     assert target["colmap_error_px"] is None
+
+
+def test_get_thumb_redirects_relative_thumb_path_unchanged(client):
+    _, img = _insert_session_and_image(client)
+
+    from backend.db.database import get_db
+    from backend.db.models import Image
+    from backend.main import app
+
+    db = next(app.dependency_overrides[get_db]())
+    db.query(Image).filter(Image.id == img.id).update({"thumb_path": "processed/1/thumbs/a.jpg"})
+    db.commit()
+
+    resp = client.get(f"/images/{img.id}/thumb", follow_redirects=False)
+
+    assert resp.status_code == 307
+    assert resp.headers["location"] == "/processed/1/thumbs/a.jpg"
+
+
+def test_get_thumb_redirects_absolute_processed_path_under_processed(client, tmp_path, monkeypatch):
+    _, img = _insert_session_and_image(client)
+    processed_dir = tmp_path / "processed-root"
+    thumb = processed_dir / "42" / "thumbs" / "frame.jpg"
+
+    from backend.db.database import get_db
+    from backend.db.models import Image
+    from backend.main import app
+
+    monkeypatch.setattr(
+        "backend.routers.images.get_config",
+        lambda: type("Cfg", (), {"processed_dir": str(processed_dir)})(),
+    )
+
+    db = next(app.dependency_overrides[get_db]())
+    db.query(Image).filter(Image.id == img.id).update({"thumb_path": str(thumb)})
+    db.commit()
+
+    resp = client.get(f"/images/{img.id}/thumb", follow_redirects=False)
+
+    assert resp.status_code == 307
+    assert resp.headers["location"] == "/processed/42/thumbs/frame.jpg"

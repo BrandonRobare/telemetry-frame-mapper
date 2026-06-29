@@ -35,9 +35,16 @@ def parse_srt_text(text: str) -> list[TelemetryPoint]:
         r"([+-]?\d+(?:\.\d+)?)\s*,\s*([+-]?\d+(?:\.\d+)?)\s*\)"
     )
     height_re = re.compile(r"(?:^|,\s*)H\s+([+-]?\d+(?:\.\d+)?)m")
+    key_value_re = re.compile(
+        r"\b(lat(?:itude)?|lon(?:gitude)?|rel[_\s-]?alt(?:itude)?|alt(?:itude)?)\b"
+        r"\s*[:=]\s*([+-]?\d+(?:\.\d+)?)",
+        re.IGNORECASE,
+    )
 
     points: list[TelemetryPoint] = []
     current_start = current_end = None
+    timed_blocks = 0
+    telemetry_like_lines = 0
 
     for raw_line in text.splitlines():
         line = re.sub(r"<[^<]+?>", "", raw_line).strip()
@@ -49,19 +56,49 @@ def parse_srt_text(text: str) -> list[TelemetryPoint]:
         if time_match:
             current_start = parse_srt_time(time_match.group(1))
             current_end = parse_srt_time(time_match.group(2))
+            timed_blocks += 1
             continue
 
         gps_match = gps_re.search(line)
         if gps_match and current_start is not None and current_end is not None:
+            telemetry_like_lines += 1
             lon = float(gps_match.group(1))
             lat = float(gps_match.group(2))
             height_match = height_re.search(line)
             rel_alt_m = float(height_match.group(1)) if height_match else float(gps_match.group(3))
             if lat != 0 and lon != 0:
                 points.append(TelemetryPoint(current_start, current_end, lat, lon, rel_alt_m))
+            continue
+
+        key_values: dict[str, float] = {}
+        for key, value in key_value_re.findall(line):
+            normalized = key.lower().replace(" ", "_").replace("-", "_")
+            if normalized.startswith("lat"):
+                key_values["lat"] = float(value)
+            elif normalized.startswith("lon"):
+                key_values["lon"] = float(value)
+            elif normalized.startswith("rel"):
+                key_values["rel_alt"] = float(value)
+            elif normalized.startswith("alt"):
+                key_values.setdefault("rel_alt", float(value))
+
+        if key_values and current_start is not None and current_end is not None:
+            telemetry_like_lines += 1
+            lat = key_values.get("lat")
+            lon = key_values.get("lon")
+            rel_alt_m = key_values.get("rel_alt", 0.0)
+            if lat is not None and lon is not None and lat != 0 and lon != 0:
+                points.append(TelemetryPoint(current_start, current_end, lat, lon, rel_alt_m))
 
     if len(points) < 2:
-        raise ValueError("Not enough GPS telemetry was found in the SRT data")
+        raise ValueError(
+            "Not enough GPS telemetry was found in the SRT data "
+            f"(parsed {len(points)} points from {timed_blocks} timed blocks; "
+            f"saw {telemetry_like_lines} telemetry-like lines). Supported DJI formats include "
+            "'GPS (lon, lat, alt)' with optional 'H 12.3m', and key/value forms such as "
+            "'[latitude: 41.1] [longitude: -81.1] [rel_alt: 24.0]' or "
+            "'Lat: 41.1 Lon: -81.1 Alt: 24.0'."
+        )
     return points
 
 
