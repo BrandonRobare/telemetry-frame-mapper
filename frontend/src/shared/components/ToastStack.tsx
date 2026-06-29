@@ -1,17 +1,18 @@
 import { AnimatePresence, motion } from 'framer-motion'
 import { useToast } from '../hooks/useToast'
 import { easeOut } from '../motion'
+import { glassBackdrop } from '../motion/glassSupport'
 
 const styleByType: Record<string, { bg: string; color: string; bar: string }> = {
-  success: { bg: 'var(--success-soft)', color: 'var(--success)', bar: 'var(--sage)' },
-  error: { bg: 'var(--danger-soft)', color: 'var(--danger)', bar: 'var(--danger-accent)' },
-  info: { bg: 'var(--surface)', color: 'var(--text)', bar: 'var(--accent)' },
+  success: { bg: 'color-mix(in srgb, var(--success-soft) 76%, transparent)', color: 'var(--success)', bar: 'var(--sage)' },
+  error: { bg: 'color-mix(in srgb, var(--danger-soft) 76%, transparent)', color: 'var(--danger)', bar: 'var(--danger-accent)' },
+  info: { bg: 'color-mix(in srgb, var(--surface) 70%, transparent)', color: 'var(--text)', bar: 'var(--accent)' },
 }
 
 export function ToastStack() {
   const { toasts, dismissToast } = useToast()
   return (
-    <div className="fixed bottom-4 right-4 flex flex-col gap-2 z-50" style={{ maxWidth: 340 }}>
+    <div className="fixed bottom-4 right-4 flex flex-col gap-2 z-50" role="status" aria-live="polite" aria-relevant="additions" style={{ maxWidth: 340 }}>
       <AnimatePresence initial={false}>
         {toasts.map((t) => {
           const s = styleByType[t.type] ?? styleByType.info
@@ -27,15 +28,29 @@ export function ToastStack() {
               style={{
                 background: s.bg,
                 color: s.color,
-                border: '1px solid var(--border)',
+                borderTop: '1px solid var(--glass-border)',
+                borderRight: '1px solid var(--glass-border)',
+                borderBottom: '1px solid var(--glass-border)',
                 borderLeft: `3px solid ${s.bar}`,
                 borderRadius: 'var(--radius-md)',
+                backdropFilter: glassBackdrop(true),
+                WebkitBackdropFilter: 'blur(var(--glass-blur)) saturate(1.35)',
+                boxShadow: 'var(--shadow-1)',
               }}
             >
-              <span>{t.message}</span>
+              <span style={{ flex: 1 }}>{t.message}</span>
+              {t.action && (
+                <button
+                  onClick={() => { t.action!.onClick(); dismissToast(t.id) }}
+                  className="shrink-0 cursor-pointer border-none bg-transparent"
+                  style={{ color: 'inherit', fontWeight: 600, textDecoration: 'underline', textUnderlineOffset: 2, fontFamily: 'var(--font-display)' }}
+                >
+                  {t.action.label}
+                </button>
+              )}
               <button
                 onClick={() => dismissToast(t.id)}
-                className="ml-auto opacity-60 hover:opacity-100 cursor-pointer border-none bg-transparent"
+                className="shrink-0 opacity-60 hover:opacity-100 cursor-pointer border-none bg-transparent"
                 style={{ color: 'inherit' }}
                 aria-label="Dismiss"
               >

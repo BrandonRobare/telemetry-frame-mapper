@@ -22,7 +22,11 @@ export function Badge({ color, children }: BadgeProps) {
   return (
     <span
       className="rounded-full text-xs px-2 py-0.5 inline-flex font-medium"
-      style={{ color: c.text, background: c.bg }}
+      style={{
+        color: c.text,
+        background: c.bg,
+        backgroundImage: 'radial-gradient(110% 150% at 28% -10%, rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0) 55%)',
+      }}
     >
       {children}
     </span>
