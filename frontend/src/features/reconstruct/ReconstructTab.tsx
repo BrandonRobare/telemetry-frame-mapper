@@ -11,7 +11,7 @@ import { Button } from '../../shared/components/Button'
 import TabHeader from '../../shared/components/TabHeader'
 import EmptyState from '../../shared/components/EmptyState'
 import { formatEta } from '../../shared/time'
-import type { Job } from '../../types/api'
+import type { Job, PreflightQualityReport } from '../../types/api'
 
 const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
 
@@ -44,6 +44,14 @@ function useFrameSelection(sessionId: number | null) {
   return useQuery<{ image_ids: number[] }>({
     queryKey: ['frame-selection', sessionId],
     queryFn: () => get(`/reconstruction/frame-selection/${sessionId}`),
+    enabled: sessionId !== null,
+  })
+}
+
+function usePreflightReport(sessionId: number | null) {
+  return useQuery<PreflightQualityReport>({
+    queryKey: ['preflight-quality', sessionId],
+    queryFn: () => get<PreflightQualityReport>(`/reconstruction/preflight/${sessionId}`),
     enabled: sessionId !== null,
   })
 }
@@ -92,6 +100,7 @@ export default function ReconstructTab() {
   const { data: allJobs } = useJobs(sseConnectedIds)
   const { data: targetAreas } = useTargetAreas()
   const { data: frameSelection } = useFrameSelection(selectedSessionId)
+  const { data: preflightReport, isLoading: preflightLoading } = usePreflightReport(selectedSessionId)
   useReconstructionStatusEvents(allJobs, setSseConnectedIds)
 
   const sessionJobs = (allJobs ?? []).filter((j) => j.session_id === selectedSessionId)
@@ -158,6 +167,81 @@ export default function ReconstructTab() {
             <p className="text-xs" style={{ color: 'var(--accent-strong)', margin: 0 }}>
               {selectedCount} frames manually selected (Review tab). Only these frames will be used.
             </p>
+          )}
+
+          {preflightLoading && (
+            <p className="text-xs" style={{ color: 'var(--text-muted)', margin: 0 }}>
+              Checking dataset quality…
+            </p>
+          )}
+
+          {preflightReport && (
+            <div
+              className="flex flex-col gap-3"
+              style={{
+                padding: 12,
+                background: 'var(--surface-2)',
+                border: '1px solid var(--border)',
+                borderRadius: 'var(--radius-sm)',
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+                <div>
+                  <h3 className="text-sm font-semibold" style={{ color: 'var(--text)', margin: 0 }}>
+                    Preflight quality
+                  </h3>
+                  <p className="text-xs" style={{ color: 'var(--text-muted)', margin: '4px 0 0' }}>
+                    {preflightReport.usable_frames}/{preflightReport.total_frames} usable frames · {preflightReport.recommended_action}
+                  </p>
+                </div>
+                <span
+                  className="text-xs rounded"
+                  style={{
+                    alignSelf: 'flex-start',
+                    padding: '2px 8px',
+                    background: preflightReport.safe_to_reconstruct === 'yes'
+                      ? 'var(--success-soft)'
+                      : preflightReport.safe_to_reconstruct === 'caution'
+                      ? 'var(--warning-soft)'
+                      : 'var(--danger-soft)',
+                    color: preflightReport.safe_to_reconstruct === 'yes'
+                      ? 'var(--success)'
+                      : preflightReport.safe_to_reconstruct === 'caution'
+                      ? 'var(--warning)'
+                      : 'var(--danger)',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {preflightReport.score}/100 · {preflightReport.safe_to_reconstruct.toUpperCase()}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 text-xs" style={{ color: 'var(--text-muted)' }}>
+                <span>GPS: {preflightReport.gps.completeness_pct}% complete</span>
+                <span>Timestamps: {preflightReport.timestamps.completeness_pct}% complete</span>
+                <span>Blur: {preflightReport.quality.blur_pct}%</span>
+                <span>Exposure: {(preflightReport.quality.dark_pct + preflightReport.quality.bright_pct).toFixed(1)}%</span>
+                <span>Gaps: {preflightReport.timestamps.gap_count}</span>
+                <span>Duplicates: {preflightReport.timestamps.duplicate_frames}</span>
+                <span>Footprints: {preflightReport.coverage.footprint_coverage_pct}%</span>
+                <span>
+                  Overlap: {preflightReport.coverage.estimated_overlap_pct === null
+                    ? 'n/a'
+                    : `${preflightReport.coverage.estimated_overlap_pct}%`}
+                </span>
+              </div>
+
+              {preflightReport.warnings.length > 0 && (
+                <ul className="text-xs" style={{ color: 'var(--warning)', margin: 0, paddingLeft: 18 }}>
+                  {preflightReport.warnings.slice(0, 4).map((warning) => (
+                    <li key={warning}>{warning}</li>
+                  ))}
+                  {preflightReport.warnings.length > 4 && (
+                    <li>{preflightReport.warnings.length - 4} more warnings</li>
+                  )}
+                </ul>
+              )}
+            </div>
           )}
 
           {/* Preset */}
