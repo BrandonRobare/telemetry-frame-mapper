@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -95,3 +97,73 @@ def test_apply_sync_returns_applied_count(client):
     data = resp.json()
     assert "applied" in data
     assert isinstance(data["applied"], int)
+
+
+def test_apply_sync_replaces_stale_footprint(client):
+    from backend.db.database import get_db
+    from backend.db.models import Footprint, Image
+    from backend.main import app
+
+    s = _make_session(client)
+    db = next(app.dependency_overrides[get_db]())
+    img = Image(
+        session_id=s.id,
+        filename="frame.jpg",
+        filepath="/tmp/frame.jpg",
+        timestamp=datetime.fromtimestamp(1),
+        latitude=10.0,
+        longitude=20.0,
+        altitude_m=50.0,
+        yaw=15.0,
+    )
+    db.add(img)
+    db.commit()
+    db.refresh(img)
+    db.add(Footprint(
+        image_id=img.id,
+        geom_wkt="STALE",
+        geom_geojson='{"type":"Polygon","coordinates":[]}',
+        ground_width_m=1.0,
+        ground_height_m=1.0,
+    ))
+    db.commit()
+
+    _upload_log(client, s.id)
+    resp = client.post(f"/flight-logs/apply?session_id={s.id}")
+
+    assert resp.status_code == 200
+    db.expire_all()
+    footprints = db.query(Footprint).filter(Footprint.image_id == img.id).all()
+    assert len(footprints) == 1
+    assert footprints[0].geom_wkt != "STALE"
+    assert footprints[0].ground_width_m > 1.0
+
+
+def test_apply_sync_creates_missing_footprint(client):
+    from backend.db.database import get_db
+    from backend.db.models import Footprint, Image
+    from backend.main import app
+
+    s = _make_session(client)
+    db = next(app.dependency_overrides[get_db]())
+    img = Image(
+        session_id=s.id,
+        filename="frame.jpg",
+        filepath="/tmp/frame.jpg",
+        timestamp=datetime.fromtimestamp(1),
+        latitude=None,
+        longitude=None,
+        altitude_m=None,
+    )
+    db.add(img)
+    db.commit()
+    db.refresh(img)
+
+    _upload_log(client, s.id)
+    resp = client.post(f"/flight-logs/apply?session_id={s.id}")
+
+    assert resp.status_code == 200
+    db.expire_all()
+    footprint = db.query(Footprint).filter(Footprint.image_id == img.id).one_or_none()
+    assert footprint is not None
+    assert footprint.ground_width_m > 0
