@@ -173,7 +173,7 @@ export default function ReconstructTab() {
                   style={{ accentColor: 'var(--accent)' }}
                 />
                 <span style={{ color: preset === p ? 'var(--text)' : 'var(--text-muted)' }}>
-                  {p === 'quick' ? 'Quick — fewer iterations, faster' : 'Full — best quality, slower'}
+                  {p === 'quick' ? 'Quick: fewer iterations, faster' : 'Full: best quality, slower'}
                 </span>
               </label>
             ))}
@@ -182,7 +182,7 @@ export default function ReconstructTab() {
           {/* Target area */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             <label className="text-xs" style={{ color: 'var(--text-muted)' }}>
-              Target area (optional — crops images to polygon before COLMAP)
+              Target area (optional, crops images to polygon before COLMAP)
             </label>
             <select
               value={targetAreaId ?? ''}
@@ -193,7 +193,7 @@ export default function ReconstructTab() {
                 fontSize: 13, fontFamily: 'inherit', maxWidth: 280,
               }}
             >
-              <option value="">No crop — use all usable frames</option>
+              <option value="">No crop: use all usable frames</option>
               {(targetAreas ?? []).map((ta) => (
                 <option key={ta.id} value={ta.id}>{ta.name}</option>
               ))}
@@ -222,7 +222,7 @@ export default function ReconstructTab() {
           >
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <h2 className="text-base font-semibold" style={{ color: 'var(--text)', margin: 0 }}>
-                Reconstruction #{activeJob.id} — In Progress
+                Reconstruction #{activeJob.id}: In Progress
               </h2>
               <button
                 onClick={() => cancelMutation.mutate(activeJob.id)}

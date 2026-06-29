@@ -131,7 +131,7 @@ export default function IngestSettings() {
 
         <Field
           label="Thumbnail JPEG Quality"
-          hint="1–100; higher = larger file, better quality"
+          hint="1-100; higher = larger file, better quality"
           error={validationErrors.thumbnail_jpeg_quality}
         >
           <input

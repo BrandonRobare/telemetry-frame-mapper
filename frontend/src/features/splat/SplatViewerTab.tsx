@@ -109,7 +109,7 @@ function useFlythroughStatus(reconstructionId: number | null) {
 
 const STATUS_STEP_LABEL: Record<string, string> = {
   pending: 'Queued…',
-  running_colmap: 'COLMAP — feature extraction & matching',
+  running_colmap: 'COLMAP: feature extraction & matching',
   running_gsplat: 'Gaussian Splatting',
 }
 
@@ -1348,7 +1348,7 @@ export default function SplatViewerTab() {
                 }}
               >
                 <p className="text-xs font-medium" style={{ color: 'var(--text)', margin: '0 0 2px' }}>
-                  #{job.id} — {job.preset}
+                  #{job.id} · {job.preset}
                 </p>
                 <p className="text-xs" style={{ color: 'var(--text-muted)', margin: 0 }}>
                   {job.frames_used} frames

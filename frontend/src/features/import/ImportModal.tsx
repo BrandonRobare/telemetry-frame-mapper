@@ -124,7 +124,7 @@ export default function ImportModal({ open, onClose }: ImportModalProps) {
   const isBusy = isPending || isImporting
   const backendDown = backendStatus === 'down'
   const errorMessage = isError
-    ? (error as Error)?.message ?? 'Import failed — check the folder path and that the backend is running.'
+    ? (error as Error)?.message ?? 'Import failed. Check the folder path and that the backend is running.'
     : progress?.status === 'error'
     ? 'Import pipeline failed on the server. Check the backend logs and try again.'
     : null
@@ -233,7 +233,7 @@ export default function ImportModal({ open, onClose }: ImportModalProps) {
               spellCheck={false}
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. Field A — 2026-05-02"
+              placeholder="e.g. Field A, 2026-05-02"
               disabled={isBusy}
               style={{
                 width: '100%', boxSizing: 'border-box',
@@ -280,7 +280,7 @@ export default function ImportModal({ open, onClose }: ImportModalProps) {
               }}
             />
             <p className="text-xs" style={{ color: 'var(--text-muted)', marginTop: 5 }}>
-              Relative path inside the server's imports/ folder — copy your JPEG files there first.
+              Relative path inside the server's imports/ folder. Copy your JPEG files there first.
             </p>
             {pathError && (
               <p className="text-xs" style={{ color: 'var(--danger)', marginTop: 4 }}>

@@ -6,7 +6,7 @@ interface GlassSurfaceProps extends React.HTMLAttributes<HTMLDivElement> {
   /** Refract the content behind the panel. Auto-disabled where unsupported.
       Reserve `true` for surfaces with rich content behind them (hero, map). */
   refraction?: boolean
-  /** Tilt/specular strength (0–1+). Lower for small/dense chips. */
+  /** Tilt/specular strength (0-1+). Lower for small/dense chips. */
   intensity?: number
   /** Wire up cursor tilt + specular. Off = static glass (e.g. toasts). */
   interactive?: boolean

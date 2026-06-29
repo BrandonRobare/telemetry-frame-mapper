@@ -73,7 +73,7 @@ export default function OverviewTab({ onImport }: Props) {
               </span>
             </div>
             <p className="mt-2" style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.55 }}>
-              A drone flight becomes a measurable, explorable 3D site — one pipeline, end to end.
+              A drone flight becomes a measurable, explorable 3D site. One pipeline, end to end.
             </p>
           </div>
         </div>
