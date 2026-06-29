@@ -1,9 +1,10 @@
 @import "tailwindcss";
 
 /* ---------------------------------------------------------------------------
-   Warm Light — design tokens
+   Warm themes — design tokens
    Built out from four base colors: cream #F7F1DE, terracotta #B87C4C,
-   tan #C4A484, sage #A8BBA3. Light-only; a warm-dark theme is a later follow-up.
+   tan #C4A484, sage #A8BBA3. Light is the default theme; dark keeps the
+   same warm material language with ember/umber surfaces and softened text.
 --------------------------------------------------------------------------- */
 :root {
   /* surfaces */
@@ -91,6 +92,39 @@
   --grad-splat-hover: radial-gradient(125% 145% at 28% 16%, rgba(255, 255, 255, 0.2), rgba(255, 255, 255, 0) 44%),
     linear-gradient(176deg, var(--accent-hover), var(--accent-hover));
   --splat-soft: radial-gradient(120% 150% at 30% 12%, color-mix(in srgb, var(--accent) 26%, transparent), transparent 60%);
+}
+
+[data-theme="dark"] {
+  --bg: #1D1712;            /* dark umber page background */
+  --surface: #2A211A;       /* charcoal-brown cards / nav */
+  --surface-2: #372B22;     /* raised inputs / hover */
+  --border: #4B3A2C;        /* warm low-contrast hairlines */
+  --border-strong: #6B513C; /* focus / emphasis borders */
+
+  --text: #F1E7D2;          /* warm cream foreground */
+  --text-muted: #C9B99D;    /* secondary text */
+  --text-faint: #9B8669;    /* hints */
+
+  --accent: #D69462;        /* terracotta glow */
+  --accent-strong: #E0A06F; /* readable links / controls on dark */
+  --accent-hover: #F0B685;
+  --accent-soft: rgba(214, 148, 98, 0.18);
+
+  --sage: #9DB58F;
+  --success: #B8D1A9;
+  --success-soft: rgba(157, 181, 143, 0.18);
+
+  --tan: #C7A783;
+  --tan-text: #DCC39F;
+  --tan-soft: rgba(199, 167, 131, 0.17);
+
+  --warning: #E2B761;
+  --warning-accent: #C98F35;
+  --warning-soft: rgba(201, 143, 53, 0.18);
+
+  --danger: #F0A18D;
+  --danger-accent: #C96A55;
+  --danger-soft: rgba(201, 106, 85, 0.18);
 }
 
 * {

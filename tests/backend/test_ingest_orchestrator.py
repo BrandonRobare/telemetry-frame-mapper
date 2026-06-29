@@ -69,7 +69,13 @@ def test_progress_endpoint_returns_pending(client, tmp_path):
 # Helpers for _run unit tests
 # ---------------------------------------------------------------------------
 
-def _make_gps_jpg(folder: Path, name: str, lat: float = 35.0, lon: float = -80.0) -> Path:
+def _make_gps_jpg(
+    folder: Path,
+    name: str,
+    lat: float = 35.0,
+    lon: float = -80.0,
+    alt_m: float = 60.96,
+) -> Path:
     """Create a minimal JPEG with GPS EXIF at given coords."""
     p = folder / name
     img = PILImage.new("RGB", (100, 100), color=(128, 128, 128))
@@ -85,7 +91,7 @@ def _make_gps_jpg(folder: Path, name: str, lat: float = 35.0, lon: float = -80.0
         piexif.GPSIFD.GPSLatitude: to_rational(lat),
         piexif.GPSIFD.GPSLongitudeRef: b"E" if lon >= 0 else b"W",
         piexif.GPSIFD.GPSLongitude: to_rational(abs(lon)),
-        piexif.GPSIFD.GPSAltitude: (6096, 100),
+        piexif.GPSIFD.GPSAltitude: (int(abs(alt_m) * 100), 100),
         piexif.GPSIFD.GPSAltitudeRef: 0,
     }
     exif_dict = {"GPS": gps_ifd}
@@ -289,3 +295,87 @@ def test_run_filter_zero_gps_keeps_no_gps_images(tmp_path, setup_test_db):
     filenames = {img.filename for img in images}
     # No-GPS images must still be imported (filter only drops confirmed 0,0 coords).
     assert "nogps.jpg" in filenames
+
+
+def test_run_creates_footprint_when_longitude_is_zero(tmp_path, setup_test_db):
+    from backend.db.database import get_db
+    from backend.db.models import Footprint
+    from backend.db.models import Image as ImageModel
+    from backend.db.models import Session as SessionModel
+    from backend.main import app
+    from backend.services.ingest_orchestrator import _run
+    from tests.conftest import TestSessionLocal
+
+    db = next(app.dependency_overrides[get_db]())
+    session = SessionModel(name="zero-lon-footprint", folder_path=str(tmp_path),
+                           photo_count=0, usable_count=0)
+    db.add(session)
+    db.commit()
+    db.refresh(session)
+
+    _make_gps_jpg(tmp_path, "zero_lon.jpg", lat=35.0, lon=0.0, alt_m=60.96)
+
+    ingest_cfg = {
+        "accepted_extensions": [".jpg", ".jpeg"],
+        "filter_zero_gps": False,
+        "thumbnail_size_px": 64,
+        "thumbnail_jpeg_quality": 75,
+    }
+
+    with patch("backend.core.config.get_ingest_config", return_value=ingest_cfg), \
+         patch("backend.core.config.load_config") as mock_load_cfg:
+        mock_load_cfg.return_value.processed_dir = str(tmp_path)
+        mock_load_cfg.return_value.thumbnail_size_px = 64
+        mock_load_cfg.return_value.fov_horizontal_deg = 83
+        mock_load_cfg.return_value.fov_vertical_deg = 53
+        mock_load_cfg.return_value.target_crs = "EPSG:32631"
+        _run(session.id, tmp_path, TestSessionLocal)
+
+    db.expire_all()
+    img = db.query(ImageModel).filter(ImageModel.session_id == session.id).one()
+    footprint = db.query(Footprint).filter(Footprint.image_id == img.id).one_or_none()
+    assert img.longitude == 0.0
+    assert footprint is not None
+    assert footprint.ground_width_m > 0
+
+
+def test_run_creates_footprint_when_altitude_is_zero(tmp_path, setup_test_db):
+    from backend.db.database import get_db
+    from backend.db.models import Footprint
+    from backend.db.models import Image as ImageModel
+    from backend.db.models import Session as SessionModel
+    from backend.main import app
+    from backend.services.ingest_orchestrator import _run
+    from tests.conftest import TestSessionLocal
+
+    db = next(app.dependency_overrides[get_db]())
+    session = SessionModel(name="zero-alt-footprint", folder_path=str(tmp_path),
+                           photo_count=0, usable_count=0)
+    db.add(session)
+    db.commit()
+    db.refresh(session)
+
+    _make_gps_jpg(tmp_path, "zero_alt.jpg", lat=35.0, lon=-80.0, alt_m=0.0)
+
+    ingest_cfg = {
+        "accepted_extensions": [".jpg", ".jpeg"],
+        "filter_zero_gps": False,
+        "thumbnail_size_px": 64,
+        "thumbnail_jpeg_quality": 75,
+    }
+
+    with patch("backend.core.config.get_ingest_config", return_value=ingest_cfg), \
+         patch("backend.core.config.load_config") as mock_load_cfg:
+        mock_load_cfg.return_value.processed_dir = str(tmp_path)
+        mock_load_cfg.return_value.thumbnail_size_px = 64
+        mock_load_cfg.return_value.fov_horizontal_deg = 83
+        mock_load_cfg.return_value.fov_vertical_deg = 53
+        mock_load_cfg.return_value.target_crs = "EPSG:32617"
+        _run(session.id, tmp_path, TestSessionLocal)
+
+    db.expire_all()
+    img = db.query(ImageModel).filter(ImageModel.session_id == session.id).one()
+    footprint = db.query(Footprint).filter(Footprint.image_id == img.id).one_or_none()
+    assert img.altitude_m == 0.0
+    assert footprint is not None
+    assert footprint.ground_width_m == 0.0

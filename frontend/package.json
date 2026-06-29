@@ -17,7 +17,7 @@
     "@turf/distance": "^7.3.5",
     "@types/leaflet-draw": "^1.0.13",
     "@types/proj4": "^2.19.0",
-    "framer-motion": "^12.40.0",
+    "framer-motion": "^12.41.0",
     "leaflet": "^1.9.4",
     "leaflet-draw": "^1.0.4",
     "proj4": "^2.20.9",
@@ -30,11 +30,11 @@
     "@eslint/js": "^10.0.1",
     "@tailwindcss/vite": "^4.3.1",
     "@types/leaflet": "^1.9.21",
-    "@types/node": "^25.9.3",
+    "@types/node": "^26.0.0",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@types/three": "^0.184.1",
-    "@vitejs/plugin-react": "^6.0.2",
+    "@vitejs/plugin-react": "^6.0.3",
     "@vitest/coverage-v8": "^4.1.8",
     "eslint": "^10.4.1",
     "eslint-plugin-react-hooks": "^7.1.1",
@@ -42,8 +42,8 @@
     "globals": "^17.6.0",
     "tailwindcss": "^4.3.1",
     "typescript": "~6.0.2",
-    "typescript-eslint": "^8.61.1",
-    "vite": "^8.0.16",
+    "typescript-eslint": "^8.62.0",
+    "vite": "^8.1.0",
     "vitest": "^4.1.9"
   }
 }

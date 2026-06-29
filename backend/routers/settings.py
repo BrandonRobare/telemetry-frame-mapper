@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path, PureWindowsPath
 from typing import Any
 
 import yaml
@@ -24,9 +25,7 @@ CONFIG_PATH: str = "config.yaml"
 # The set of derived (read-only) field names that MUST NOT be settable via API.
 # ---------------------------------------------------------------------------
 _DERIVED_FIELDS = frozenset(
-    name
-    for name, fld in AppConfig.__dataclass_fields__.items()
-    if not fld.init
+    name for name, fld in AppConfig.__dataclass_fields__.items() if not fld.init
 )
 
 # ---------------------------------------------------------------------------
@@ -43,6 +42,14 @@ class GeneralSettings(BaseModel):
     processed_dir: str | None = None
     exports_dir: str | None = None
     data_dir: str | None = None
+
+    @field_validator("imports_dir", "processed_dir", "exports_dir", "data_dir")
+    @classmethod
+    def validate_storage_path(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        _reject_unsafe_storage_path(v)
+        return v
 
 
 class MissionSettings(BaseModel):
@@ -167,6 +174,53 @@ class SettingsPatch(BaseModel):
 # Helpers
 # ---------------------------------------------------------------------------
 
+
+def _reject_unsafe_storage_path(value: str) -> None:
+    stripped = value.strip()
+    if not stripped:
+        raise ValueError("storage paths cannot be empty")
+
+    if stripped in {"~", "~/", "~\\"}:
+        raise ValueError("storage paths cannot point at the home directory root")
+
+    path = Path(stripped).expanduser()
+    try:
+        resolved = path.resolve(strict=False)
+    except OSError as exc:
+        raise ValueError("storage path cannot be resolved") from exc
+
+    home = Path.home().resolve()
+    blocked = {
+        Path("/"),
+        home,
+        Path("/etc"),
+        Path("/usr"),
+        Path("/bin"),
+        Path("/sbin"),
+        Path("/var"),
+        Path("/System"),
+        Path("/Windows"),
+    }
+    if resolved in blocked:
+        raise ValueError("storage paths cannot point at root, home, or system directories")
+
+    win_path = PureWindowsPath(stripped)
+    win_text = stripped.replace("/", "\\").rstrip("\\").lower()
+    if win_path.is_absolute():
+        if win_path.parent == win_path or win_text.endswith(":"):
+            raise ValueError("storage paths cannot point at a Windows drive root")
+        blocked_windows = (
+            "c:\\windows",
+            "c:\\program files",
+            "c:\\program files (x86)",
+            "c:\\users",
+        )
+        if win_text in blocked_windows or any(
+            win_text.startswith(prefix + "\\") for prefix in blocked_windows[:3]
+        ):
+            raise ValueError("storage paths cannot point at Windows system directories")
+
+
 def _load_raw(path: str) -> dict:
     """Load raw config.yaml dict (empty dict if missing)."""
     try:
@@ -201,14 +255,27 @@ def _build_full_response() -> dict:
     render_cfg = get_render_config(CONFIG_PATH)
 
     # General + mission keys come from AppConfig init fields (exclude derived).
-    general_keys = {"default_basemap", "target_crs", "imports_dir", "processed_dir",
-                    "exports_dir", "data_dir"}
+    general_keys = {
+        "default_basemap",
+        "target_crs",
+        "imports_dir",
+        "processed_dir",
+        "exports_dir",
+        "data_dir",
+    }
     mission_keys = {
-        "altitude_ft", "fov_horizontal_deg", "fov_vertical_deg",
-        "image_width_px", "image_height_px",
-        "desired_side_overlap", "desired_forward_overlap",
-        "lane_spacing_ft", "default_video_fps",
-        "battery_range_m", "mission_buffer_pct", "flight_log_match_tolerance_sec",
+        "altitude_ft",
+        "fov_horizontal_deg",
+        "fov_vertical_deg",
+        "image_width_px",
+        "image_height_px",
+        "desired_side_overlap",
+        "desired_forward_overlap",
+        "lane_spacing_ft",
+        "default_video_fps",
+        "battery_range_m",
+        "mission_buffer_pct",
+        "flight_log_match_tolerance_sec",
     }
 
     general = {k: getattr(cfg, k) for k in general_keys}
@@ -223,7 +290,6 @@ def _build_full_response() -> dict:
     }
 
 
-
 def _section_to_dict(section_model: BaseModel) -> dict:
     """Convert a Pydantic section model to a dict with only non-None values."""
     return {k: v for k, v in section_model.model_dump().items() if v is not None}
@@ -232,6 +298,7 @@ def _section_to_dict(section_model: BaseModel) -> dict:
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
+
 
 @router.get("")
 def get_settings() -> dict:
@@ -260,8 +327,13 @@ def patch_settings(body: SettingsPatch) -> dict:
 
     if body.reconstruction is not None:
         recon_patch = {}
-        for key in ("default_preset", "colmap_threads", "sift_max_features",
-                    "matcher", "camera_model"):
+        for key in (
+            "default_preset",
+            "colmap_threads",
+            "sift_max_features",
+            "matcher",
+            "camera_model",
+        ):
             val = getattr(body.reconstruction, key)
             if val is not None:
                 recon_patch[key] = val
@@ -294,9 +366,7 @@ def patch_settings(body: SettingsPatch) -> dict:
 def reset_settings() -> dict:
     """Restore config.yaml to all defaults and return the full config."""
     cfg = AppConfig()
-    init_fields = {
-        name for name, fld in AppConfig.__dataclass_fields__.items() if fld.init
-    }
+    init_fields = {name for name, fld in AppConfig.__dataclass_fields__.items() if fld.init}
     app_defaults = {name: getattr(cfg, name) for name in init_fields}
 
     # Get defaults by loading from a nonexistent path (returns pure defaults).

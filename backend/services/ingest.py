@@ -101,6 +101,7 @@ def extract_exif(filepath: str) -> dict:
         lat_raw = gps.get(piexif.GPSIFD.GPSLatitude)
         lon_raw = gps.get(piexif.GPSIFD.GPSLongitude)
         alt_raw = gps.get(piexif.GPSIFD.GPSAltitude)
+        alt_ref = gps.get(piexif.GPSIFD.GPSAltitudeRef, 0)
 
         if lat_raw and lon_raw:
             lat = _rational_to_float(lat_raw)
@@ -114,7 +115,10 @@ def extract_exif(filepath: str) -> dict:
             result["gps_source"] = "exif"
 
         if alt_raw:
-            result["altitude_m"] = _rational_to_float(alt_raw)
+            altitude_m = _rational_to_float(alt_raw)
+            if alt_ref in (1, b"\x01"):
+                altitude_m = -altitude_m
+            result["altitude_m"] = altitude_m
 
     xmp = _extract_xmp_dji(filepath)
     if "altitude_m" in xmp:

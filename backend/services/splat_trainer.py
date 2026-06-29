@@ -19,8 +19,10 @@ Contracts honored for the reconstruction pipeline:
   graceful-degradation branch keys on that family).
 - CUDA OOM is re-wrapped as ``RuntimeError`` containing the literal
   ``"CUDA out of memory"`` (mapped to a user-facing preset hint).
-- ``cancel`` (a ``threading.Event``) is polled every iteration and raises
-  :class:`ReconstructionCancelled`.
+- ``cancel`` (a ``threading.Event``) is polled every iteration; when set after
+  training state exists, the current Gaussian parameters are saved to
+  ``output_path`` plus a ``*.checkpoint.json`` sidecar before
+  :class:`ReconstructionCancelled` is raised.
 - ``progress_cb(step, pct)`` performs a DB UPDATE + commit per call, so calls
   are throttled to at most one per 2 wall-clock seconds and progress is mapped
   into the 40.0 -> 99.0 window (COLMAP owns 0-40).
@@ -34,6 +36,7 @@ One GPU job runs at a time (``_GPU_LOCK``): the target card has 4 GB of VRAM.
 
 from __future__ import annotations
 
+import json
 import math
 import shutil
 import subprocess
@@ -306,6 +309,43 @@ def _initial_log_scales(torch, means):
     return torch.log(nn_dist.clamp_min(1e-6))[:, None].repeat(1, 3)
 
 
+def _params_to_cloud(params) -> ply_io.GaussianCloud:
+    return ply_io.GaussianCloud(
+        means=params["means"].detach().cpu().numpy().astype(np.float32),
+        sh0=params["sh0"].detach().cpu().numpy()[:, 0, :].astype(np.float32),
+        shN=params["shN"].detach().cpu().numpy().astype(np.float32),
+        opacities=params["opacities"].detach().cpu().numpy().astype(np.float32),
+        scales=params["scales"].detach().cpu().numpy().astype(np.float32),
+        quats=params["quats"].detach().cpu().numpy().astype(np.float32),
+    )
+
+
+def _checkpoint_sidecar_path(output_path: Path) -> Path:
+    return output_path.with_suffix(output_path.suffix + ".checkpoint.json")
+
+
+def _write_cancel_checkpoint(
+    output_path: Path,
+    params,
+    completed_iterations: int,
+    metrics: list[dict],
+) -> Path:
+    """Persist the current Gaussian parameters when the user cancels training."""
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    cloud = _params_to_cloud(params)
+    ply_io.write_3dgs_ply(output_path, cloud)
+    _checkpoint_sidecar_path(output_path).write_text(
+        json.dumps({
+            "reason": "cancelled_by_user",
+            "completed_iterations": completed_iterations,
+            "gaussian_count": int(cloud.means.shape[0]),
+            "training_metrics": metrics or None,
+        }, indent=2),
+        encoding="utf-8",
+    )
+    return output_path
+
+
 def _load_dataset(torch, colmap_dir: Path, model, downscale_factor: int):
     """Load training views as uint8 CPU tensors plus per-view viewmats/intrinsics.
 
@@ -475,6 +515,12 @@ def _train(
 
     for step in range(config.iterations):
         if cancel.is_set():
+            progress(
+                "saving cancellation checkpoint",
+                _training_pct(step, config.iterations),
+                force=True,
+            )
+            _write_cancel_checkpoint(output_path, params, step, metrics)
             raise ReconstructionCancelled("Cancelled by user")
 
         view = views[int(rng.integers(len(views)))]
@@ -536,14 +582,7 @@ def _train(
 
     progress("exporting splat PLY", _PROGRESS_END, force=True)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    cloud = ply_io.GaussianCloud(
-        means=params["means"].detach().cpu().numpy().astype(np.float32),
-        sh0=params["sh0"].detach().cpu().numpy()[:, 0, :].astype(np.float32),
-        shN=params["shN"].detach().cpu().numpy().astype(np.float32),
-        opacities=params["opacities"].detach().cpu().numpy().astype(np.float32),
-        scales=params["scales"].detach().cpu().numpy().astype(np.float32),
-        quats=params["quats"].detach().cpu().numpy().astype(np.float32),
-    )
+    cloud = _params_to_cloud(params)
     ply_io.write_3dgs_ply(output_path, cloud)
 
     final = metrics[-1] if metrics else {"psnr": None, "ssim": None}

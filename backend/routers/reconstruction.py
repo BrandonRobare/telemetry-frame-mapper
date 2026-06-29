@@ -1,25 +1,32 @@
 from __future__ import annotations
 
 import json
+import zipfile
+from collections.abc import Iterator
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session as DBSession
 
 from ..core.config import get_config, get_render_config
 from ..db.database import get_db
 from ..db.models import Reconstruction, SessionFrameSelection, TargetArea
+from ..services.artifact_cleanup import cleanup_reconstruction_artifacts
 from ..services.reconstruction import (
     _compute_coverage_gaps,
     _export_point_cloud,
+    _load_geo_transform_for_reconstruction,
     _safe_export_path,
+    _write_mesh_georef,
     cancel_reconstruction,
+    current_reconstruction_status_version,
     get_rec_log,
     start_flythrough_render,
     start_mesh_export,
     start_reconstruction,
+    wait_for_reconstruction_status_change,
 )
 
 router = APIRouter(prefix="/reconstruction", tags=["reconstruction"])
@@ -38,6 +45,33 @@ def _safe_export_http_path(path: Path) -> Path:
 def _reconstruction_artifact_path(reconstruction_id: int, filename: str) -> Path:
     cfg = get_config()
     return _safe_export_http_path(Path(cfg.exports_dir) / str(reconstruction_id) / filename)
+
+
+def _safe_owned_http_path(path: Path, *, allow_processed: bool = False) -> Path:
+    cfg = get_config()
+    roots = [Path(cfg.exports_dir)]
+    if allow_processed:
+        roots.append(Path(cfg.processed_dir))
+    for root in roots:
+        try:
+            return _safe_export_path(path, root)
+        except ValueError:
+            continue
+    raise HTTPException(status_code=403, detail="Invalid artifact path")
+
+
+def _bundle_metadata(rec: Reconstruction, files: dict[str, str | None]) -> dict:
+    return {
+        "id": rec.id,
+        "session_id": rec.session_id,
+        "status": rec.status,
+        "mesh_status": rec.mesh_status,
+        "frames_used": rec.frames_used,
+        "frames_registered": rec.frames_registered,
+        "psnr": rec.psnr,
+        "ssim": rec.ssim,
+        "files": files,
+    }
 
 
 class StartIn(BaseModel):
@@ -195,12 +229,51 @@ def get_status(reconstruction_id: int, db: DBSession = Depends(get_db)):
     return rec
 
 
+def _status_sse_payload(rec: Reconstruction) -> str:
+    body = ReconstructionOut.model_validate(rec).model_dump(mode="json")
+    return f"event: status\ndata: {json.dumps(body, separators=(',', ':'))}\n\n"
+
+
+@router.get("/{reconstruction_id}/status/events")
+def stream_status_events(reconstruction_id: int, db: DBSession = Depends(get_db)):
+    rec = db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Reconstruction not found")
+
+    def events() -> Iterator[str]:
+        version = current_reconstruction_status_version(reconstruction_id)
+        while True:
+            db.expire_all()
+            rec = db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).first()
+            if rec is None:
+                yield "event: deleted\ndata: {}\n\n"
+                return
+            yield _status_sse_payload(rec)
+            new_version = wait_for_reconstruction_status_change(reconstruction_id, version)
+            if new_version == version:
+                yield ": keepalive\n\n"
+            else:
+                version = new_version
+
+    return StreamingResponse(
+        events(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
 @router.delete("/{reconstruction_id}")
 def cancel(reconstruction_id: int, db: DBSession = Depends(get_db)):
     rec = db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).first()
     if not rec:
         raise HTTPException(status_code=404, detail="Reconstruction not found")
     cancel_reconstruction(reconstruction_id)
+    cleanup_reconstruction_artifacts(rec, get_config())
+    db.delete(rec)
+    db.commit()
     return {"ok": True}
 
 
@@ -353,6 +426,64 @@ def download_mesh(
         safe_mesh_path,
         media_type=media_types[format],
         filename=f"mesh_{reconstruction_id}.{format}",
+    )
+
+
+@router.get("/{reconstruction_id}/download-bundle")
+def download_reconstruction_bundle(reconstruction_id: int, db: DBSession = Depends(get_db)):
+    rec = db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Reconstruction not found")
+    if rec.status != "complete":
+        raise HTTPException(status_code=202, detail="Reconstruction still in progress")
+    if rec.mesh_status in {"pending", "running"}:
+        raise HTTPException(status_code=202, detail="Mesh export still in progress")
+    if not rec.mesh_glb_path:
+        raise HTTPException(status_code=404, detail="GLB mesh file not found on disk")
+
+    glb_path = _safe_owned_http_path(Path(rec.mesh_glb_path))
+    if not glb_path.exists():
+        raise HTTPException(status_code=404, detail="GLB mesh file not found on disk")
+
+    thumb_path: Path | None = None
+    if rec.thumb_path:
+        thumb_path = _safe_owned_http_path(Path(rec.thumb_path), allow_processed=True)
+        if not thumb_path.exists():
+            thumb_path = None
+
+    georef_path = _reconstruction_artifact_path(rec.id, "mesh_georef.json")
+    if not georef_path.exists():
+        try:
+            geo = _load_geo_transform_for_reconstruction(rec)
+            georef_path = _write_mesh_georef(georef_path.parent, rec, geo)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=422, detail=f"Failed to build mesh georef sidecar: {exc}"
+            ) from exc
+
+    bundle_path = _reconstruction_artifact_path(rec.id, f"reconstruction_{rec.id}_bundle.zip")
+    bundle_path.parent.mkdir(parents=True, exist_ok=True)
+
+    thumbnail_name = f"thumbnail{thumb_path.suffix.lower() or '.jpg'}" if thumb_path else None
+    files = {
+        "glb": "mesh.glb",
+        "thumbnail": thumbnail_name,
+        "mesh_georef": "mesh_georef.json",
+        "metadata": "metadata.json",
+    }
+    metadata = _bundle_metadata(rec, files)
+
+    with zipfile.ZipFile(bundle_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.write(glb_path, "mesh.glb")
+        if thumb_path and thumbnail_name:
+            zf.write(thumb_path, thumbnail_name)
+        zf.write(georef_path, "mesh_georef.json")
+        zf.writestr("metadata.json", json.dumps(metadata, indent=2, sort_keys=True))
+
+    return FileResponse(
+        bundle_path,
+        media_type="application/zip",
+        filename=f"reconstruction_{reconstruction_id}_bundle.zip",
     )
 
 

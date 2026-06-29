@@ -1,11 +1,16 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { get, post } from '../../shared/api/client'
+import {
+  isLiveReconstructionStatus,
+  useReconstructionStatusEvents,
+} from '../../shared/api/reconstructionStatusEvents'
 import { useMapStore } from '../../shared/stores/mapStore'
 import { useToast } from '../../shared/hooks/useToast'
 import { Button } from '../../shared/components/Button'
 import TabHeader from '../../shared/components/TabHeader'
 import EmptyState from '../../shared/components/EmptyState'
+import { formatEta } from '../../shared/time'
 import type { Job } from '../../types/api'
 
 const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
@@ -14,16 +19,16 @@ interface TargetAreaOption { id: number; name: string }
 
 // ---- hooks ----
 
-function useJobs() {
+function useJobs(sseConnectedIds: ReadonlySet<number>) {
   return useQuery<Job[]>({
     queryKey: ['jobs'],
     queryFn: () => get<Job[]>('/jobs/'),
     refetchInterval: (query) => {
       const jobs = query.state.data ?? []
-      const hasRunning = jobs.some((j) =>
-        ['pending', 'running_colmap', 'running_gsplat'].includes(j.status)
+      const needsPollingFallback = jobs.some((j) =>
+        isLiveReconstructionStatus(j.status) && !sseConnectedIds.has(j.id)
       )
-      return hasRunning ? 3000 : false
+      return needsPollingFallback ? 3000 : false
     },
   })
 }
@@ -82,16 +87,17 @@ export default function ReconstructTab() {
 
   const [preset, setPreset] = useState<'quick' | 'full'>('quick')
   const [targetAreaId, setTargetAreaId] = useState<number | null>(null)
+  const [sseConnectedIds, setSseConnectedIds] = useState<ReadonlySet<number>>(new Set())
 
-  const { data: allJobs } = useJobs()
+  const { data: allJobs } = useJobs(sseConnectedIds)
   const { data: targetAreas } = useTargetAreas()
   const { data: frameSelection } = useFrameSelection(selectedSessionId)
+  useReconstructionStatusEvents(allJobs, setSseConnectedIds)
 
   const sessionJobs = (allJobs ?? []).filter((j) => j.session_id === selectedSessionId)
-  const activeJob = sessionJobs.find((j) =>
-    ['pending', 'running_colmap', 'running_gsplat'].includes(j.status)
-  )
+  const activeJob = sessionJobs.find((j) => isLiveReconstructionStatus(j.status))
   const selectedCount = frameSelection?.image_ids.length ?? 0
+  const activeEta = activeJob ? formatEta(activeJob.started_at, activeJob.progress_pct) : null
 
   const startMutation = useMutation({
     mutationFn: () =>
@@ -253,6 +259,7 @@ export default function ReconstructTab() {
               {activeJob.progress_pct.toFixed(1)}%
               {' · '}{activeJob.frames_used} frames
               {activeJob.started_at && ` · elapsed ${formatDuration(activeJob.started_at, null)}`}
+              {activeEta && ` · ${activeEta}`}
             </p>
           </section>
         )}

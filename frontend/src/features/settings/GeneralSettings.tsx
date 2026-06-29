@@ -1,17 +1,20 @@
 import { useState } from 'react'
 import { Button } from '../../shared/components/Button'
+import { useMapStore } from '../../shared/stores/mapStore'
 import { useSettingsStore } from './settingsStore'
 import { useSettings, useUpdateSettings } from './api'
 import type { GeneralSettings as GeneralSettingsType } from './api'
 import type { SettingsTab, Units, CoordFormat } from './settingsStore'
+import { hasValidationErrors, validateGeneralSettings } from './settingsValidation'
 
 // Shared inline field component
 interface FieldProps {
   label: string
   hint?: string
+  error?: string
   children: React.ReactNode
 }
-function Field({ label, hint, children }: FieldProps) {
+function Field({ label, hint, error, children }: FieldProps) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
       <label className="text-xs font-medium" style={{ color: 'var(--text)' }}>
@@ -21,6 +24,11 @@ function Field({ label, hint, children }: FieldProps) {
       {hint && (
         <span className="text-xs" style={{ color: 'var(--text-faint)' }}>
           {hint}
+        </span>
+      )}
+      {error && (
+        <span className="text-xs" style={{ color: 'var(--danger)' }}>
+          {error}
         </span>
       )}
     </div>
@@ -69,10 +77,10 @@ const BASEMAPS = [
 const GENERAL_DEFAULTS: GeneralSettingsType = {
   default_basemap: 'esri_satellite',
   target_crs: 'EPSG:32617',
-  imports_dir: '',
-  processed_dir: '',
-  exports_dir: '',
-  data_dir: '',
+  imports_dir: './imports',
+  processed_dir: './processed',
+  exports_dir: './exports',
+  data_dir: './data',
 }
 
 export default function GeneralSettings() {
@@ -80,6 +88,7 @@ export default function GeneralSettings() {
     defaultTab, units, coordFormat, coordPrecision, reducedMotion, apiBaseUrl,
     setDefaultTab, setUnits, setCoordFormat, setCoordPrecision, setReducedMotion, setApiBaseUrl,
   } = useSettingsStore()
+  const { theme, toggleTheme } = useMapStore()
 
   const { data: settings } = useSettings()
   const updateMutation = useUpdateSettings()
@@ -91,12 +100,15 @@ export default function GeneralSettings() {
   // Effective form value: server data merged with local edits
   const server = settings?.general ?? GENERAL_DEFAULTS
   const form: GeneralSettingsType = { ...server, ...edits }
+  const validationErrors = validateGeneralSettings(form)
+  const hasErrors = hasValidationErrors(validationErrors)
 
   function updateForm(key: keyof GeneralSettingsType, value: string) {
     setEdits((e) => ({ ...e, [key]: value }))
   }
 
   function handleSave() {
+    if (hasErrors) return
     updateMutation.mutate(
       { general: form },
       { onSuccess: () => setEdits({}) }
@@ -113,9 +125,25 @@ export default function GeneralSettings() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           <Field label="Theme">
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <span className="text-sm" style={{ color: 'var(--text)' }}>Light</span>
+              <span className="text-sm" style={{ color: 'var(--text)' }}>
+                {theme === 'light' ? 'Light' : 'Dark'}
+              </span>
+              <button
+                type="button"
+                onClick={toggleTheme}
+                className="text-xs cursor-pointer rounded"
+                style={{
+                  padding: '4px 10px',
+                  background: 'var(--surface-2)',
+                  border: '1px solid var(--border)',
+                  color: 'var(--text-muted)',
+                  fontFamily: 'inherit',
+                }}
+              >
+                Switch to {theme === 'light' ? 'dark' : 'light'}
+              </button>
               <span className="text-xs" style={{ color: 'var(--text-faint)' }}>
-                Warm-dark theme coming soon
+                Saved on this device
               </span>
             </div>
           </Field>
@@ -216,7 +244,11 @@ export default function GeneralSettings() {
             </select>
           </Field>
 
-          <Field label="Target CRS" hint="Coordinate reference system used for exports and area calculations">
+          <Field
+            label="Target CRS"
+            hint="Coordinate reference system used for exports and area calculations"
+            error={validationErrors.target_crs}
+          >
             <input
               type="text"
               value={form.target_crs}
@@ -226,7 +258,7 @@ export default function GeneralSettings() {
             />
           </Field>
 
-          <Field label="Imports Directory">
+          <Field label="Imports Directory" error={validationErrors.imports_dir}>
             <input
               type="text"
               value={form.imports_dir}
@@ -235,7 +267,7 @@ export default function GeneralSettings() {
             />
           </Field>
 
-          <Field label="Processed Directory">
+          <Field label="Processed Directory" error={validationErrors.processed_dir}>
             <input
               type="text"
               value={form.processed_dir}
@@ -244,7 +276,7 @@ export default function GeneralSettings() {
             />
           </Field>
 
-          <Field label="Exports Directory">
+          <Field label="Exports Directory" error={validationErrors.exports_dir}>
             <input
               type="text"
               value={form.exports_dir}
@@ -253,7 +285,7 @@ export default function GeneralSettings() {
             />
           </Field>
 
-          <Field label="Data Directory">
+          <Field label="Data Directory" error={validationErrors.data_dir}>
             <input
               type="text"
               value={form.data_dir}
@@ -269,7 +301,7 @@ export default function GeneralSettings() {
           <Button
             variant="primary"
             size="sm"
-            disabled={updateMutation.isPending}
+            disabled={updateMutation.isPending || hasErrors}
             onClick={handleSave}
           >
             {updateMutation.isPending ? 'Saving…' : 'Save changes'}
