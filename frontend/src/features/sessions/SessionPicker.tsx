@@ -65,7 +65,7 @@ export default function SessionPicker({ onImport }: SessionPickerProps) {
           : null
         return (
           <option key={s.id} value={s.id}>
-            {s.name}{date ? ` — ${date}` : ''}
+            {s.name}{date ? `, ${date}` : ''}
           </option>
         )
       })}

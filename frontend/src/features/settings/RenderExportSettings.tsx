@@ -80,7 +80,7 @@ export default function RenderExportSettings() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
       <p className="text-xs" style={{ color: 'var(--text-faint)', margin: 0 }}>
-        Applies to new render/export jobs only — running jobs are not affected.
+        Applies to new render/export jobs only. Running jobs are not affected.
       </p>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -128,7 +128,7 @@ export default function RenderExportSettings() {
           />
         </Field>
 
-        <Field label="Thumbnail Quality" hint="JPEG quality 1–100" error={validationErrors.thumbnail_quality}>
+        <Field label="Thumbnail Quality" hint="JPEG quality 1-100" error={validationErrors.thumbnail_quality}>
           <input
             type="number"
             min={1}
@@ -143,7 +143,7 @@ export default function RenderExportSettings() {
       <AdvancedDisclosure>
         <Field
           label="LOD Preview Ratio"
-          hint="0–1 fraction of gaussians shown in preview LOD"
+          hint="0-1 fraction of gaussians shown in preview LOD"
           error={validationErrors.lod_preview_ratio}
         >
           <input
@@ -159,7 +159,7 @@ export default function RenderExportSettings() {
 
         <Field
           label="LOD Medium Ratio"
-          hint="0–1 fraction of gaussians shown in medium LOD"
+          hint="0-1 fraction of gaussians shown in medium LOD"
           error={validationErrors.lod_medium_ratio}
         >
           <input

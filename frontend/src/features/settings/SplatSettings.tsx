@@ -115,7 +115,7 @@ export default function SplatSettings() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
       <p className="text-xs" style={{ color: 'var(--text-faint)', margin: 0 }}>
-        Applies to new splat training jobs only — running jobs are not affected.
+        Applies to new splat training jobs only. Running jobs are not affected.
       </p>
 
       {presetKeys.map((name) => {

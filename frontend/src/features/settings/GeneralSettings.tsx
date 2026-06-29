@@ -176,7 +176,7 @@ export default function GeneralSettings() {
             </select>
           </Field>
 
-          <Field label="Units" hint="Display-only — does not affect stored data">
+          <Field label="Units" hint="Display-only. Does not affect stored data">
             <select
               value={units}
               onChange={(e) => setUnits(e.target.value as Units)}

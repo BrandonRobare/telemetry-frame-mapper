@@ -94,7 +94,7 @@ export default function ReconstructionSettings() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
       <p className="text-xs" style={{ color: 'var(--text-faint)', margin: 0 }}>
-        Applies to new reconstruction jobs only — running jobs are not affected.
+        Applies to new reconstruction jobs only. Running jobs are not affected.
       </p>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>

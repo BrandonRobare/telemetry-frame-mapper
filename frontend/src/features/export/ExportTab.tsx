@@ -241,7 +241,7 @@ export default function ExportTab() {
     a.click()
     URL.revokeObjectURL(url)
 
-    addToast(`GeoJSON downloaded — ${gpsImages.length} features`, 'success')
+    addToast(`GeoJSON downloaded: ${gpsImages.length} features`, 'success')
   }
 
   // ---- guard: no session selected ----
@@ -360,7 +360,7 @@ export default function ExportTab() {
                 style={{ background: 'var(--surface-2)', border: '1px solid var(--border)' }}
               >
                 <span style={{ color: 'var(--success)', fontWeight: 600 }}>
-                  Ready — {webodmResult.image_count} images
+                  Ready: {webodmResult.image_count} images
                 </span>
                 <span
                   className="font-mono text-xs"
