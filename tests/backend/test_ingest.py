@@ -10,7 +10,13 @@ from PIL import Image
 from backend.services.ingest import extract_exif, generate_thumbnail
 
 
-def make_gps_jpeg(lat: float, lon: float, alt_m: float, out_path: str):
+def make_gps_jpeg(
+    lat: float,
+    lon: float,
+    alt_m: float,
+    out_path: str,
+    altitude_ref: int = 0,
+):
     """Create a minimal JPEG with GPS EXIF at given coords."""
     img = Image.new("RGB", (100, 100), color=(100, 150, 200))
 
@@ -25,8 +31,8 @@ def make_gps_jpeg(lat: float, lon: float, alt_m: float, out_path: str):
         piexif.GPSIFD.GPSLatitude: to_rational(lat),
         piexif.GPSIFD.GPSLongitudeRef: b"E" if lon >= 0 else b"W",
         piexif.GPSIFD.GPSLongitude: to_rational(abs(lon)),
-        piexif.GPSIFD.GPSAltitude: (int(alt_m * 100), 100),
-        piexif.GPSIFD.GPSAltitudeRef: 0,
+        piexif.GPSIFD.GPSAltitude: (int(abs(alt_m) * 100), 100),
+        piexif.GPSIFD.GPSAltitudeRef: altitude_ref,
     }
     exif_dict = {"GPS": gps_ifd}
     exif_bytes = piexif.dump(exif_dict)
@@ -42,6 +48,15 @@ def test_extract_exif_with_gps():
     assert data["longitude"] == pytest.approx(-81.341, abs=0.001)
     assert data["altitude_m"] == pytest.approx(60.96, abs=0.5)
     assert data["gps_source"] == "exif"
+    os.unlink(path)
+
+
+def test_extract_exif_honors_below_sea_level_altitude_ref():
+    fd, path = tempfile.mkstemp(suffix=".jpg")
+    os.close(fd)
+    make_gps_jpeg(31.5, 35.5, 430.5, path, altitude_ref=1)
+    data = extract_exif(path)
+    assert data["altitude_m"] == pytest.approx(-430.5, abs=0.01)
     os.unlink(path)
 
 
