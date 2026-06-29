@@ -175,7 +175,7 @@ uvicorn backend.main:app --reload
 # Interactive docs at http://localhost:8000/docs
 ```
 
-Optional: copy `config.yaml.example` to `config.yaml` and adjust mission parameters (altitude, FOV, overlap, target CRS).
+Optional: copy `config.yaml.example` to `config.yaml` and adjust mission parameters (altitude, FOV, overlap, target CRS). Upload limits are configurable in `config.yaml` under `upload_limits` (`flight_log_max_bytes` and `srt_max_bytes`, both 10 MiB by default).
 
 ## CLI inputs
 
