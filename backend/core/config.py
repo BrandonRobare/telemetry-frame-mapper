@@ -23,6 +23,31 @@ class AppConfig:
     default_video_fps: float = 2.0
     target_crs: str = "EPSG:32617"
     default_basemap: str = "esri_satellite"
+    basemap_providers: list[dict] = field(
+        default_factory=lambda: [
+            {
+                "id": "esri_satellite",
+                "label": "Esri Satellite",
+                "url": "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+                "attribution": "© Esri",
+                "offline": False,
+            },
+            {
+                "id": "osm",
+                "label": "OpenStreetMap",
+                "url": "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+                "attribution": "© OpenStreetMap contributors",
+                "offline": False,
+            },
+            {
+                "id": "offline_mbtiles",
+                "label": "Offline MBTiles/local tiles",
+                "url": "/tiles/{z}/{x}/{y}.png",
+                "attribution": "Local tiles",
+                "offline": True,
+            },
+        ]
+    )
     flight_log_match_tolerance_sec: float = 2.0
     battery_range_m: float = 3000
     mission_buffer_pct: float = 0.10
@@ -39,11 +64,11 @@ class AppConfig:
 
     def __post_init__(self):
         self.altitude_m = self.altitude_ft * 0.3048
-        self.ground_width_m = 2 * self.altitude_m * math.tan(
-            math.radians(self.fov_horizontal_deg / 2)
+        self.ground_width_m = (
+            2 * self.altitude_m * math.tan(math.radians(self.fov_horizontal_deg / 2))
         )
-        self.ground_height_m = 2 * self.altitude_m * math.tan(
-            math.radians(self.fov_vertical_deg / 2)
+        self.ground_height_m = (
+            2 * self.altitude_m * math.tan(math.radians(self.fov_vertical_deg / 2))
         )
         self.lane_spacing_m = self.ground_width_m * (1 - self.desired_side_overlap)
 
@@ -56,8 +81,7 @@ def load_config(path: str = "config.yaml") -> AppConfig:
         data = {}
 
     init_fields = {
-        f for f in AppConfig.__dataclass_fields__
-        if AppConfig.__dataclass_fields__[f].init
+        f for f in AppConfig.__dataclass_fields__ if AppConfig.__dataclass_fields__[f].init
     }
     filtered = {k: v for k, v in data.items() if k in init_fields}
 

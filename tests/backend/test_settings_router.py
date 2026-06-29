@@ -26,6 +26,15 @@ def tmp_config(tmp_path, monkeypatch):
         "default_video_fps": 2.0,
         "target_crs": "EPSG:32617",
         "default_basemap": "esri_satellite",
+        "basemap_providers": [
+            {
+                "id": "osm",
+                "label": "OpenStreetMap",
+                "url": "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+                "attribution": "© OSM",
+                "offline": False,
+            }
+        ],
         "flight_log_match_tolerance_sec": 2.0,
         "battery_range_m": 3000,
         "mission_buffer_pct": 0.10,
@@ -60,6 +69,7 @@ def test_get_settings_general_keys(client, tmp_config):
     data = client.get("/settings").json()
     general = data["general"]
     assert "default_basemap" in general
+    assert "basemap_providers" in general
     assert "target_crs" in general
     assert "imports_dir" in general
     assert "processed_dir" in general
