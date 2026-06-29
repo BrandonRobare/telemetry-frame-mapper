@@ -60,7 +60,13 @@ def _add_second_image(client, session_id, flag="good"):
     from backend.main import app
 
     db = next(app.dependency_overrides[get_db]())
-    img = Image(session_id=session_id, filename="b.jpg", filepath="/tmp/b.jpg", flag=flag, usable=True)
+    img = Image(
+        session_id=session_id,
+        filename="b.jpg",
+        filepath="/tmp/b.jpg",
+        flag=flag,
+        usable=True,
+    )
     db.add(img)
     db.commit()
     db.refresh(img)
