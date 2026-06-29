@@ -14,6 +14,7 @@ from ..core.config import get_config, get_render_config
 from ..db.database import get_db
 from ..db.models import Reconstruction, SessionFrameSelection, TargetArea
 from ..services.artifact_cleanup import cleanup_reconstruction_artifacts
+from ..services.preflight_quality import build_preflight_quality_report
 from ..services.reconstruction import (
     _compute_coverage_gaps,
     _export_point_cloud,
@@ -124,6 +125,63 @@ class ReconstructionOut(BaseModel):
         return v  # type: ignore[return-value]
 
 
+class HistogramBin(BaseModel):
+    min: float
+    max: float
+    count: int
+
+
+class PreflightCompletenessOut(BaseModel):
+    missing: int
+    completeness_pct: float
+
+
+class PreflightTimestampOut(PreflightCompletenessOut):
+    duplicate_groups: int
+    duplicate_frames: int
+    gap_count: int
+    max_gap_s: float
+    typical_gap_s: float | None
+    gap_threshold_s: float | None
+
+
+class PreflightImageQualityOut(BaseModel):
+    blur_threshold: float
+    dark_threshold: float
+    bright_threshold: float
+    blur_count: int
+    dark_count: int
+    bright_count: int
+    blur_pct: float
+    dark_pct: float
+    bright_pct: float
+    flag_counts: dict[str, int]
+    sharpness_histogram: list[HistogramBin]
+    brightness_histogram: list[HistogramBin]
+
+
+class PreflightCoverageOut(BaseModel):
+    footprint_count: int
+    footprint_coverage_pct: float
+    estimated_overlap_pct: float | None
+    union_area: float
+    summed_footprint_area: float
+    warnings: list[str]
+
+
+class PreflightReportOut(BaseModel):
+    session_id: int
+    total_frames: int
+    usable_frames: int
+    gps: PreflightCompletenessOut
+    timestamps: PreflightTimestampOut
+    quality: PreflightImageQualityOut
+    coverage: PreflightCoverageOut
+    warnings: list[str]
+    safe_to_reconstruct: str
+    score: int
+    recommended_action: str
+
 class ReconstructionImageDiagnostic(BaseModel):
     id: int
     filename: str
@@ -167,6 +225,7 @@ class ReconstructionDiagnosticsOut(BaseModel):
     timeline_heatmap: list[ReconstructionTimelineBucket]
     map_heatmap: list[ReconstructionMapHeatPoint]
     suggestions: list[ReconstructionSuggestion]
+
 
 
 class MeshStatusOut(BaseModel):
@@ -242,6 +301,14 @@ def _raise_start_error(exc: ValueError) -> None:
     if "already running" in msg:
         raise HTTPException(status_code=409, detail=msg) from exc
     raise HTTPException(status_code=422, detail=msg) from exc
+
+
+@router.get("/preflight/{session_id}", response_model=PreflightReportOut)
+def get_preflight_report(session_id: int, db: DBSession = Depends(get_db)):
+    try:
+        return build_preflight_quality_report(session_id, db)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.post("/start", response_model=ReconstructionOut, status_code=201)
