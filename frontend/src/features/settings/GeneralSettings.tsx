@@ -1,6 +1,5 @@
 import { useState } from 'react'
 import { Button } from '../../shared/components/Button'
-import { useMapStore } from '../../shared/stores/mapStore'
 import { useSettingsStore } from './settingsStore'
 import { useSettings, useUpdateSettings } from './api'
 import type { GeneralSettings as GeneralSettingsType } from './api'
@@ -45,6 +44,7 @@ const selectStyle: React.CSSProperties = {
 }
 
 const TABS: { id: SettingsTab; label: string }[] = [
+  { id: 'overview', label: 'Overview' },
   { id: 'map', label: 'Map' },
   { id: 'gps-sync', label: 'GPS Sync' },
   { id: 'review', label: 'Review' },
@@ -76,7 +76,6 @@ const GENERAL_DEFAULTS: GeneralSettingsType = {
 }
 
 export default function GeneralSettings() {
-  const { theme, toggleTheme } = useMapStore()
   const {
     defaultTab, units, coordFormat, coordPrecision, reducedMotion, apiBaseUrl,
     setDefaultTab, setUnits, setCoordFormat, setCoordPrecision, setReducedMotion, setApiBaseUrl,
@@ -109,30 +108,14 @@ export default function GeneralSettings() {
       {/* -- GUI-only prefs (localStorage) -- */}
       <section>
         <h3 className="text-sm font-semibold" style={{ color: 'var(--text)', margin: '0 0 14px' }}>
-          Appearance &amp; Display
+          Display
         </h3>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           <Field label="Theme">
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <span className="text-sm" style={{ color: 'var(--text)' }}>
-                {theme === 'light' ? 'Light' : 'Dark'}
-              </span>
-              <button
-                type="button"
-                onClick={toggleTheme}
-                className="text-xs cursor-pointer rounded"
-                style={{
-                  padding: '4px 10px',
-                  background: 'var(--surface-2)',
-                  border: '1px solid var(--border)',
-                  color: 'var(--text-muted)',
-                  fontFamily: 'inherit',
-                }}
-              >
-                Toggle
-              </button>
+              <span className="text-sm" style={{ color: 'var(--text)' }}>Light</span>
               <span className="text-xs" style={{ color: 'var(--text-faint)' }}>
-                Light (Dark coming soon)
+                Warm-dark theme coming soon
               </span>
             </div>
           </Field>

@@ -1,9 +1,9 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { motion } from 'framer-motion'
 import type { Session, CoverageResult } from '../../types/api'
 import { useMapStore } from '../../shared/stores/mapStore'
 import { get } from '../../shared/api/client'
 import { Skeleton } from '../../shared/components/Skeleton'
+import GlassSurface from '../../shared/components/GlassSurface'
 
 interface Props {
   session: Session | undefined
@@ -14,21 +14,21 @@ interface Props {
 
 function StatCard({ label, value, color }: { label: string; value: React.ReactNode; color?: string }) {
   return (
-    <motion.div
-      whileHover={{ y: -2 }}
-      transition={{ duration: 0.15, ease: [0.22, 1, 0.36, 1] }}
+    <GlassSurface
+      refraction={false}
+      intensity={0.7}
+      radius={0}
       className="p-2"
-      style={{
-        background: 'var(--surface-2)',
-        border: '1px solid var(--border)',
-        borderRadius: 'var(--radius-md)',
-      }}
+      style={{ background: 'color-mix(in srgb, var(--surface-2) 80%, transparent)' }}
     >
-      <div className="text-xs" style={{ color: 'var(--text-muted)' }}>{label}</div>
-      <div className="text-base font-semibold mt-0.5" style={{ color: color ?? 'var(--accent-strong)' }}>
+      <div className="text-xs" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-display)' }}>{label}</div>
+      <div
+        className="text-base font-semibold mt-0.5"
+        style={{ color: color ?? 'var(--accent-strong)', fontFamily: 'var(--font-mono)' }}
+      >
         {value}
       </div>
-    </motion.div>
+    </GlassSurface>
   )
 }
 
@@ -119,9 +119,9 @@ export default function SessionSidebar({ session, coverage, frameCount, isLoadin
       {/* Stats grid */}
       <div className="p-3" style={{ borderBottom: '1px solid var(--border)' }}>
         <div className="grid grid-cols-2 gap-1.5">
-          <StatCard label="Frames" value={frameCount} />
+          <StatCard label="Mapped" value={frameCount} />
           <StatCard label="Usable" value={session.usable_count} color="var(--success)" />
-          <StatCard label="Photos" value={session.photo_count} />
+          <StatCard label="Frames" value={session.photo_count} />
           <StatCard label="Coverage" value={covPct !== null ? `${covPct.toFixed(0)}%` : '—'} color="var(--success)" />
         </div>
       </div>
@@ -163,16 +163,16 @@ export default function SessionSidebar({ session, coverage, frameCount, isLoadin
       <button
         onClick={() => coverageMutation.mutate()}
         disabled={coverageMutation.isPending}
-        className="m-3 rounded text-sm cursor-pointer border-none transition-all duration-150 active:scale-[0.98]"
+        className="m-3 text-sm cursor-pointer border-none transition-all duration-150 active:scale-[0.98]"
         style={{
           padding: '8px',
           background: coverageMutation.isPending ? 'var(--border-strong)' : 'var(--accent-strong)',
-          color: '#FFFDF7',
+          color: 'var(--on-accent)',
           fontFamily: 'inherit',
           opacity: coverageMutation.isPending ? 0.7 : 1,
         }}
       >
-        {coverageMutation.isPending ? 'Running…' : 'Run Coverage Analysis'}
+        {coverageMutation.isPending ? 'Running…' : 'Run coverage analysis'}
       </button>
     </aside>
   )

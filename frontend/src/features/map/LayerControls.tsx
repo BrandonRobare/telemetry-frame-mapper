@@ -1,11 +1,12 @@
 import { useMapStore } from '../../shared/stores/mapStore'
+import { glassBackdrop } from '../../shared/motion/glassSupport'
 
 // Checkbox accent colors mirror the warm-light map layer colors.
 const LAYERS = [
-  { key: 'footprints' as const, label: 'Footprints', color: '#B87C4C' },
-  { key: 'coverage' as const, label: 'Coverage', color: '#A8BBA3' },
-  { key: 'heatmap' as const, label: 'Heatmap', color: '#C8902F' },
-  { key: 'targetArea' as const, label: 'Target Area', color: '#C4A484' },
+  { key: 'footprints' as const, label: 'Footprints', color: 'var(--accent)' },
+  { key: 'coverage' as const, label: 'Coverage', color: 'var(--sage)' },
+  { key: 'heatmap' as const, label: 'Heatmap', color: 'var(--warning-accent)' },
+  { key: 'targetArea' as const, label: 'Target Area', color: 'var(--tan)' },
 ]
 
 export default function LayerControls() {
@@ -13,17 +14,20 @@ export default function LayerControls() {
 
   return (
     <div
-      className="absolute top-3 left-3 z-[1000] rounded-lg"
+      className="absolute top-3 left-3 z-[1000]"
       style={{
-        background: 'color-mix(in srgb, var(--surface) 92%, transparent)',
-        border: '1px solid var(--border)',
+        background: 'color-mix(in srgb, var(--surface) 62%, transparent)',
+        border: '1px solid var(--glass-border)',
+        backdropFilter: glassBackdrop(true),
+        WebkitBackdropFilter: 'blur(var(--glass-blur)) saturate(1.35)',
+        boxShadow: 'var(--shadow-1)',
         padding: '10px 12px',
         minWidth: 140,
       }}
     >
       <div
         className="text-xs uppercase tracking-wide mb-2"
-        style={{ color: 'var(--text-muted)', letterSpacing: '0.06em' }}
+        style={{ color: 'var(--text-muted)', letterSpacing: '0.06em', fontFamily: 'var(--font-display)' }}
       >
         Layers
       </div>

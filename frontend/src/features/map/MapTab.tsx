@@ -1,3 +1,4 @@
+import { lazy, Suspense } from 'react'
 import { useMapStore } from '../../shared/stores/mapStore'
 import { useSession } from './hooks/useSession'
 import { useFootprints } from './hooks/useFootprints'
@@ -6,7 +7,14 @@ import LeafletMapView from './LeafletMap'
 import LayerControls from './LayerControls'
 import SessionSidebar from './SessionSidebar'
 
-export default function MapTab() {
+// Code-split: three.js only ships when the no-session hero is shown.
+const GlassHero3D = lazy(() => import('../hero/GlassHero3D'))
+
+interface Props {
+  onImport?: () => void
+}
+
+export default function MapTab({ onImport }: Props) {
   const { selectedSessionId, sidebarOpen, toggleSidebar } = useMapStore()
 
   const { data: session } = useSession(selectedSessionId)
@@ -14,6 +22,15 @@ export default function MapTab() {
   const { data: coverage } = useCoverageResult(selectedSessionId)
 
   const sidebarWidth = sidebarOpen ? 200 : 20
+
+  // No session yet → the 3D glass landing hero instead of an empty map.
+  if (!selectedSessionId) {
+    return (
+      <Suspense fallback={<div className="tg-topo-backdrop flex-1" />}>
+        <GlassHero3D onImport={onImport} />
+      </Suspense>
+    )
+  }
 
   return (
     <div className="flex flex-1 overflow-hidden relative">

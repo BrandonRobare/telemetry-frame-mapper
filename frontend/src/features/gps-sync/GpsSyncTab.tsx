@@ -4,6 +4,9 @@ import { useMapStore } from '../../shared/stores/mapStore'
 import { useApplyFlightSync } from '../../shared/api/mutations'
 import { useToast } from '../../shared/hooks/useToast'
 import { Button } from '../../shared/components/Button'
+import TabHeader from '../../shared/components/TabHeader'
+import EmptyState from '../../shared/components/EmptyState'
+import InfoHint from '../../shared/components/InfoHint'
 import { get } from '../../shared/api/client'
 
 const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
@@ -15,7 +18,7 @@ interface MatchPreviewRow {
 }
 
 export default function GpsSyncTab() {
-  const { selectedSessionId } = useMapStore()
+  const { selectedSessionId, setRequestedTab } = useMapStore()
   const { addToast } = useToast()
   const applySync = useApplyFlightSync()
 
@@ -73,27 +76,31 @@ export default function GpsSyncTab() {
 
   if (selectedSessionId === null) {
     return (
-      <div
-        className="flex-1 flex items-center justify-center"
-        style={{ color: 'var(--text-muted)' }}
-      >
-        <p>Select a session first</p>
-      </div>
+      <EmptyState
+        title="No session selected"
+        description="Choose a session, then upload its flight log (CSV) to align frames by timestamp."
+        actionLabel="Open Overview"
+        onAction={() => setRequestedTab('overview')}
+      />
     )
   }
 
   return (
-    <div
-      className="flex-1 overflow-y-auto"
-      style={{ padding: '24px 32px', background: 'var(--bg)', color: 'var(--text)' }}
-    >
-      <h2 className="text-base font-semibold mb-6" style={{ color: 'var(--text)' }}>
-        GPS Sync
-      </h2>
+    <div className="flex flex-col flex-1 overflow-hidden">
+      <TabHeader
+        title="GPS Sync"
+        description="Align frames to a DJI flight log by timestamp."
+        nextTab="review"
+        nextLabel="Review"
+      />
+      <div
+        className="flex-1 overflow-y-auto"
+        style={{ padding: '24px 32px', background: 'var(--bg)', color: 'var(--text)' }}
+      >
 
       {/* Upload section */}
       <section
-        className="rounded mb-6"
+        className="mb-6"
         style={{
           background: 'var(--surface)',
           border: '1px solid var(--border)',
@@ -120,7 +127,7 @@ export default function GpsSyncTab() {
             onChange={handleFileChange}
           />
           {uploadSuccess && !uploadError && (
-            <span className="text-xs" style={{ color: 'var(--accent)' }}>
+            <span className="text-xs" style={{ color: 'var(--success)' }}>
               Uploaded successfully
             </span>
           )}
@@ -135,7 +142,7 @@ export default function GpsSyncTab() {
       {/* Match preview table */}
       {previewEnabled && (
         <section
-          className="rounded mb-6"
+          className="mb-6"
           style={{
             background: 'var(--surface)',
             border: '1px solid var(--border)',
@@ -185,7 +192,8 @@ export default function GpsSyncTab() {
                       className="text-left py-1 font-medium"
                       style={{ color: 'var(--text-muted)' }}
                     >
-                      &Delta;t (sec)
+                      &Delta;t (sec){' '}
+                      <InfoHint text="Δt: the time gap between a frame's timestamp and the nearest flight-log entry. Smaller is a tighter match." />
                     </th>
                   </tr>
                 </thead>
@@ -232,6 +240,7 @@ export default function GpsSyncTab() {
             Upload a flight log to enable sync
           </span>
         )}
+      </div>
       </div>
     </div>
   )

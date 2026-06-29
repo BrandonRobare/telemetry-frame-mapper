@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { get } from '../../shared/api/client'
 import type { Job, SystemResources } from '../../types/api'
 import { SkeletonRow } from '../../shared/components/Skeleton'
+import TabHeader from '../../shared/components/TabHeader'
 
 function useAllJobs() {
   return useQuery<Job[]>({
@@ -156,6 +157,10 @@ export default function JobsTab() {
 
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
+      <TabHeader
+        title="Jobs"
+        description="Every reconstruction job across all sessions, with live system resources."
+      />
       <ResourceBar />
       <div className="flex-1 overflow-y-auto p-6" style={{ color: 'var(--text)' }}>
         <div className="mx-auto" style={{ maxWidth: 800 }}>
