@@ -82,6 +82,7 @@
   /* survey motifs (topographic contour + grid for hero/empty backdrops) */
   --contour: rgba(154, 94, 50, 0.3);
   --grid: rgba(110, 100, 84, 0.16);
+  --topo-grad: radial-gradient(120% 120% at 30% 0%, #f2e7cb, #e4cfa4); /* hero backdrop wash */
 
   /* ---- Gaussian-splat glow: the app's light ------------------------------
      A soft off-axis highlight over a terracotta body reads like a splat's
@@ -125,6 +126,21 @@
   --danger: #F0A18D;
   --danger-accent: #C96A55;
   --danger-soft: rgba(201, 106, 85, 0.18);
+
+  /* glass + elevation retuned for dark umber surfaces (the light values read as
+     a bright warm-white frost on dark — these keep the refraction subtle). */
+  --glass-bg: rgba(42, 33, 26, 0.46);
+  --glass-border: rgba(240, 224, 198, 0.16);
+  --glass-spec: rgba(240, 224, 198, 0.22);
+
+  --shadow-1: 0 2px 6px -2px rgba(0, 0, 0, 0.5);
+  --shadow-2: 0 14px 34px -16px rgba(0, 0, 0, 0.66), 0 2px 6px -2px rgba(0, 0, 0, 0.5);
+  --shadow-3: 0 22px 48px -18px rgba(0, 0, 0, 0.72), 0 4px 10px -4px rgba(0, 0, 0, 0.55);
+
+  /* survey motifs lighten so they stay legible against the dark backdrop */
+  --contour: rgba(224, 160, 111, 0.24);
+  --grid: rgba(240, 224, 198, 0.07);
+  --topo-grad: radial-gradient(120% 120% at 30% 0%, #2C2118, #1A140F);
 }
 
 * {
@@ -247,7 +263,7 @@ body {
   background-image:
     repeating-linear-gradient(0deg, transparent 0 79px, var(--grid) 79px 80px),
     repeating-linear-gradient(90deg, transparent 0 119px, var(--grid) 119px 120px),
-    radial-gradient(120% 120% at 30% 0%, #f2e7cb, #e4cfa4);
+    var(--topo-grad);
 }
 
 /* Fine engineering grid for blueprint-accent surfaces (overview / empty / framed). */
