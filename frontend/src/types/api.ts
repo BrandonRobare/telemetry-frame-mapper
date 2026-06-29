@@ -19,6 +19,12 @@ export interface Image {
   latitude: number | null;
   longitude: number | null;
   altitude_m: number | null;
+  original_latitude: number | null;
+  original_longitude: number | null;
+  original_altitude_m: number | null;
+  synced_latitude: number | null;
+  synced_longitude: number | null;
+  synced_altitude_m: number | null;
   gps_source: string;
   yaw: number | null;
   gimbal_pitch: number | null;
