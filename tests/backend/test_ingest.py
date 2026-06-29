@@ -68,6 +68,35 @@ def test_extract_exif_honors_below_sea_level_altitude_ref():
     os.unlink(path)
 
 
+def test_extract_exif_camera_lens_and_focal_metadata():
+    fd, path = tempfile.mkstemp(suffix=".jpg")
+    os.close(fd)
+    img = Image.new("RGB", (640, 480), color=(100, 150, 200))
+    exif_bytes = piexif.dump({
+        "0th": {
+            piexif.ImageIFD.Make: b"DJI",
+            piexif.ImageIFD.Model: b"FC3582",
+        },
+        "Exif": {
+            piexif.ExifIFD.FocalLength: (672, 100),
+            piexif.ExifIFD.FocalLengthIn35mmFilm: 24,
+            piexif.ExifIFD.LensModel: b"24mm F1.7",
+        },
+    })
+    img.save(path, "JPEG", exif=exif_bytes)
+
+    data = extract_exif(path)
+
+    assert data["width"] == 640
+    assert data["height"] == 480
+    assert data["camera_make"] == "DJI"
+    assert data["camera_model"] == "FC3582"
+    assert data["lens_model"] == "24mm F1.7"
+    assert data["focal_length_mm"] == pytest.approx(6.72)
+    assert data["focal_length_35mm"] == pytest.approx(24)
+    os.unlink(path)
+
+
 def test_extract_exif_parses_dji_xmp_namespace_attributes():
     fd, path = tempfile.mkstemp(suffix=".jpg")
     os.close(fd)
@@ -114,6 +143,23 @@ def test_extract_exif_no_gps():
     data = extract_exif(path)
     assert data["latitude"] is None
     assert data["gps_source"] == "none"
+    os.unlink(path)
+
+
+def test_extract_exif_parses_dji_xmp_calibrated_focal_and_zoom():
+    fd, path = tempfile.mkstemp(suffix=".jpg")
+    os.close(fd)
+    make_xmp_jpeg(
+        path,
+        b"""
+        <rdf:Description
+          drone-dji:CalibratedFocalLength='24.0'
+          drone-dji:DigitalZoomRatio='1.5' />
+        """,
+    )
+    data = extract_exif(path)
+    assert data["focal_length_35mm"] == pytest.approx(24.0)
+    assert data["digital_zoom_ratio"] == pytest.approx(1.5)
     os.unlink(path)
 
 

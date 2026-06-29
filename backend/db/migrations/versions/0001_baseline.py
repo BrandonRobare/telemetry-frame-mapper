@@ -48,6 +48,14 @@ _RECONSTRUCTIONS_SHIM_COLUMNS: dict[str, sa.types.TypeEngine] = {
     "flythrough_error": sa.String(),
 }
 
+_IMAGES_CALIBRATION_COLUMNS: dict[str, sa.types.TypeEngine] = {
+    "camera_make": sa.String(),
+    "camera_model": sa.String(),
+    "lens_model": sa.String(),
+    "focal_length_35mm": sa.Float(),
+    "digital_zoom_ratio": sa.Float(),
+}
+
 
 def upgrade() -> None:
     bind = op.get_bind()
@@ -68,6 +76,13 @@ def upgrade() -> None:
         for name, col_type in _RECONSTRUCTIONS_SHIM_COLUMNS.items():
             if name not in existing_columns:
                 op.add_column("reconstructions", sa.Column(name, col_type))
+
+    inspector = sa.inspect(bind)
+    if "images" in inspector.get_table_names():
+        existing_columns = {col["name"] for col in inspector.get_columns("images")}
+        for name, col_type in _IMAGES_CALIBRATION_COLUMNS.items():
+            if name not in existing_columns:
+                op.add_column("images", sa.Column(name, col_type))
 
 
 def downgrade() -> None:

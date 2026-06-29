@@ -24,6 +24,35 @@ reconstruction:
   sift_max_features: 8192
   matcher: exhaustive
   camera_model: PINHOLE
+  camera_profiles:
+    - name: "DJI Mini 3/4 Pro wide camera"
+      make: "DJI"
+      model: "FC3582"
+      lens_model: "24mm F1.7"
+      sensor_width_mm: 6.4
+      sensor_height_mm: 4.8
+      focal_length_mm: 6.72
+      fov_horizontal_deg: 73.4
+      fov_vertical_deg: 52.2
+      colmap_camera_model: PINHOLE
+    - name: "DJI Air 2S wide camera"
+      make: "DJI"
+      model: "FC3411"
+      sensor_width_mm: 13.2
+      sensor_height_mm: 8.8
+      focal_length_mm: 8.4
+      fov_horizontal_deg: 76.5
+      fov_vertical_deg: 55.3
+      colmap_camera_model: PINHOLE
+    - name: "DJI Mavic 3 wide camera"
+      make: "DJI"
+      model: "L2D-20c"
+      sensor_width_mm: 17.3
+      sensor_height_mm: 13.0
+      focal_length_mm: 12.29
+      fov_horizontal_deg: 70.3
+      fov_vertical_deg: 55.8
+      colmap_camera_model: PINHOLE
   presets:
     quick:
       iterations: 1000
