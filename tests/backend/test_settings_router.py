@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 import yaml
 
@@ -46,6 +48,7 @@ def tmp_config(tmp_path, monkeypatch):
 # GET /settings
 # ---------------------------------------------------------------------------
 
+
 def test_get_settings_has_all_five_sections(client, tmp_config):
     resp = client.get("/settings")
     assert resp.status_code == 200
@@ -68,11 +71,18 @@ def test_get_settings_mission_keys(client, tmp_config):
     data = client.get("/settings").json()
     mission = data["mission"]
     expected_keys = {
-        "altitude_ft", "fov_horizontal_deg", "fov_vertical_deg",
-        "image_width_px", "image_height_px",
-        "desired_side_overlap", "desired_forward_overlap",
-        "lane_spacing_ft", "default_video_fps",
-        "battery_range_m", "mission_buffer_pct", "flight_log_match_tolerance_sec",
+        "altitude_ft",
+        "fov_horizontal_deg",
+        "fov_vertical_deg",
+        "image_width_px",
+        "image_height_px",
+        "desired_side_overlap",
+        "desired_forward_overlap",
+        "lane_spacing_ft",
+        "default_video_fps",
+        "battery_range_m",
+        "mission_buffer_pct",
+        "flight_log_match_tolerance_sec",
     }
     assert expected_keys == set(mission.keys())
 
@@ -128,6 +138,7 @@ def test_get_settings_render_defaults(client, tmp_config):
 # PATCH /settings
 # ---------------------------------------------------------------------------
 
+
 def test_patch_mission_field_and_fresh_get_reflects_change(client, tmp_config):
     """PATCH a mission field → the response and a subsequent GET both show the new value."""
     resp = client.patch("/settings", json={"mission": {"altitude_ft": 300}})
@@ -175,6 +186,33 @@ def test_patch_general_field(client, tmp_config):
 # ---------------------------------------------------------------------------
 # PATCH validation errors → 422
 # ---------------------------------------------------------------------------
+
+
+def test_patch_rejects_posix_root_storage_path(client, tmp_config):
+    resp = client.patch("/settings", json={"general": {"imports_dir": "/"}})
+    assert resp.status_code == 422
+
+
+def test_patch_rejects_posix_system_storage_path(client, tmp_config):
+    resp = client.patch("/settings", json={"general": {"exports_dir": "/etc"}})
+    assert resp.status_code == 422
+
+
+def test_patch_rejects_home_root_storage_path(client, tmp_config):
+    resp = client.patch("/settings", json={"general": {"data_dir": str(Path.home())}})
+    assert resp.status_code == 422
+
+
+def test_patch_rejects_windows_system_storage_path(client, tmp_config):
+    resp = client.patch("/settings", json={"general": {"processed_dir": "C:\\Windows"}})
+    assert resp.status_code == 422
+
+
+def test_patch_allows_safe_relative_storage_path(client, tmp_config):
+    resp = client.patch("/settings", json={"general": {"imports_dir": "./safe/imports"}})
+    assert resp.status_code == 200
+    assert resp.json()["general"]["imports_dir"].endswith("safe/imports")
+
 
 def test_patch_overlap_above_one_returns_422(client, tmp_config):
     resp = client.patch("/settings", json={"mission": {"desired_side_overlap": 1.5}})
@@ -228,6 +266,7 @@ def test_patch_valid_camera_model_simple_pinhole_returns_200(client, tmp_config)
 # ---------------------------------------------------------------------------
 # POST /settings/reset
 # ---------------------------------------------------------------------------
+
 
 def test_reset_restores_defaults(client, tmp_config):
     # Dirty the config first.
