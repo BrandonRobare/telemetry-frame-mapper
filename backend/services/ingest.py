@@ -24,7 +24,9 @@ def _extract_xmp_dji(filepath: str) -> dict:
     """Read DJI XMP metadata from a JPEG file.
 
     Parses RelativeAltitude (AGL), FlightYawDegree, and GimbalPitchDegree
-    from the raw XMP block embedded near the start of the file.
+    from the raw XMP block embedded near the start of the file. DJI has emitted
+    these fields both as rdf:Description attributes (with and without a
+    namespace prefix) and as namespaced XML elements, so support both forms.
     Returns a dict with whichever keys were found.
     """
     try:
@@ -33,17 +35,24 @@ def _extract_xmp_dji(filepath: str) -> dict:
     except OSError:
         return {}
     result: dict = {}
-    for key, pattern in (
-        ("altitude_m", rb'RelativeAltitude="([+-]?\d+\.?\d*)"'),
-        ("yaw", rb'FlightYawDegree="([+-]?\d+\.?\d*)"'),
-        ("gimbal_pitch", rb'GimbalPitchDegree="([+-]?\d+\.?\d*)"'),
+    number = rb"([+-]?(?:\d+(?:\.\d*)?|\.\d+))"
+    for key, xmp_name in (
+        ("altitude_m", rb"RelativeAltitude"),
+        ("yaw", rb"FlightYawDegree"),
+        ("gimbal_pitch", rb"GimbalPitchDegree"),
     ):
-        m = re.search(pattern, data)
-        if m:
-            try:
-                result[key] = float(m.group(1))
-            except ValueError:
-                pass
+        patterns = (
+            rb"(?:[A-Za-z_][\w.-]*:)?" + xmp_name + rb"\s*=\s*['\"]" + number + rb"['\"]",
+            rb"<\s*(?:[A-Za-z_][\w.-]*:)?" + xmp_name + rb"\s*>\s*" + number + rb"\s*<\s*/",
+        )
+        for pattern in patterns:
+            m = re.search(pattern, data)
+            if m:
+                try:
+                    result[key] = float(m.group(1))
+                except ValueError:
+                    pass
+                break
     return result
 
 

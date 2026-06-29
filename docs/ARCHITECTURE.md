@@ -41,7 +41,7 @@ FastAPI app (`backend.main:app`), SQLite via SQLAlchemy (PostgreSQL-swappable th
 
 Vite + React 19 + TypeScript, feature-sliced (`src/features/<tab>/` + `src/shared/`). Server state via TanStack Query, UI state via Zustand, Leaflet/react-leaflet for maps, `@mkkellogg/gaussian-splats-3d` (Three.js) for the splat canvas, Tailwind v4.
 
-Eleven tabs: **Map** (footprints + coverage on satellite imagery), **GPS Sync** (flight-log matching), **Review** (quality flags, frame selection, reprojection-error badges), **Plan** (target areas, lawnmower plans), **Export** (WebODM zip, GeoJSON, LAS, mesh), **Session Log**, **Reconstruct** (presets, job start), **Jobs** (resource monitor + job logs), **Storage** (disk breakdown + file browser), **Splat Viewer** (3D canvas, sparklines, coverage-gap heatmap, annotations, measurements, ortho/3D split, flythrough), **Compare** (voxel change detection between reconstructions).
+Eleven tabs: **Map** (footprints + coverage on satellite imagery), **GPS Sync** (flight-log matching), **Review** (quality flags, frame selection, reprojection-error badges), **Plan** (target areas, lawnmower plans), **Export** (WebODM georeferencing CSV-only zip, GeoJSON, LAS, mesh), **Session Log**, **Reconstruct** (presets, job start), **Jobs** (resource monitor + job logs), **Storage** (disk breakdown + file browser), **Splat Viewer** (3D canvas, sparklines, coverage-gap heatmap, annotations, measurements, ortho/3D split, flythrough), **Compare** (voxel change detection between reconstructions).
 
 ## The reconstruction job
 
