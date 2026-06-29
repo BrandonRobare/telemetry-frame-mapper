@@ -25,6 +25,12 @@ class ImageOut(BaseModel):
     latitude: float | None
     longitude: float | None
     altitude_m: float | None
+    original_latitude: float | None
+    original_longitude: float | None
+    original_altitude_m: float | None
+    synced_latitude: float | None
+    synced_longitude: float | None
+    synced_altitude_m: float | None
     gps_source: str | None
     yaw: float | None
     gimbal_pitch: float | None

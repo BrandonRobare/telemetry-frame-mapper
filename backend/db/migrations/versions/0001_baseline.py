@@ -48,6 +48,15 @@ _RECONSTRUCTIONS_SHIM_COLUMNS: dict[str, sa.types.TypeEngine] = {
     "flythrough_error": sa.String(),
 }
 
+_IMAGE_FLIGHT_LOG_SYNC_COLUMNS: dict[str, sa.types.TypeEngine] = {
+    "original_latitude": sa.Float(),
+    "original_longitude": sa.Float(),
+    "original_altitude_m": sa.Float(),
+    "synced_latitude": sa.Float(),
+    "synced_longitude": sa.Float(),
+    "synced_altitude_m": sa.Float(),
+}
+
 
 def upgrade() -> None:
     bind = op.get_bind()
@@ -60,14 +69,20 @@ def upgrade() -> None:
         if table.name not in existing_tables:
             table.create(bind=bind)
 
-    # Case 2: backfill any shim columns missing from a pre-existing
-    # `reconstructions` table (legacy DBs created before Alembic existed).
+    # Case 2: backfill any columns missing from pre-existing legacy tables.
     inspector = sa.inspect(bind)
-    if "reconstructions" in inspector.get_table_names():
+    table_names = inspector.get_table_names()
+    if "reconstructions" in table_names:
         existing_columns = {col["name"] for col in inspector.get_columns("reconstructions")}
         for name, col_type in _RECONSTRUCTIONS_SHIM_COLUMNS.items():
             if name not in existing_columns:
                 op.add_column("reconstructions", sa.Column(name, col_type))
+
+    if "images" in table_names:
+        existing_columns = {col["name"] for col in inspector.get_columns("images")}
+        for name, col_type in _IMAGE_FLIGHT_LOG_SYNC_COLUMNS.items():
+            if name not in existing_columns:
+                op.add_column("images", sa.Column(name, col_type))
 
 
 def downgrade() -> None:
