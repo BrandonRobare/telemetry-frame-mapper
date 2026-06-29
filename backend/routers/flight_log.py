@@ -3,15 +3,14 @@ from __future__ import annotations
 import calendar
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from sqlalchemy.orm import Session as DBSession
 
-from ..core.config import get_upload_limits_config, load_config
+from ..core.config import get_upload_limits_config
 from ..db.database import get_db
-from ..db.models import FlightLog, FlightLogPoint, Footprint, Image
+from ..db.models import FlightLog, FlightLogPoint, Image
 from ..db.models import Session as SessionModel
-from ..services.flight_log_sync import match_images_to_log, parse_dji_csv
-from ..services.geometry import compute_footprint
+from ..services.flight_log_sync import build_offset_preview, match_images_to_log, parse_dji_csv
 
 router = APIRouter(prefix="/flight-logs", tags=["flight-logs"])
 
@@ -145,55 +144,74 @@ async def upload_flight_log(
 
 
 @router.get("/match-preview")
-def match_preview(session_id: int, db: DBSession = Depends(get_db)):
+def match_preview(
+    session_id: int,
+    offset_s: float = 0.0,
+    tolerance_s: float = Query(2.0, ge=0.0),
+    db: DBSession = Depends(get_db),
+):
     _, log_points_dicts, images = _get_log_points_and_images(session_id, db)
-    return match_images_to_log(images, log_points_dicts, tolerance_s=2.0)
+    return match_images_to_log(
+        images,
+        log_points_dicts,
+        tolerance_s=tolerance_s,
+        offset_s=offset_s,
+    )
+
+
+@router.get("/offset-preview")
+def offset_preview(
+    session_id: int,
+    offset_s: float = 0.0,
+    tolerance_s: float = Query(2.0, ge=0.0),
+    window_s: float = Query(10.0, ge=0.0, le=300.0),
+    step_s: float = Query(1.0, gt=0.0, le=60.0),
+    db: DBSession = Depends(get_db),
+):
+    _, log_points_dicts, images = _get_log_points_and_images(session_id, db)
+    return build_offset_preview(
+        images,
+        log_points_dicts,
+        tolerance_s=tolerance_s,
+        center_offset_s=offset_s,
+        window_s=window_s,
+        step_s=step_s,
+    )
 
 
 @router.post("/apply")
-def apply_sync(session_id: int, db: DBSession = Depends(get_db)):
+def apply_sync(
+    session_id: int,
+    offset_s: float = 0.0,
+    tolerance_s: float = Query(2.0, ge=0.0),
+    db: DBSession = Depends(get_db),
+):
     _, log_points_dicts, images = _get_log_points_and_images(session_id, db)
-    matches = match_images_to_log(images, log_points_dicts, tolerance_s=2.0)
+    matches = match_images_to_log(
+        images,
+        log_points_dicts,
+        tolerance_s=tolerance_s,
+        offset_s=offset_s,
+    )
 
     match_map = {m["image_id"]: m for m in matches}
-    cfg = load_config()
     applied = 0
     for img in images:
         if img.id in match_map:
             m = match_map[img.id]
+            if img.original_latitude is None and img.latitude is not None:
+                img.original_latitude = img.latitude
+            if img.original_longitude is None and img.longitude is not None:
+                img.original_longitude = img.longitude
+            if img.original_altitude_m is None and img.altitude_m is not None:
+                img.original_altitude_m = img.altitude_m
+            img.synced_latitude = m["latitude"]
+            img.synced_longitude = m["longitude"]
+            img.synced_altitude_m = m["altitude_m"]
             img.latitude = m["latitude"]
             img.longitude = m["longitude"]
             img.altitude_m = m["altitude_m"]
-
-            if img.footprint is not None:
-                db.delete(img.footprint)
-                db.flush()
-
-            if (
-                img.latitude is not None
-                and img.longitude is not None
-                and img.altitude_m is not None
-            ):
-                fp = compute_footprint(
-                    lat=img.latitude,
-                    lon=img.longitude,
-                    altitude_m=img.altitude_m,
-                    fov_horizontal_deg=cfg.fov_horizontal_deg,
-                    fov_vertical_deg=cfg.fov_vertical_deg,
-                    yaw_deg=img.yaw,
-                    target_crs=cfg.target_crs,
-                )
-                if fp:
-                    db.add(
-                        Footprint(
-                            image_id=img.id,
-                            geom_wkt=fp.get("geom_wkt"),
-                            geom_geojson=fp.get("geom_geojson"),
-                            ground_width_m=fp.get("ground_width_m"),
-                            ground_height_m=fp.get("ground_height_m"),
-                            heading_estimated=fp.get("heading_estimated", True),
-                        )
-                    )
+            img.gps_source = "flight_log"
             applied += 1
 
     db.commit()

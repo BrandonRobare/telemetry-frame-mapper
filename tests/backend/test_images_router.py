@@ -125,11 +125,12 @@ def test_webodm_georeferencing_csv_export_uses_configured_exports_dir(client, tm
     from unittest.mock import patch
 
     s, _ = _insert_session_and_image(client)
+    session_id = s.id
     configured_exports_dir = tmp_path / "configured-exports"
 
     with patch("backend.routers.export.get_config") as mock_cfg:
         mock_cfg.return_value.exports_dir = str(configured_exports_dir)
-        resp = client.post(f"/export/webodm-georeferencing-csv?session_id={s.id}")
+        resp = client.post(f"/export/webodm-georeferencing-csv?session_id={session_id}")
 
     assert resp.status_code == 200
     data = resp.json()
