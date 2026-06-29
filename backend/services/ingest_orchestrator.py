@@ -97,6 +97,11 @@ def _run(session_id: int, folder: Path, db_factory) -> None:
                 width=exif.get("width"),
                 height=exif.get("height"),
                 focal_length_mm=exif.get("focal_length_mm"),
+                camera_make=exif.get("camera_make"),
+                camera_model=exif.get("camera_model"),
+                lens_model=exif.get("lens_model"),
+                focal_length_35mm=exif.get("focal_length_35mm"),
+                digital_zoom_ratio=exif.get("digital_zoom_ratio"),
                 flag="good",
                 usable=True,
             )
