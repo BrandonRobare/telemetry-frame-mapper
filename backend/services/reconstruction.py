@@ -24,6 +24,7 @@ from backend.db.models import (
     SessionFrameSelection,
 )
 from backend.services import ply_io, splat_trainer
+from backend.services.camera_calibration import calibration_profile_for_images
 from backend.services.splat_trainer import ReconstructionCancelled, TrainerConfig
 
 # Maps reconstruction_id → cancel Event
@@ -58,6 +59,11 @@ def _log_rec(rec_id: int, msg: str) -> None:
 def get_rec_log(rec_id: int) -> list[str]:
     with _rec_logs_lock:
         return list(_rec_logs.get(rec_id, []))
+
+
+def clear_rec_logs() -> None:
+    with _rec_logs_lock:
+        _rec_logs.clear()
 
 
 def notify_reconstruction_status_changed(rec_id: int) -> None:
@@ -98,10 +104,23 @@ def _write_colmap_workspace(colmap_dir: Path, images: list) -> None:
 
     cfg = get_config()
     recon_cfg = get_reconstruction_config()
-    camera_model = recon_cfg.get("camera_model", "PINHOLE")
-    f_px = (cfg.image_width_px / 2) / math.tan(math.radians(cfg.fov_horizontal_deg / 2))
-    cx = cfg.image_width_px / 2
-    cy = cfg.image_height_px / 2
+    calibration = calibration_profile_for_images(
+        images,
+        recon_cfg.get("camera_profiles", []),
+        cfg.image_width_px,
+        cfg.image_height_px,
+        cfg.fov_horizontal_deg,
+        cfg.fov_vertical_deg,
+        recon_cfg.get("camera_model", "PINHOLE"),
+    )
+    camera_model = calibration["suggested_colmap_camera_model"]
+    width = int(calibration["width"])
+    height = int(calibration["height"])
+    f_px = calibration.get("focal_px") or (width / 2) / math.tan(
+        math.radians(cfg.fov_horizontal_deg / 2)
+    )
+    cx = width / 2
+    cy = height / 2
     cameras_txt = colmap_dir / "cameras.txt"
     if camera_model == "SIMPLE_PINHOLE":
         # SIMPLE_PINHOLE: 3 params — f cx cy
@@ -112,7 +131,7 @@ def _write_colmap_workspace(colmap_dir: Path, images: list) -> None:
     cameras_txt.write_text(
         "# Camera list with one line of data per camera:\n"
         "#   CAMERA_ID, MODEL, WIDTH, HEIGHT, PARAMS[]\n"
-        f"1 {camera_model} {cfg.image_width_px} {cfg.image_height_px} {params_str}\n"
+        f"1 {camera_model} {width} {height} {params_str}\n"
     )
 
     for img in images:
@@ -1463,6 +1482,28 @@ def _run_pipeline(
             status="running_colmap", step="writing workspace", progress_pct=2.0,
         )
         _log_rec(reconstruction_id, "COLMAP: starting")
+        calibration = calibration_profile_for_images(
+            images,
+            recon_cfg.get("camera_profiles", []),
+            get_config().image_width_px,
+            get_config().image_height_px,
+            get_config().fov_horizontal_deg,
+            get_config().fov_vertical_deg,
+            recon_cfg.get("camera_model", "PINHOLE"),
+        )
+        profile = calibration.get("profile")
+        if profile:
+            _log_rec(reconstruction_id, f"Camera calibration profile: {profile.get('name')}")
+        suggested_model = calibration["suggested_colmap_camera_model"]
+        configured_model = calibration["configured_colmap_camera_model"]
+        if suggested_model != configured_model:
+            _log_rec(
+                reconstruction_id,
+                "COLMAP camera model suggestion: "
+                f"{suggested_model} (configured {configured_model})",
+            )
+        for warning in calibration["warnings"]:
+            _log_rec(reconstruction_id, f"Camera calibration warning: {warning}")
         _write_colmap_workspace(colmap_dir, images)
 
         if cancel.is_set():

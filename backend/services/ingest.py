@@ -40,6 +40,8 @@ def _extract_xmp_dji(filepath: str) -> dict:
         ("altitude_m", rb"RelativeAltitude"),
         ("yaw", rb"FlightYawDegree"),
         ("gimbal_pitch", rb"GimbalPitchDegree"),
+        ("focal_length_35mm", rb"CalibratedFocalLength"),
+        ("digital_zoom_ratio", rb"DigitalZoomRatio"),
     ):
         patterns = (
             rb"(?:[A-Za-z_][\w.-]*:)?" + xmp_name + rb"\s*=\s*['\"]" + number + rb"['\"]",
@@ -60,7 +62,8 @@ def extract_exif(filepath: str) -> dict:
     """Extract metadata from a JPEG file.
 
     Returns dict with: filename, filepath, timestamp, latitude, longitude,
-    altitude_m, gps_source, yaw, gimbal_pitch, width, height, focal_length_mm.
+    altitude_m, gps_source, yaw, gimbal_pitch, width, height, focal_length_mm,
+    camera_make, camera_model, lens_model, focal_length_35mm, digital_zoom_ratio.
     """
     result = {
         "filename": os.path.basename(filepath),
@@ -75,6 +78,11 @@ def extract_exif(filepath: str) -> dict:
         "width": None,
         "height": None,
         "focal_length_mm": None,
+        "camera_make": None,
+        "camera_model": None,
+        "lens_model": None,
+        "focal_length_35mm": None,
+        "digital_zoom_ratio": None,
     }
 
     try:
@@ -102,6 +110,22 @@ def extract_exif(filepath: str) -> dict:
     fl = exif.get("Exif", {}).get(piexif.ExifIFD.FocalLength)
     if fl:
         result["focal_length_mm"] = _rational_to_float(fl)
+    fl35 = exif.get("Exif", {}).get(piexif.ExifIFD.FocalLengthIn35mmFilm)
+    if fl35:
+        result["focal_length_35mm"] = float(fl35)
+
+    zeroth = exif.get("0th", {})
+    exif_ifd = exif.get("Exif", {})
+    for out_key, ifd, tag in (
+        ("camera_make", zeroth, piexif.ImageIFD.Make),
+        ("camera_model", zeroth, piexif.ImageIFD.Model),
+        ("lens_model", exif_ifd, piexif.ExifIFD.LensModel),
+    ):
+        raw = ifd.get(tag)
+        if isinstance(raw, bytes):
+            result[out_key] = raw.decode(errors="ignore").strip(" \x00") or None
+        elif raw is not None:
+            result[out_key] = str(raw).strip() or None
 
     gps = exif.get("GPS", {})
     if gps:
@@ -136,6 +160,10 @@ def extract_exif(filepath: str) -> dict:
         result["yaw"] = xmp["yaw"]
     if "gimbal_pitch" in xmp:
         result["gimbal_pitch"] = xmp["gimbal_pitch"]
+    if "focal_length_35mm" in xmp:
+        result["focal_length_35mm"] = xmp["focal_length_35mm"]
+    if "digital_zoom_ratio" in xmp:
+        result["digital_zoom_ratio"] = xmp["digital_zoom_ratio"]
 
     return result
 

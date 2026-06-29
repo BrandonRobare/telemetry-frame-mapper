@@ -232,6 +232,30 @@ def test_workspace_cameras_txt_pinhole_format():
         assert int(parts[3]) == 3000
 
 
+def test_workspace_cameras_txt_uses_imported_image_dimensions_and_profile_focal_length():
+    from backend.services.reconstruction import _write_colmap_workspace
+    with tempfile.TemporaryDirectory() as tmp:
+        colmap_dir = Path(tmp)
+        img = _make_mock_image()
+        img.width = 5280
+        img.height = 3956
+        img.camera_make = "DJI"
+        img.camera_model = "FC3582"
+        img.lens_model = "24mm F1.7"
+        img.focal_length_mm = 6.72
+        Path(img.filepath).touch()
+        _write_colmap_workspace(colmap_dir, [img])
+        line = [
+            ln for ln in (colmap_dir / "cameras.txt").read_text().splitlines()
+            if not ln.startswith("#") and ln.strip()
+        ][0]
+        parts = line.split()
+        assert parts[1] == "PINHOLE"
+        assert int(parts[2]) == 5280
+        assert int(parts[3]) == 3956
+        assert float(parts[4]) == pytest.approx(5544.0, abs=0.1)
+
+
 def test_workspace_cameras_txt_focal_length():
     from backend.services.reconstruction import _write_colmap_workspace
     with tempfile.TemporaryDirectory() as tmp:

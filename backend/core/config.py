@@ -7,6 +7,8 @@ from pathlib import Path
 
 import yaml
 
+from backend.services.camera_calibration import default_camera_profiles, normalize_profiles
+
 
 @dataclass
 class AppConfig:
@@ -95,6 +97,7 @@ def get_reconstruction_config(path: str = "config.yaml") -> dict:
         "sift_max_features": 8192,
         "matcher": "exhaustive",
         "camera_model": "PINHOLE",
+        "camera_profiles": default_camera_profiles(),
         "presets": {
             "quick": {
                 "iterations": 1000,
@@ -127,6 +130,7 @@ def get_reconstruction_config(path: str = "config.yaml") -> dict:
             if preset_name not in merged_presets:
                 merged_presets[preset_name] = preset_vals
         merged["presets"] = merged_presets
+    merged["camera_profiles"] = normalize_profiles(merged.get("camera_profiles"))
     return merged
 
 
