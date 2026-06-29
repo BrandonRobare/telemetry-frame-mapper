@@ -15,7 +15,7 @@ import type {
   Annotation,
   FlythroughStatus,
 } from '../../types/api'
-import { worldToGps, useRayCast } from './useViewerCoords'
+import { gpsToWorld, worldToGps, useRayCast } from './useViewerCoords'
 import { smoothstep } from './smoothstep'
 import MiniLeafletPane from './MiniLeafletPane'
 
@@ -960,7 +960,6 @@ function SplatCanvas({
     import('three').then(async (THREE) => {
       if (cancelled) return
       const group = new THREE.Group()
-      const { gpsToWorld } = await import('./useViewerCoords')
 
       for (const ann of annotations) {
         const wp = gpsToWorld({ lat: ann.lat, lon: ann.lon, alt: ann.alt_m }, geoTransform)
