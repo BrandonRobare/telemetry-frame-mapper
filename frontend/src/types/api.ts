@@ -113,6 +113,58 @@ export interface FlythroughStatus {
   flythrough_path: string | null
 }
 
+export interface HistogramBin {
+  min: number;
+  max: number;
+  count: number;
+}
+
+export interface PreflightQualityReport {
+  session_id: number;
+  total_frames: number;
+  usable_frames: number;
+  gps: {
+    missing: number;
+    completeness_pct: number;
+  };
+  timestamps: {
+    missing: number;
+    completeness_pct: number;
+    duplicate_groups: number;
+    duplicate_frames: number;
+    gap_count: number;
+    max_gap_s: number;
+    typical_gap_s: number | null;
+    gap_threshold_s: number | null;
+  };
+  quality: {
+    blur_threshold: number;
+    dark_threshold: number;
+    bright_threshold: number;
+    blur_count: number;
+    dark_count: number;
+    bright_count: number;
+    blur_pct: number;
+    dark_pct: number;
+    bright_pct: number;
+    flag_counts: Record<string, number>;
+    sharpness_histogram: HistogramBin[];
+    brightness_histogram: HistogramBin[];
+  };
+  coverage: {
+    footprint_count: number;
+    footprint_coverage_pct: number;
+    estimated_overlap_pct: number | null;
+    union_area: number;
+    summed_footprint_area: number;
+    warnings: string[];
+  };
+  warnings: string[];
+  safe_to_reconstruct: "yes" | "caution" | "no";
+  score: number;
+  recommended_action: string;
+}
+
 export interface Job {
   id: number;
   type: "reconstruction";
