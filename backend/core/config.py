@@ -190,3 +190,23 @@ def get_upload_limits_config(path: str = "config.yaml") -> dict:
     }
     upload_limits = data.get("upload_limits", {})
     return {**defaults, **upload_limits}
+
+
+def get_browser_upload_config(path: str = "config.yaml") -> dict:
+    """Return browser image upload safeguards from config.yaml with defaults applied."""
+    try:
+        with open(path) as f:
+            data = yaml.safe_load(f) or {}
+    except FileNotFoundError:
+        data = {}
+
+    defaults = {
+        "chunk_size_bytes": 2 * 1024 * 1024,
+        "max_file_bytes": 50 * 1024 * 1024,
+        "max_total_bytes": 2 * 1024 * 1024 * 1024,
+        "quota_bytes": 10 * 1024 * 1024 * 1024,
+        "cleanup_after_hours": 24,
+        "accepted_extensions": [".jpg", ".jpeg"],
+    }
+    browser_uploads = data.get("browser_uploads", {})
+    return {**defaults, **browser_uploads}
