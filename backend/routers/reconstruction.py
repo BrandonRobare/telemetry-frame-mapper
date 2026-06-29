@@ -21,6 +21,7 @@ from ..services.reconstruction import (
     _load_geo_transform_for_reconstruction,
     _safe_export_path,
     _write_mesh_georef,
+    build_reconstruction_diagnostics,
     cancel_reconstruction,
     current_reconstruction_status_version,
     get_rec_log,
@@ -181,6 +182,51 @@ class PreflightReportOut(BaseModel):
     score: int
     recommended_action: str
 
+class ReconstructionImageDiagnostic(BaseModel):
+    id: int
+    filename: str
+    timestamp: str | None = None
+    latitude: float | None = None
+    longitude: float | None = None
+    altitude_m: float | None = None
+    colmap_error_px: float | None = None
+    registered: bool
+
+
+class ReconstructionTimelineBucket(BaseModel):
+    bucket: int
+    start_index: int
+    end_index: int
+    total: int
+    unregistered: int
+    unregistered_pct: float
+
+
+class ReconstructionMapHeatPoint(BaseModel):
+    id: int
+    filename: str
+    latitude: float
+    longitude: float
+    weight: int
+
+
+class ReconstructionSuggestion(BaseModel):
+    code: str
+    title: str
+    detail: str
+    setting: dict | None = None
+
+
+class ReconstructionDiagnosticsOut(BaseModel):
+    reconstruction_id: int
+    summary: dict
+    registered_images: list[ReconstructionImageDiagnostic]
+    unregistered_images: list[ReconstructionImageDiagnostic]
+    timeline_heatmap: list[ReconstructionTimelineBucket]
+    map_heatmap: list[ReconstructionMapHeatPoint]
+    suggestions: list[ReconstructionSuggestion]
+
+
 
 class MeshStatusOut(BaseModel):
     id: int
@@ -294,6 +340,14 @@ def get_status(reconstruction_id: int, db: DBSession = Depends(get_db)):
     if not rec:
         raise HTTPException(status_code=404, detail="Reconstruction not found")
     return rec
+
+
+@router.get("/{reconstruction_id}/diagnostics", response_model=ReconstructionDiagnosticsOut)
+def get_diagnostics(reconstruction_id: int, db: DBSession = Depends(get_db)):
+    rec = db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Reconstruction not found")
+    return build_reconstruction_diagnostics(db, rec)
 
 
 def _status_sse_payload(rec: Reconstruction) -> str:
