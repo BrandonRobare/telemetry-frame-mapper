@@ -59,3 +59,7 @@ render:
   thumbnail_quality: 85
   lod_preview_ratio: 0.10
   lod_medium_ratio: 0.50
+
+upload_limits:
+  flight_log_max_bytes: 10485760
+  srt_max_bytes: 10485760
