@@ -35,6 +35,6 @@ jobs:
         run: python3 -m zipfile --create frontend-dist.zip frontend/dist
 
       - name: Upload frontend dist to release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: frontend-dist.zip
