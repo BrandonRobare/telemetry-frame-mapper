@@ -67,7 +67,12 @@ export function useImportSession() {
 
   const progressQuery = useQuery({
     queryKey: ['session-progress', importingSessionId],
-    queryFn: () => get<{ processed: number; total: number; status: 'running' | 'done' | 'error' }>(
+    queryFn: () => get<{
+      processed: number
+      total: number
+      status: 'running' | 'done' | 'error'
+      error?: string
+    }>(
       `/sessions/${importingSessionId}/progress`
     ),
     enabled: importingSessionId !== null,
@@ -82,10 +87,10 @@ export function useImportSession() {
       addToast('Session imported successfully', 'success')
       queueMicrotask(() => setImportingSessionId(null))
     } else if (status === 'error') {
-      addToast('Import failed', 'error')
+      addToast(progressQuery.data?.error || 'Import failed', 'error')
       queueMicrotask(() => setImportingSessionId(null))
     }
-  }, [progressQuery.data?.status, queryClient, addToast])
+  }, [progressQuery.data?.status, progressQuery.data?.error, queryClient, addToast])
 
   const mutation = useMutation({
     mutationFn: (body: { folder_path: string; name: string }) =>
