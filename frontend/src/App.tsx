@@ -152,28 +152,28 @@ export default function App() {
   }
 
   return (
-    <div className="flex flex-col" style={{ height: '100vh', background: 'var(--bg)' }}>
+    <div className="fm-app flex flex-col" style={{ height: '100vh', background: 'var(--bg)' }}>
       <GlassFilters />
       {/* Nav bar */}
       <nav
-        className="flex items-stretch shrink-0 relative z-20"
+        className="fm-top-nav flex items-stretch shrink-0 relative z-20"
         style={{ background: 'var(--surface)', borderBottom: '1px solid var(--border)', height: 44 }}
       >
         {/* Logo — a live pipeline hex meter; click to open Overview */}
         <button
           onClick={() => selectTab('overview')}
-          className="flex items-center gap-2 shrink-0 cursor-pointer bg-transparent border-none"
+          className="fm-brand flex items-center gap-2 shrink-0 cursor-pointer bg-transparent border-none"
           style={{ padding: '0 20px 0 16px' }}
           title="Pipeline status, open Overview"
         >
           <LogoMark stageStates={selectedSessionId !== null ? status.states : undefined} />
-          <span className="text-sm font-semibold whitespace-nowrap" style={{ color: 'var(--text)', fontFamily: 'var(--font-display)', letterSpacing: '0.01em' }}>
+          <span className="fm-brand-text text-sm font-semibold whitespace-nowrap" style={{ color: 'var(--text)', fontFamily: 'var(--font-display)', letterSpacing: '0.01em' }}>
             Telemetry Frame Mapper
           </span>
         </button>
 
         {/* Pipeline tabs — the always-visible spine */}
-        <div className="flex flex-1 items-stretch min-w-0 overflow-x-auto tg-noscrollbar">
+        <div className="fm-pipeline-nav flex flex-1 items-stretch min-w-0 overflow-x-auto tg-noscrollbar">
           {PIPELINE_TABS.map((tab) => {
             const active = activeTab === tab.id
             return (
@@ -210,7 +210,7 @@ export default function App() {
         </div>
 
         {/* Tools — secondary tabs behind a dropdown (keeps the spine uncluttered) */}
-        <div className="relative flex items-stretch shrink-0">
+        <div className="fm-tools-nav relative flex items-stretch shrink-0">
           <div aria-hidden="true" style={{ alignSelf: 'center', width: 1, height: 20, background: 'var(--border)', margin: '0 6px' }} />
           <button
             ref={toolsBtnRef}
@@ -239,7 +239,7 @@ export default function App() {
                 ref={menuRef}
                 role="menu"
                 onKeyDown={onMenuKeyDown}
-                className="absolute"
+                className="fm-tools-menu absolute"
                 style={{ top: '100%', left: 6, zIndex: 31, minWidth: 168, background: 'var(--surface)', border: '1px solid var(--border-strong)', boxShadow: 'var(--shadow-2)', padding: 4 }}
               >
                 {TOOL_TABS.map((tab) => {
@@ -269,12 +269,12 @@ export default function App() {
         </div>
 
         {/* Session picker */}
-        <div className="flex items-center shrink-0" style={{ padding: '0 8px', borderLeft: '1px solid var(--border)' }}>
+        <div className="fm-session-slot flex items-center shrink-0" style={{ padding: '0 8px', borderLeft: '1px solid var(--border)' }}>
           <SessionPicker onImport={() => setShowImport(true)} />
         </div>
 
         {/* Controls */}
-        <div className="flex items-center gap-2 shrink-0 pr-4">
+        <div className="fm-import-slot flex items-center gap-2 shrink-0 pr-4">
           <button
             onClick={() => setShowImport(true)}
             className="text-sm cursor-pointer transition-colors duration-150 active:scale-[0.98]"

@@ -19,7 +19,7 @@ export function TabHeader({ title, description, nextTab, nextLabel, right }: Tab
   const setRequestedTab = useMapStore((s) => s.setRequestedTab)
   return (
     <div
-      className="shrink-0 flex items-center justify-between gap-4"
+      className="fm-tab-header shrink-0 flex items-center justify-between gap-4"
       style={{
         padding: '13px 20px',
         background: 'var(--surface)',
@@ -43,7 +43,7 @@ export function TabHeader({ title, description, nextTab, nextLabel, right }: Tab
           {description}
         </p>
       </div>
-      <div className="flex items-center gap-3 shrink-0">
+      <div className="fm-tab-header-actions flex items-center gap-3 shrink-0">
         {right}
         {nextTab && (
           <button

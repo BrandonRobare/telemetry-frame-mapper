@@ -37,7 +37,7 @@ function StatCard({ label, value, color }: { label: string; value: React.ReactNo
 function SidebarSkeleton() {
   return (
     <aside
-      className="shrink-0 flex flex-col gap-3"
+      className="fm-session-sidebar shrink-0 flex flex-col gap-3"
       style={{ width: 200, background: 'var(--surface)', borderLeft: '1px solid var(--border)', padding: 12 }}
     >
       <Skeleton width="60%" height={10} />
@@ -86,7 +86,7 @@ export default function SessionSidebar({ session, coverage, frameCount, isLoadin
   if (!session) {
     return (
       <aside
-        className="shrink-0 flex flex-col items-center justify-center gap-2"
+        className="fm-session-sidebar shrink-0 flex flex-col items-center justify-center gap-2"
         style={{ width: 200, background: 'var(--surface)', borderLeft: '1px solid var(--border)', padding: 16 }}
       >
         <p className="text-sm text-center" style={{ color: 'var(--text-muted)' }}>
@@ -110,7 +110,7 @@ export default function SessionSidebar({ session, coverage, frameCount, isLoadin
 
   return (
     <aside
-      className="shrink-0 flex flex-col overflow-y-auto"
+      className="fm-session-sidebar shrink-0 flex flex-col overflow-y-auto"
       style={{ width: 200, background: 'var(--surface)', borderLeft: '1px solid var(--border)' }}
     >
       {/* Session header */}
