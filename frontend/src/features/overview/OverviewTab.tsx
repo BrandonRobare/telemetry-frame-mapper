@@ -57,15 +57,15 @@ export default function OverviewTab({ onImport }: Props) {
 
   return (
     <div className="flex-1 overflow-y-auto" style={{ background: 'var(--bg)' }}>
-      <div style={{ maxWidth: 920, margin: '0 auto', padding: '24px 24px 48px' }}>
+      <div className="fm-overview-shell" style={{ maxWidth: 920, margin: '0 auto', padding: '24px 24px 48px' }}>
         {/* Hero band: 3D logo over the earthy backdrop */}
         <div
-          className="tg-topo-backdrop relative overflow-hidden"
+          className="fm-overview-hero tg-topo-backdrop relative overflow-hidden"
           style={{ height: 250, border: '1px solid var(--border-strong)' }}
         >
           <CornerTicks size={10} inset={5} label={session ? session.name : 'no session'} />
           <ReconstructionLogo3D stageStates={states} className="absolute inset-0 w-full h-full" />
-          <div className="absolute" style={{ left: 26, top: 26, maxWidth: 360 }}>
+          <div className="fm-overview-copy absolute" style={{ left: 26, top: 26, maxWidth: 360 }}>
             <div className="flex items-center gap-2">
               <LogoMark size={26} />
               <span style={{ fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 20, color: 'var(--text)' }}>
@@ -104,7 +104,7 @@ export default function OverviewTab({ onImport }: Props) {
           </div>
         ) : (
           <div
-            className="mt-5 flex items-center justify-between gap-4"
+            className="fm-overview-cta mt-5 flex items-center justify-between gap-4"
             style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', padding: '18px 20px' }}
           >
             <div>
@@ -115,7 +115,7 @@ export default function OverviewTab({ onImport }: Props) {
                 Import a DJI video + frames to light up the pipeline.
               </div>
             </div>
-            <div className="flex items-center gap-3 shrink-0">
+            <div className="fm-overview-cta-actions flex items-center gap-3 shrink-0">
               <Button onClick={onImport}>Import a flight</Button>
               <span style={{ fontSize: 11, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>.jpg frames in a folder</span>
             </div>
