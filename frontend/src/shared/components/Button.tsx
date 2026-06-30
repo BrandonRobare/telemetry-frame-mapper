@@ -57,8 +57,10 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
     loading = false,
     loadingLabel = 'Loading…',
     className = '',
-    children,
     style,
+    onMouseEnter,
+    onMouseLeave,
+    children,
     ...props
   },
   ref,
@@ -67,6 +69,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
   const v = variantStyles[variant];
   const isDisabled = disabled || loading;
   const lifted = !isDisabled && hover;
+
   return (
     <button
       ref={ref}
@@ -83,24 +86,17 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
         ...sizeStyles[size],
         ...style,
       }}
-      onMouseEnter={() => setHover(true)}
-      onMouseLeave={() => setHover(false)}
+      onMouseEnter={(event) => {
+        setHover(true);
+        onMouseEnter?.(event);
+      }}
+      onMouseLeave={(event) => {
+        setHover(false);
+        onMouseLeave?.(event);
+      }}
       {...props}
     >
-      {loading && (
-        <span
-          aria-hidden="true"
-          style={{
-            width: '1em',
-            height: '1em',
-            border: '2px solid currentColor',
-            borderTopColor: 'transparent',
-            borderRadius: '50%',
-            display: 'inline-block',
-            animation: 'tg-button-spin 0.75s linear infinite',
-          }}
-        />
-      )}
+      {loading && <span aria-hidden="true" className="tg-button-spinner" />}
       <span>{loading ? loadingLabel : children}</span>
     </button>
   );
