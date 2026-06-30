@@ -97,3 +97,30 @@ def get_diff_geojson(comparison_id: int, db: DBSession = Depends(get_db)):
             "Content-Disposition": f'attachment; filename="comparison_{comparison_id}.geojson"'
         },
     )
+
+
+def _diff_metrics(diff: dict) -> dict:
+    new_cells = diff.get("new", []) or []
+    removed_cells = diff.get("removed", []) or []
+
+    def volume(cells):
+        return sum(float(c.get("size", 0) or 0) ** 3 for c in cells)
+
+    def area(cells):
+        return sum(float(c.get("size", 0) or 0) ** 2 for c in cells)
+
+    return {
+        "new_count": len(new_cells),
+        "removed_count": len(removed_cells),
+        "new_volume_m3": volume(new_cells),
+        "removed_volume_m3": volume(removed_cells),
+        "net_volume_m3": volume(new_cells) - volume(removed_cells),
+        "changed_area_m2": area(new_cells) + area(removed_cells),
+        "alignment": diff.get("alignment") or {"method": "none", "status": "not_applied"},
+    }
+
+
+@router.get("/{comparison_id}/metrics")
+def get_comparison_metrics(comparison_id: int, db: DBSession = Depends(get_db)):
+    comparison = _comparison_or_404(comparison_id, db)
+    return _diff_metrics(_load_complete_diff(comparison))
