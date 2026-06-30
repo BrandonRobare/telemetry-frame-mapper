@@ -389,3 +389,245 @@ body {
   transform-origin: center;
   animation: fm-trio-pulse 1.6s ease-in-out infinite;
 }
+
+/* ---------------------------------------------------------------------------
+   Phone-sized responsive layout
+   Keep core controls reachable at 320/375/430px by stacking panels, letting
+   command strips scroll horizontally, and preserving map controls above
+   Leaflet-heavy views instead of clipping them off-canvas.
+--------------------------------------------------------------------------- */
+@media (max-width: 430px) {
+  .fm-app {
+    min-width: 0;
+  }
+
+  .fm-top-nav {
+    height: auto !important;
+    min-height: 44px;
+    flex-wrap: wrap;
+    align-content: stretch;
+  }
+
+  .fm-brand {
+    padding: 0 10px !important;
+    min-height: 44px;
+    max-width: calc(100% - 94px);
+  }
+
+  .fm-brand-text {
+    max-width: 10.5rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .fm-import-slot {
+    order: 2;
+    margin-left: auto;
+    min-height: 44px;
+    padding-right: 8px !important;
+  }
+
+  .fm-import-slot button {
+    padding: 5px 10px !important;
+  }
+
+  .fm-pipeline-nav {
+    order: 3;
+    flex: 1 0 100%;
+    min-height: 40px;
+    border-top: 1px solid var(--border);
+  }
+
+  .fm-pipeline-nav > button,
+  .fm-tools-nav > button {
+    padding-left: 10px !important;
+    padding-right: 10px !important;
+    min-height: 40px;
+  }
+
+  .fm-tools-nav {
+    order: 4;
+    min-height: 40px;
+  }
+
+  .fm-tools-menu {
+    left: auto !important;
+    right: 4px;
+    max-width: calc(100vw - 16px);
+    max-height: calc(100dvh - 92px);
+    overflow-y: auto;
+  }
+
+  .fm-session-slot {
+    order: 5;
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 40px;
+    border-top: 1px solid var(--border);
+    border-left: 0 !important;
+  }
+
+  .fm-session-slot > * {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .fm-tab-header {
+    align-items: flex-start;
+    padding: 11px 12px !important;
+    gap: 8px;
+  }
+
+  .fm-tab-header-actions {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    max-width: 42%;
+  }
+
+  .fm-import-dialog {
+    width: 100% !important;
+    padding: 18px 16px !important;
+  }
+
+  .fm-import-mode-toggle,
+  .fm-import-actions {
+    flex-wrap: wrap;
+  }
+
+  .fm-import-mode-toggle > *,
+  .fm-import-actions > * {
+    flex: 1 1 120px;
+  }
+
+  .fm-settings-layout {
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .fm-settings-sidebar {
+    width: 100% !important;
+    max-height: 40dvh;
+    border-right: 0 !important;
+    border-bottom: 1px solid var(--border);
+    padding: 12px 0 !important;
+  }
+
+  .fm-settings-nav {
+    flex-direction: row !important;
+    overflow-x: auto;
+    scrollbar-width: thin;
+  }
+
+  .fm-settings-nav > button {
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
+
+  .fm-settings-content {
+    padding: 16px 12px 24px !important;
+  }
+
+  .fm-review-stats {
+    gap: 10px !important;
+    padding: 10px 12px !important;
+    overflow-x: auto;
+    white-space: nowrap;
+    scrollbar-width: thin;
+  }
+
+  .fm-review-stats > span:last-child {
+    margin-left: 0 !important;
+  }
+
+  .fm-review-batch {
+    padding-left: 12px !important;
+    padding-right: 12px !important;
+    scrollbar-width: thin;
+  }
+
+  .fm-review-grid {
+    padding: 10px !important;
+    grid-template-columns: repeat(auto-fill, minmax(142px, 1fr)) !important;
+    gap: 10px !important;
+  }
+
+  .fm-overview-shell {
+    padding: 12px 10px 28px !important;
+  }
+
+  .fm-overview-hero {
+    height: 200px !important;
+  }
+
+  .fm-overview-copy {
+    left: 14px !important;
+    top: 14px !important;
+    right: 14px;
+    max-width: none !important;
+  }
+
+  .fm-overview-cta {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .fm-overview-cta-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .fm-map-layout,
+  .fm-plan-layout {
+    flex-direction: column;
+  }
+
+  .fm-map-canvas,
+  .fm-plan-map {
+    min-height: 320px;
+    flex: 1 1 320px;
+  }
+
+  .fm-layer-controls {
+    left: 8px !important;
+    right: 8px;
+    top: 8px !important;
+    min-width: 0 !important;
+    padding: 8px 10px !important;
+    max-height: 42dvh;
+    overflow-y: auto;
+  }
+
+  .fm-session-sidebar {
+    width: 100% !important;
+    max-height: 45dvh;
+    border-left: 0 !important;
+    border-top: 1px solid var(--border);
+  }
+
+  .fm-plan-panel {
+    width: 100% !important;
+    max-height: 48dvh;
+    border-right: 0 !important;
+    border-bottom: 1px solid var(--border);
+    padding: 14px !important;
+  }
+}
+
+@media (max-width: 360px) {
+  .fm-brand-text {
+    max-width: 8rem;
+  }
+
+  .fm-tab-header {
+    flex-direction: column;
+  }
+
+  .fm-tab-header-actions {
+    justify-content: flex-start;
+    max-width: 100%;
+  }
+
+  .fm-review-grid {
+    grid-template-columns: 1fr !important;
+  }
+}

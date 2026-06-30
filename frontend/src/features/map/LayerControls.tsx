@@ -14,7 +14,7 @@ export default function LayerControls() {
 
   return (
     <div
-      className="absolute top-3 left-3 z-[1000]"
+      className="fm-layer-controls absolute top-3 left-3 z-[1000]"
       style={{
         background: 'color-mix(in srgb, var(--surface) 62%, transparent)',
         border: '1px solid var(--glass-border)',

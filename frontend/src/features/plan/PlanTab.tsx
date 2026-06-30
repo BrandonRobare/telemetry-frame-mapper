@@ -96,10 +96,10 @@ export default function PlanTab() {
         title="Plan"
         description="Draw a target area and generate a flight plan (KML/GPX)."
       />
-      <div className="flex flex-1 overflow-hidden">
+      <div className="fm-plan-layout flex flex-1 overflow-hidden">
       {/* Left panel */}
       <div
-        className="flex flex-col shrink-0 overflow-y-auto"
+        className="fm-plan-panel flex flex-col shrink-0 overflow-y-auto"
         style={{
           width: 280,
           padding: 20,
@@ -189,7 +189,7 @@ export default function PlanTab() {
       </div>
 
       {/* Map */}
-      <div className="flex-1 relative">
+      <div className="fm-plan-map flex-1 relative">
         <PlanMap lanesGeoJSON={lanesGeoJSON} onPolygonDrawn={handlePolygonDrawn} />
         {isBusy && (
           <div
