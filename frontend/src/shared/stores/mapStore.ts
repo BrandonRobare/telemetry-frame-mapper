@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 
 export type Theme = 'dark' | 'light'
+export type BasemapId = string
 
 interface ActiveLayers {
   footprints: boolean
@@ -21,6 +22,8 @@ interface MapStore {
   activeLayers: ActiveLayers
   theme: Theme
   sidebarOpen: boolean
+  basemapId: BasemapId
+  setBasemapId: (id: BasemapId) => void
   setSession: (id: number | null) => void
   toggleLayer: (key: keyof ActiveLayers) => void
   toggleTheme: () => void
@@ -65,11 +68,35 @@ function applyTheme(theme: Theme) {
 const savedTheme = getSavedTheme()
 applyTheme(savedTheme)
 
+function getSavedBasemap(): BasemapId {
+  try {
+    if (typeof localStorage === 'undefined') return 'esri_satellite'
+    return localStorage.getItem('basemapId') || 'esri_satellite'
+  } catch {
+    return 'esri_satellite'
+  }
+}
+
+function saveBasemap(id: BasemapId) {
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem('basemapId', id)
+    }
+  } catch {
+    // Ignore storage failures; the in-memory store still reflects the user's choice.
+  }
+}
+
 export const useMapStore = create<MapStore>((set) => ({
   selectedSessionId: null,
   activeLayers: { footprints: true, coverage: true, heatmap: false, targetArea: true },
   theme: savedTheme,
   sidebarOpen: true,
+  basemapId: getSavedBasemap(),
+  setBasemapId: (id) => set(() => {
+    saveBasemap(id)
+    return { basemapId: id }
+  }),
 
   setSession: (id) => set({ selectedSessionId: id }),
 
