@@ -73,10 +73,10 @@ export default function SettingsTab() {
   }
 
   return (
-    <div className="flex flex-1 overflow-hidden" style={{ color: 'var(--text)' }}>
+    <div className="fm-settings-layout flex flex-1 overflow-hidden" style={{ color: 'var(--text)' }}>
       {/* ---- Left sub-nav ---- */}
       <aside
-        className="flex flex-col shrink-0 overflow-y-auto"
+        className="fm-settings-sidebar flex flex-col shrink-0 overflow-y-auto"
         style={{
           width: 220,
           background: 'var(--surface)',
@@ -95,7 +95,7 @@ export default function SettingsTab() {
           Settings
         </p>
 
-        <nav style={{ display: 'flex', flexDirection: 'column', gap: 2, padding: '0 8px' }}>
+        <nav className="fm-settings-nav" style={{ display: 'flex', flexDirection: 'column', gap: 2, padding: '0 8px' }}>
           {SECTIONS.map((sec) => {
             const isActive = active === sec.id
             return (
@@ -157,7 +157,7 @@ export default function SettingsTab() {
       </aside>
 
       {/* ---- Right content panel ---- */}
-      <main className="flex flex-1 overflow-y-auto" style={{ padding: 32, background: 'var(--bg)' }}>
+      <main className="fm-settings-content flex flex-1 overflow-y-auto" style={{ padding: 32, background: 'var(--bg)' }}>
         <div style={{ maxWidth: 700, width: '100%' }}>
           <AnimatePresence mode="wait" initial={false}>
             <motion.div

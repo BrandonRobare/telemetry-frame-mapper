@@ -33,9 +33,9 @@ export default function MapTab({ onImport }: Props) {
   }
 
   return (
-    <div className="flex flex-1 overflow-hidden relative">
+    <div className="fm-map-layout flex flex-1 overflow-hidden relative">
       {/* Map + floating controls */}
-      <div className="relative flex-1 flex flex-col">
+      <div className="fm-map-canvas relative flex-1 flex flex-col">
         <LeafletMapView
           footprints={footprints}
           coverage={coverage ?? null}
