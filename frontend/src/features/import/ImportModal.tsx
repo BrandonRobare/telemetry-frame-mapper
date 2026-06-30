@@ -233,18 +233,22 @@ export default function ImportModal({ open, onClose }: ImportModalProps) {
         position: 'fixed', inset: 0, zIndex: 1000,
         background: 'rgba(0,0,0,0.55)',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
+        padding: 12,
       }}
     >
       {/* Dialog box */}
       <div
         ref={dialogRef}
         onKeyDown={trapTab}
+        className="fm-import-dialog"
         style={{
           background: 'var(--surface)',
           border: '1px solid var(--border-strong)',
           borderRadius: 2,
           width: 520,
-          maxWidth: 'calc(100vw - 32px)',
+          maxWidth: '100%',
+          maxHeight: 'calc(100dvh - 24px)',
+          overflowY: 'auto',
           padding: '24px 28px',
           boxShadow: '0 24px 60px -20px rgba(74,52,30,0.55)',
           position: 'relative',
@@ -340,7 +344,7 @@ export default function ImportModal({ open, onClose }: ImportModalProps) {
             />
           </div>
 
-          <div className="flex gap-2" style={{ marginBottom: 16 }}>
+          <div className="fm-import-mode-toggle flex gap-2" style={{ marginBottom: 16 }}>
             <Button
               type="button"
               variant={mode === 'browser' ? 'primary' : 'ghost'}
@@ -527,7 +531,7 @@ export default function ImportModal({ open, onClose }: ImportModalProps) {
           )}
 
           {/* Actions */}
-          <div className="flex gap-2 justify-end">
+          <div className="fm-import-actions flex gap-2 justify-end">
             {isBrowserUploading ? (
               <Button type="button" variant="ghost" size="sm" onClick={cancelBrowserUpload}>
                 Cancel upload

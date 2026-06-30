@@ -128,7 +128,7 @@ function StatsBar({ images, activeFlag, onFlagClick, visibleCount, selectedCount
 
   return (
     <div
-      className="flex gap-6 items-center shrink-0 px-5 py-3 text-sm"
+      className="fm-review-stats flex gap-6 items-center shrink-0 px-5 py-3 text-sm"
       style={{ background: 'var(--surface)', borderBottom: '1px solid var(--border)' }}
     >
       <span className="flex items-center gap-2" style={{ color: 'var(--text-muted)', fontWeight: 500 }}>
@@ -450,7 +450,7 @@ function BatchToolbar({
   const divider = <span aria-hidden="true" style={{ width: 1, height: 14, background: 'var(--border)', margin: '0 2px', flexShrink: 0 }} />
   return (
     <div
-      className="flex items-center gap-2 px-5 py-1.5 shrink-0 overflow-x-auto tg-noscrollbar"
+      className="fm-review-batch flex items-center gap-2 px-5 py-1.5 shrink-0 overflow-x-auto tg-noscrollbar"
       style={{ background: 'var(--surface)', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap' }}
     >
       <span style={groupLabel}>Select</span>
@@ -586,7 +586,7 @@ export default function ReviewTab() {
         onSetFlag={setShownFlag}
       />
       <div
-        className="flex-1 overflow-y-auto p-4"
+        className="fm-review-grid flex-1 overflow-y-auto p-4"
         style={{
           display: 'grid',
           gridTemplateColumns: 'repeat(auto-fill, minmax(190px, 1fr))',
