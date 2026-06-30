@@ -4,6 +4,7 @@ import { del, get } from '../../shared/api/client'
 import type { StorageStats, StorageFileItem, StorageFileList } from '../../types/api'
 import { formatBytes } from './formatBytes'
 import TabHeader from '../../shared/components/TabHeader'
+import { Button } from '../../shared/components/Button'
 import { useToast } from '../../shared/hooks/useToast'
 
 function useStorageSummary() {
@@ -51,20 +52,18 @@ function FileBrowser() {
     <div style={{ marginTop: 20 }}>
       <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
         {DIRECTORIES.map((d) => (
-          <button
+          <Button
+            type="button"
+            variant={dir === d ? 'primary' : 'ghost'}
+            size="sm"
             key={d}
             onClick={() => setDir(d)}
             style={{
               padding: '4px 12px', borderRadius: 'var(--radius-sm)', fontSize: 12,
-              border: dir === d ? '1px solid var(--accent)' : '1px solid var(--border)',
-              cursor: 'pointer',
-              background: dir === d ? 'var(--accent-soft)' : 'var(--surface)',
-              color: dir === d ? 'var(--accent-strong)' : 'var(--text-muted)',
-              fontFamily: 'inherit',
             }}
           >
             {d}
-          </button>
+          </Button>
         ))}
       </div>
       {isLoading ? (
@@ -95,17 +94,19 @@ function FileBrowser() {
                   {new Date(f.modified * 1000).toLocaleDateString()}
                 </td>
                 <td style={{ padding: '5px 8px', textAlign: 'right' }}>
-                  <button
+                  <Button
+                    type="button"
+                    variant="danger"
+                    size="sm"
                     onClick={() => handleDelete(f)}
                     disabled={deleting === f.path}
                     style={{
-                      background: 'none', border: '1px solid var(--danger-accent)', borderRadius: 'var(--radius-sm)',
-                      color: 'var(--danger)', cursor: 'pointer', fontSize: 11,
-                      padding: '2px 8px', fontFamily: 'inherit',
+                      borderRadius: 'var(--radius-sm)', fontSize: 11,
+                      padding: '2px 8px',
                     }}
                   >
                     Delete
-                  </button>
+                  </Button>
                 </td>
               </tr>
             ))}
