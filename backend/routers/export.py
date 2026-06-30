@@ -49,6 +49,22 @@ def export_webodm_georeferencing_csv(session_id: int, db: DBSession = Depends(ge
     }
 
 
+@router.post("/reproducibility-manifest")
+def export_reproducibility_manifest(workflow: str, artifact_path: str | None = None):
+    """Generate a reproducibility manifest for an import/reconstruction/export artifact."""
+    from ..core.config import get_config as _get_config
+    from ..services.reproducibility_manifest import build_reproducibility_manifest
+
+    cfg = _get_config()
+    settings = {
+        k: getattr(cfg, k)
+        for k in ("target_crs", "default_basemap", "exports_dir", "processed_dir")
+    }
+    return build_reproducibility_manifest(
+        workflow=workflow, settings=settings, artifacts=[artifact_path] if artifact_path else []
+    )
+
+
 @router.post("/reconstructions/{reconstruction_id}/share-bundle")
 def export_reconstruction_share_bundle(reconstruction_id: int, db: DBSession = Depends(get_db)):
     """Create a static share bundle for a completed reconstruction."""
