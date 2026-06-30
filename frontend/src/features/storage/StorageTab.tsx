@@ -5,6 +5,8 @@ import type { StorageStats, StorageFileItem, StorageFileList } from '../../types
 import { formatBytes } from './formatBytes'
 import TabHeader from '../../shared/components/TabHeader'
 import { useToast } from '../../shared/hooks/useToast'
+import { Button } from '../../shared/components/Button'
+import ConfirmDialog from '../../shared/components/ConfirmDialog'
 
 function useStorageSummary() {
   return useQuery<StorageStats>({
@@ -30,13 +32,14 @@ function FileBrowser() {
   const addToast = useToast((s) => s.addToast)
   const [dir, setDir] = useState<Directory>('imports')
   const [deleting, setDeleting] = useState<string | null>(null)
+  const [fileToDelete, setFileToDelete] = useState<StorageFileItem | null>(null)
   const { data, isLoading } = useStorageFiles(dir)
 
   async function handleDelete(file: StorageFileItem) {
-    if (!confirm(`Delete ${file.name}? This cannot be undone.`)) return
     setDeleting(file.path)
     try {
       await del(`/storage/file?directory=${dir}&filename=${encodeURIComponent(file.name)}`)
+      setFileToDelete(null)
     } catch (e) {
       addToast(`Couldn't delete ${file.name}: ${e instanceof Error ? e.message : 'unknown error'}`, 'error')
       return
@@ -95,23 +98,36 @@ function FileBrowser() {
                   {new Date(f.modified * 1000).toLocaleDateString()}
                 </td>
                 <td style={{ padding: '5px 8px', textAlign: 'right' }}>
-                  <button
-                    onClick={() => handleDelete(f)}
-                    disabled={deleting === f.path}
-                    style={{
-                      background: 'none', border: '1px solid var(--danger-accent)', borderRadius: 'var(--radius-sm)',
-                      color: 'var(--danger)', cursor: 'pointer', fontSize: 11,
-                      padding: '2px 8px', fontFamily: 'inherit',
-                    }}
+                  <Button
+                    type="button"
+                    variant="danger"
+                    size="sm"
+                    onClick={() => setFileToDelete(f)}
+                    loading={deleting === f.path}
+                    disabled={deleting !== null}
                   >
                     Delete
-                  </button>
+                  </Button>
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
       )}
+      <ConfirmDialog
+        open={fileToDelete !== null}
+        title="Delete file?"
+        description={
+          <>
+            Delete <strong>{fileToDelete?.name}</strong>? This cannot be undone.
+          </>
+        }
+        confirmLabel="Delete file"
+        danger
+        loading={fileToDelete !== null && deleting === fileToDelete.path}
+        onCancel={() => setFileToDelete(null)}
+        onConfirm={() => { if (fileToDelete) void handleDelete(fileToDelete) }}
+      />
     </div>
   )
 }
