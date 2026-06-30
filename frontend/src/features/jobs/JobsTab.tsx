@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, type ComponentProps } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { get } from '../../shared/api/client'
 import {
@@ -10,6 +10,7 @@ import type { Job, SystemResources, SystemTool, WorkflowStatus } from '../../typ
 import { SkeletonRow } from '../../shared/components/Skeleton'
 import TabHeader from '../../shared/components/TabHeader'
 import { Button } from '../../shared/components/Button'
+import { Badge } from '../../shared/components/Badge'
 import { useToast } from '../../shared/hooks/useToast'
 import { filterReconstructionLogLines } from './logPanel'
 
@@ -114,17 +115,9 @@ function ToolStatusCard({ tool }: { tool: SystemTool }) {
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
         <span className="text-xs font-semibold" style={{ color: 'var(--text)' }}>{tool.label}</span>
-        <span
-          className="text-xs rounded"
-          style={{
-            padding: '1px 6px',
-            background: tool.available ? 'var(--success-soft)' : 'var(--danger-soft)',
-            color: tool.available ? 'var(--success)' : 'var(--danger)',
-            marginLeft: 'auto',
-          }}
-        >
+        <Badge color={tool.available ? 'sage' : 'red'} className="rounded" style={{ padding: '1px 6px', marginLeft: 'auto' }}>
           {tool.available ? 'Available' : 'Unavailable'}
-        </span>
+        </Badge>
       </div>
       <div style={{ color: 'var(--text-muted)', fontSize: 11, lineHeight: 1.5 }}>
         <div title={tool.path ?? undefined} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -136,16 +129,18 @@ function ToolStatusCard({ tool }: { tool: SystemTool }) {
         {tool.cuda_available != null && <div>CUDA: {tool.cuda_available ? 'Yes' : 'No'}</div>}
         {tool.error && <div style={{ color: 'var(--danger)' }}>Error: {tool.error}</div>}
       </div>
-      <button
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
         onClick={copyInstallCommands}
-        className="text-xs cursor-pointer"
         style={{
-          marginTop: 8, padding: '4px 8px', borderRadius: 'var(--radius-sm)',
-          border: '1px solid var(--border)', background: 'var(--surface-2)', color: 'var(--text)',
+          marginTop: 8,
+          padding: '4px 8px',
         }}
       >
         Copy install
-      </button>
+      </Button>
     </div>
   )
 }
@@ -232,7 +227,10 @@ function LogPanel({ recId, isActive }: { recId: number; isActive: boolean }) {
 
   return (
     <div style={{ marginTop: 6 }}>
-      <button
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
         onClick={() => setOpen((o) => !o)}
         style={{
           background: 'none', border: 'none', cursor: 'pointer',
@@ -241,7 +239,7 @@ function LogPanel({ recId, isActive }: { recId: number; isActive: boolean }) {
         }}
       >
         {open ? '▾' : '▸'} {open ? 'Hide' : 'Show'} log ({lines.length} lines)
-      </button>
+      </Button>
       {open && (
         <div style={{ marginTop: 4 }}>
           <div style={{ display: 'flex', gap: 8, marginBottom: 4, alignItems: 'center' }}>
@@ -294,6 +292,15 @@ const STATUS_BADGE: Record<string, { bg: string; text: string; label: string }> 
   running_gsplat: { bg: 'var(--accent-soft)',  text: 'var(--accent-strong)', label: 'Gaussian' },
   complete:       { bg: 'var(--success-soft)', text: 'var(--success)',       label: 'Complete' },
   failed:         { bg: 'var(--danger-soft)',  text: 'var(--danger)',        label: 'Failed' },
+}
+
+function jobStatusBadgeColor(status: string): ComponentProps<typeof Badge>['color'] {
+  if (status === 'complete') return 'sage'
+  if (status === 'failed') return 'red'
+  if (status === 'pending') return 'tan'
+  if (status === 'running_colmap') return 'amber'
+  if (status === 'running_gsplat') return 'terracotta'
+  return 'muted'
 }
 
 function formatDuration(start: string, end: string | null): string {
@@ -392,12 +399,9 @@ export default function JobsTab() {
                   >
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
                       <span className="text-xs" style={{ color: 'var(--text-muted)' }}>#{job.id}</span>
-                      <span
-                        className="text-xs rounded"
-                        style={{ padding: '2px 8px', background: s.bg, color: s.text }}
-                      >
+                      <Badge color={jobStatusBadgeColor(job.status)} className="rounded" style={{ padding: '2px 8px' }}>
                         {s.label}
-                      </span>
+                      </Badge>
                       <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
                         Session {job.session_id} · {job.preset} · {job.frames_used} frames
                       </span>
@@ -492,12 +496,9 @@ export default function JobsTab() {
                     <tr key={job.id} style={{ borderBottom: '1px solid var(--border)' }}>
                       <td style={{ padding: '8px 10px', color: 'var(--text-muted)' }}>{job.id}</td>
                       <td style={{ padding: '8px 10px' }}>
-                        <span
-                          className="text-xs rounded"
-                          style={{ padding: '2px 7px', background: s.bg, color: s.text }}
-                        >
+                        <Badge color={jobStatusBadgeColor(job.status)} className="rounded" style={{ padding: '2px 7px' }}>
                           {s.label}
-                        </span>
+                        </Badge>
                       </td>
                       <td style={{ padding: '8px 10px', color: 'var(--text-muted)' }}>{job.session_id}</td>
                       <td style={{ padding: '8px 10px', color: 'var(--text-muted)' }}>{job.preset}</td>
@@ -521,21 +522,27 @@ export default function JobsTab() {
             </table>
           )}
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 12, color: 'var(--text-muted)', fontSize: 12 }}>
-            <button
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
               disabled={historyPage === 0}
               onClick={() => setHistoryPage((page) => Math.max(0, page - 1))}
               style={{ padding: '5px 10px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)' }}
             >
               Previous
-            </button>
+            </Button>
             <span>Page {historyPage + 1}</span>
-            <button
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
               disabled={!hasNextHistoryPage}
               onClick={() => setHistoryPage((page) => page + 1)}
               style={{ padding: '5px 10px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)' }}
             >
               Next
-            </button>
+            </Button>
           </div>
         </section>
       </div>
