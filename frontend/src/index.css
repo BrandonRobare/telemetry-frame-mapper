@@ -50,6 +50,13 @@
   --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   --font-display: 'Space Grotesk', var(--font-sans);  /* UI labels / nav / headings */
   --font-mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace; /* instrument readouts */
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-base: 1rem;
+  --text-lg: 1.125rem;
+  --text-xl: 1.5rem;
+  --leading-tight: 1.2;
+  --leading-normal: 1.5;
 
   /* radii — sharp editorial: rectangular surfaces are near-flat (2px). One
      source of truth; the sized aliases stay for call-site intent. Pills and
@@ -75,9 +82,10 @@
   --glass-blur: 9px;
 
   /* warm-tinted elevation (none existed before — flat surfaces only) */
-  --shadow-1: 0 2px 6px -2px rgba(74, 52, 30, 0.28);
-  --shadow-2: 0 14px 34px -16px rgba(74, 52, 30, 0.5), 0 2px 6px -2px rgba(74, 52, 30, 0.32);
-  --shadow-3: 0 22px 48px -18px rgba(74, 52, 30, 0.58), 0 4px 10px -4px rgba(74, 52, 30, 0.4);
+  --shadow-tint: 74 52 30;
+  --shadow-1: 0 2px 6px -2px rgb(var(--shadow-tint) / 0.28);
+  --shadow-2: 0 14px 34px -16px rgb(var(--shadow-tint) / 0.5), 0 2px 6px -2px rgb(var(--shadow-tint) / 0.32);
+  --shadow-3: 0 22px 48px -18px rgb(var(--shadow-tint) / 0.58), 0 4px 10px -4px rgb(var(--shadow-tint) / 0.4);
 
   /* survey motifs (topographic contour + grid for hero/empty backdrops) */
   --contour: rgba(154, 94, 50, 0.3);
@@ -133,9 +141,10 @@
   --glass-border: rgba(240, 224, 198, 0.16);
   --glass-spec: rgba(240, 224, 198, 0.22);
 
-  --shadow-1: 0 2px 6px -2px rgba(0, 0, 0, 0.5);
-  --shadow-2: 0 14px 34px -16px rgba(0, 0, 0, 0.66), 0 2px 6px -2px rgba(0, 0, 0, 0.5);
-  --shadow-3: 0 22px 48px -18px rgba(0, 0, 0, 0.72), 0 4px 10px -4px rgba(0, 0, 0, 0.55);
+  --shadow-tint: 0 0 0;
+  --shadow-1: 0 2px 6px -2px rgb(var(--shadow-tint) / 0.5);
+  --shadow-2: 0 14px 34px -16px rgb(var(--shadow-tint) / 0.66), 0 2px 6px -2px rgb(var(--shadow-tint) / 0.5);
+  --shadow-3: 0 22px 48px -18px rgb(var(--shadow-tint) / 0.72), 0 4px 10px -4px rgb(var(--shadow-tint) / 0.55);
 
   /* survey motifs lighten so they stay legible against the dark backdrop */
   --contour: rgba(224, 160, 111, 0.24);
@@ -229,6 +238,19 @@ body {
 }
 .tg-glass--interactive:hover {
   border-color: var(--accent);
+}
+
+/* Button loading state. */
+@keyframes tg-button-spin {
+  to { transform: rotate(360deg); }
+}
+.tg-button-spinner {
+  width: 0.85em;
+  height: 0.85em;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 999px;
+  animation: tg-button-spin 0.75s linear infinite;
 }
 
 /* Horizontally-scrollable strip without a visible scrollbar (nav tabs). */

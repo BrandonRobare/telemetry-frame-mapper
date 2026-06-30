@@ -10,6 +10,7 @@ import RenderExportSettings from './RenderExportSettings'
 import { useResetSettings } from './api'
 import { useToast } from '../../shared/hooks/useToast'
 import { getUrlParam, setUrlParam } from '../../shared/hooks/useUrlState'
+import ConfirmDialog from '../../shared/components/ConfirmDialog'
 
 // ---------------------------------------------------------------------------
 // Sub-nav definition
@@ -60,20 +61,24 @@ export default function SettingsTab() {
   })
   const resetMutation = useResetSettings()
   const { addToast } = useToast()
+  const [confirmResetOpen, setConfirmResetOpen] = useState(false)
 
   // Deep-link the settings section (e.g. ?tab=settings&section=reconstruction).
   useEffect(() => { setUrlParam('section', active) }, [active])
 
   function handleReset() {
-    if (!confirm('Reset ALL settings to defaults? This cannot be undone.')) return
     resetMutation.mutate(undefined, {
-      onSuccess: () => addToast('Settings reset to defaults', 'success'),
+      onSuccess: () => {
+        setConfirmResetOpen(false)
+        addToast('Settings reset to defaults', 'success')
+      },
       onError: (err: Error) => addToast(err.message || 'Reset failed', 'error'),
     })
   }
 
   return (
-    <div className="flex flex-1 overflow-hidden" style={{ color: 'var(--text)' }}>
+    <>
+      <div className="flex flex-1 overflow-hidden" style={{ color: 'var(--text)' }}>
       {/* ---- Left sub-nav ---- */}
       <aside
         className="flex flex-col shrink-0 overflow-y-auto"
@@ -137,7 +142,7 @@ export default function SettingsTab() {
         <div style={{ marginTop: 'auto', padding: '20px 8px 0' }}>
           <button
             type="button"
-            onClick={handleReset}
+            onClick={() => setConfirmResetOpen(true)}
             disabled={resetMutation.isPending}
             className="text-left cursor-pointer border-none w-full"
             style={{
@@ -189,6 +194,17 @@ export default function SettingsTab() {
           </AnimatePresence>
         </div>
       </main>
-    </div>
+      </div>
+      <ConfirmDialog
+        open={confirmResetOpen}
+        title="Reset all settings?"
+        description="This restores every setting to its default value. The change cannot be undone."
+        confirmLabel="Reset settings"
+        danger
+        loading={resetMutation.isPending}
+        onConfirm={handleReset}
+        onCancel={() => setConfirmResetOpen(false)}
+      />
+    </>
   )
 }
