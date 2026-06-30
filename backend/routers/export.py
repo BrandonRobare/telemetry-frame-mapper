@@ -49,6 +49,20 @@ def export_webodm_georeferencing_csv(session_id: int, db: DBSession = Depends(ge
     }
 
 
+@router.post("/reconstructions/{reconstruction_id}/share-bundle")
+def export_reconstruction_share_bundle(reconstruction_id: int, db: DBSession = Depends(get_db)):
+    """Create a static share bundle for a completed reconstruction."""
+    from ..db.models import Reconstruction
+    from ..services.share_bundle import build_share_bundle
+
+    rec = db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Reconstruction not found")
+    return build_share_bundle(
+        Path(get_config().exports_dir) / f"reconstruction_{reconstruction_id}_share.zip", rec
+    )
+
+
 @router.post("/webodm-package")
 def export_webodm_package(
     session_id: int,
