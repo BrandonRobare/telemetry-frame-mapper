@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { forwardRef, useState } from 'react';
 
 type ButtonVariant = 'primary' | 'ghost' | 'danger';
 type ButtonSize = 'sm' | 'md';
@@ -6,6 +6,9 @@ type ButtonSize = 'sm' | 'md';
 interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: ButtonVariant;
   size?: ButtonSize;
+  /** Shows a pending state while preserving the original accessible label. */
+  loading?: boolean;
+  loadingLabel?: string;
 }
 
 interface VariantStyle {
@@ -37,34 +40,50 @@ const variantStyles: Record<ButtonVariant, VariantStyle> = {
 };
 
 const sizeClasses: Record<ButtonSize, string> = {
-  sm: 'text-xs px-3 py-1',
-  md: 'text-sm px-4 py-2',
+  sm: 'px-3 py-1',
+  md: 'px-4 py-2',
 };
 
-export function Button({
-  variant = 'primary',
-  size = 'md',
-  disabled,
-  className = '',
-  style,
-  onMouseEnter,
-  onMouseLeave,
-  children,
-  ...props
-}: ButtonProps) {
+const sizeStyles: Record<ButtonSize, React.CSSProperties> = {
+  sm: { fontSize: 'var(--text-xs)', lineHeight: 'var(--leading-normal)' },
+  md: { fontSize: 'var(--text-sm)', lineHeight: 'var(--leading-normal)' },
+};
+
+export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button(
+  {
+    variant = 'primary',
+    size = 'md',
+    disabled,
+    loading = false,
+    loadingLabel = 'Loading…',
+    className = '',
+    style,
+    onMouseEnter,
+    onMouseLeave,
+    children,
+    ...props
+  },
+  ref,
+) {
   const [hover, setHover] = useState(false);
   const v = variantStyles[variant];
-  const lifted = !disabled && hover;
+  const isDisabled = disabled || loading;
+  const lifted = !isDisabled && hover;
+
   return (
     <button
-      disabled={disabled}
-      className={`font-medium transition-colors duration-150 active:scale-[0.98] ${sizeClasses[size]} ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'} ${className}`}
+      ref={ref}
+      disabled={isDisabled}
+      aria-busy={loading || undefined}
+      aria-label={loading && typeof children === 'string' ? children : props['aria-label']}
+      className={`inline-flex items-center justify-center gap-2 font-medium transition-colors duration-150 active:scale-[0.98] ${sizeClasses[size]} ${isDisabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'} ${className}`}
       style={{
         background: lifted ? v.hoverBg : v.bg,
         color: v.color,
         border: v.border,
         borderRadius: 'var(--edge)',
         fontFamily: 'var(--font-display)',
+        ...sizeStyles[size],
         ...style,
       }}
       onMouseEnter={(event) => {
@@ -77,9 +96,10 @@ export function Button({
       }}
       {...props}
     >
-      {children}
+      {loading && <span aria-hidden="true" className="tg-button-spinner" />}
+      <span>{loading ? loadingLabel : children}</span>
     </button>
   );
-}
+});
 
 export default Button;
