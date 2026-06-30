@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, type ComponentProps } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { get, post } from '../../shared/api/client'
 import {
@@ -8,6 +8,7 @@ import {
 import { useMapStore } from '../../shared/stores/mapStore'
 import { useToast } from '../../shared/hooks/useToast'
 import { Button } from '../../shared/components/Button'
+import { Badge } from '../../shared/components/Badge'
 import TabHeader from '../../shared/components/TabHeader'
 import EmptyState from '../../shared/components/EmptyState'
 import { formatEta } from '../../shared/time'
@@ -77,13 +78,19 @@ const STATUS_BADGE: Record<string, { bg: string; text: string; label: string }> 
 function StatusBadge({ status }: { status: string }) {
   const s = STATUS_BADGE[status] ?? { bg: 'var(--surface-2)', text: 'var(--text)', label: status }
   return (
-    <span
-      className="text-xs rounded"
-      style={{ padding: '2px 8px', background: s.bg, color: s.text, whiteSpace: 'nowrap' }}
-    >
+    <Badge color={jobStatusBadgeColor(status)} className="rounded" style={{ padding: '2px 8px', whiteSpace: 'nowrap' }}>
       {s.label}
-    </span>
+    </Badge>
   )
+}
+
+function jobStatusBadgeColor(status: string): ComponentProps<typeof Badge>['color'] {
+  if (status === 'complete') return 'sage'
+  if (status === 'failed') return 'red'
+  if (status === 'pending') return 'tan'
+  if (status === 'running_colmap') return 'amber'
+  if (status === 'running_gsplat') return 'terracotta'
+  return 'muted'
 }
 
 // ---- main component ----
@@ -308,17 +315,18 @@ export default function ReconstructTab() {
               <h2 className="text-base font-semibold" style={{ color: 'var(--text)', margin: 0 }}>
                 Reconstruction #{activeJob.id}: In Progress
               </h2>
-              <button
+              <Button
+                type="button"
+                variant="danger"
+                size="sm"
                 onClick={() => cancelMutation.mutate(activeJob.id)}
                 disabled={cancelMutation.isPending}
                 style={{
-                  background: 'none', border: '1px solid var(--danger)',
                   borderRadius: 4, padding: '3px 10px', fontSize: 12,
-                  color: 'var(--danger, #f85149)', cursor: 'pointer', fontFamily: 'inherit',
                 }}
               >
                 {cancelMutation.isPending ? 'Cancelling…' : 'Cancel'}
-              </button>
+              </Button>
             </div>
 
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>

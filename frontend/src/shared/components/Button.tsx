@@ -46,6 +46,9 @@ export function Button({
   size = 'md',
   disabled,
   className = '',
+  style,
+  onMouseEnter,
+  onMouseLeave,
   children,
   ...props
 }: ButtonProps) {
@@ -62,9 +65,16 @@ export function Button({
         border: v.border,
         borderRadius: 'var(--edge)',
         fontFamily: 'var(--font-display)',
+        ...style,
       }}
-      onMouseEnter={() => setHover(true)}
-      onMouseLeave={() => setHover(false)}
+      onMouseEnter={(event) => {
+        setHover(true);
+        onMouseEnter?.(event);
+      }}
+      onMouseLeave={(event) => {
+        setHover(false);
+        onMouseLeave?.(event);
+      }}
       {...props}
     >
       {children}
