@@ -39,8 +39,13 @@ interface Props {
 function FitBounds({ footprints }: { footprints: Footprint[] }) {
   const map = useMap()
   const fitted = useRef(false)
+  const previousFootprints = useRef<Footprint[]>(footprints)
 
   useEffect(() => {
+    if (previousFootprints.current !== footprints) {
+      fitted.current = false
+      previousFootprints.current = footprints
+    }
     if (fitted.current || footprints.length === 0) return
     const coords: number[][] = []
     footprints.forEach((fp) => {
