@@ -89,6 +89,7 @@ class Footprint(Base):
     ground_width_m = Column(Float)
     ground_height_m = Column(Float)
     heading_estimated = Column(Boolean, default=True)
+    pitch_oblique = Column(Boolean, default=False)
     image = relationship("Image", back_populates="footprint")
 
 

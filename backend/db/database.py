@@ -6,6 +6,7 @@ from pathlib import Path
 from alembic import command
 from alembic.config import Config
 from sqlalchemy import create_engine, inspect
+from sqlalchemy import event
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -13,6 +14,7 @@ ALEMBIC_INI_PATH = REPO_ROOT / "alembic.ini"
 
 DATABASE_URL = os.environ.get(
     "DATABASE_URL",
+    # Default is CWD-relative but init_db() resolves it against config
     "sqlite:///./data/drone_mapping.db",
 )
 
@@ -20,6 +22,12 @@ engine = create_engine(
     DATABASE_URL,
     connect_args={"check_same_thread": False},
 )
+if engine.dialect.name == "sqlite":
+    @event.listens_for(engine, "connect")
+    def _set_sqlite_pragma(dbapi_connection, connection_record):
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
