@@ -111,10 +111,16 @@ export interface RayCastResult {
   screenPos: { x: number; y: number }
 }
 
+export function deriveGroundPlaneY(geo: GeoTransform | null | undefined): number {
+  if (geo?.translation?.[2] == null) return 0
+  return -geo.translation[2] / (geo.scale || 1)
+}
+
 export function useRayCast(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   viewerRef: RefObject<any>,
   containerRef: RefObject<HTMLDivElement | null>,
+  groundY = 0,
 ) {
   async function castRay(e: MouseEvent): Promise<RayCastResult | null> {
     const viewer = viewerRef.current
@@ -132,10 +138,9 @@ export function useRayCast(
     const raycaster = new THREE.Raycaster()
     raycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), camera)
 
-    // Intersect with a ground plane at Y = estimated scene median
-    // Default Y = 0 works for most COLMAP reconstructions where
-    // the ground is near the world origin.
-    const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0)
+    // Intersect with a ground plane derived from reconstruction metadata.
+    // Falling back to 0 preserves the old behavior when no transform exists.
+    const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -groundY)
     const target = new THREE.Vector3()
     const hit = raycaster.ray.intersectPlane(groundPlane, target)
     if (!hit) return null

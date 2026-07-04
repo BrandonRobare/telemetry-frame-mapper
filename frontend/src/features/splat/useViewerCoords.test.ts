@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { worldToGps, gpsToWorld } from './useViewerCoords'
+import { deriveGroundPlaneY, worldToGps, gpsToWorld } from './useViewerCoords'
 import type { GeoTransform } from '../../types/api'
 
 const IDENTITY: GeoTransform = {
@@ -26,6 +26,12 @@ describe('worldToGps', () => {
   it('returns null for unknown utm_zone', () => {
     const geo: GeoTransform = { ...IDENTITY, utm_zone: 'unknown' }
     expect(worldToGps({ x: 0, y: 0, z: 0 }, geo)).toBeNull()
+  })
+
+  it('allows callers to fall back to scene-unit measurements for unknown utm_zone', () => {
+    const geo: GeoTransform = { ...IDENTITY, utm_zone: 'unknown' }
+    expect(worldToGps({ x: 3, y: 0, z: 4 }, geo)).toBeNull()
+    expect(Math.hypot(3, 0, 4)).toBe(5)
   })
 
   it('offsets in world space shift lon/lat correctly', () => {
@@ -75,5 +81,19 @@ describe('gpsToWorld', () => {
     expect(back.x).toBeCloseTo(world.x, 3)
     expect(back.y).toBeCloseTo(world.y, 3)
     expect(back.z).toBeCloseTo(world.z, 3)
+  })
+})
+
+describe('deriveGroundPlaneY', () => {
+  it('derives the viewer Y plane from vertical translation', () => {
+    expect(deriveGroundPlaneY({ ...IDENTITY, translation: [0, 0, 100], scale: 1 })).toBe(-100)
+  })
+
+  it('accounts for transform scale', () => {
+    expect(deriveGroundPlaneY({ ...IDENTITY, translation: [0, 0, 200], scale: 2 })).toBe(-100)
+  })
+
+  it('falls back to zero when geo-transform metadata is missing', () => {
+    expect(deriveGroundPlaneY(undefined)).toBe(0)
   })
 })
