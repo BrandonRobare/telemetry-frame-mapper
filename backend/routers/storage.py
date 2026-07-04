@@ -6,10 +6,9 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 from fastapi import APIRouter, HTTPException, Query
 
 from ..core.config import get_config
+from ..services.storage_summary_cache import _cache, invalidate_storage_summary_cache
 
 router = APIRouter(prefix="/storage", tags=["storage"])
-
-_cache: dict = {"data": None, "ts": 0.0}
 _CACHE_TTL = 30.0
 
 
@@ -153,7 +152,7 @@ def delete_file(
         if not resolved.is_file():
             raise HTTPException(status_code=400, detail="Path is not a file")
         resolved.unlink()
-        _cache["ts"] = 0.0  # invalidate the summary cache
+        invalidate_storage_summary_cache()
         return {"deleted": str(resolved)}
 
     raise HTTPException(status_code=404, detail="File not found")
