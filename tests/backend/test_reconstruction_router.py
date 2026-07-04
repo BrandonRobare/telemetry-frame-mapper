@@ -171,7 +171,7 @@ def test_stream_reconstruction_status_events_not_found(client):
     assert resp.status_code == 404
 
 
-def test_cancel_reconstruction(client):
+def test_cancel_reconstruction_requests_stop_without_deleting_record(client):
     db = _get_db(client)
     s = _make_session_with_images(db)
     rec = Reconstruction(
@@ -183,10 +183,54 @@ def test_cancel_reconstruction(client):
     db.refresh(rec)
 
     with patch("backend.routers.reconstruction.cancel_reconstruction") as mock_cancel:
-        resp = client.delete(f"/reconstruction/{rec.id}")
+        resp = client.post(f"/reconstruction/{rec.id}/cancel")
     assert resp.status_code == 200
     mock_cancel.assert_called_once_with(rec.id)
-    assert db.query(Reconstruction).filter(Reconstruction.id == rec.id).first() is None
+    data = resp.json()
+    assert data["status"] == "cancelling"
+    assert data["step"] == "cancelling"
+    db.refresh(rec)
+    assert rec.status == "cancelling"
+    assert db.query(Reconstruction).filter(Reconstruction.id == rec.id).first() is not None
+
+
+def test_cancel_reconstruction_rejects_stopped_jobs(client):
+    db = _get_db(client)
+    s = _make_session_with_images(db)
+    rec = Reconstruction(
+        session_id=s.id, preset="quick", status="complete",
+        progress_pct=100.0, frames_used=3,
+    )
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+
+    with patch("backend.routers.reconstruction.cancel_reconstruction") as mock_cancel:
+        resp = client.post(f"/reconstruction/{rec.id}/cancel")
+    assert resp.status_code == 409
+    mock_cancel.assert_not_called()
+
+
+def test_delete_reconstruction_rejects_running_jobs_without_cleanup(client, tmp_path):
+    db = _get_db(client)
+    s = _make_session_with_images(db)
+    artifact = tmp_path / "exports" / "running" / "splat.ply"
+    artifact.parent.mkdir(parents=True)
+    artifact.write_bytes(b"artifact")
+    rec = Reconstruction(
+        session_id=s.id, preset="quick", status="running_colmap",
+        progress_pct=20.0, frames_used=3, splat_path=str(artifact),
+    )
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+
+    with patch("backend.routers.reconstruction.cleanup_reconstruction_artifacts") as cleanup:
+        resp = client.delete(f"/reconstruction/{rec.id}")
+    assert resp.status_code == 409
+    cleanup.assert_not_called()
+    assert artifact.exists()
+    assert db.query(Reconstruction).filter(Reconstruction.id == rec.id).first() is not None
 
 
 def test_delete_reconstruction_removes_artifacts(client, tmp_path):
@@ -229,8 +273,7 @@ def test_delete_reconstruction_removes_artifacts(client, tmp_path):
         "exports_dir": str(exports_dir),
         "data_dir": str(data_dir),
     })()
-    with patch("backend.routers.reconstruction.get_config", return_value=cfg), \
-         patch("backend.routers.reconstruction.cancel_reconstruction"):
+    with patch("backend.routers.reconstruction.get_config", return_value=cfg):
         resp = client.delete(f"/reconstruction/{rec.id}")
 
     assert resp.status_code == 200
