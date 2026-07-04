@@ -155,6 +155,6 @@ def test_written_ply_readable_by_existing_loader(tmp_path, monkeypatch):
 
     # Coverage-gap path: the header/dtype scan must accept the written layout.
     cells, output_path = _compute_coverage_gaps(path, 7)
-    assert output_path == tmp_path.resolve() / "7" / "coverage_gaps.json"
+    assert output_path == tmp_path.resolve() / "coverage_gaps_7.json"
     assert output_path.exists()
     assert json.loads(output_path.read_text()) == cells
