@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import itertools
 import json
 
 import pyproj
@@ -37,24 +38,22 @@ def run_coverage(footprint_geojsons: list[str], target_geojson: str) -> dict:
 
     union_utm = unary_union(polys_utm)
     covered_utm = union_utm.intersection(target_utm)
-    gap = target.difference(union)
+    gap_utm = target_utm.difference(union_utm)
 
     # Compute pairwise overlap (double-coverage regions) in UTM
-    from shapely.ops import unary_union as _unary
-    import itertools
     overlap_polys = []
     for a, b in itertools.combinations(polys_utm, 2):
         inter = a.intersection(b)
         if not inter.is_empty:
             overlap_polys.append(inter)
-    overlap_utm = _unary(overlap_polys) if overlap_polys else None
+    overlap_utm = unary_union(overlap_polys) if overlap_polys else None
     overlap_wgs84 = transform(to_wgs84, overlap_utm) if overlap_utm else None
 
     covered_area_m2 = covered_utm.area
     pct = (covered_utm.area / target_utm.area * 100) if target_utm.area > 0 else 0.0
 
     # Project gap back to WGS84 for GeoJSON output
-    gap_wgs84 = transform(to_wgs84, transform(to_utm, gap)) if not gap.is_empty else None
+    gap_wgs84 = transform(to_wgs84, gap_utm) if not gap_utm.is_empty else None
 
     return {
         "covered_area_m2": round(covered_area_m2, 2),

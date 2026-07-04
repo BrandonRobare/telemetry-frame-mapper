@@ -85,7 +85,7 @@ def run(args: argparse.Namespace) -> int:
     telemetry = parse_srt(srt_path)
     frames = collect_frames(args.frames)
     frame_rate = args.frame_rate or infer_frame_rate(frames, telemetry[-1].end_s)
-    video_start = read_video_start(args.ffmpeg, video_path)
+    video_start = read_video_start(args.ffmpeg, args.video)
     if video_start is None:
         print(
             "WARNING: ffmpeg did not report a creation_time for the video. "
