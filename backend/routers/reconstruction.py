@@ -400,12 +400,39 @@ def stream_status_events(reconstruction_id: int, db: DBSession = Depends(get_db)
     )
 
 
-@router.delete("/{reconstruction_id}")
-def cancel(reconstruction_id: int, db: DBSession = Depends(get_db)):
+LIVE_RECONSTRUCTION_STATUSES = {"pending", "running_colmap", "running_gsplat", "cancelling"}
+
+
+@router.post("/{reconstruction_id}/cancel", response_model=ReconstructionOut)
+def request_cancel(reconstruction_id: int, db: DBSession = Depends(get_db)):
     rec = db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).first()
     if not rec:
         raise HTTPException(status_code=404, detail="Reconstruction not found")
+    if rec.status not in LIVE_RECONSTRUCTION_STATUSES:
+        raise HTTPException(status_code=409, detail="Reconstruction is not running")
+
     cancel_reconstruction(reconstruction_id)
+    rec.status = "cancelling"
+    rec.step = "cancelling"
+    rec.error_msg = None
+    db.commit()
+    db.refresh(rec)
+    return rec
+
+
+@router.delete("/{reconstruction_id}")
+def delete_reconstruction(reconstruction_id: int, db: DBSession = Depends(get_db)):
+    rec = db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Reconstruction not found")
+    if rec.status in LIVE_RECONSTRUCTION_STATUSES:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Cancel running reconstruction and wait for it to stop "
+                "before deleting artifacts"
+            ),
+        )
     cleanup_reconstruction_artifacts(rec, get_config())
     db.delete(rec)
     db.commit()

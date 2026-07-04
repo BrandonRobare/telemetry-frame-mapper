@@ -78,7 +78,7 @@ export interface CoverageGapCell {
 export interface Reconstruction {
   id: number;
   session_id: number;
-  status: "pending" | "running_colmap" | "running_gsplat" | "complete" | "failed";
+  status: "pending" | "running_colmap" | "running_gsplat" | "cancelling" | "cancelled" | "complete" | "failed";
   preset: "quick" | "full";
   progress_pct: number;
   step: string;
@@ -175,7 +175,7 @@ export interface Job {
   id: number;
   type: "reconstruction";
   session_id: number;
-  status: "pending" | "running_colmap" | "running_gsplat" | "complete" | "failed";
+  status: "pending" | "running_colmap" | "running_gsplat" | "cancelling" | "cancelled" | "complete" | "failed";
   preset: string;
   progress_pct: number;
   step: string;
