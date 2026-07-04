@@ -30,8 +30,21 @@ from backend.services.splat_trainer import ReconstructionCancelled, TrainerConfi
 # Maps reconstruction_id → cancel Event
 _cancel_events: dict[int, threading.Event] = {}
 
+# Tracks running subprocesses so cancel can terminate them immediately
+_running_subprocess: dict[int, subprocess.Popen] = {}
+
 _rec_logs: dict[int, list[str]] = {}
 _rec_logs_lock = threading.Lock()
+
+
+def _kill_running_subprocess(reconstruction_id: int) -> None:
+    """Kill the COLMAP/gsplat subprocess for the given reconstruction, if any."""
+    proc = _running_subprocess.pop(reconstruction_id, None)
+    if proc is not None:
+        try:
+            proc.kill()
+        except Exception:
+            pass
 _mesh_jobs: set[int] = set()
 _mesh_jobs_lock = threading.Lock()
 _flythrough_jobs: set[int] = set()
@@ -160,6 +173,45 @@ def _colmap_matcher_command(matcher_key: str) -> tuple[str, bool]:
     return presets.get(matcher_key, presets["exhaustive"])
 
 
+def _pick_best_submodel(sparse_dir: Path) -> Path:
+    """Return the sub-model directory with the most registered images.
+
+    COLMAP may produce multiple sub-models (sparse/0, sparse/1, ...) when
+    the reconstruction fragments.  Return the largest one and set the
+    module-level log buffer entry so the pipeline log reflects the split.
+    Returns sparse/0 when the directory doesn't exist or is empty (graceful
+    fallback for mocked pipelines and not-yet-run model_converter output).
+    """
+    if not sparse_dir.exists():
+        return sparse_dir / "0"
+    candidates = sorted(
+        (d for d in sparse_dir.iterdir() if d.is_dir() and d.name.isdigit()),
+        key=lambda d: int(d.name),
+    )
+    if not candidates:
+        # Graceful fallback when sparse/ dir exists but has no sub-models
+        # (e.g. mocked pipeline runs, or model_converter not yet run).
+        return sparse_dir / "0"
+
+    if len(candidates) > 1:
+        with _rec_logs_lock:
+            log_lines = _rec_logs.setdefault(-1, [])
+            sizes = []
+            for d in candidates:
+                images_txt = d / "images.txt"
+                c = _count_registered_images(images_txt) if images_txt.exists() else 0
+                sizes.append((d.name, c))
+            sizes.sort(key=lambda t: t[1], reverse=True)
+            log_lines.append(
+                f"COLMAP produced {len(candidates)} sub-models: "
+                + ", ".join(f"{name}({count})" for name, count in sizes)
+                + f"; using largest: sparse/{sizes[0][0]}({sizes[0][1]})"
+            )
+        return candidates[[int(s[0]) for s in sizes].index(int(sizes[0][0]))]
+
+    return candidates[0]
+
+
 def _run_colmap(colmap_dir: Path, progress_cb, cancel: threading.Event) -> int | None:
     """Run COLMAP feature_extractor → matcher → mapper pipeline.
 
@@ -168,6 +220,7 @@ def _run_colmap(colmap_dir: Path, progress_cb, cancel: threading.Event) -> int |
     db_path = str(colmap_dir / "database.db")
     image_path = str(colmap_dir / "images")
     output_path = str(colmap_dir / "sparse")
+    output_dir = Path(output_path)
     cfg = get_reconstruction_config()
 
     camera_model = cfg.get("camera_model", "PINHOLE")
@@ -200,8 +253,8 @@ def _run_colmap(colmap_dir: Path, progress_cb, cancel: threading.Event) -> int |
         ),
         (
             ["colmap", "model_converter",
-             "--input_path", str(colmap_dir / "sparse" / "0"),
-             "--output_path", str(colmap_dir / "sparse" / "0"),
+             "--input_path", str(colmap_dir / "sparse"),
+             "--output_path", str(colmap_dir / "sparse"),
              "--output_type", "TXT"],
             "model conversion",
             40.0,
@@ -224,7 +277,8 @@ def _run_colmap(colmap_dir: Path, progress_cb, cancel: threading.Event) -> int |
                 f"COLMAP {step_name} failed: {result.stderr[:_ERROR_MSG_MAX_CHARS]}"
             )
 
-    images_txt = colmap_dir / "sparse" / "0" / "images.txt"
+    best_submodel = _pick_best_submodel(output_dir)
+    images_txt = best_submodel / "images.txt"
     registered_count = _count_registered_images(images_txt) if images_txt.exists() else 0
     if registered_count == 0:
         raise RuntimeError(
@@ -236,16 +290,30 @@ def _run_colmap(colmap_dir: Path, progress_cb, cancel: threading.Event) -> int |
 
 
 def _count_registered_images(images_txt: Path) -> int:
+    """Count registered images by parsing COLMAP TXT format correctly.
+
+    Each registered image has a header line (IMAGE_ID QW QX QY QZ TX TY TZ
+    CAMERA_ID NAME) spanning at least 10 tokens. Images registered with zero
+    2D points have an empty second line, which the old line-count//2 heuristic
+    miscounts. Instead we count header lines whose first token is a valid int.
+    """
     count = 0
     for line in images_txt.read_text().splitlines():
-        if line and not line.startswith("#") and not line.startswith(" "):
-            count += 1
-    return count // 2  # each image is 2 lines in COLMAP TXT format
+        if not line or line.startswith("#"):
+            continue
+        parts = line.split()
+        if len(parts) >= 10:
+            try:
+                int(parts[0])
+                count += 1
+            except ValueError:
+                pass
+    return count
 
 
 def _registered_image_names(colmap_dir: Path) -> set[str]:
-    """Return image filenames present in COLMAP sparse/0/images.txt."""
-    images_txt = colmap_dir / "sparse" / "0" / "images.txt"
+    """Return image filenames present in the best COLMAP sub-model."""
+    images_txt = _pick_best_submodel(colmap_dir / "sparse") / "images.txt"
     if not images_txt.exists():
         return set()
     names: set[str] = set()
@@ -411,8 +479,9 @@ def build_reconstruction_diagnostics(db: DBSession, rec: Reconstruction) -> dict
 
 def _store_reprojection_errors(db: DBSession, reconstruction_id: int, colmap_dir: Path) -> None:
     """Read COLMAP TXT output and write per-frame mean reprojection error to DB."""
-    points3d_txt = colmap_dir / "sparse" / "0" / "points3D.txt"
-    images_txt = colmap_dir / "sparse" / "0" / "images.txt"
+    best = _pick_best_submodel(colmap_dir / "sparse")
+    points3d_txt = best / "points3D.txt"
+    images_txt = best / "images.txt"
     if not points3d_txt.exists() or not images_txt.exists():
         return
 
@@ -802,7 +871,9 @@ def _export_point_cloud(colmap_dir: Path, splat_path: Path, output_path: Path) -
     cfg = get_config()
     output_path = _safe_export_path(output_path, Path(cfg.exports_dir))
 
-    points_xyz, colmap_rgb = _read_colmap_points3d(colmap_dir / "sparse" / "0" / "points3D.txt")
+    points_xyz, colmap_rgb = _read_colmap_points3d(
+        _pick_best_submodel(colmap_dir / "sparse") / "points3D.txt"
+    )
     gaussian_xyz, gaussian_rgb = _load_ply_positions_and_colors(splat_path)
     colors = _nearest_gaussian_colors(points_xyz, gaussian_xyz, gaussian_rgb, colmap_rgb)
 
@@ -1181,7 +1252,9 @@ def _load_reconstruction_points_utm(rec: Reconstruction, target_geo: dict | None
         points, _rgb = _load_ply_positions_and_colors(Path(rec.splat_path))
         points = _world_points_to_utm(points, geo)
     elif rec.colmap_dir:
-        points, _rgb = _read_colmap_points3d(Path(rec.colmap_dir) / "sparse" / "0" / "points3D.txt")
+        points, _rgb = _read_colmap_points3d(
+            _pick_best_submodel(Path(rec.colmap_dir) / "sparse") / "points3D.txt"
+        )
         points = _world_points_to_utm(points, geo)
     else:
         raise RuntimeError(f"Reconstruction {rec.id} has no point source")
@@ -1420,16 +1493,21 @@ def start_reconstruction(
         raise ValueError("No usable images in session")
 
     cfg = get_config()
-    colmap_dir = Path(cfg.data_dir) / "colmap" / str(session_id)
-
+    # Create the record first to get an id for the workspace directory.
+    # Workspace is keyed by reconstruction id, not session id, to prevent
+    # cross-run contamination when the same session is reconstructed twice.
     rec = Reconstruction(
         session_id=session_id,
         preset=preset,
         status="pending",
         frames_used=len(images),
-        colmap_dir=str(colmap_dir),
     )
     db.add(rec)
+    db.commit()
+    db.refresh(rec)
+
+    colmap_dir = Path(cfg.data_dir) / "colmap" / str(rec.id)
+    rec.colmap_dir = str(colmap_dir)
     db.commit()
     db.refresh(rec)
 
@@ -1452,10 +1530,16 @@ def start_reconstruction(
 
 
 def cancel_reconstruction(reconstruction_id: int) -> None:
-    """Signal the background thread to stop between pipeline steps."""
+    """Signal the background thread to stop between pipeline steps.
+
+    Also terminates any running COLMAP or Gaussian Splatting subprocess
+    so the reconstruction thread can exit promptly instead of waiting for
+    the current step to finish (which can take 30+ minutes).
+    """
     event = _cancel_events.get(reconstruction_id)
-    if event:
+    if event and not event.is_set():
         event.set()
+    _kill_running_subprocess(reconstruction_id)
 
 
 def _update_rec(db: DBSession, rec_id: int, **kwargs) -> None:
