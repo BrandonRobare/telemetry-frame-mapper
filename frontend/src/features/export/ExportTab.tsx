@@ -183,7 +183,13 @@ export default function ExportTab() {
     useCompletedReconstructions(selectedSessionId)
 
   // WebODM georeferencing CSV-only export state
-  const [webodmResult, setWebodmResult] = useState<{ zip_path: string; image_count: number } | null>(null)
+  const [webodmResult, setWebodmResult] = useState<{
+    session_id: number | null
+    zip_path: string
+    image_count: number
+  } | null>(null)
+  const visibleWebodmResult =
+    webodmResult?.session_id === selectedSessionId ? webodmResult : null
 
   const webodmMutation = useMutation({
     mutationFn: () =>
@@ -191,9 +197,10 @@ export default function ExportTab() {
         `/export/webodm-georeferencing-csv?session_id=${selectedSessionId}`
       ),
     onSuccess: (data) => {
-      setWebodmResult(data)
+      setWebodmResult({ ...data, session_id: selectedSessionId })
     },
     onError: (err: Error) => {
+      setWebodmResult(null)
       addToast(`WebODM georeferencing CSV export failed: ${err.message}`, 'error')
     },
   })
@@ -269,9 +276,10 @@ export default function ExportTab() {
   }
 
   // ---- zip filename helper ----
-  const zipFilename = webodmResult
-    ? webodmResult.zip_path.split(/[/\\]/).at(-1) ?? webodmResult.zip_path
+  const zipFilename = visibleWebodmResult
+    ? (visibleWebodmResult.zip_path.split('/').pop() ?? visibleWebodmResult.zip_path)
     : null
+
 
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
@@ -354,13 +362,13 @@ export default function ExportTab() {
               {webodmMutation.isPending ? 'Building…' : 'Download georeferencing CSV zip'}
             </Button>
 
-            {webodmResult && (
+            {visibleWebodmResult && (
               <div
                 className="px-3 py-2 text-sm flex flex-col gap-0.5"
                 style={{ background: 'var(--surface-2)', border: '1px solid var(--border)' }}
               >
                 <span style={{ color: 'var(--success)', fontWeight: 600 }}>
-                  Ready: {webodmResult.image_count} images
+                  Ready: {visibleWebodmResult.image_count} images
                 </span>
                 <span
                   className="font-mono text-xs"
