@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import io
+import json
 import zipfile
+
+from backend.services.coverage import run_coverage
 
 _POLYGON = '{"type":"Polygon","coordinates":[[[0,0],[1,0],[1,1],[0,1],[0,0]]]}'
 
@@ -99,6 +102,36 @@ def test_coverage_run_no_footprints(client):
     resp = client.post(f"/coverage/run?session_id={s.id}&target_area_id={area_id}")
     assert resp.status_code == 200
     assert resp.json()["coverage_pct"] == 0.0
+
+
+def test_run_coverage_returns_gap_for_partial_footprint():
+    target = {
+        "type": "Polygon",
+        "coordinates": [[
+            [-81.0, 41.0],
+            [-80.99, 41.0],
+            [-80.99, 41.01],
+            [-81.0, 41.01],
+            [-81.0, 41.0],
+        ]],
+    }
+    footprint = {
+        "type": "Polygon",
+        "coordinates": [[
+            [-81.0, 41.0],
+            [-80.995, 41.0],
+            [-80.995, 41.01],
+            [-81.0, 41.01],
+            [-81.0, 41.0],
+        ]],
+    }
+
+    result = run_coverage([json.dumps(footprint)], json.dumps(target))
+
+    assert 45.0 < result["coverage_pct"] < 55.0
+    assert result["covered_area_m2"] > 0
+    assert result["gap_geojson"] is not None
+    assert json.loads(result["gap_geojson"])["type"] == "Polygon"
 
 
 def test_coverage_results(client):

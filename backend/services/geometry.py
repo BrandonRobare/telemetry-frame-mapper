@@ -4,7 +4,7 @@ import json
 import math
 
 from pyproj import Transformer
-from shapely.affinity import rotate, translate
+from shapely.affinity import rotate
 from shapely.geometry import Polygon, mapping
 
 

@@ -31,7 +31,7 @@ from backend.services.splat_trainer import ReconstructionCancelled, TrainerConfi
 _cancel_events: dict[int, threading.Event] = {}
 
 # Tracks running subprocesses so cancel can terminate them immediately
-_running_subprocess: dict[int, "subprocess.Popen"] = {}
+_running_subprocess: dict[int, subprocess.Popen] = {}
 
 _rec_logs: dict[int, list[str]] = {}
 _rec_logs_lock = threading.Lock()
