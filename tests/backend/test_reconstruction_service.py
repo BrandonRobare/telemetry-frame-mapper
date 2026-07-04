@@ -1045,7 +1045,7 @@ def test_compute_coverage_gaps_classifies_levels(tmp_path, monkeypatch):
 
     monkeypatch.setattr(
         "backend.services.reconstruction.get_config",
-        lambda: MagicMock(exports_dir=str(tmp_path)),
+        lambda: MagicMock(exports_dir=str(tmp_path), data_dir=str(tmp_path / "data")),
     )
 
     # 10 dense voxels (100 pts each) + 1 sparse voxel (3 pts far away)
@@ -1080,7 +1080,7 @@ def test_compute_coverage_gaps_classifies_levels(tmp_path, monkeypatch):
 
     cells, output_path = _compute_coverage_gaps(ply_path, 42, voxel_size_m=1.0)
 
-    assert output_path == tmp_path.resolve() / "42" / "coverage_gaps.json"
+    assert output_path == tmp_path.resolve() / "coverage_gaps_42.json"
     assert output_path.exists()
     loaded = json.loads(output_path.read_text())
     assert loaded == cells
@@ -1102,7 +1102,7 @@ def test_compute_coverage_gaps_empty_ply_returns_empty(tmp_path, monkeypatch):
 
     monkeypatch.setattr(
         "backend.services.reconstruction.get_config",
-        lambda: MagicMock(exports_dir=str(tmp_path)),
+        lambda: MagicMock(exports_dir=str(tmp_path), data_dir=str(tmp_path / "data")),
     )
 
     header = (
@@ -1565,7 +1565,7 @@ def test_compute_voxel_diff_writes_new_and_removed_cells(tmp_path, monkeypatch):
 
     monkeypatch.setattr(
         "backend.services.reconstruction.get_config",
-        lambda: MagicMock(exports_dir=str(tmp_path)),
+        lambda: MagicMock(exports_dir=str(tmp_path), data_dir=str(tmp_path / "data")),
     )
 
     a_ply = tmp_path / "a.ply"

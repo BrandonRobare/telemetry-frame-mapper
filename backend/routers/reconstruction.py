@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import time
 import zipfile
 from collections.abc import Iterator
@@ -17,13 +18,13 @@ from ..db.models import Reconstruction, SessionFrameSelection, TargetArea
 from ..services.artifact_cleanup import cleanup_reconstruction_artifacts
 from ..services.preflight_quality import build_preflight_quality_report
 from ..services.reconstruction import (
-    _compute_coverage_gaps,
     _export_point_cloud,
     _load_geo_transform_for_reconstruction,
     _safe_export_path,
     _write_mesh_georef,
     build_reconstruction_diagnostics,
     cancel_reconstruction,
+    compute_coverage_gaps,
     current_reconstruction_status_version,
     get_rec_log,
     start_flythrough_render,
@@ -33,7 +34,7 @@ from ..services.reconstruction import (
 )
 
 router = APIRouter(prefix="/reconstruction", tags=["reconstruction"])
-
+logger = logging.getLogger(__name__)
 VALID_PRESETS = {"quick", "full"}
 
 
@@ -744,12 +745,16 @@ def get_coverage_gaps(reconstruction_id: int, db: DBSession = Depends(get_db)):
         return json.loads(Path(rec.coverage_gaps_path).read_text())
 
     try:
-        cells, output_path = _compute_coverage_gaps(splat_path, reconstruction_id)
+        cells, output_path = compute_coverage_gaps(splat_path, reconstruction_id)
     except Exception as exc:
         raise HTTPException(
             status_code=422, detail=f"Failed to compute coverage gaps: {exc}"
         ) from exc
 
     rec.coverage_gaps_path = str(output_path)
-    db.commit()
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        logger.exception("Failed to persist coverage gaps cache path")
     return cells
