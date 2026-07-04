@@ -1,6 +1,6 @@
 import { useState, type ComponentProps } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { get, post } from '../../shared/api/client'
+import { del, get, post } from '../../shared/api/client'
 import {
   isLiveReconstructionStatus,
   useReconstructionStatusEvents,
@@ -13,8 +13,7 @@ import TabHeader from '../../shared/components/TabHeader'
 import EmptyState from '../../shared/components/EmptyState'
 import { formatEta } from '../../shared/time'
 import type { Job, PreflightQualityReport } from '../../types/api'
-
-const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
+import { API_BASE_URL } from '../../shared/api/client'
 
 interface TargetAreaOption { id: number; name: string }
 
@@ -132,11 +131,13 @@ export default function ReconstructTab() {
 
   const cancelMutation = useMutation({
     mutationFn: (id: number) =>
-      fetch(`${BASE_URL}/reconstruction/${id}/cancel`, { method: 'POST' }),
+      del(`/reconstruction/${id}`),
     onSuccess: () => {
       addToast('Reconstruction cancelled', 'info')
       qc.invalidateQueries({ queryKey: ['jobs'] })
     },
+    onError: (err: Error) =>
+      addToast(err.message || 'Failed to cancel reconstruction', 'error'),
   })
 
   if (selectedSessionId === null) {
@@ -389,7 +390,7 @@ export default function ReconstructTab() {
                   )}
                   {job.status === 'complete' && (
                     <a
-                      href={`${BASE_URL}/reconstruction/${job.id}/splat?lod=full`}
+                      href={`${API_BASE_URL}/reconstruction/${job.id}/splat?lod=full`}
                       download={`splat_${job.id}.ply`}
                       style={{
                         padding: '3px 10px', borderRadius: 'var(--radius-sm)', fontSize: 12,

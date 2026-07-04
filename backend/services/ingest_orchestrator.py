@@ -11,6 +11,7 @@ from ..db.models import Session as SessionModel
 from .geometry import compute_footprint
 from .ingest import extract_exif, generate_thumbnail
 from .quality import flag_image, score_brightness, score_sharpness
+from .storage_summary_cache import invalidate_storage_summary_cache
 
 _progress: dict[int, dict] = {}
 _progress_lock = threading.Lock()
@@ -170,6 +171,7 @@ def _run(session_id: int, folder: Path, db_factory) -> None:
             db.commit()
         with _progress_lock:
             _progress[session_id]["status"] = "done"
+        invalidate_storage_summary_cache()
     except Exception as exc:
         with _progress_lock:
             _progress[session_id]["status"] = "error"

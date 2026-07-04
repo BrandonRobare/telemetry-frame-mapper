@@ -185,6 +185,11 @@ export interface Job {
   error_msg: string | null;
 }
 
+export interface StorageSessionBreakdown {
+  session_id: string;
+  bytes: number;
+}
+
 export interface StorageStats {
   total_bytes: number;
   by_type: {
@@ -193,7 +198,7 @@ export interface StorageStats {
     exports: number;
     data: number;
   };
-  by_session: unknown[];
+  by_session: StorageSessionBreakdown[];
 }
 
 export interface SystemResources {

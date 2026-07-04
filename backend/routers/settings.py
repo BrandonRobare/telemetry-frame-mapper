@@ -181,6 +181,9 @@ def _reject_unsafe_storage_path(value: str) -> None:
     if not stripped:
         raise ValueError("storage paths cannot be empty")
 
+    if stripped in {"/", "\\"}:
+        raise ValueError("storage paths cannot point at root, home, or system directories")
+
     if stripped in {"~", "~/", "~\\"}:
         raise ValueError("storage paths cannot point at the home directory root")
 
