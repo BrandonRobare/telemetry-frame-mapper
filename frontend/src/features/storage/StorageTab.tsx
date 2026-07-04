@@ -258,6 +258,55 @@ export default function StorageTab() {
             })}
           </section>
 
+          {data.by_session.length > 0 && (
+            <section
+              className="overflow-hidden"
+              style={{ border: '1px solid var(--border)', marginTop: 20 }}
+            >
+              <div
+                style={{
+                  padding: '12px 16px',
+                  background: 'var(--surface)',
+                  borderBottom: '1px solid var(--border)',
+                }}
+              >
+                <h2 className="text-base font-semibold" style={{ color: 'var(--text)', margin: 0 }}>
+                  Usage by session
+                </h2>
+                <p className="text-xs" style={{ color: 'var(--text-muted)', margin: '4px 0 0' }}>
+                  Processed session folders ranked by disk usage.
+                </p>
+              </div>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                <thead>
+                  <tr style={{ color: 'var(--text-muted)', textAlign: 'left' }}>
+                    <th style={{ padding: '6px 12px', borderBottom: '1px solid var(--border)', fontWeight: 500 }}>
+                      Session
+                    </th>
+                    <th style={{ padding: '6px 12px', borderBottom: '1px solid var(--border)', fontWeight: 500, textAlign: 'right' }}>
+                      Size
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.by_session
+                    .slice()
+                    .sort((a, b) => b.bytes - a.bytes)
+                    .map((session) => (
+                      <tr key={session.session_id} style={{ borderBottom: '1px solid var(--border)' }}>
+                        <td style={{ padding: '6px 12px', color: 'var(--text)' }}>
+                          Session {session.session_id}
+                        </td>
+                        <td style={{ padding: '6px 12px', color: 'var(--text)', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+                          {formatBytes(session.bytes)}
+                        </td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+            </section>
+          )}
+
           <FileBrowser />
         </div>
       </div>
