@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { get, post, del } from '../../shared/api/client'
@@ -15,7 +15,7 @@ import type {
   Annotation,
   FlythroughStatus,
 } from '../../types/api'
-import { gpsToWorld, worldToGps, useRayCast } from './useViewerCoords'
+import { deriveGroundPlaneY, gpsToWorld, worldToGps, useRayCast } from './useViewerCoords'
 import { smoothstep } from './smoothstep'
 import { cleanupFlythroughRecording } from './flythroughRecording'
 import MiniLeafletPane from './MiniLeafletPane'
@@ -28,7 +28,7 @@ type ActiveTool = 'none' | 'annotate' | 'measure-dist' | 'measure-area'
 
 interface MeasurePoint {
   worldPos: { x: number; y: number; z: number }
-  gps: { lat: number; lon: number; alt: number }
+  gps: { lat: number; lon: number; alt: number } | null
 }
 
 interface FlythroughKeyframe {
@@ -412,21 +412,41 @@ function useMeasurementLayer({ viewerRef, viewerReady, points, mode }: Measureme
       // Label sprite
       let labelText = ''
       if (mode === 'measure-dist' && points.length >= 2) {
-        const distance = await import('@turf/distance').then(({ default: turfDist }) =>
-          turfDist(
-            [points[0].gps.lon, points[0].gps.lat],
-            [points[points.length - 1].gps.lon, points[points.length - 1].gps.lat],
-            { units: 'meters' },
+        const first = points[0]
+        const last = points[points.length - 1]
+        if (first.gps && last.gps) {
+          const distance = await import('@turf/distance').then(({ default: turfDist }) =>
+            turfDist(
+              [first.gps!.lon, first.gps!.lat],
+              [last.gps!.lon, last.gps!.lat],
+              { units: 'meters' },
+            )
           )
-        )
-        labelText = distance >= 1000 ? `${(distance / 1000).toFixed(2)} km` : `${distance.toFixed(1)} m`
+          labelText = distance >= 1000 ? `${(distance / 1000).toFixed(2)} km` : `${distance.toFixed(1)} m`
+        } else {
+          const dx = last.worldPos.x - first.worldPos.x
+          const dy = last.worldPos.y - first.worldPos.y
+          const dz = last.worldPos.z - first.worldPos.z
+          const distance = Math.sqrt(dx * dx + dy * dy + dz * dz)
+          labelText = `${distance.toFixed(1)} scene units ⚠`
+        }
       } else if (mode === 'measure-area' && points.length >= 3) {
-        const area = await import('@turf/area').then(({ default: turfArea }) => {
-          const coords = [...points.map((p): [number, number] => [p.gps.lon, p.gps.lat])]
-          coords.push(coords[0])
-          return turfArea({ type: 'Feature', geometry: { type: 'Polygon', coordinates: [coords] }, properties: {} })
-        })
-        labelText = area >= 10000 ? `${(area / 10000).toFixed(2)} ha` : `${area.toFixed(0)} m²`
+        if (points.every((point) => point.gps)) {
+          const area = await import('@turf/area').then(({ default: turfArea }) => {
+            const coords = [...points.map((p): [number, number] => [p.gps!.lon, p.gps!.lat])]
+            coords.push(coords[0])
+            return turfArea({ type: 'Feature', geometry: { type: 'Polygon', coordinates: [coords] }, properties: {} })
+          })
+          labelText = area >= 10000 ? `${(area / 10000).toFixed(2)} ha` : `${area.toFixed(0)} m²`
+        } else {
+          let doubleArea = 0
+          for (let i = 0; i < points.length; i += 1) {
+            const current = points[i].worldPos
+            const next = points[(i + 1) % points.length].worldPos
+            doubleArea += current.x * next.z - next.x * current.z
+          }
+          labelText = `${(Math.abs(doubleArea) / 2).toFixed(0)} scene units² ⚠`
+        }
       }
 
       if (labelText) {
@@ -629,9 +649,11 @@ function SplatCanvas({
 
   const queryClient = useQueryClient()
   const { data: flythroughStatus } = useFlythroughStatus(reconstructionId)
+  const groundY = useMemo(() => deriveGroundPlaneY(geoTransform), [geoTransform])
   const { castRay } = useRayCast(
     viewerRef as React.RefObject<unknown>,
     containerRef,
+    groundY,
   )
 
   useMeasurementLayer({ viewerRef: viewerRef as React.RefObject<unknown>, viewerReady, points: measurePoints, mode: measureMode })
@@ -874,9 +896,8 @@ function SplatCanvas({
         })
       } else if (activeTool === 'measure-dist' || activeTool === 'measure-area') {
         castRay(e).then((result) => {
-          if (!result || !geoTransform) return
-          const gps = worldToGps(result.worldPos, geoTransform)
-          if (!gps) return
+          if (!result) return
+          const gps = geoTransform ? worldToGps(result.worldPos, geoTransform) : null
           onMeasurePoint({ worldPos: result.worldPos, gps })
         })
       }
@@ -1103,8 +1124,9 @@ function ViewerToolbar({
   hasMeasurePoints,
   onClearMeasure,
 }: ViewerToolbarProps) {
-  function toolBtn(tool: ActiveTool, label: string, title: string) {
+  function toolBtn(tool: ActiveTool, label: string, title: string, allowSceneUnits = false) {
     const active = activeTool === tool
+    const enabled = geoTransformAvailable || allowSceneUnits
     return (
       <button
         key={tool}
@@ -1115,23 +1137,23 @@ function ViewerToolbar({
           border: active ? '1px solid var(--accent)' : '1px solid var(--border)',
           background: active ? 'var(--accent-soft)' : 'var(--surface-2)',
           color: active ? 'var(--accent-strong)' : 'var(--text-muted)',
-          cursor: geoTransformAvailable ? 'pointer' : 'not-allowed',
+          cursor: enabled ? 'pointer' : 'not-allowed',
           fontFamily: 'inherit',
-          opacity: geoTransformAvailable ? 1 : 0.5,
+          opacity: enabled ? 1 : 0.5,
         }}
-        disabled={!geoTransformAvailable}
+        disabled={!enabled}
       >
         {label}
       </button>
     )
   }
 
-  const noGeo = 'Geo-transform unavailable'
+  const noGeoHelp = 'Geo-transform unavailable. Add GPS sync/GCPs for geographic output.'
   return (
     <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 8 }}>
-      {toolBtn('annotate', '⊕ Annotate', geoTransformAvailable ? 'Place GPS annotation' : noGeo)}
-      {toolBtn('measure-dist', '↔ Distance', geoTransformAvailable ? 'Measure distance between two points' : noGeo)}
-      {toolBtn('measure-area', '⬡ Area', geoTransformAvailable ? 'Measure polygon area (double-click to close)' : noGeo)}
+      {toolBtn('annotate', '⊕ Annotate', geoTransformAvailable ? 'Place GPS annotation' : noGeoHelp)}
+      {toolBtn('measure-dist', '↔ Distance', geoTransformAvailable ? 'Measure distance between two points' : `${noGeoHelp} Measuring in scene units.`, true)}
+      {toolBtn('measure-area', '⬡ Area', geoTransformAvailable ? 'Measure polygon area (double-click to close)' : `${noGeoHelp} Measuring in scene units.`, true)}
       {hasMeasurePoints && (
         <button
           onClick={onClearMeasure}
