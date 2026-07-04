@@ -51,7 +51,18 @@ def read_video_start(ffmpeg: str | Path, video: Path) -> datetime | None:
             "Install ffmpeg or pass --ffmpeg /path/to/ffmpeg."
         ) from exc
     text = result.stdout + "\n" + result.stderr
-    match = re.search(r"creation_time\s*:\s*([0-9T:\.\-]+Z)", text)
+    # Accept optional Z or numeric offset (+HH:MM, -HH:MM, +HHMM, -HHMM).
+    # Bare timestamps without any suffix are treated as UTC.
+    match = re.search(r"creation_time\s*:\s*([0-9T:.\-]+)(Z|[+-]\d{2}:?\d{2})?", text)
     if not match:
         return None
-    return datetime.fromisoformat(match.group(1).replace("Z", "+00:00"))
+    ts = match.group(1)
+    suffix = match.group(2)
+    if suffix == "Z" or suffix is None:
+        ts = ts + "+00:00"
+    else:
+        if ":" not in suffix:
+            # +HHMM → +HH:MM
+            suffix = suffix[:3] + ":" + suffix[3:]
+        ts = ts + suffix
+    return datetime.fromisoformat(ts)
