@@ -224,6 +224,12 @@ def test_patch_allows_safe_relative_storage_path(client, tmp_config):
     assert resp.json()["general"]["imports_dir"].endswith("safe/imports")
 
 
+@pytest.mark.parametrize("path", ["/", "\\"])
+def test_patch_rejects_slash_root_storage_path(client, tmp_config, path):
+    resp = client.patch("/settings", json={"general": {"imports_dir": path}})
+    assert resp.status_code == 422
+
+
 def test_patch_overlap_above_one_returns_422(client, tmp_config):
     resp = client.patch("/settings", json={"mission": {"desired_side_overlap": 1.5}})
     assert resp.status_code == 422
