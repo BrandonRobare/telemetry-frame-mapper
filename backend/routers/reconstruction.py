@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 import zipfile
 from collections.abc import Iterator
 from pathlib import Path
@@ -360,16 +361,29 @@ def stream_status_events(reconstruction_id: int, db: DBSession = Depends(get_db)
     rec = db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).first()
     if not rec:
         raise HTTPException(status_code=404, detail="Reconstruction not found")
+    # Release the FastAPI request-scoped session immediately — we create
+    # short-lived sessions per poll iteration inside the generator so that
+    # long-running SSE connections don't hold pooled connections open for
+    # the duration of the reconstruction run.
+    db.close()
+
+    from backend.db.database import SessionLocal as _SessionLocal
 
     def events() -> Iterator[str]:
         version = current_reconstruction_status_version(reconstruction_id)
-        while True:
-            db.expire_all()
-            rec = db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).first()
-            if rec is None:
-                yield "event: deleted\ndata: {}\n\n"
-                return
-            yield _status_sse_payload(rec)
+        deadline = time.monotonic() + 3600.0  # 1h hard cap
+        while time.monotonic() < deadline:
+            sdb = _SessionLocal()
+            try:
+                rec = sdb.query(Reconstruction).filter(
+                    Reconstruction.id == reconstruction_id
+                ).first()
+                if rec is None:
+                    yield "event: deleted\ndata: {}\n\n"
+                    return
+                yield _status_sse_payload(rec)
+            finally:
+                sdb.close()
             new_version = wait_for_reconstruction_status_change(reconstruction_id, version)
             if new_version == version:
                 yield ": keepalive\n\n"

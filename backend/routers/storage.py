@@ -46,7 +46,27 @@ def _compute_summary() -> dict:
             by_type[name] = _dir_size(d)
 
     total = sum(by_type.values())
-    return {"total_bytes": total, "by_type": by_type, "by_session": []}
+    # Per-session breakdown: walk sessions under processed_dir and sum sizes.
+    # Uses the same cache TTL as the top-level summary; cache is invalidated
+    # on delete / import completion.
+    try:
+        processed = Path(get_config().processed_dir)
+        by_session = []
+        if processed.exists():
+            for session_dir in sorted(processed.iterdir()):
+                if session_dir.is_dir():
+                    size = sum(
+                        f.stat().st_size
+                        for f in session_dir.rglob("*")
+                        if f.is_file()
+                    )
+                    by_session.append({
+                        "session_id": session_dir.name,
+                        "bytes": size,
+                    })
+    except Exception:
+        by_session = []
+    return {"total_bytes": total, "by_type": by_type, "by_session": by_session}
 
 
 VALID_DIRECTORIES = {"imports", "processed", "exports", "data"}
@@ -133,6 +153,7 @@ def delete_file(
         if not resolved.is_file():
             raise HTTPException(status_code=400, detail="Path is not a file")
         resolved.unlink()
+        _cache["ts"] = 0.0  # invalidate the summary cache
         return {"deleted": str(resolved)}
 
     raise HTTPException(status_code=404, detail="File not found")

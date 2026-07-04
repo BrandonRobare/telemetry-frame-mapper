@@ -138,6 +138,7 @@ def _run(session_id: int, folder: Path, db_factory) -> None:
                         fov_vertical_deg=cfg.fov_vertical_deg,
                         yaw_deg=img.yaw,
                         target_crs=cfg.target_crs,
+                        gimbal_pitch=exif.get("gimbal_pitch"),
                     )
                     if fp:
                         db.add(Footprint(
@@ -147,6 +148,7 @@ def _run(session_id: int, folder: Path, db_factory) -> None:
                             ground_width_m=fp.get("ground_width_m"),
                             ground_height_m=fp.get("ground_height_m"),
                             heading_estimated=fp.get("heading_estimated", True),
+                            pitch_oblique=fp.get("pitch_oblique", False),
                         ))
                 except Exception:
                     pass  # footprint is best-effort

@@ -24,17 +24,19 @@ class FrameTag:
 
 def collect_frames(frame_dir: Path) -> list[tuple[Path, int]]:
     frames = []
-    for path in sorted(
-        (p for p in frame_dir.iterdir() if p.is_file() and p.suffix.lower() in {".jpg", ".jpeg"}),
-        key=lambda p: p.name.lower(),
-    ):
+    for path in frame_dir.iterdir():
+        if not path.is_file() or path.suffix.lower() not in {".jpg", ".jpeg"}:
+            continue
         # Frame index = the LAST number in the filename, so prefixed names like
-        # DJI_0081_frame_42.jpg index as 42, not 81. Files without digits are skipped.
+        # DJI_0081_frame_42.jpg index as 42, not 81. Files without digits skipped.
         digit_groups = re.findall(r"\d+", path.stem)
         if digit_groups:
             frames.append((path, int(digit_groups[-1])))
     if not frames:
         raise ValueError(f"No .jpg/.jpeg frames found in {frame_dir}")
+    # Sort by extracted frame index, not lexicographic filename order.
+    # Prevents false gap-detection aborts with unpadded names like DJI_1…DJI_12.
+    frames.sort(key=lambda t: t[1])
     return frames
 
 

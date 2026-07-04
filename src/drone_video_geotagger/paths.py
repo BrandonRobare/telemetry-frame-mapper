@@ -23,6 +23,11 @@ def windows_path(path: Path) -> str:
 
 
 def external_file_arg(path: Path, executable: str | Path) -> str:
+    """Return a safe CLI argument string for a file path.
+
+    Resolves to absolute form to prevent dash-prefix injection where
+    `-relative/path` could be parsed as an ExifTool option.
+    """
     if is_wsl() and is_windows_executable(executable):
         return windows_path(path)
-    return str(path)
+    return str(path.resolve())

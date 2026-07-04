@@ -23,6 +23,7 @@ def generate_lawnmower(
 
     poly = shape(json.loads(target_geojson))
     bounds = poly.bounds  # minx, miny, maxx, maxy
+    centroid = poly.centroid
 
     altitude_m = altitude_ft * 0.3048
     gw = 2 * altitude_m * math.tan(math.radians(fov_h_deg / 2))
@@ -34,8 +35,15 @@ def generate_lawnmower(
     if waypoint_spacing_m <= 0:
         waypoint_spacing_m = gh * 0.2  # fallback for degenerate overlap values
 
-    # Convert lane_spacing from meters to degrees (approximate, using 111_000 m/deg)
-    lane_spacing_deg = lane_spacing / 111_000
+    # Convert lane_spacing from meters to degrees along the longitude axis.
+    # meters-per-degree-longitude = 111_320 * cos(latitude), so the step in
+    # degrees depends on the centroid latitude of the target polygon.
+    lat_rad = math.radians(centroid.y)
+    meters_per_deg_lon = 111_320 * math.cos(lat_rad)
+    # Guard at the poles (tiny value would produce very large step).
+    if meters_per_deg_lon < 1_000:
+        meters_per_deg_lon = 1_000
+    lane_spacing_deg = lane_spacing / meters_per_deg_lon
 
     minx, miny, maxx, maxy = bounds
     lanes = []
@@ -49,7 +57,21 @@ def generate_lawnmower(
         x += lane_spacing_deg
         direction *= -1
 
-    total_dist = sum(math.dist(ln[0], ln[1]) * 111_000 for ln in lanes)
+    # Total distance: along-lane distances + inter-lane transit legs.
+    meters_per_deg_lat = 111_320  # approximately constant per degree latitude
+    along_lane_dist = 0.0
+    for ln in lanes:
+        dx = (ln[1][0] - ln[0][0]) * meters_per_deg_lon
+        dy = (ln[1][1] - ln[0][1]) * meters_per_deg_lat
+        along_lane_dist += math.hypot(dx, dy)
+    # Transit legs between consecutive lanes
+    transit_dist = 0.0
+    for i in range(len(lanes) - 1):
+        transit_dist += math.hypot(
+            (lanes[i + 1][0][0] - lanes[i][1][0]) * meters_per_deg_lon,
+            (lanes[i + 1][0][1] - lanes[i][1][1]) * meters_per_deg_lat,
+        )
+    total_dist = along_lane_dist + transit_dist
 
     return {
         "lanes_geojson": json.dumps({
