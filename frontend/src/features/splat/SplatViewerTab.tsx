@@ -17,6 +17,7 @@ import type {
 } from '../../types/api'
 import { gpsToWorld, worldToGps, useRayCast } from './useViewerCoords'
 import { smoothstep } from './smoothstep'
+import { cleanupFlythroughRecording } from './flythroughRecording'
 import MiniLeafletPane from './MiniLeafletPane'
 
 const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
@@ -616,6 +617,8 @@ function SplatCanvas({
   const gapGroupRef = useRef<any>(null)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const annotationGroupRef = useRef<any>(null)
+  const recorderRef = useRef<MediaRecorder | null>(null)
+  const rafRef = useRef<number | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [viewerReady, setViewerReady] = useState(false)
@@ -686,6 +689,7 @@ function SplatCanvas({
     return new Promise((resolve) => {
       let segment = 0
       let startTime: number | null = null
+      rafRef.current = null
 
       function step(now: number) {
         const current = flythroughKeyframes[segment]
@@ -708,19 +712,20 @@ function SplatCanvas({
         if (controls?.target?.set) controls.target.set(target[0], target[1], target[2])
         controls?.update?.()
         if (t < 1) {
-          window.requestAnimationFrame(step)
+          rafRef.current = window.requestAnimationFrame(step)
           return
         }
         segment += 1
         startTime = now
         if (segment >= flythroughKeyframes.length - 1) {
+          rafRef.current = null
           resolve()
         } else {
-          window.requestAnimationFrame(step)
+          rafRef.current = window.requestAnimationFrame(step)
         }
       }
 
-      window.requestAnimationFrame(step)
+      rafRef.current = window.requestAnimationFrame(step)
     })
   }
 
@@ -750,12 +755,14 @@ function SplatCanvas({
     const stream = canvas.captureStream(30)
     const chunks: BlobPart[] = []
     const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined)
+    recorderRef.current = recorder
     recorder.ondataavailable = (event) => {
       if (event.data.size > 0) chunks.push(event.data)
     }
     recorder.onstop = () => {
       downloadBlob(new Blob(chunks, { type: mimeType || 'video/webm' }), extension)
       stream.getTracks().forEach((track) => track.stop())
+      if (recorderRef.current === recorder) recorderRef.current = null
       setRecording(false)
       setFlythroughMessage(`Downloaded ${extension.toUpperCase()} flythrough.`)
     }
@@ -763,7 +770,9 @@ function SplatCanvas({
     setFlythroughMessage('Recording browser flythrough…')
     recorder.start()
     await previewFlythrough()
-    recorder.stop()
+    if (recorderRef.current === recorder && recorder.state !== 'inactive') {
+      recorder.stop()
+    }
   }
 
   // Viewer init
@@ -808,6 +817,8 @@ function SplatCanvas({
     return () => {
       cancelled = true
       setViewerReady(false)
+      cleanupFlythroughRecording({ rafRef, recorderRef })
+      setRecording(false)
       if (viewerRef.current) {
         try {
           (viewerRef.current as { dispose?: () => void }).dispose?.()
