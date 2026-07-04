@@ -718,7 +718,73 @@ def test_run_pipeline_gsplat_missing_completes_colmap_only(setup_test_db):
     assert rec.progress_pct == 100.0
 
 
-def test_run_pipeline_cancel_during_training_marks_failed(setup_test_db):
+def test_run_pipeline_cancel_before_colmap_marks_cancelled(setup_test_db):
+    import threading
+    from unittest.mock import MagicMock, patch
+
+    from backend.db.database import get_db
+    from backend.main import app
+    from backend.services.reconstruction import _run_pipeline
+    from tests.conftest import TestSessionLocal
+
+    db = next(app.dependency_overrides[get_db]())
+    with tempfile.TemporaryDirectory() as tmp:
+        rec, img, colmap_dir = _pipeline_fixture(db, tmp)
+        cancel = threading.Event()
+        cancel.set()
+        with patch("backend.services.reconstruction._write_colmap_workspace", MagicMock()), \
+             patch("backend.services.reconstruction._run_colmap") as colmap_mock, \
+             patch("backend.services.reconstruction.SessionLocal", TestSessionLocal), \
+             patch("backend.services.reconstruction.get_config") as mock_cfg:
+            mock_cfg.return_value.data_dir = tmp
+            mock_cfg.return_value.exports_dir = tmp
+            mock_cfg.return_value.processed_dir = tmp
+            _run_pipeline(rec.id, "quick", colmap_dir, [img.id], cancel)
+        db.refresh(rec)
+
+    assert rec.status == "cancelled"
+    assert rec.step == "cancelled"
+    assert rec.error_msg == "Cancelled by user"
+    colmap_mock.assert_not_called()
+
+
+def test_run_pipeline_cancel_after_colmap_marks_cancelled(setup_test_db):
+    import threading
+    from unittest.mock import MagicMock, patch
+
+    from backend.db.database import get_db
+    from backend.main import app
+    from backend.services.reconstruction import _run_pipeline
+    from tests.conftest import TestSessionLocal
+
+    db = next(app.dependency_overrides[get_db]())
+    with tempfile.TemporaryDirectory() as tmp:
+        rec, img, colmap_dir = _pipeline_fixture(db, tmp)
+        cancel = threading.Event()
+
+        def colmap_then_cancel(*_args):
+            cancel.set()
+            return 1
+
+        colmap_mock = MagicMock(side_effect=colmap_then_cancel)
+        with patch("backend.services.reconstruction._write_colmap_workspace", MagicMock()), \
+             patch("backend.services.reconstruction._run_colmap", colmap_mock), \
+             patch("backend.services.reconstruction._run_gsplat") as gsplat_mock, \
+             patch("backend.services.reconstruction.SessionLocal", TestSessionLocal), \
+             patch("backend.services.reconstruction.get_config") as mock_cfg:
+            mock_cfg.return_value.data_dir = tmp
+            mock_cfg.return_value.exports_dir = tmp
+            mock_cfg.return_value.processed_dir = tmp
+            _run_pipeline(rec.id, "quick", colmap_dir, [img.id], cancel)
+        db.refresh(rec)
+
+    assert rec.status == "cancelled"
+    assert rec.step == "cancelled"
+    assert rec.error_msg == "Cancelled by user"
+    gsplat_mock.assert_not_called()
+
+
+def test_run_pipeline_cancel_during_training_marks_cancelled(setup_test_db):
     from backend.db.database import get_db
     from backend.main import app
     from backend.services.splat_trainer import ReconstructionCancelled
@@ -729,9 +795,9 @@ def test_run_pipeline_cancel_during_training_marks_failed(setup_test_db):
         cancelled = MagicMock(side_effect=ReconstructionCancelled("Cancelled by user"))
         _run_pipeline_with_gsplat(db, tmp, rec, img, colmap_dir, cancelled)
 
-    assert rec.status == "failed"
+    assert rec.status == "cancelled"
     assert rec.error_msg == "Cancelled by user"
-    assert rec.step != "colmap_only"
+    assert rec.step == "cancelled"
 
 
 def test_run_pipeline_cancel_during_training_persists_checkpoint_path(setup_test_db):
@@ -754,7 +820,7 @@ def test_run_pipeline_cancel_during_training_persists_checkpoint_path(setup_test
 
         _run_pipeline_with_gsplat(db, tmp, rec, img, colmap_dir, cancel_after_checkpoint)
 
-        assert rec.status == "failed"
+        assert rec.status == "cancelled"
         assert rec.step == "cancelled_checkpoint"
         assert rec.splat_path.endswith("splat.ply")
         assert Path(rec.splat_path).exists()

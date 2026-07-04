@@ -1593,7 +1593,8 @@ def _run_pipeline(
         if cancel.is_set():
             _update_rec(
                 db, reconstruction_id,
-                status="failed",
+                status="cancelled",
+                step="cancelled",
                 error_msg="Cancelled by user",
                 completed_at=datetime.now(timezone.utc),
             )
@@ -1609,7 +1610,8 @@ def _run_pipeline(
         if cancel.is_set():
             _update_rec(
                 db, reconstruction_id,
-                status="failed",
+                status="cancelled",
+                step="cancelled",
                 error_msg="Cancelled by user",
                 completed_at=datetime.now(timezone.utc),
             )
@@ -1672,7 +1674,7 @@ def _run_pipeline(
                 )
             _update_rec(
                 db, reconstruction_id,
-                status="failed",
+                status="cancelled",
                 step="cancelled_checkpoint" if checkpoint_saved else "cancelled",
                 splat_path=str(splat_path) if checkpoint_saved else None,
                 error_msg=(
