@@ -1,6 +1,6 @@
 import { useState, type ComponentProps } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { del, get, post } from '../../shared/api/client'
+import { get, post } from '../../shared/api/client'
 import {
   isLiveReconstructionStatus,
   useReconstructionStatusEvents,
@@ -70,6 +70,8 @@ const STATUS_BADGE: Record<string, { bg: string; text: string; label: string }> 
   pending:        { bg: 'var(--tan-soft)',     text: 'var(--tan-text)',      label: 'Pending' },
   running_colmap: { bg: 'var(--warning-soft)', text: 'var(--warning)',       label: 'COLMAP' },
   running_gsplat: { bg: 'var(--accent-soft)',  text: 'var(--accent-strong)', label: 'Gaussian' },
+  cancelling:     { bg: 'var(--warning-soft)', text: 'var(--warning)',       label: 'Cancelling' },
+  cancelled:      { bg: 'var(--surface-2)',    text: 'var(--text-muted)',    label: 'Cancelled' },
   complete:       { bg: 'var(--success-soft)', text: 'var(--success)',       label: 'Complete' },
   failed:         { bg: 'var(--danger-soft)',  text: 'var(--danger)',        label: 'Failed' },
 }
@@ -89,6 +91,7 @@ function jobStatusBadgeColor(status: string): ComponentProps<typeof Badge>['colo
   if (status === 'pending') return 'tan'
   if (status === 'running_colmap') return 'amber'
   if (status === 'running_gsplat') return 'terracotta'
+  if (status === 'cancelling') return 'amber'
   return 'muted'
 }
 
@@ -131,9 +134,9 @@ export default function ReconstructTab() {
 
   const cancelMutation = useMutation({
     mutationFn: (id: number) =>
-      del(`/reconstruction/${id}`),
+      post(`/reconstruction/${id}/cancel`),
     onSuccess: () => {
-      addToast('Reconstruction cancelled', 'info')
+      addToast('Cancellation requested', 'info')
       qc.invalidateQueries({ queryKey: ['jobs'] })
     },
     onError: (err: Error) =>

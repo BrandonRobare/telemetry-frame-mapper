@@ -3,7 +3,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { API_BASE_URL } from './client'
 import type { Job, Reconstruction } from '../../types/api'
 
-const LIVE_STATUSES = new Set<Job['status']>(['pending', 'running_colmap', 'running_gsplat'])
+const LIVE_STATUSES = new Set<Job['status']>(['pending', 'running_colmap', 'running_gsplat', 'cancelling'])
 
 export function isLiveReconstructionStatus(status: Job['status']) {
   return LIVE_STATUSES.has(status)
