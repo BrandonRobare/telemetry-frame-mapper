@@ -50,19 +50,15 @@ def export_webodm_georeferencing_csv(session_id: int, db: DBSession = Depends(ge
 
 
 def _safe_manifest_artifact_path(raw_path: str) -> Path:
-    resolved = Path(raw_path).resolve()
+    from ..services.reconstruction import _safe_export_path
+
     cfg = get_config()
-    safe_roots = [
-        Path(root).resolve()
-        for root in (
-            cfg.imports_dir,
-            cfg.processed_dir,
-            cfg.exports_dir,
-            cfg.data_dir,
-        )
-    ]
-    if any(resolved == root or resolved.is_relative_to(root) for root in safe_roots):
-        return resolved
+    for root_value in (cfg.imports_dir, cfg.processed_dir, cfg.exports_dir, cfg.data_dir):
+        root = Path(root_value)
+        try:
+            return _safe_export_path(Path(raw_path), root)
+        except ValueError:
+            continue
     raise HTTPException(
         status_code=422,
         detail="artifact_path is outside configured safe directories",
