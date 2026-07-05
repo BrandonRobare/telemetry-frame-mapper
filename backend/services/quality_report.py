@@ -23,17 +23,23 @@ import numpy as np
 #  Data classes
 # ---------------------------------------------------------------------------
 
+
 @dataclass(frozen=True)
 class SurveyedPoint:
     """A surveyed control or checkpoint with local 3-D coordinates.
 
-    The *local* frame is the reconstruction's local COLMAP UTM-aligned
-    coordinate system (the same space that ``geo_transform`` maps into).
+    For GCP accuracy reports, ``reconstructed_*`` stores the corresponding
+    reconstructed/control-point coordinate so residuals compare paired
+    observations instead of measuring distance from the transform origin.
     """
+
     label: str
     x: float
     y: float
     z: float
+    reconstructed_x: float | None = None
+    reconstructed_y: float | None = None
+    reconstructed_z: float | None = None
 
 
 @dataclass
@@ -49,12 +55,13 @@ class GcpResidual:
 class CheckpointValidation:
     label: str
     distance_m: float
-    surface_point: str | None = None   # "x,y,z" of nearest surface point, or None
+    surface_point: str | None = None  # "x,y,z" of nearest surface point, or None
 
 
 # ---------------------------------------------------------------------------
 #  Quality scorecard (issue #292)
 # ---------------------------------------------------------------------------
+
 
 def build_quality_scorecard(
     rec: Any,
@@ -149,25 +156,18 @@ def build_quality_scorecard(
 #  GCP accuracy report (issue #287)
 # ---------------------------------------------------------------------------
 
+
 def compute_gcp_accuracy(
     geo_transform: dict,
     survey_points: list[SurveyedPoint],
 ) -> dict:
-    """Compute per-point residuals and RMSE for surveyed GCPs.
+    """Compute paired GCP residuals and RMSE.
 
-    The provided ``survey_points`` are in the same local coordinate system
-    produced by ``geo_transform`` (i.e. already UTM-aligned).  The transform
-    is included for metadata only; residuals are simply the Euclidean
-    difference between each surveyed coordinate and the local origin.
-
-    If you need to convert WGS84 survey points to the local frame first, do
-    that conversion *before* calling this function and pass the results as
-    ``SurveyedPoint`` instances.
+    Each point must include surveyed coordinates (``x/y/z``) and the matching
+    reconstructed/control-point coordinates (``reconstructed_x/y/z``).  RMSE is
+    computed from those paired observations, which is the client-facing GCP
+    accuracy metric requested by #287.
     """
-    scale = float(geo_transform.get("scale", 1.0))
-    translation = geo_transform.get("translation", [0.0, 0.0, 0.0])
-    tx, ty, tz = float(translation[0]), float(translation[1]), float(translation[2])
-
     residuals: list[GcpResidual] = []
     dx_list: list[float] = []
     dy_list: list[float] = []
@@ -175,18 +175,24 @@ def compute_gcp_accuracy(
     d3d_list: list[float] = []
 
     for sp in survey_points:
-        # The geo_transform maps a local COLMAP point p_local to UTM via
-        #   p_utm = scale * R @ p_local + translation
-        # So the local origin maps to the translation vector.
-        # A surveyed GCP in the same UTM frame has a nominal local coordinate
-        # of (sp - translation) / scale (ignoring rotation for now) — but
-        # since we cannot invert rotation without knowing the solve details,
-        # we compute residuals directly as the Euclidean distance from the
-        # local origin *in the scaled space*.  This is the conservative,
-        # deterministic metric the issue calls for.
-        dx = sp.x - (tx / scale if scale != 0 else sp.x)
-        dy = sp.y - (ty / scale if scale != 0 else sp.y)
-        dz = sp.z - (tz / scale if scale != 0 else sp.z)
+        missing = [
+            name
+            for name, value in (
+                ("reconstructed_x", sp.reconstructed_x),
+                ("reconstructed_y", sp.reconstructed_y),
+                ("reconstructed_z", sp.reconstructed_z),
+            )
+            if value is None
+        ]
+        if missing:
+            raise ValueError(
+                "GCP accuracy requires paired reconstructed coordinates; "
+                f"missing {', '.join(missing)} for {sp.label}"
+            )
+
+        dx = float(sp.x - sp.reconstructed_x)
+        dy = float(sp.y - sp.reconstructed_y)
+        dz = float(sp.z - sp.reconstructed_z)
         d3d = math.sqrt(dx * dx + dy * dy + dz * dz)
         residuals.append(
             GcpResidual(
@@ -197,9 +203,9 @@ def compute_gcp_accuracy(
                 distance_3d=round(d3d, 4),
             )
         )
-        dx_list.append(abs(dx))
-        dy_list.append(abs(dy))
-        dz_list.append(abs(dz))
+        dx_list.append(dx)
+        dy_list.append(dy)
+        dz_list.append(dz)
         d3d_list.append(d3d)
 
     rmse_x = _rmse(dx_list) if dx_list else None
@@ -232,6 +238,7 @@ def compute_gcp_accuracy(
 # ---------------------------------------------------------------------------
 #  Held-out checkpoint validation (issue #294)
 # ---------------------------------------------------------------------------
+
 
 def validate_held_out_checkpoints(
     rec: Any,
@@ -309,6 +316,7 @@ def validate_held_out_checkpoints(
 # ---------------------------------------------------------------------------
 #  Surface extraction helpers
 # ---------------------------------------------------------------------------
+
 
 def _extract_splat_surface_points(splat_path: str) -> list[tuple[float, float, float]]:
     """Extract Gaussian mean positions from a PLY splat file."""
@@ -449,6 +457,7 @@ def _parse_glb_vertex_positions(data: bytes) -> list[tuple[float, float, float]]
 #  Shared helpers
 # ---------------------------------------------------------------------------
 
+
 def _rmse(values: list[float]) -> float:
     if not values:
         return 0.0
@@ -469,5 +478,24 @@ def parse_surveyed_points_3d(
         x = float(item["x"])
         y = float(item["y"])
         z = float(item["z"])
-        points.append(SurveyedPoint(label=label, x=x, y=y, z=z))
+        reconstructed_x = (
+            float(item["reconstructed_x"]) if item.get("reconstructed_x") is not None else None
+        )
+        reconstructed_y = (
+            float(item["reconstructed_y"]) if item.get("reconstructed_y") is not None else None
+        )
+        reconstructed_z = (
+            float(item["reconstructed_z"]) if item.get("reconstructed_z") is not None else None
+        )
+        points.append(
+            SurveyedPoint(
+                label=label,
+                x=x,
+                y=y,
+                z=z,
+                reconstructed_x=reconstructed_x,
+                reconstructed_y=reconstructed_y,
+                reconstructed_z=reconstructed_z,
+            )
+        )
     return points

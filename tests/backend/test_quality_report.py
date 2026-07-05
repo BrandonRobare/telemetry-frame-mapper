@@ -22,6 +22,7 @@ from backend.services.quality_report import (
 #  _rmse
 # ---------------------------------------------------------------------------
 
+
 def test_rmse_empty():
     assert _rmse([]) == 0.0
 
@@ -39,9 +40,18 @@ def test_rmse_known():
 #  parse_surveyed_points_3d
 # ---------------------------------------------------------------------------
 
+
 def test_parse_surveyed_points():
     items = [
-        {"label": "P1", "x": 1.0, "y": 2.0, "z": 3.0},
+        {
+            "label": "P1",
+            "x": 1.0,
+            "y": 2.0,
+            "z": 3.0,
+            "reconstructed_x": 0.5,
+            "reconstructed_y": 1.0,
+            "reconstructed_z": 1.5,
+        },
         {"x": 10.0, "y": 20.0, "z": 30.0},
     ]
     points = parse_surveyed_points_3d(items)
@@ -50,12 +60,14 @@ def test_parse_surveyed_points():
     assert points[0].x == 1.0
     assert points[0].y == 2.0
     assert points[0].z == 3.0
+    assert points[0].reconstructed_x == 0.5
     assert points[1].label == "point_1"  # auto-generated
 
 
 # ---------------------------------------------------------------------------
 #  build_quality_scorecard
 # ---------------------------------------------------------------------------
+
 
 class _FakeRec:
     def __init__(self):
@@ -135,76 +147,32 @@ SAMPLE_GEO_TRANSFORM = {
 }
 
 
-def test_gcp_accuracy_identity_transform():
-    """With scale=1 and translation at origin, residuals are just point coordinates."""
+def test_gcp_accuracy_uses_paired_reconstructed_coordinates():
     points = [
-        SurveyedPoint("A", 0.0, 0.0, 0.0),
-        SurveyedPoint("B", 3.0, 4.0, 0.0),
+        SurveyedPoint("A", 100.0, 200.0, 50.0, 100.0, 200.0, 50.0),
+        SurveyedPoint("B", 103.0, 204.0, 50.0, 100.0, 200.0, 50.0),
     ]
-    result = compute_gcp_accuracy({"scale": 1.0, "translation": [0.0, 0.0, 0.0]}, points)
+    result = compute_gcp_accuracy(SAMPLE_GEO_TRANSFORM, points)
 
     assert result["point_count"] == 2
-    assert result["rmse"]["x_m"] == pytest.approx(math.sqrt((0 + 9) / 2), abs=1e-4)
-    assert result["rmse"]["y_m"] == pytest.approx(math.sqrt((0 + 16) / 2), abs=1e-4)
-    assert result["rmse"]["3d_m"] == pytest.approx(math.sqrt((0 + 25) / 2), abs=1e-4)
-    # B distance: 5.0
-    assert result["residuals"][1]["distance_3d_m"] == 5.0
-
-
-def test_gcp_accuracy_with_translation():
-    """Points close to translation should have small residuals."""
-    tx, ty, tz = 500_000.0, 4_500_000.0, 100.0
-    geo = {"scale": 1.0, "translation": [tx, ty, tz]}
-    # A point at exactly the translation
-    points = [
-        SurveyedPoint("at_origin", tx, ty, tz),
-        SurveyedPoint("offset", tx + 1.5, ty + 2.0, tz - 0.5),
-    ]
-    result = compute_gcp_accuracy(geo, points)
-
-    # At origin: dx = tx - tx = 0
-    assert result["residuals"][0]["dx_m"] == 0.0
-    assert result["residuals"][0]["dy_m"] == 0.0
-    assert result["residuals"][0]["dz_m"] == 0.0
-
-    # Offset: dx = (tx+1.5) - tx = 1.5
-    assert result["residuals"][1]["dx_m"] == 1.5
-    assert result["residuals"][1]["dy_m"] == 2.0
-    assert result["residuals"][1]["dz_m"] == -0.5
-
-    rmse_x = math.sqrt((0 + 1.5**2) / 2)
-    rmse_y = math.sqrt((0 + 2.0**2) / 2)
-    assert result["rmse"]["x_m"] == pytest.approx(rmse_x, abs=1e-4)
-    assert result["rmse"]["y_m"] == pytest.approx(rmse_y, abs=1e-4)
-
-
-def test_gcp_accuracy_with_scale():
-    """Scale > 1 reduces local residuals proportionally."""
-    geo = {"scale": 2.0, "translation": [0.0, 0.0, 0.0]}
-    points = [
-        SurveyedPoint("P", 10.0, 10.0, 0.0),
-    ]
-    result = compute_gcp_accuracy(geo, points)
-    # Expected: translation divided by scale = 0.0, so dx = 10.0 - 0 = 10.0
-    assert result["residuals"][0]["dx_m"] == 10.0
-    # rmse_x = 10.0
-    assert result["rmse"]["x_m"] == 10.0
-
-
-def test_gcp_accuracy_3d_distance():
-    geo = {"scale": 1.0, "translation": [100.0, 200.0, 50.0]}
-    points = [
-        SurveyedPoint("P", 100.0, 200.0, 50.0),   # 0.0 distance
-        SurveyedPoint("Q", 103.0, 204.0, 50.0),   # 3-4-0 → 5.0
-    ]
-    result = compute_gcp_accuracy(geo, points)
     assert result["residuals"][0]["distance_3d_m"] == 0.0
+    assert result["residuals"][1]["dx_m"] == 3.0
+    assert result["residuals"][1]["dy_m"] == 4.0
     assert result["residuals"][1]["distance_3d_m"] == 5.0
+    assert result["rmse"]["x_m"] == pytest.approx(math.sqrt((0 + 9) / 2), abs=1e-4)
+    assert result["rmse"]["3d_m"] == pytest.approx(math.sqrt((0 + 25) / 2), abs=1e-4)
+
+
+def test_gcp_accuracy_rejects_unpaired_points():
+    points = [SurveyedPoint("A", 1.0, 2.0, 3.0)]
+    with pytest.raises(ValueError, match="paired reconstructed"):
+        compute_gcp_accuracy(SAMPLE_GEO_TRANSFORM, points)
 
 
 # ---------------------------------------------------------------------------
 #  Held-out checkpoint validation (unit tests)
 # ---------------------------------------------------------------------------
+
 
 def test_validate_checkpoints_no_surface_available():
     """When no mesh/splat/pointcloud exists, returns available=False."""
@@ -238,9 +206,7 @@ def test_validate_checkpoints_with_splat(tmp_path):
     splat_file = tmp_path / "test.ply"
     rec = _FakeRecWithMesh(str(splat_file))
 
-    means = np.array(
-        [[0.0, 0.0, 0.0], [10.0, 0.0, 0.0], [0.0, 10.0, 0.0]], dtype=np.float32
-    )
+    means = np.array([[0.0, 0.0, 0.0], [10.0, 0.0, 0.0], [0.0, 10.0, 0.0]], dtype=np.float32)
     # Build a minimal GaussianCloud
     n = 3
     cloud = ply_io.GaussianCloud(
@@ -270,6 +236,7 @@ def test_validate_checkpoints_with_splat(tmp_path):
 # ---------------------------------------------------------------------------
 #  CheckpointValidation dataclass
 # ---------------------------------------------------------------------------
+
 
 def test_checkpoint_validation_accepts_coordinate_string():
     cv = CheckpointValidation(label="X", distance_m=1.0, surface_point="12.3456,67.8901,0.0000")
