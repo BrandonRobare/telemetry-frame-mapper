@@ -13,10 +13,12 @@ cleanup_ply_file(src_path, dst_path, **kwargs) -> (stats, n_before, n_after)
 """
 from __future__ import annotations
 
+import json
 import logging
 from pathlib import Path
 
 import numpy as np
+from shapely.geometry import Point, shape
 
 from .ply_io import GaussianCloud, read_3dgs_ply, write_3dgs_ply
 
@@ -39,6 +41,7 @@ def cleanup_cloud(
     scale_std_threshold: float = _DEFAULT_SCALE_STD_THRESHOLD,
     outlier_k: int = _DEFAULT_OUTLIER_K,
     outlier_std_threshold: float = _DEFAULT_OUTLIER_STD_THRESHOLD,
+    target_area_geojson: str | None = None,
 ) -> tuple[GaussianCloud, dict]:
     """Apply low-opacity, floater, and outlier filters; return (result, stats).
 
@@ -60,13 +63,30 @@ def cleanup_cloud(
         "opacity_keep": 0,
         "scale_clipped": 0,
         "outlier_clipped": 0,
+        "target_area_clipped": 0,
     }
 
+    # ---- 0. optional target-area crop ---------------------------------------
+    result = cloud
+    if target_area_geojson:
+        result, target_clipped = _crop_to_target_area(result, target_area_geojson)
+        stats["target_area_clipped"] = target_clipped
+
+    n_current = result.means.shape[0]
+    if n_current == 0:
+        stats.update({
+            "opacity_keep": 0,
+            "n_after_opacity": 0,
+            "n_after_scale": 0,
+            "n_after_outlier": 0,
+        })
+        return result, stats
+
     # ---- 1. low opacity -----------------------------------------------------
-    keep_opacity = max(1, int(n_before * opacity_keep_ratio))
-    order = np.argsort(-cloud.opacities, kind="stable")[:keep_opacity]
+    keep_opacity = max(1, int(n_current * opacity_keep_ratio))
+    order = np.argsort(-result.opacities, kind="stable")[:keep_opacity]
     stats["opacity_keep"] = keep_opacity
-    result = _slice_cloud(cloud, order)
+    result = _slice_cloud(result, order)
 
     # ---- 2. huge-scale floaters ---------------------------------------------
     scale_mag = np.linalg.norm(result.scales, axis=1)
@@ -107,6 +127,7 @@ def cleanup_ply_file(
     scale_std_threshold: float = _DEFAULT_SCALE_STD_THRESHOLD,
     outlier_k: int = _DEFAULT_OUTLIER_K,
     outlier_std_threshold: float = _DEFAULT_OUTLIER_STD_THRESHOLD,
+    target_area_geojson: str | None = None,
 ) -> tuple[dict, int, int]:
     """Read *src*, apply cleanup filters, write a cleaned PLY to *dst*.
 
@@ -120,6 +141,7 @@ def cleanup_ply_file(
         scale_std_threshold=scale_std_threshold,
         outlier_k=outlier_k,
         outlier_std_threshold=outlier_std_threshold,
+        target_area_geojson=target_area_geojson,
     )
     write_3dgs_ply(dst, cleaned)
     n_after = cleaned.means.shape[0]
@@ -129,6 +151,26 @@ def cleanup_ply_file(
 # ---------------------------------------------------------------------------
 # helpers
 # ---------------------------------------------------------------------------
+
+
+def _crop_to_target_area(
+    cloud: GaussianCloud,
+    target_area_geojson: str,
+) -> tuple[GaussianCloud, int]:
+    """Keep only Gaussian centers inside the target-area polygon in x/y space."""
+    try:
+        polygon = shape(json.loads(target_area_geojson))
+    except (TypeError, json.JSONDecodeError, ValueError) as exc:
+        raise ValueError("Invalid target area geometry") from exc
+    if polygon.is_empty:
+        raise ValueError("Target area geometry is empty")
+
+    mask = np.array(
+        [polygon.covers(Point(float(x), float(y))) for x, y in cloud.means[:, :2]],
+        dtype=bool,
+    )
+    kept = int(mask.sum())
+    return _slice_cloud(cloud, np.flatnonzero(mask)), int(cloud.means.shape[0] - kept)
 
 
 def _slice_cloud(cloud: GaussianCloud, indices: np.ndarray) -> GaussianCloud:
