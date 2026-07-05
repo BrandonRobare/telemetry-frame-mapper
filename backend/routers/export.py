@@ -95,6 +95,38 @@ def export_reconstruction_share_bundle(reconstruction_id: int, db: DBSession = D
     )
 
 
+@router.post("/survey-report")
+def export_survey_report(
+    session_id: int,
+    format: str = "json",
+    db: DBSession = Depends(get_db),
+):
+    """Generate a professional survey report for a session.
+
+    Returns structured JSON by default. Pass ``format=html`` to get the
+    self-contained HTML report with a ``Content-Type: text/html`` header
+    suitable for browser viewing or print-to-PDF.
+
+    PDF output: this endpoint does NOT generate PDF. Use browser print-to-PDF
+    on the HTML report (Ctrl/Cmd+P → Save as PDF).
+    """
+    from fastapi.responses import HTMLResponse
+
+    from ..services.survey_report import build_survey_report
+
+    session = db.query(SessionModel).filter(SessionModel.id == session_id).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    try:
+        report = build_survey_report(session_id, db)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    if format == "html":
+        return HTMLResponse(content=report["html"], status_code=200)
+    return report
+
+
 @router.post("/webodm-package")
 def export_webodm_package(
     session_id: int,
