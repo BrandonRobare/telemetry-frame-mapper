@@ -26,9 +26,9 @@ A standalone geotagging tool (`drone-video-geotagger`). Pipeline order inside `c
 
 ### Backend — `backend/`
 
-FastAPI app (`backend.main:app`), SQLite via SQLAlchemy (PostgreSQL-swappable through `DATABASE_URL`), schema created on startup with small manual column-add shims for upgrades.
+FastAPI app (`backend.main:app`), SQLite via SQLAlchemy (PostgreSQL-swappable through `DATABASE_URL`), with Alembic migrations in `backend/db/migrations/` for schema upgrades.
 
-- **Routers** (17): sessions, images, footprints, coverage, flight_log, srt, plans, export, session_log, reconstruction, annotations, comparisons, system, jobs, storage, target_areas — ~53 endpoints, self-documented at `/docs`.
+- **Routers** (19): sessions, images, footprints, coverage, flight_log, srt, plans, export, session_log, reconstruction, annotations, comparisons, system, jobs, storage, target_areas, georeferencing, settings, uploads — 77 endpoints, self-documented at `/docs`.
 - **Key services:**
   - `ingest.py` / `ingest_orchestrator.py` — EXIF GPS + DJI XMP extraction (relative altitude → AGL, yaw, gimbal pitch), quality scoring (OpenCV sharpness/brightness), thumbnails, footprint computation, case-insensitive file dedupe.
   - `geometry.py` — ground footprint math: UTM projection, FOV-based extent from AGL, yaw rotation (Shapely/pyproj).
@@ -41,7 +41,7 @@ FastAPI app (`backend.main:app`), SQLite via SQLAlchemy (PostgreSQL-swappable th
 
 Vite + React 19 + TypeScript, feature-sliced (`src/features/<tab>/` + `src/shared/`). Server state via TanStack Query, UI state via Zustand, Leaflet/react-leaflet for maps, `@mkkellogg/gaussian-splats-3d` (Three.js) for the splat canvas, Tailwind v4.
 
-Eleven tabs: **Map** (footprints + coverage on satellite imagery), **GPS Sync** (flight-log matching), **Review** (quality flags, frame selection, reprojection-error badges), **Plan** (target areas, lawnmower plans), **Export** (WebODM georeferencing CSV-only zip, GeoJSON, LAS, mesh), **Session Log**, **Reconstruct** (presets, job start), **Jobs** (resource monitor + job logs), **Storage** (disk breakdown + file browser), **Splat Viewer** (3D canvas, sparklines, coverage-gap heatmap, annotations, measurements, ortho/3D split, flythrough), **Compare** (voxel change detection between reconstructions).
+Thirteen tabs: **Overview** (pipeline status and import CTA), **Map** (footprints + coverage on satellite imagery), **GPS Sync** (flight-log matching), **Review** (quality flags, frame selection, reprojection-error badges), **Plan** (target areas, lawnmower plans), **Export** (WebODM georeferencing CSV-only zip, GeoJSON, LAS, mesh), **Session Log**, **Reconstruct** (presets, job start), **Jobs** (resource monitor + job logs), **Storage** (disk breakdown + file browser), **Splat Viewer** (3D canvas, sparklines, coverage-gap heatmap, annotations, measurements, ortho/3D split, flythrough), **Compare** (voxel change detection between reconstructions), **Settings** (app, storage, mission, reconstruction, and render preferences).
 
 ## The reconstruction job
 
