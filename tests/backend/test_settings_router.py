@@ -221,7 +221,7 @@ def test_patch_rejects_windows_system_storage_path(client, tmp_config):
 def test_patch_allows_safe_relative_storage_path(client, tmp_config):
     resp = client.patch("/settings", json={"general": {"imports_dir": "./safe/imports"}})
     assert resp.status_code == 200
-    assert resp.json()["general"]["imports_dir"].endswith("safe/imports")
+    assert Path(resp.json()["general"]["imports_dir"]).parts[-2:] == ("safe", "imports")
 
 
 @pytest.mark.parametrize("path", ["/", "\\"])

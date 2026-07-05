@@ -137,6 +137,7 @@ def test_reconstruction_model_fields(setup_test_db):
     assert rec.progress_pct == 0.0
     assert rec.started_at is not None
     assert rec.completed_at is None
+    assert rec.duration_s is None
     assert rec.error_msg is None
 
 
@@ -180,6 +181,70 @@ def test_session_reconstructions_relationship(setup_test_db):
     assert len(s.reconstructions) == 1
     assert s.reconstructions[0].preset == "full"
 
+
+
+def test_update_rec_sets_duration_when_completed_at_is_written(setup_test_db):
+    from datetime import datetime, timezone
+
+    from backend.db.database import get_db
+    from backend.db.models import Reconstruction
+    from backend.main import app
+    from backend.services.reconstruction import _update_rec
+
+    db = next(app.dependency_overrides[get_db]())
+    s = _make_session(db)
+    rec = Reconstruction(
+        session_id=s.id,
+        preset="quick",
+        status="running_gsplat",
+        frames_used=1,
+        started_at=datetime(2026, 1, 1, 0, 0, 0, tzinfo=timezone.utc),
+    )
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+
+    _update_rec(
+        db,
+        rec.id,
+        status="complete",
+        completed_at=datetime(2026, 1, 1, 0, 0, 2, 250000, tzinfo=timezone.utc),
+    )
+
+    db.refresh(rec)
+    assert rec.duration_s == pytest.approx(2.25)
+
+
+def test_update_rec_clamps_negative_duration_to_zero(setup_test_db):
+    from datetime import datetime, timezone
+
+    from backend.db.database import get_db
+    from backend.db.models import Reconstruction
+    from backend.main import app
+    from backend.services.reconstruction import _update_rec
+
+    db = next(app.dependency_overrides[get_db]())
+    s = _make_session(db)
+    rec = Reconstruction(
+        session_id=s.id,
+        preset="quick",
+        status="running_colmap",
+        frames_used=1,
+        started_at=datetime(2026, 1, 1, 0, 0, 10, tzinfo=timezone.utc),
+    )
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+
+    _update_rec(
+        db,
+        rec.id,
+        status="failed",
+        completed_at=datetime(2026, 1, 1, 0, 0, 5, tzinfo=timezone.utc),
+    )
+
+    db.refresh(rec)
+    assert rec.duration_s == 0.0
 
 # ---------------------------------------------------------------------------
 # Workspace writer tests
