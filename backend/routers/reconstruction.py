@@ -32,6 +32,7 @@ from ..services.reconstruction import (
     start_reconstruction,
     wait_for_reconstruction_status_change,
 )
+from ..services.splat_cleanup import cleanup_ply_file
 
 router = APIRouter(prefix="/reconstruction", tags=["reconstruction"])
 logger = logging.getLogger(__name__)
@@ -728,6 +729,66 @@ def get_log(
         raise HTTPException(status_code=404, detail="Reconstruction not found")
     lines = get_rec_log(reconstruction_id)
     return {"lines": lines[-limit:]}
+
+
+class CleanupOut(BaseModel):
+    n_before: int
+    n_after: int
+    cleaned_path: str
+    stats: dict
+
+
+class CleanupIn(BaseModel):
+    opacity_keep_ratio: float | None = Field(default=None, gt=0.0, le=1.0)
+    scale_std_threshold: float | None = Field(default=None, gt=0.0)
+    outlier_k: int | None = Field(default=None, ge=0)
+    outlier_std_threshold: float | None = Field(default=None, gt=0.0)
+    target_area_id: int | None = None
+
+
+@router.post("/{reconstruction_id}/cleanup", response_model=CleanupOut, status_code=201)
+def cleanup_splat(
+    reconstruction_id: int,
+    body: CleanupIn | None = None,
+    db: DBSession = Depends(get_db),
+):
+    rec = db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Reconstruction not found")
+    if rec.status != "complete":
+        raise HTTPException(
+            status_code=422, detail="Reconstruction must be complete before cleanup"
+        )
+    if not rec.splat_path:
+        raise HTTPException(
+            status_code=404, detail="No splat file available for this reconstruction"
+        )
+    src = Path(rec.splat_path)
+    if not src.exists():
+        raise HTTPException(status_code=404, detail=f"Splat file not found on disk: {src}")
+
+    dst = _reconstruction_artifact_path(rec.id, "splat_cleaned.ply")
+    options = body.model_dump(exclude_none=True) if body else {}
+    target_area_id = options.pop("target_area_id", None)
+    if target_area_id is not None:
+        ta = db.query(TargetArea).filter(TargetArea.id == target_area_id).first()
+        if not ta:
+            raise HTTPException(status_code=404, detail="Target area not found")
+        if not ta.geom_geojson:
+            raise HTTPException(status_code=422, detail="Target area has no geometry defined")
+        options["target_area_geojson"] = ta.geom_geojson
+    try:
+        stats, n_before, n_after = cleanup_ply_file(src, dst, **options)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=422, detail=f"Splat cleanup failed: {exc}"
+        ) from exc
+    return CleanupOut(
+        n_before=n_before,
+        n_after=n_after,
+        cleaned_path=str(dst),
+        stats=stats,
+    )
 
 
 @router.get("/{reconstruction_id}/coverage-gaps")
