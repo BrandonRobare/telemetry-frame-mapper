@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import datetime
+import json
 import shutil
+import threading
 import uuid
 from pathlib import Path, PurePosixPath, PureWindowsPath
+from typing import Any
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel, Field
@@ -16,7 +19,10 @@ from ..services.ingest_orchestrator import start_import
 
 router = APIRouter(prefix="/uploads/imports", tags=["uploads"])
 
-_UPLOADS: dict[str, dict] = {}
+_UPLOADS: dict[str, dict[str, Any]] = {}
+_UPLOAD_LOCKS: dict[str, threading.Lock] = {}
+_UPLOADS_GUARD = threading.Lock()
+_MANIFEST_NAME = ".upload.json"
 
 
 class UploadFilePlan(BaseModel):
@@ -134,8 +140,66 @@ def _validate_plan(req: StartUploadRequest, limits: dict) -> dict[str, UploadFil
     return by_path
 
 
-def _state(upload_id: str) -> dict:
+def _manifest_path(root: Path) -> Path:
+    return root / _MANIFEST_NAME
+
+
+def _state_for_disk(state: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": state["id"],
+        "name": state["name"],
+        "root": str(state["root"]),
+        "files": state["files"],
+        "uploaded_bytes": state["uploaded_bytes"],
+        "total_bytes": state["total_bytes"],
+        "status": state["status"],
+        "session_id": state.get("session_id"),
+        "error": state.get("error"),
+    }
+
+
+def _persist_state(state: dict[str, Any]) -> None:
+    root = Path(state["root"])
+    root.mkdir(parents=True, exist_ok=True)
+    manifest = _manifest_path(root)
+    tmp = manifest.with_suffix(f"{manifest.suffix}.tmp")
+    tmp.write_text(json.dumps(_state_for_disk(state), sort_keys=True))
+    tmp.replace(manifest)
+
+
+def _load_state_from_manifest(upload_id: str) -> dict[str, Any] | None:
+    root = _upload_root() / upload_id
+    manifest = _manifest_path(root)
+    if not manifest.exists():
+        return None
+    try:
+        raw = json.loads(manifest.read_text())
+    except json.JSONDecodeError:
+        return None
+    if raw.get("id") != upload_id:
+        return None
+    raw["root"] = Path(raw["root"])
+    return raw
+
+
+def _lock_for(upload_id: str) -> threading.Lock:
+    with _UPLOADS_GUARD:
+        return _UPLOAD_LOCKS.setdefault(upload_id, threading.Lock())
+
+
+def _remember_state(state: dict[str, Any]) -> dict[str, Any]:
+    with _UPLOADS_GUARD:
+        _UPLOADS[state["id"]] = state
+        _UPLOAD_LOCKS.setdefault(state["id"], threading.Lock())
+    return state
+
+
+def _state(upload_id: str) -> dict[str, Any]:
     state = _UPLOADS.get(upload_id)
+    if state is None:
+        state = _load_state_from_manifest(upload_id)
+        if state is not None:
+            _remember_state(state)
     if state is None:
         raise HTTPException(status_code=404, detail="Upload not found")
     if state.get("status") == "cancelled":
@@ -143,6 +207,18 @@ def _state(upload_id: str) -> dict:
     if state.get("status") == "error":
         raise HTTPException(status_code=409, detail=state.get("error") or "Upload failed")
     return state
+
+
+def _progress(state: dict[str, Any]) -> UploadProgress:
+    return UploadProgress(
+        upload_id=state["id"],
+        status=state["status"],
+        uploaded_bytes=state["uploaded_bytes"],
+        total_bytes=state["total_bytes"],
+        file_count=len(state["files"]),
+        session_id=state.get("session_id"),
+        error=state.get("error"),
+    )
 
 
 @router.post("/start", response_model=StartUploadResponse)
@@ -157,7 +233,7 @@ def start_browser_import_upload(req: StartUploadRequest):
     upload_id = uuid.uuid4().hex
     dest = root / upload_id
     dest.mkdir(parents=True)
-    _UPLOADS[upload_id] = {
+    state = {
         "id": upload_id,
         "name": req.name.strip(),
         "root": dest,
@@ -166,7 +242,10 @@ def start_browser_import_upload(req: StartUploadRequest):
         "total_bytes": req.total_bytes,
         "status": "uploading",
         "session_id": None,
+        "error": None,
     }
+    _persist_state(state)
+    _remember_state(state)
     return StartUploadResponse(
         upload_id=upload_id,
         chunk_size=limits["chunk_size_bytes"],
@@ -184,61 +263,60 @@ async def upload_import_chunk(
     chunk: UploadFile = File(...),
 ):
     state = _state(upload_id)
-    if state["status"] != "uploading":
-        raise HTTPException(status_code=409, detail="Upload is not accepting chunks")
-    rel = _safe_upload_path(path).as_posix()
-    planned = state["files"].get(rel)
-    if planned is None:
-        raise HTTPException(status_code=400, detail="Chunk path was not in upload plan")
-    if offset != planned["received"]:
-        raise HTTPException(status_code=409, detail="Chunk offset does not match server state")
-
     data = await chunk.read()
-    limits = _limits()
-    if len(data) > limits["chunk_size_bytes"]:
-        raise HTTPException(status_code=413, detail="Chunk exceeds configured size")
-    if planned["received"] + len(data) > planned["size"]:
-        raise HTTPException(status_code=413, detail="Chunk exceeds planned file size")
+    with _lock_for(upload_id):
+        if state["status"] != "uploading":
+            raise HTTPException(status_code=409, detail="Upload is not accepting chunks")
+        rel = _safe_upload_path(path).as_posix()
+        planned = state["files"].get(rel)
+        if planned is None:
+            raise HTTPException(status_code=400, detail="Chunk path was not in upload plan")
 
-    dest = (state["root"] / rel).resolve()
-    if not dest.is_relative_to(state["root"].resolve()):
-        raise HTTPException(status_code=400, detail="Invalid upload path")
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    with dest.open("ab") as f:
-        f.write(data)
+        limits = _limits()
+        if len(data) > limits["chunk_size_bytes"]:
+            raise HTTPException(status_code=413, detail="Chunk exceeds configured size")
+        if planned["received"] + len(data) > planned["size"]:
+            raise HTTPException(status_code=413, detail="Chunk exceeds planned file size")
 
-    planned["received"] += len(data)
-    state["uploaded_bytes"] += len(data)
-    return UploadProgress(
-        upload_id=upload_id,
-        status=state["status"],
-        uploaded_bytes=state["uploaded_bytes"],
-        total_bytes=state["total_bytes"],
-        file_count=len(state["files"]),
-        session_id=state.get("session_id"),
-    )
+        dest = (state["root"] / rel).resolve()
+        if not dest.is_relative_to(state["root"].resolve()):
+            raise HTTPException(status_code=400, detail="Invalid upload path")
+        actual_size = dest.stat().st_size if dest.exists() else 0
+        if offset != planned["received"] or offset != actual_size:
+            raise HTTPException(status_code=409, detail="Chunk offset does not match server state")
+
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        with dest.open("ab") as f:
+            f.write(data)
+
+        planned["received"] += len(data)
+        state["uploaded_bytes"] += len(data)
+        _persist_state(state)
+        return _progress(state)
 
 
 @router.post("/{upload_id}/complete", response_model=CompleteUploadResponse)
 def complete_browser_import_upload(upload_id: str, db: DBSession = Depends(get_db)):
     state = _state(upload_id)
-    incomplete = [p for p, meta in state["files"].items() if meta["received"] != meta["size"]]
-    if incomplete:
-        raise HTTPException(status_code=409, detail=f"Upload is incomplete: {incomplete[0]}")
+    with _lock_for(upload_id):
+        incomplete = [p for p, meta in state["files"].items() if meta["received"] != meta["size"]]
+        if incomplete:
+            raise HTTPException(status_code=409, detail=f"Upload is incomplete: {incomplete[0]}")
 
-    state["status"] = "importing"
-    session = SessionModel(
-        name=state["name"],
-        folder_path=str(state["root"]),
-        imported_at=datetime.datetime.now(datetime.timezone.utc),
-        photo_count=0,
-        usable_count=0,
-    )
-    db.add(session)
-    db.commit()
-    db.refresh(session)
-    state["session_id"] = session.id
-    start_import(session.id, state["root"], SessionLocal)
+        state["status"] = "importing"
+        session = SessionModel(
+            name=state["name"],
+            folder_path=str(state["root"]),
+            imported_at=datetime.datetime.now(datetime.timezone.utc),
+            photo_count=0,
+            usable_count=0,
+        )
+        db.add(session)
+        db.commit()
+        db.refresh(session)
+        state["session_id"] = session.id
+        _persist_state(state)
+        start_import(session.id, state["root"], SessionLocal)
     return CompleteUploadResponse(
         upload_id=upload_id,
         status=state["status"],
@@ -259,30 +337,20 @@ def complete_browser_import_upload(upload_id: str, db: DBSession = Depends(get_d
 
 @router.post("/{upload_id}/cancel", response_model=UploadProgress)
 def cancel_browser_import_upload(upload_id: str):
-    state = _UPLOADS.get(upload_id)
+    state = _UPLOADS.get(upload_id) or _load_state_from_manifest(upload_id)
     if state is None:
         raise HTTPException(status_code=404, detail="Upload not found")
-    state["status"] = "cancelled"
-    shutil.rmtree(state["root"], ignore_errors=True)
-    return UploadProgress(
-        upload_id=upload_id,
-        status="cancelled",
-        uploaded_bytes=state["uploaded_bytes"],
-        total_bytes=state["total_bytes"],
-        file_count=len(state["files"]),
-        session_id=state.get("session_id"),
-    )
+    with _lock_for(upload_id):
+        state["status"] = "cancelled"
+        progress = _progress(state)
+        shutil.rmtree(state["root"], ignore_errors=True)
+        with _UPLOADS_GUARD:
+            _UPLOADS.pop(upload_id, None)
+            _UPLOAD_LOCKS.pop(upload_id, None)
+        return progress
 
 
 @router.get("/{upload_id}", response_model=UploadProgress)
 def get_browser_import_upload(upload_id: str):
     state = _state(upload_id)
-    return UploadProgress(
-        upload_id=upload_id,
-        status=state["status"],
-        uploaded_bytes=state["uploaded_bytes"],
-        total_bytes=state["total_bytes"],
-        file_count=len(state["files"]),
-        session_id=state.get("session_id"),
-        error=state.get("error"),
-    )
+    return _progress(state)
