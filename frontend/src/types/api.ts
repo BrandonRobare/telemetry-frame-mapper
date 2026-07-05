@@ -274,6 +274,66 @@ export interface StorageFileList {
   files: StorageFileItem[]
 }
 
+export interface PolicyCandidate {
+  path: string
+  bytes: number
+  reason: string
+  action: string
+  directory: boolean
+}
+
+export interface PolicySummary {
+  total_items: number
+  total_bytes: number
+  actions: Record<string, number>
+  removed_items?: number
+  failed_items?: number
+}
+
+export interface PolicyResult {
+  mode: "dry-run" | "execute"
+  candidates: PolicyCandidate[]
+  summary: PolicySummary
+  executed?: {
+    removed: string[]
+    failed: { path: string; reason: string }[]
+  }
+}
+
+export interface SurveyReport {
+  report_type: string
+  version: string
+  generated_at: string
+  session: {
+    id: number
+    name: string
+    folder_path: string
+    imported_at: string | null
+    photo_count: number
+    usable_count: number
+    notes: string | null
+  }
+  frame_summary: {
+    total: number
+    usable: number
+    quality_breakdown: Record<string, number>
+    camera: Record<string, unknown> | null
+    gps_present: number
+  }
+  quality_assessment: {
+    available: boolean
+    reason?: string
+    score?: number
+    safe_to_reconstruct?: string
+    recommended_action?: string
+    warnings?: string[]
+  }
+  coverage: { available: boolean }
+  reconstructions: unknown[]
+  annotations: unknown[]
+  html: string
+}
+
 export interface Annotation {
   id: number
   reconstruction_id: number
