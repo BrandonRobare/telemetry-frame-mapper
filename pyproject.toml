@@ -62,6 +62,7 @@ reconstruction = [
 
 [project.scripts]
 drone-video-geotagger = "drone_video_geotagger.cli:main"
+dvg-pipeline = "drone_video_geotagger.pipeline_cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/drone_video_geotagger"]
