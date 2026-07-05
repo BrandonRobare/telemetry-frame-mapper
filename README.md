@@ -29,7 +29,7 @@ This repository is a monorepo with three components:
 ```
 src/              CLI package (drone-video-geotagger command)
 backend/          FastAPI app (API server, DB models, services)
-frontend/         Vite + React frontend (11-tab workflow UI)
+frontend/         Vite + React frontend (13-tab workflow UI)
 tests/            pytest suite (tests/cli/ and tests/backend/)
 data/             SQLite database (gitignored)
 imports/          Drop folder for raw images and flight logs (gitignored)
@@ -50,9 +50,10 @@ exports/          KML/GPX mission plan exports (gitignored)
 - Coverage analysis, lawnmower mission planning with KML/GPX export, and flight-log sync.
 - Reconstruction job pipeline: COLMAP SfM (quick/full presets, target-area crop, frame selection), GPS geo-registration, gaussian-splat training, LOD generation, and per-frame reprojection-error reporting.
 - Exports: WebODM georeferencing CSV-only zip, GeoJSON, LAS 1.4 point cloud, optional SuGaR mesh, flythrough video.
-- SQLite database via SQLAlchemy (swappable for PostgreSQL via `DATABASE_URL`).
+- SQLite database via SQLAlchemy (swappable for PostgreSQL via `DATABASE_URL`) with Alembic-managed schema migrations.
 
-### Frontend (11 tabs, all functional)
+### Frontend (13 tabs, all functional)
+- **Overview** — pipeline status, session summary, import call-to-action, and reconstruction readiness.
 - **Map** — Leaflet + ESRI satellite, footprint polygons, coverage overlay, session stats sidebar.
 - **GPS Sync** — DJI FlightRecord CSV matching with timing deltas.
 - **Review** — thumbnail grid, quality flags, COLMAP reprojection-error badges, reconstruction frame selection.
@@ -61,6 +62,7 @@ exports/          KML/GPX mission plan exports (gitignored)
 - **Session Log · Reconstruct · Jobs · Storage** — event history, preset-based job start, resource monitor with live logs, disk usage + file browser.
 - **Splat Viewer** — in-browser gaussian-splat rendering, PSNR/SSIM sparklines, coverage-gap heatmap, GPS-pinned annotations, distance/area measurement, ortho/3D split view, flythrough recording.
 - **Compare** — voxel change detection between two reconstructions of the same site.
+- **Settings** — app preferences, import/storage paths, mission parameters, reconstruction presets, rendering/export defaults.
 - Dark/light theme with persistence.
 
 ## Install
@@ -112,7 +114,7 @@ docker run --rm -p 8000:8000 \
   telemetry-frame-mapper
 ```
 
-Open `http://localhost:8000`. The image installs `ffmpeg`, `exiftool`, and COLMAP for CPU-only reconstruction. CUDA/torch/gsplat GPU training is intentionally out of scope for this image; use the manual GPU setup in `docs/SETUP.md` when needed.
+Open `http://localhost:8000`. The image installs `ffmpeg`, `exiftool`, and COLMAP for CPU-only reconstruction. CUDA/torch/gsplat GPU training is intentionally out of scope for this image; use the manual GPU setup in `docs/SETUP.md` when needed. CI runs a Docker build smoke test so the image stays buildable; runtime GPU reconstruction remains a manual/local support tier.
 
 ### Frontend
 
@@ -154,7 +156,7 @@ drone-video-geotagger \
   --takeoff-altitude 236.94
 ```
 
-Writes geotagged copies to `extracted_geotagged/` by default.
+Writes geotagged copies to `extracted_geotagged/` by default. Add `--in-place` to write EXIF tags directly into the source frame folder instead of creating copies.
 
 If you already have the SRT telemetry file:
 
@@ -166,6 +168,11 @@ drone-video-geotagger \
   --takeoff-altitude 236.94 \
   --frame-rate 8
 ```
+
+
+### Browser upload import
+
+The Import dialog defaults to **Browser upload**: choose or drag a folder of frames in the browser, and the app streams files to the backend in chunks before starting the same import pipeline used by server-side paths. This is the easiest path when the image folder is on your workstation but not already under `imports/`. The legacy **Server path** mode remains available for folders that already live under the backend's `imports/` directory.
 
 ### Backend
 
@@ -186,6 +193,7 @@ Optional: copy `config.yaml.example` to `config.yaml` and adjust mission paramet
 | `--takeoff-altitude` | Takeoff altitude in metres above sea level |
 | `--srt` | Optional DJI SRT file (extracted from video if omitted) |
 | `--frame-rate` | Optional frame extraction rate (estimated from SRT if omitted) |
+| `--in-place` | Write EXIF tags into the original frame folder instead of `<frames>_geotagged/` copies |
 
 Frame index rule: the index is the **last** number in each filename — `frame_00042.jpg` and `DJI_0081_frame_42.jpg` both index as frame 42. Files with no digits in the name are skipped.
 
@@ -200,9 +208,9 @@ Upload the geotagged folder to WebODM; it reads GPS EXIF tags on import.
 ## Tests
 
 ```bash
-pytest        # 222 tests (CLI + backend)
+pytest        # 355 tests (CLI + backend)
 ruff check .  # linter
-cd frontend && npm test -- --run   # frontend unit tests (vitest)
+cd frontend && npm test -- --run   # 83 frontend unit tests (vitest)
 ```
 
 Tests use inline fixture data and temporary paths — no real flight files required. CI mocks all external binaries (no real ffmpeg, exiftool, COLMAP, or GPU).

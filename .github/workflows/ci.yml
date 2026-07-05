@@ -59,3 +59,12 @@ jobs:
       - name: Build
         working-directory: frontend
         run: npm run build
+
+  docker-build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v7
+
+      - name: Build single-container image
+        run: docker build -t telemetry-frame-mapper:ci .
