@@ -171,6 +171,23 @@ export interface PreflightQualityReport {
   recommended_action: string;
 }
 
+export interface QuickReport {
+  session_id: number;
+  total_frames: number;
+  usable_frames: number;
+  score: number;
+  safe_to_reconstruct: "yes" | "caution" | "no";
+  recommended_action: string;
+  warnings: string[];
+  gps_completeness_pct: number;
+  timestamp_completeness_pct: number;
+  blur_pct: number;
+  exposure_issue_pct: number;
+  estimated_overlap_pct: number | null;
+  match_density_weak_ratio: number | null;
+  match_density_avg_matches: number | null;
+}
+
 export interface Job {
   id: number;
   type: "reconstruction";

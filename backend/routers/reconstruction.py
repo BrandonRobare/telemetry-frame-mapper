@@ -183,6 +183,7 @@ class PreflightReportOut(BaseModel):
     safe_to_reconstruct: str
     score: int
     recommended_action: str
+    match_density: dict | None = None
 
 class ReconstructionImageDiagnostic(BaseModel):
     id: int
