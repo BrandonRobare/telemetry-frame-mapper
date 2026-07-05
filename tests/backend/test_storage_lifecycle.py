@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
 
 from backend.core.config import AppConfig
+from backend.db.models import Session as SessionModel
 from backend.services.storage_lifecycle import (
     PolicyRule,
     _configured_roots,
@@ -81,15 +83,15 @@ class TestApplyPolicyDryRun:
         )
 
         rules = [{"target": "raw_frames", "age_days": 0}]
-        result = apply_policy(rules, execute=False, cfg=cfg)
+        result = apply_policy(rules, execute=False, cfg=cfg, db=_FakeDb())
         assert result["mode"] == "dry-run"
         assert isinstance(result["candidates"], list)
+        assert len(result["candidates"]) == 1
+        assert result["candidates"][0]["action"] == "archive"
         assert isinstance(result["summary"], dict)
 
     def test_dry_run_rejects_unknown_target(self):
-        result = apply_policy(
-            [{"target": "nonexistent", "age_days": 30}], execute=False
-        )
+        result = apply_policy([{"target": "nonexistent", "age_days": 30}], execute=False)
         assert "error" in result
 
     def test_dry_run_rejects_invalid_rule(self):
@@ -120,12 +122,9 @@ class TestExecuteSafety:
         )
 
         rules = [{"target": "raw_frames", "age_days": 0}]
-        result = apply_policy(rules, execute=False, cfg=cfg)
+        result = apply_policy(rules, execute=False, cfg=cfg, db=_FakeDb())
         for c in result["candidates"]:
-            assert any(
-                Path(c["path"]).resolve().is_relative_to(r)
-                for r in _configured_roots(cfg)
-            )
+            assert any(Path(c["path"]).resolve().is_relative_to(r) for r in _configured_roots(cfg))
 
     def test_disk_usage_pct_returns_number(self):
         pct = _disk_usage_pct(".")
@@ -147,8 +146,114 @@ class TestEndpoint:
         assert "summary" in data
 
     def test_apply_policy_invalid_target(self, client):
-        resp = client.post("/storage/apply-policy", json={
-            "rules": [{"target": "nonexistent", "age_days": 30}],
-            "execute": False,
-        })
+        resp = client.post(
+            "/storage/apply-policy",
+            json={
+                "rules": [{"target": "nonexistent", "age_days": 30}],
+                "execute": False,
+            },
+        )
         assert resp.status_code == 422
+
+
+class _Query:
+    def filter(self, *args, **kwargs):
+        return self
+
+    def first(self):
+        return SessionModel(
+            name="old",
+            folder_path="/tmp/old_session",
+            imported_at=datetime.now(timezone.utc) - timedelta(days=1),
+        )
+
+
+class _FakeDb:
+    def query(self, _model):
+        return _Query()
+
+
+def test_execute_archives_age_based_raw_frames(tmp_path):
+    imports = tmp_path / "imports"
+    imports.mkdir()
+    session_dir = imports / "old_session"
+    session_dir.mkdir()
+    (session_dir / "frame.jpg").write_bytes(b"x" * 100)
+
+    (tmp_path / "processed").mkdir()
+    exports = tmp_path / "exports"
+    exports.mkdir()
+    (tmp_path / "data").mkdir()
+
+    cfg = AppConfig(
+        imports_dir=str(imports),
+        processed_dir=str(tmp_path / "processed"),
+        exports_dir=str(exports),
+        data_dir=str(tmp_path / "data"),
+    )
+
+    result = apply_policy(
+        [{"target": "raw_frames", "age_days": 0}],
+        execute=True,
+        cfg=cfg,
+        db=_FakeDb(),
+    )
+
+    assert result["summary"]["archived_items"] == 1
+    assert result["summary"].get("removed_items", 0) == 0
+    archived = Path(result["executed"]["archived"][0]["archive_path"])
+    assert archived.exists()
+    assert archived.is_dir()
+    assert not session_dir.exists()
+    assert archived.is_relative_to((exports / "storage_archive").resolve())
+
+
+def test_apply_policy_without_db_dry_run_returns_empty_candidates(tmp_path):
+    cfg = AppConfig(
+        imports_dir=str(tmp_path / "imports"),
+        processed_dir=str(tmp_path / "processed"),
+        exports_dir=str(tmp_path / "exports"),
+        data_dir=str(tmp_path / "data"),
+    )
+    result = apply_policy([{"target": "raw_frames", "age_days": 0}], execute=False, cfg=cfg)
+    assert result["mode"] == "dry-run"
+    assert result["candidates"] == []
+
+
+def test_apply_policy_uses_session_import_date_for_dry_run(tmp_path):
+    class SessionQuery:
+        def filter(self, *args, **kwargs):
+            return self
+
+        def first(self):
+            return SessionModel(
+                name="old",
+                folder_path="/tmp/old_session",
+                imported_at=datetime.now(timezone.utc) - timedelta(days=10),
+            )
+
+    class Db:
+        def query(self, _model):
+            return SessionQuery()
+
+    imports = tmp_path / "imports"
+    imports.mkdir()
+    session_dir = imports / "old_session"
+    session_dir.mkdir()
+    (session_dir / "frame.jpg").write_bytes(b"x" * 100)
+    (tmp_path / "processed").mkdir()
+    (tmp_path / "exports").mkdir()
+    (tmp_path / "data").mkdir()
+    cfg = AppConfig(
+        imports_dir=str(imports),
+        processed_dir=str(tmp_path / "processed"),
+        exports_dir=str(tmp_path / "exports"),
+        data_dir=str(tmp_path / "data"),
+    )
+
+    result = apply_policy(
+        [{"target": "raw_frames", "age_days": 5}], execute=False, cfg=cfg, db=Db()
+    )
+
+    assert len(result["candidates"]) == 1
+    assert "Age 10d" in result["candidates"][0]["reason"]

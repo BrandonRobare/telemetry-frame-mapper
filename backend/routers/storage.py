@@ -55,15 +55,13 @@ def _compute_summary() -> dict:
         if processed.exists():
             for session_dir in sorted(processed.iterdir()):
                 if session_dir.is_dir():
-                    size = sum(
-                        f.stat().st_size
-                        for f in session_dir.rglob("*")
-                        if f.is_file()
+                    size = sum(f.stat().st_size for f in session_dir.rglob("*") if f.is_file())
+                    by_session.append(
+                        {
+                            "session_id": session_dir.name,
+                            "bytes": size,
+                        }
                     )
-                    by_session.append({
-                        "session_id": session_dir.name,
-                        "bytes": size,
-                    })
     except Exception:
         by_session = []
     return {"total_bytes": total, "by_type": by_type, "by_session": by_session}
@@ -120,12 +118,14 @@ def list_files(directory: str = Query("imports")):
     for f in sorted(base.iterdir()):
         if f.is_file():
             stat = f.stat()
-            files.append({
-                "name": f.name,
-                "path": str(f),
-                "size_bytes": stat.st_size,
-                "modified": stat.st_mtime,
-            })
+            files.append(
+                {
+                    "name": f.name,
+                    "path": str(f),
+                    "size_bytes": stat.st_size,
+                    "modified": stat.st_mtime,
+                }
+            )
     return {"directory": directory, "files": files}
 
 
@@ -196,12 +196,11 @@ def apply_storage_policy(body: ApplyPolicyRequest):
     from ..services.storage_lifecycle import apply_policy
 
     rules = [r.model_dump() for r in body.rules]
-    db = SessionLocal() if body.execute else None
+    db = SessionLocal()
     try:
         result = apply_policy(rules, execute=body.execute, db=db)
     finally:
-        if db is not None:
-            db.close()
+        db.close()
     if "error" in result:
         raise HTTPException(status_code=422, detail=result["error"])
     return result

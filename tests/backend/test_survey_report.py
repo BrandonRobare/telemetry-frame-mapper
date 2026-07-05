@@ -16,8 +16,17 @@ def _make_session(db):
     return session
 
 
-def _add_image(db, session_id: int, index: int, *, timestamp=None, latitude=35.0,
-               longitude=-80.0, flag="good", usable=True):
+def _add_image(
+    db,
+    session_id: int,
+    index: int,
+    *,
+    timestamp=None,
+    latitude=35.0,
+    longitude=-80.0,
+    flag="good",
+    usable=True,
+):
     image = Image(
         session_id=session_id,
         filename=f"frame_{index:04d}.jpg",
@@ -154,3 +163,43 @@ def test_survey_report_endpoint_html(client):
 def test_survey_report_404(client):
     resp = client.post("/export/survey-report?session_id=999999")
     assert resp.status_code == 404
+
+
+def test_survey_report_endpoint_pdf_requires_optional_backend(client):
+    from unittest.mock import patch
+
+    from backend.db.database import get_db
+    from backend.main import app
+
+    db = next(app.dependency_overrides[get_db]())
+    session = _make_session(db)
+    for i in range(3):
+        _add_image(db, session.id, i)
+
+    real_import = __import__
+
+    def fake_import(name, *args, **kwargs):
+        if name == "weasyprint":
+            raise ImportError("not installed")
+        return real_import(name, *args, **kwargs)
+
+    with patch("builtins.__import__", side_effect=fake_import):
+        resp = client.post(f"/export/survey-report?session_id={session.id}&format=pdf")
+
+    assert resp.status_code == 422
+    assert "weasyprint" in resp.json()["detail"].lower()
+
+
+def test_survey_report_endpoint_rejects_unknown_format(client):
+    from backend.db.database import get_db
+    from backend.main import app
+
+    db = next(app.dependency_overrides[get_db]())
+    session = _make_session(db)
+    for i in range(3):
+        _add_image(db, session.id, i)
+
+    resp = client.post(f"/export/survey-report?session_id={session.id}&format=docx")
+
+    assert resp.status_code == 422
+    assert "format" in resp.json()["detail"].lower()

@@ -76,9 +76,7 @@ def export_reproducibility_manifest(workflow: str, artifact_path: str | None = N
         for k in ("target_crs", "default_basemap", "exports_dir", "processed_dir")
     }
     artifacts = [_safe_manifest_artifact_path(artifact_path)] if artifact_path else []
-    return build_reproducibility_manifest(
-        workflow=workflow, settings=settings, artifacts=artifacts
-    )
+    return build_reproducibility_manifest(workflow=workflow, settings=settings, artifacts=artifacts)
 
 
 @router.post("/reconstructions/{reconstruction_id}/share-bundle")
@@ -103,14 +101,10 @@ def export_survey_report(
 ):
     """Generate a professional survey report for a session.
 
-    Returns structured JSON by default. Pass ``format=html`` to get the
-    self-contained HTML report with a ``Content-Type: text/html`` header
-    suitable for browser viewing or print-to-PDF.
-
-    PDF output: this endpoint does NOT generate PDF. Use browser print-to-PDF
-    on the HTML report (Ctrl/Cmd+P → Save as PDF).
+    Returns structured JSON by default. Pass ``format=html`` for self-contained
+    HTML, or ``format=pdf`` for a PDF when WeasyPrint is installed.
     """
-    from fastapi.responses import HTMLResponse
+    from fastapi.responses import HTMLResponse, Response
 
     from ..services.survey_report import build_survey_report
 
@@ -124,6 +118,24 @@ def export_survey_report(
 
     if format == "html":
         return HTMLResponse(content=report["html"], status_code=200)
+    if format == "pdf":
+        try:
+            from weasyprint import HTML
+        except ImportError as exc:
+            raise HTTPException(
+                status_code=422,
+                detail="PDF export requires the optional weasyprint package",
+            ) from exc
+        pdf_bytes = HTML(string=report["html"]).write_pdf()
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": (f'attachment; filename="survey_report_{session_id}.pdf"')
+            },
+        )
+    if format != "json":
+        raise HTTPException(status_code=422, detail="format must be json, html, or pdf")
     return report
 
 

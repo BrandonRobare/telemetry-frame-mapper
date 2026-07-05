@@ -60,6 +60,20 @@ def _size_of(path: Path) -> int:
     return sum(f.stat().st_size for f in path.rglob("*") if f.is_file())
 
 
+def _archive_root(cfg: AppConfig) -> Path:
+    return Path(cfg.exports_dir).resolve() / "storage_archive"
+
+
+def _archive_destination(path: Path, cfg: AppConfig) -> Path:
+    resolved = path.resolve()
+    for root in _configured_roots(cfg):
+        if resolved == root or resolved.is_relative_to(root):
+            rel = resolved.relative_to(root)
+            stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+            return _archive_root(cfg) / stamp / root.name / rel
+    raise ValueError("path is outside configured storage roots")
+
+
 def _make_cutoff(rule: PolicyRule) -> datetime | None:
     if rule.age_days is None:
         return None
@@ -72,9 +86,7 @@ def _age_from_dt(dt: datetime) -> int:
 
 def _age_from_file(path: Path) -> int:
     mtime = path.stat().st_mtime
-    return (datetime.now(timezone.utc) - datetime.fromtimestamp(
-        mtime, tz=timezone.utc
-    )).days
+    return (datetime.now(timezone.utc) - datetime.fromtimestamp(mtime, tz=timezone.utc)).days
 
 
 def _discover_candidates(
@@ -95,9 +107,11 @@ def _discover_candidates(
         for session_dir in sorted(imports.iterdir()):
             if not session_dir.is_dir():
                 continue
-            session = db.query(SessionModel).filter(
-                SessionModel.folder_path.like(f"%{session_dir.name}%")
-            ).first()
+            session = (
+                db.query(SessionModel)
+                .filter(SessionModel.folder_path.like(f"%{session_dir.name}%"))
+                .first()
+            )
             if session and session.imported_at:
                 age = _age_from_dt(session.imported_at)
             else:
@@ -115,13 +129,15 @@ def _discover_candidates(
                 if rule.age_days is not None
                 else f"Disk pressure {rule.disk_pct}%"
             )
-            candidates.append({
-                "path": str(session_dir.resolve()),
-                "bytes": size,
-                "reason": reason,
-                "action": "archive" if rule.age_days is not None else "delete",
-                "directory": True,
-            })
+            candidates.append(
+                {
+                    "path": str(session_dir.resolve()),
+                    "bytes": size,
+                    "reason": reason,
+                    "action": "archive" if rule.age_days is not None else "delete",
+                    "directory": True,
+                }
+            )
 
     elif rule.target == "colmap_intermediates":
         processed = Path(cfg.processed_dir).resolve()
@@ -142,20 +158,21 @@ def _discover_candidates(
                 continue
             reason = (
                 f"Age {age}d > {rule.age_days}d threshold"
-                if rule.age_days else f"Disk pressure {rule.disk_pct}%"
+                if rule.age_days
+                else f"Disk pressure {rule.disk_pct}%"
             )
-            candidates.append({
-                "path": str(colmap_dir.resolve()),
-                "bytes": size,
-                "reason": reason,
-                "action": "delete",
-                "directory": True,
-            })
+            candidates.append(
+                {
+                    "path": str(colmap_dir.resolve()),
+                    "bytes": size,
+                    "reason": reason,
+                    "action": "delete",
+                    "directory": True,
+                }
+            )
 
     elif rule.target == "reconstruction_artifacts":
-        recs = db.query(Reconstruction).filter(
-            Reconstruction.status == "complete"
-        ).all()
+        recs = db.query(Reconstruction).filter(Reconstruction.status == "complete").all()
 
         for rec in recs:
             if not rec.completed_at:
@@ -165,9 +182,15 @@ def _discover_candidates(
                 continue
 
             artifact_paths = [
-                rec.splat_path, rec.splat_preview_path, rec.splat_medium_path,
-                rec.pointcloud_path, rec.mesh_glb_path, rec.mesh_obj_path,
-                rec.mesh_mtl_path, rec.flythrough_path, rec.coverage_gaps_path,
+                rec.splat_path,
+                rec.splat_preview_path,
+                rec.splat_medium_path,
+                rec.pointcloud_path,
+                rec.mesh_glb_path,
+                rec.mesh_obj_path,
+                rec.mesh_mtl_path,
+                rec.flythrough_path,
+                rec.coverage_gaps_path,
             ]
             for artifact_raw in artifact_paths:
                 if not artifact_raw:
@@ -183,16 +206,17 @@ def _discover_candidates(
                     continue
                 size = p.stat().st_size if p.is_file() else _size_of(p)
                 reason = (
-                    f"Reconstruction #{rec.id} completed {age}d ago"
-                    f" > {rule.age_days}d threshold"
+                    f"Reconstruction #{rec.id} completed {age}d ago > {rule.age_days}d threshold"
                 )
-                candidates.append({
-                    "path": str(resolved),
-                    "bytes": size,
-                    "reason": reason,
-                    "action": "archive" if rule.age_days else "delete",
-                    "directory": p.is_dir(),
-                })
+                candidates.append(
+                    {
+                        "path": str(resolved),
+                        "bytes": size,
+                        "reason": reason,
+                        "action": "archive" if rule.age_days else "delete",
+                        "directory": p.is_dir(),
+                    }
+                )
 
     return candidates
 
@@ -229,9 +253,6 @@ def apply_policy(
 
         cfg = get_config()
 
-    if db is None and execute:
-        raise ValueError("db session required for execute mode")
-
     # Parse rules
     parsed_rules: list[PolicyRule] = []
     for r in rules:
@@ -242,23 +263,28 @@ def apply_policy(
         age_days = r.get("age_days")
         disk_pct = r.get("disk_pct")
         try:
-            parsed_rules.append(PolicyRule(
-                target=target,
-                age_days=int(age_days) if age_days is not None else None,
-                disk_pct=float(disk_pct) if disk_pct is not None else None,
-            ))
+            parsed_rules.append(
+                PolicyRule(
+                    target=target,
+                    age_days=int(age_days) if age_days is not None else None,
+                    disk_pct=float(disk_pct) if disk_pct is not None else None,
+                )
+            )
         except (ValueError, TypeError) as exc:
             return {"error": f"Invalid rule: {exc}"}
 
     all_candidates: list[dict] = []
-    for rule in parsed_rules:
-        if rule.disk_pct is not None:
-            usage = _disk_usage_pct(cfg.data_dir)
-            if usage < rule.disk_pct:
-                continue
-            rule.age_days = 0
+    if db is None:
+        if execute:
+            return {"error": "db session required for execute mode"}
+    else:
+        for rule in parsed_rules:
+            if rule.disk_pct is not None:
+                usage = _disk_usage_pct(cfg.data_dir)
+                if usage < rule.disk_pct:
+                    continue
+                rule.age_days = 0
 
-        if db is not None:
             all_candidates.extend(_discover_candidates(rule, cfg, db))
 
     total_bytes = sum(c["bytes"] for c in all_candidates)
@@ -280,6 +306,7 @@ def apply_policy(
         if db is None:
             return {"error": "db session required for execute mode"}
         removed: list[str] = []
+        archived: list[dict] = []
         failed: list[dict] = []
         roots = _configured_roots(cfg)
 
@@ -297,16 +324,28 @@ def apply_policy(
                 failed.append({"path": str(resolved), "reason": "outside storage roots"})
                 continue
             try:
-                if p.is_dir():
-                    shutil.rmtree(p)
+                if cand.get("action") == "archive":
+                    destination = _archive_destination(p, cfg)
+                    destination.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.move(str(p), str(destination))
+                    archived.append(
+                        {
+                            "path": str(resolved),
+                            "archive_path": str(destination),
+                        }
+                    )
                 else:
-                    p.unlink()
-                removed.append(str(resolved))
-            except OSError as exc:
+                    if p.is_dir():
+                        shutil.rmtree(p)
+                    else:
+                        p.unlink()
+                    removed.append(str(resolved))
+            except (OSError, ValueError) as exc:
                 failed.append({"path": str(resolved), "reason": str(exc)})
 
-        result["executed"] = {"removed": removed, "failed": failed}
+        result["executed"] = {"removed": removed, "archived": archived, "failed": failed}
         result["summary"]["removed_items"] = len(removed)
+        result["summary"]["archived_items"] = len(archived)
         result["summary"]["failed_items"] = len(failed)
 
     return result
