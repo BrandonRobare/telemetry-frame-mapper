@@ -6,9 +6,10 @@ import App from './App.tsx'
 import { ErrorBoundary } from './ErrorBoundary.tsx'
 import { useMapStore } from './shared/stores/mapStore'
 
-// dev helper — remove before production
-;(window as unknown as Record<string, unknown>).setSession =
-  (id: number) => useMapStore.getState().setSession(id)
+if (import.meta.env.DEV) {
+  ;(window as unknown as Record<string, unknown>).setSession =
+    (id: number) => useMapStore.getState().setSession(id)
+}
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, refetchOnWindowFocus: false } },
