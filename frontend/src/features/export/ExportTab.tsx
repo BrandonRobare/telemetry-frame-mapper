@@ -6,6 +6,8 @@ import { useToast } from '../../shared/hooks/useToast'
 import { Button } from '../../shared/components/Button'
 import TabHeader from '../../shared/components/TabHeader'
 import EmptyState from '../../shared/components/EmptyState'
+import { useCoverageResult } from '../map/hooks/useCoverageResult'
+import { formatCoveragePct } from './coverageSummary'
 import type { Session, Image, Job, MeshStatus } from '../../types/api'
 
 const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
@@ -179,6 +181,7 @@ export default function ExportTab() {
   const { addToast } = useToast()
 
   const { data: session, isLoading: sessionLoading } = useSession(selectedSessionId)
+  const { data: coverage } = useCoverageResult(selectedSessionId)
   const { data: completedReconstructions, isLoading: reconstructionsLoading } =
     useCompletedReconstructions(selectedSessionId)
 
@@ -325,7 +328,9 @@ export default function ExportTab() {
               <dd style={{ color: 'var(--text)', margin: 0 }}>{formatDate(session.imported_at)}</dd>
 
               <dt style={{ color: 'var(--text-muted)' }}>Coverage</dt>
-              <dd style={{ color: 'var(--text-muted)', margin: 0 }}>N/A</dd>
+              <dd style={{ color: coverage?.coverage_pct != null ? 'var(--text)' : 'var(--text-muted)', margin: 0 }}>
+                {formatCoveragePct(coverage?.coverage_pct)}
+              </dd>
             </dl>
           )}
         </section>
