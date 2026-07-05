@@ -12,7 +12,12 @@ import { Badge } from '../../shared/components/Badge'
 import TabHeader from '../../shared/components/TabHeader'
 import EmptyState from '../../shared/components/EmptyState'
 import { formatEta } from '../../shared/time'
-import type { Job, PreflightQualityReport } from '../../types/api'
+import type {
+  Job,
+  PreflightQualityReport,
+  GcpAccuracyReport,
+  QualityScorecard,
+} from '../../types/api'
 import { API_BASE_URL } from '../../shared/api/client'
 
 interface TargetAreaOption { id: number; name: string }
@@ -54,6 +59,154 @@ function usePreflightReport(sessionId: number | null) {
     queryFn: () => get<PreflightQualityReport>(`/reconstruction/preflight/${sessionId}`),
     enabled: sessionId !== null,
   })
+}
+
+// ---- quality scorecard component ----
+
+function QualityReportInline({ jobId }: { jobId: number }) {
+  const [expanded, setExpanded] = useState(false)
+  const { data, isLoading, isError } = useQuery<QualityScorecard>({
+    queryKey: ['quality-scorecard', jobId],
+    queryFn: () => get<QualityScorecard>(`/reconstruction/${jobId}/quality-scorecard`),
+    enabled: expanded,
+  })
+
+  return (
+    <div style={{ marginTop: 4 }}>
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="text-xs"
+        style={{
+          background: 'var(--surface-2)', border: '1px solid var(--border)',
+          borderRadius: 'var(--radius-sm)', padding: '3px 10px',
+          color: 'var(--accent-strong)', cursor: 'pointer',
+        }}
+      >
+        {expanded ? '▲ Hide report' : '▼ Quality report'}
+      </button>
+      {expanded && (
+        <div
+          className="flex flex-col gap-2 text-xs"
+          style={{
+            marginTop: 8, padding: 10,
+            background: 'var(--surface-2)',
+            border: '1px solid var(--border)',
+            borderRadius: 'var(--radius-sm)',
+            color: 'var(--text-muted)',
+          }}
+        >
+          {isLoading && <span>Loading…</span>}
+          {isError && <span style={{ color: 'var(--danger)' }}>Failed to load report</span>}
+          {data && (
+            <>
+              <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+                <span>Frames: {data.frame_counts.frames_registered}/{data.frame_counts.frames_used} ({data.frame_counts.registration_completeness_pct}% registered)</span>
+                <span>Gaussians: {data.density.gaussian_count?.toLocaleString() ?? 'n/a'}</span>
+                {data.reprojection_error.mean_px != null && (
+                  <span>Reprojection: {data.reprojection_error.mean_px.toFixed(3)} px (σ={data.reprojection_error.std_px?.toFixed(3) ?? 'n/a'})</span>
+                )}
+                <span>PSNR: {data.quality.psnr_final?.toFixed(2) ?? 'n/a'} dB</span>
+                <span>SSIM: {data.quality.ssim_final?.toFixed(4) ?? 'n/a'}</span>
+                {data.quality.psnr_trend && (
+                  <span>PSNR trend: {data.quality.psnr_trend.start.toFixed(1)} → {data.quality.psnr_trend.end.toFixed(1)} (+{data.quality.psnr_trend.delta.toFixed(1)})</span>
+                )}
+              </div>
+              {data.coverage_gaps && (
+                <div style={{ borderTop: '1px solid var(--border)', paddingTop: 6 }}>
+                  <span>Coverage gaps: {data.coverage_gaps.total_gaps} cells</span>
+                  {Object.keys(data.coverage_gaps.by_level).length > 0 && (
+                    <span className="ml-2">
+                      ({Object.entries(data.coverage_gaps.by_level).map(([k, v]) => `${k}: ${v}`).join(', ')})
+                    </span>
+                  )}
+                </div>
+              )}
+              <a
+                href={`${API_BASE_URL}/reconstruction/${jobId}/quality-scorecard`}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ color: 'var(--accent-strong)', textDecoration: 'underline', alignSelf: 'flex-start' }}
+              >
+                Export JSON
+              </a>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+
+function GcpAccuracyInline({ sessionId }: { sessionId: number }) {
+  const [expanded, setExpanded] = useState(false)
+  const [pointsText, setPointsText] = useState('[\n  {"label":"GCP-1","x":0,"y":0,"z":0,"reconstructed_x":0,"reconstructed_y":0,"reconstructed_z":0}\n]')
+  const [report, setReport] = useState<GcpAccuracyReport | null>(null)
+  const { addToast } = useToast()
+  const mutation = useMutation({
+    mutationFn: () => {
+      const points = JSON.parse(pointsText)
+      return post<GcpAccuracyReport>(`/georeferencing/sessions/${sessionId}/accuracy-report`, { points })
+    },
+    onSuccess: (data) => {
+      setReport(data)
+      addToast('GCP accuracy report ready', 'success')
+    },
+    onError: (err: Error) => addToast(err.message || 'Failed to compute GCP accuracy', 'error'),
+  })
+
+  const downloadUrl = report
+    ? `data:application/json;charset=utf-8,${encodeURIComponent(JSON.stringify(report, null, 2))}`
+    : undefined
+
+  return (
+    <div style={{ marginTop: 6 }}>
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="text-xs"
+        style={{
+          background: 'var(--surface-2)', border: '1px solid var(--border)',
+          borderRadius: 'var(--radius-sm)', padding: '3px 10px',
+          color: 'var(--accent-strong)', cursor: 'pointer',
+        }}
+      >
+        {expanded ? '▲ Hide GCP accuracy' : '▼ GCP accuracy'}
+      </button>
+      {expanded && (
+        <div className="flex flex-col gap-2 text-xs" style={{ marginTop: 8 }}>
+          <p style={{ margin: 0, color: 'var(--text-muted)' }}>
+            Paste surveyed and matching reconstructed GCP coordinates as JSON. Residuals are paired x/y/z differences.
+          </p>
+          <textarea
+            value={pointsText}
+            onChange={(e) => setPointsText(e.target.value)}
+            rows={4}
+            style={{
+              width: '100%', background: 'var(--surface-2)', border: '1px solid var(--border)',
+              borderRadius: 'var(--radius-sm)', color: 'var(--text)', fontFamily: 'monospace', fontSize: 11,
+            }}
+          />
+          <Button size="sm" variant="ghost" disabled={mutation.isPending} onClick={() => mutation.mutate()}>
+            {mutation.isPending ? 'Computing…' : 'Compute GCP RMSE'}
+          </Button>
+          {report && (
+            <div style={{ color: 'var(--text-muted)' }}>
+              RMSE: x={report.rmse.x_m?.toFixed(3) ?? 'n/a'} m · y={report.rmse.y_m?.toFixed(3) ?? 'n/a'} m · z={report.rmse.z_m?.toFixed(3) ?? 'n/a'} m · 3D={report.rmse['3d_m']?.toFixed(3) ?? 'n/a'} m
+              {downloadUrl && (
+                <a
+                  href={downloadUrl}
+                  download={`gcp_accuracy_${sessionId}.json`}
+                  style={{ marginLeft: 10, color: 'var(--accent-strong)', textDecoration: 'underline' }}
+                >
+                  Download report
+                </a>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
 }
 
 // ---- helpers ----
@@ -371,44 +524,51 @@ export default function ReconstructTab() {
             </h2>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 0, borderTop: '1px solid var(--border)' }}>
               {sessionJobs.map((job, idx) => (
-                <div
-                  key={job.id}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: 10,
-                    padding: '10px 2px',
-                    borderBottom: idx < sessionJobs.length - 1 ? '1px solid var(--border)' : 'none',
-                  }}
-                >
-                  <span className="text-xs" style={{ color: 'var(--text-muted)', minWidth: 28 }}>
-                    #{job.id}
-                  </span>
-                  <StatusBadge status={job.status} />
-                  <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
-                    {job.preset} · {job.frames_used} frames
-                  </span>
-                  {job.started_at && (
-                    <span className="text-xs" style={{ color: 'var(--text-muted)', marginLeft: 'auto' }}>
-                      {formatDuration(job.started_at, job.completed_at)}
+                <div key={job.id}>
+                  <div
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 10,
+                      padding: '10px 2px',
+                      borderBottom: idx < sessionJobs.length - 1 ? '1px solid var(--border)' : 'none',
+                    }}
+                  >
+                    <span className="text-xs" style={{ color: 'var(--text-muted)', minWidth: 28 }}>
+                      #{job.id}
                     </span>
-                  )}
+                    <StatusBadge status={job.status} />
+                    <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                      {job.preset} · {job.frames_used} frames
+                    </span>
+                    {job.started_at && (
+                      <span className="text-xs" style={{ color: 'var(--text-muted)', marginLeft: 'auto' }}>
+                        {formatDuration(job.started_at, job.completed_at)}
+                      </span>
+                    )}
+                    {job.status === 'complete' && (
+                      <a
+                        href={`${API_BASE_URL}/reconstruction/${job.id}/splat?lod=full`}
+                        download={`splat_${job.id}.ply`}
+                        style={{
+                          padding: '3px 10px', borderRadius: 'var(--radius-sm)', fontSize: 12,
+                          background: 'var(--accent-soft)',
+                          border: '1px solid var(--accent-soft)',
+                          color: 'var(--accent-strong)', textDecoration: 'none', whiteSpace: 'nowrap',
+                        }}
+                      >
+                        ↓ Download .ply
+                      </a>
+                    )}
+                    {job.status === 'failed' && job.error_msg && (
+                      <span className="text-xs" style={{ color: 'var(--danger, #f85149)', marginLeft: 'auto' }}>
+                        {job.error_msg}
+                      </span>
+                    )}
+                  </div>
                   {job.status === 'complete' && (
-                    <a
-                      href={`${API_BASE_URL}/reconstruction/${job.id}/splat?lod=full`}
-                      download={`splat_${job.id}.ply`}
-                      style={{
-                        padding: '3px 10px', borderRadius: 'var(--radius-sm)', fontSize: 12,
-                        background: 'var(--accent-soft)',
-                        border: '1px solid var(--accent-soft)',
-                        color: 'var(--accent-strong)', textDecoration: 'none', whiteSpace: 'nowrap',
-                      }}
-                    >
-                      ↓ Download .ply
-                    </a>
-                  )}
-                  {job.status === 'failed' && job.error_msg && (
-                    <span className="text-xs" style={{ color: 'var(--danger, #f85149)', marginLeft: 'auto' }}>
-                      {job.error_msg}
-                    </span>
+                    <div style={{ padding: '0 2px 8px' }}>
+                      <QualityReportInline jobId={job.id} />
+                      <GcpAccuracyInline sessionId={job.session_id} />
+                    </div>
                   )}
                 </div>
               ))}
