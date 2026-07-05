@@ -14,9 +14,14 @@ from sqlalchemy.orm import Session as DBSession
 
 from ..core.config import get_config, get_render_config
 from ..db.database import get_db
-from ..db.models import Reconstruction, SessionFrameSelection, TargetArea
+from ..db.models import Reconstruction, ReconstructionFrame, SessionFrameSelection, TargetArea
 from ..services.artifact_cleanup import cleanup_reconstruction_artifacts
 from ..services.preflight_quality import build_preflight_quality_report
+from ..services.quality_report import (
+    build_quality_scorecard,
+    parse_surveyed_points_3d,
+    validate_held_out_checkpoints,
+)
 from ..services.reconstruction import (
     _export_point_cloud,
     _load_geo_transform_for_reconstruction,
@@ -294,6 +299,28 @@ class RenderVideoIn(BaseModel):
     def validate_keyframes(cls, v: list[FlythroughKeyframe]) -> list[FlythroughKeyframe]:
         if len(v) < 2:
             raise ValueError("At least two keyframes are required")
+        return v
+
+
+# ---- Quality report request / response models ----
+
+
+class SurveyedPointIn(BaseModel):
+    """A surveyed checkpoint in local reconstruction coordinates."""
+    label: str | None = None
+    x: float
+    y: float
+    z: float
+
+
+class CheckpointValidationIn(BaseModel):
+    points: list[SurveyedPointIn]
+
+    @field_validator("points")
+    @classmethod
+    def at_least_one(cls, v: list[SurveyedPointIn]) -> list[SurveyedPointIn]:
+        if len(v) == 0:
+            raise ValueError("At least one checkpoint is required")
         return v
 
 
@@ -759,3 +786,69 @@ def get_coverage_gaps(reconstruction_id: int, db: DBSession = Depends(get_db)):
         db.rollback()
         logger.exception("Failed to persist coverage gaps cache path")
     return cells
+
+
+# ---- Quality report endpoints ----
+
+
+def _parse_training_metrics(rec: Reconstruction) -> list[dict] | None:
+    if rec.training_metrics:
+        try:
+            return json.loads(rec.training_metrics)
+        except (json.JSONDecodeError, TypeError):
+            return None
+    return None
+
+
+def _load_coverage_gaps_from_disk(rec: Reconstruction) -> list[dict] | None:
+    if rec.coverage_gaps_path:
+        gaps_path = Path(rec.coverage_gaps_path)
+        if gaps_path.exists():
+            try:
+                return json.loads(gaps_path.read_text())
+            except (json.JSONDecodeError, OSError):
+                return None
+    return None
+
+
+@router.get("/{reconstruction_id}/quality-scorecard")
+def get_quality_scorecard(reconstruction_id: int, db: DBSession = Depends(get_db)):
+    rec = db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Reconstruction not found")
+    if rec.status != "complete":
+        raise HTTPException(status_code=202, detail="Reconstruction still in progress")
+
+    frames = db.query(ReconstructionFrame).filter(
+        ReconstructionFrame.reconstruction_id == reconstruction_id
+    ).all()
+    training_metrics = _parse_training_metrics(rec)
+    coverage_gaps = _load_coverage_gaps_from_disk(rec)
+
+    return build_quality_scorecard(rec, frames, training_metrics, coverage_gaps)
+
+
+@router.post("/{reconstruction_id}/validate-checkpoints")
+def validate_checkpoints(
+    reconstruction_id: int,
+    body: CheckpointValidationIn,
+    db: DBSession = Depends(get_db),
+):
+    rec = db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Reconstruction not found")
+    if rec.status != "complete":
+        raise HTTPException(status_code=202, detail="Reconstruction still in progress")
+
+    survey_points = parse_surveyed_points_3d(
+        [p.model_dump() for p in body.points]
+    )
+    result = validate_held_out_checkpoints(rec, survey_points)
+
+    if not result.get("available"):
+        raise HTTPException(
+            status_code=422,
+            detail=result.get("reason", "No surface source available for validation"),
+        )
+
+    return result
