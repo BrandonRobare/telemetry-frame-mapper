@@ -296,6 +296,16 @@ def test_reset_restores_defaults(client, tmp_config):
     assert data["mission"]["altitude_ft"] == 200.0
 
 
+def test_reset_uses_explicit_defaults_without_creating_sentinel_file(client, tmp_config):
+    sentinel = tmp_config.with_name(".settings-reset-empty.yaml")
+
+    resp = client.post("/settings/reset")
+
+    assert resp.status_code == 200
+    assert not sentinel.exists()
+    assert resp.json()["reconstruction"]["default_preset"] == "quick"
+
+
 def test_reset_returns_full_response_shape(client, tmp_config):
     resp = client.post("/settings/reset")
     assert resp.status_code == 200

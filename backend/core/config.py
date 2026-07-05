@@ -107,14 +107,12 @@ def reload_config() -> AppConfig:
     return get_config()
 
 
-def get_reconstruction_config(path: str = "config.yaml") -> dict:
-    """Return the reconstruction section from config.yaml with defaults applied."""
-    try:
-        with open(path) as f:
-            data = yaml.safe_load(f) or {}
-    except FileNotFoundError:
-        data = {}
+def default_reconstruction_config() -> dict:
+    """Return reconstruction defaults without reading config.yaml."""
+    return _reconstruction_config_from_data({})
 
+
+def _reconstruction_config_from_data(data: dict) -> dict:
     defaults: dict = {
         "default_preset": "quick",
         "colmap_threads": 8,
@@ -158,14 +156,22 @@ def get_reconstruction_config(path: str = "config.yaml") -> dict:
     return merged
 
 
-def get_ingest_config(path: str = "config.yaml") -> dict:
-    """Return the ingest section from config.yaml with defaults applied."""
+def get_reconstruction_config(path: str = "config.yaml") -> dict:
+    """Return the reconstruction section from config.yaml with defaults applied."""
     try:
         with open(path) as f:
             data = yaml.safe_load(f) or {}
     except FileNotFoundError:
         data = {}
+    return _reconstruction_config_from_data(data)
 
+
+def default_ingest_config() -> dict:
+    """Return ingest defaults without reading config.yaml."""
+    return _ingest_config_from_data({})
+
+
+def _ingest_config_from_data(data: dict) -> dict:
     defaults: dict = {
         "thumbnail_size_px": 200,
         "thumbnail_jpeg_quality": 75,
@@ -179,14 +185,22 @@ def get_ingest_config(path: str = "config.yaml") -> dict:
     return {**defaults, **ingest}
 
 
-def get_render_config(path: str = "config.yaml") -> dict:
-    """Return the render section from config.yaml with defaults applied."""
+def get_ingest_config(path: str = "config.yaml") -> dict:
+    """Return the ingest section from config.yaml with defaults applied."""
     try:
         with open(path) as f:
             data = yaml.safe_load(f) or {}
     except FileNotFoundError:
         data = {}
+    return _ingest_config_from_data(data)
 
+
+def default_render_config() -> dict:
+    """Return render defaults without reading config.yaml."""
+    return _render_config_from_data({})
+
+
+def _render_config_from_data(data: dict) -> dict:
     defaults: dict = {
         "flythrough_fps": 30,
         "flythrough_width": 1920,
@@ -198,6 +212,16 @@ def get_render_config(path: str = "config.yaml") -> dict:
     }
     render = data.get("render", {})
     return {**defaults, **render}
+
+
+def get_render_config(path: str = "config.yaml") -> dict:
+    """Return the render section from config.yaml with defaults applied."""
+    try:
+        with open(path) as f:
+            data = yaml.safe_load(f) or {}
+    except FileNotFoundError:
+        data = {}
+    return _render_config_from_data(data)
 
 
 def get_upload_limits_config(path: str = "config.yaml") -> dict:

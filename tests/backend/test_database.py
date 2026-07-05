@@ -6,6 +6,14 @@ import sqlalchemy as sa
 from backend.db import database as database_module
 
 
+def test_default_database_url_is_repo_rooted(monkeypatch):
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+
+    expected = database_module.REPO_ROOT / "data" / "drone_mapping.db"
+
+    assert database_module._default_database_url() == f"sqlite:///{expected.as_posix()}"
+
+
 @pytest.fixture
 def isolated_engine(monkeypatch, tmp_path):
     """Bind backend.db.database's module-level `engine`/`DATABASE_URL` to an
