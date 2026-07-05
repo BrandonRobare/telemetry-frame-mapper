@@ -324,3 +324,84 @@ export interface ComparisonDiff {
   new: ComparisonCell[]
   removed: ComparisonCell[]
 }
+
+// ---- Quality reports (issues #287, #292, #294) ----
+
+export interface QualityScorecard {
+  reconstruction_id: number
+  frame_counts: {
+    frames_used: number
+    frames_registered: number
+    registration_completeness_pct: number
+  }
+  density: {
+    gaussian_count: number | null
+  }
+  reprojection_error: {
+    mean_px: number | null
+    std_px: number | null
+    min_px: number | null
+    max_px: number | null
+    frame_count_with_data: number
+  }
+  quality: {
+    psnr_final: number | null
+    ssim_final: number | null
+    training_metric_points: number
+    psnr_trend?: {
+      start: number
+      end: number
+      delta: number
+    }
+    ssim_trend?: {
+      start: number
+      end: number
+      delta: number
+    }
+  }
+  coverage_gaps: {
+    total_gaps: number
+    by_level: Record<string, number>
+    voxel_size_m?: number
+  } | null
+}
+
+export interface GcpResidual {
+  label: string
+  dx_m: number
+  dy_m: number
+  dz_m: number
+  distance_3d_m: number
+}
+
+export interface GcpAccuracyReport {
+  geo_transform: GeoTransform
+  point_count: number
+  rmse: {
+    x_m: number | null
+    y_m: number | null
+    z_m: number | null
+    "3d_m": number | null
+  }
+  residuals: GcpResidual[]
+}
+
+export interface CheckpointResult {
+  label: string
+  distance_m: number
+  nearest_surface_point: string
+}
+
+export interface CheckpointValidationReport {
+  available: boolean
+  source?: string
+  point_count?: number
+  surface_point_count?: number
+  summary?: {
+    min_m: number
+    max_m: number
+    mean_m: number
+    rmse_m: number
+  }
+  checkpoints?: CheckpointResult[]
+}
