@@ -1214,3 +1214,88 @@ def test_cleanup_succeeds(client, tmp_path):
     assert cleaned_path.exists()
     cleaned = read_3dgs_ply(cleaned_path)
     assert cleaned.means.shape[0] == data["n_after"]
+
+
+def test_cleanup_with_target_area_crops_splat(client, tmp_path):
+    import numpy as np
+
+    from backend.db.models import TargetArea
+    from backend.services.ply_io import GaussianCloud, read_3dgs_ply, write_3dgs_ply
+
+    db = _get_db(client)
+    s = _make_session_with_images(db)
+    target = TargetArea(
+        name="crop",
+        geom_geojson='{"type":"Polygon","coordinates":[[[0,0],[1,0],[1,1],[0,1],[0,0]]]}',
+    )
+    db.add(target)
+    db.commit()
+    db.refresh(target)
+
+    exports_dir = tmp_path / "exports"
+    rec_dir = exports_dir / "101"
+    rec_dir.mkdir(parents=True)
+    splat_file = rec_dir / "splat.ply"
+    cloud = GaussianCloud(
+        means=np.array([[0.5, 0.5, 0.0], [2.0, 2.0, 0.0], [-1.0, 0.5, 0.0]], dtype=np.float32),
+        sh0=np.zeros((3, 3), dtype=np.float32),
+        shN=np.zeros((3, 0, 3), dtype=np.float32),
+        opacities=np.ones(3, dtype=np.float32),
+        scales=np.zeros((3, 3), dtype=np.float32),
+        quats=np.zeros((3, 4), dtype=np.float32),
+    )
+    write_3dgs_ply(splat_file, cloud)
+
+    rec = Reconstruction(
+        id=101, session_id=s.id, preset="quick", status="complete",
+        progress_pct=100.0, frames_used=3, splat_path=str(splat_file),
+    )
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+
+    with patch("backend.routers.reconstruction.get_config") as mock_cfg:
+        mock_cfg.return_value.exports_dir = str(exports_dir)
+        resp = client.post(
+            f"/reconstruction/{rec.id}/cleanup",
+            json={"target_area_id": target.id, "opacity_keep_ratio": 1.0, "outlier_k": 0},
+        )
+
+    assert resp.status_code == 201
+    data = resp.json()
+    assert data["stats"]["target_area_clipped"] == 2
+    assert data["n_after"] == 1
+    cleaned = read_3dgs_ply(exports_dir / "101" / "splat_cleaned.ply")
+    assert cleaned.means.shape[0] == 1
+    assert cleaned.means[0].tolist() == [0.5, 0.5, 0.0]
+
+
+def test_cleanup_target_area_not_found(client, tmp_path):
+    import numpy as np
+
+    from backend.services.ply_io import GaussianCloud, write_3dgs_ply
+
+    db = _get_db(client)
+    s = _make_session_with_images(db)
+    splat_file = tmp_path / "splat.ply"
+    cloud = GaussianCloud(
+        means=np.zeros((1, 3), dtype=np.float32),
+        sh0=np.zeros((1, 3), dtype=np.float32),
+        shN=np.zeros((1, 0, 3), dtype=np.float32),
+        opacities=np.ones(1, dtype=np.float32),
+        scales=np.zeros((1, 3), dtype=np.float32),
+        quats=np.zeros((1, 4), dtype=np.float32),
+    )
+    write_3dgs_ply(splat_file, cloud)
+    rec = Reconstruction(
+        session_id=s.id, preset="quick", status="complete",
+        progress_pct=100.0, frames_used=3, splat_path=str(splat_file),
+    )
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+
+    resp = client.post(f"/reconstruction/{rec.id}/cleanup", json={"target_area_id": 999999})
+
+    assert resp.status_code == 404
+    assert "target area" in resp.json()["detail"].lower()

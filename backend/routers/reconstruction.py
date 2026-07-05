@@ -743,6 +743,7 @@ class CleanupIn(BaseModel):
     scale_std_threshold: float | None = Field(default=None, gt=0.0)
     outlier_k: int | None = Field(default=None, ge=0)
     outlier_std_threshold: float | None = Field(default=None, gt=0.0)
+    target_area_id: int | None = None
 
 
 @router.post("/{reconstruction_id}/cleanup", response_model=CleanupOut, status_code=201)
@@ -768,6 +769,14 @@ def cleanup_splat(
 
     dst = _reconstruction_artifact_path(rec.id, "splat_cleaned.ply")
     options = body.model_dump(exclude_none=True) if body else {}
+    target_area_id = options.pop("target_area_id", None)
+    if target_area_id is not None:
+        ta = db.query(TargetArea).filter(TargetArea.id == target_area_id).first()
+        if not ta:
+            raise HTTPException(status_code=404, detail="Target area not found")
+        if not ta.geom_geojson:
+            raise HTTPException(status_code=422, detail="Target area has no geometry defined")
+        options["target_area_geojson"] = ta.geom_geojson
     try:
         stats, n_before, n_after = cleanup_ply_file(src, dst, **options)
     except Exception as exc:

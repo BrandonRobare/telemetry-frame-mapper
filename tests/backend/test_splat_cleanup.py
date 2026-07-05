@@ -231,3 +231,27 @@ def test_all_filter_phases_contribute(tmp_path):
     assert stats["opacity_keep"] < n
     assert stats["scale_clipped"] > 0
     assert stats["outlier_clipped"] > 0
+
+def test_target_area_crop_removes_points_outside_polygon():
+    cloud = GaussianCloud(
+        means=np.array([[0.5, 0.5, 0.0], [1.5, 0.5, 0.0], [0.5, 1.5, 0.0]], dtype=np.float32),
+        sh0=np.zeros((3, 3), dtype=np.float32),
+        shN=np.zeros((3, 0, 3), dtype=np.float32),
+        opacities=np.ones(3, dtype=np.float32),
+        scales=np.zeros((3, 3), dtype=np.float32),
+        quats=np.zeros((3, 4), dtype=np.float32),
+    )
+    polygon = '{"type":"Polygon","coordinates":[[[0,0],[1,0],[1,1],[0,1],[0,0]]]}'
+
+    cleaned, stats = cleanup_cloud(
+        cloud,
+        opacity_keep_ratio=1.0,
+        outlier_k=0,
+        scale_std_threshold=1e9,
+        target_area_geojson=polygon,
+    )
+
+    assert cleaned.means.shape[0] == 1
+    assert cleaned.means[0].tolist() == [0.5, 0.5, 0.0]
+    assert stats["target_area_clipped"] == 2
+    assert stats["n_after_outlier"] == 1
