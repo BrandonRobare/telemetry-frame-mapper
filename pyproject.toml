@@ -77,4 +77,4 @@ ignore = ["B008"]
 [tool.pytest.ini_options]
 addopts = "-s"
 testpaths = ["tests"]
-pythonpath = ["."]
+pythonpath = [".", "src"]

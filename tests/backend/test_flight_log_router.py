@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from datetime import datetime
 
+UTC_EPOCH_PLUS_HALF = datetime(1970, 1, 1, 0, 0, 0, 500000)
+UTC_EPOCH_PLUS_ONE = datetime(1970, 1, 1, 0, 0, 1)
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -109,7 +112,7 @@ def test_match_preview_uses_offset_and_interpolation(client):
         session_id=s.id,
         filename="frame.jpg",
         filepath="/tmp/frame.jpg",
-        timestamp=datetime.fromtimestamp(0.5),
+        timestamp=UTC_EPOCH_PLUS_HALF,
     )
     db.add(img)
     db.commit()
@@ -173,7 +176,7 @@ def test_apply_sync_preserves_stale_footprint(client):
         session_id=s.id,
         filename="frame.jpg",
         filepath="/tmp/frame.jpg",
-        timestamp=datetime.fromtimestamp(1),
+        timestamp=UTC_EPOCH_PLUS_ONE,
         latitude=10.0,
         longitude=20.0,
         altitude_m=50.0,
@@ -222,7 +225,7 @@ def test_apply_sync_does_not_create_missing_footprint(client):
         session_id=s.id,
         filename="frame.jpg",
         filepath="/tmp/frame.jpg",
-        timestamp=datetime.fromtimestamp(1),
+        timestamp=UTC_EPOCH_PLUS_ONE,
         latitude=None,
         longitude=None,
         altitude_m=None,
