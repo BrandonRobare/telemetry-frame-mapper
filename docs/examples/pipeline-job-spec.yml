@@ -1,0 +1,42 @@
+# Pipeline job spec example — full end-to-end batch plan for headless processing.
+#
+# Usage:
+#   dvg-pipeline docs/examples/pipeline-job-spec.yml           # run
+#   dvg-pipeline --dry-run docs/examples/pipeline-job-spec.yml  # validate + print plan
+
+name: "example-mission"
+output_root: "./pipeline_output/example-mission"
+log_dir: "./pipeline_output/example-mission/logs"
+
+steps:
+  - kind: geotag
+    video: "./data/DJI_0081.MP4"
+    frames: "./data/frames"
+    takeoff_altitude: 250.0
+    output: "./pipeline_output/example-mission/geotagged"
+    ffmpeg: "ffmpeg"
+    exiftool: "exiftool"
+    # in_place: false  # default: false (creates copies)
+
+  - kind: ingest
+    source_dir: "./pipeline_output/example-mission/geotagged"
+
+  - kind: coverage
+    target_geojson: |
+      {
+        "type": "Polygon",
+        "coordinates": [[
+          [-81.5, 41.1], [-81.4, 41.1], [-81.4, 41.2], [-81.5, 41.2], [-81.5, 41.1]
+        ]]
+      }
+
+  - kind: reconstruction
+    preset: sparse
+    # session_id: 1  # optional: reference an ingested session
+
+  - kind: export
+    format: webodm_package
+    # session_id: 1
+    options:
+      mode: exif
+      include_images: true
