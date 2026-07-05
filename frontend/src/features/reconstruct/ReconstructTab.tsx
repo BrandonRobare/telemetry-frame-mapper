@@ -15,6 +15,7 @@ import { formatEta } from '../../shared/time'
 import type {
   Job,
   PreflightQualityReport,
+  GcpAccuracyReport,
   QualityScorecard,
 } from '../../types/api'
 import { API_BASE_URL } from '../../shared/api/client'
@@ -129,6 +130,78 @@ function QualityReportInline({ jobId }: { jobId: number }) {
                 Export JSON
               </a>
             </>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+
+function GcpAccuracyInline({ sessionId }: { sessionId: number }) {
+  const [expanded, setExpanded] = useState(false)
+  const [pointsText, setPointsText] = useState('[\n  {"label":"GCP-1","x":0,"y":0,"z":0,"reconstructed_x":0,"reconstructed_y":0,"reconstructed_z":0}\n]')
+  const [report, setReport] = useState<GcpAccuracyReport | null>(null)
+  const { addToast } = useToast()
+  const mutation = useMutation({
+    mutationFn: () => {
+      const points = JSON.parse(pointsText)
+      return post<GcpAccuracyReport>(`/georeferencing/sessions/${sessionId}/accuracy-report`, { points })
+    },
+    onSuccess: (data) => {
+      setReport(data)
+      addToast('GCP accuracy report ready', 'success')
+    },
+    onError: (err: Error) => addToast(err.message || 'Failed to compute GCP accuracy', 'error'),
+  })
+
+  const downloadUrl = report
+    ? `data:application/json;charset=utf-8,${encodeURIComponent(JSON.stringify(report, null, 2))}`
+    : undefined
+
+  return (
+    <div style={{ marginTop: 6 }}>
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="text-xs"
+        style={{
+          background: 'var(--surface-2)', border: '1px solid var(--border)',
+          borderRadius: 'var(--radius-sm)', padding: '3px 10px',
+          color: 'var(--accent-strong)', cursor: 'pointer',
+        }}
+      >
+        {expanded ? '▲ Hide GCP accuracy' : '▼ GCP accuracy'}
+      </button>
+      {expanded && (
+        <div className="flex flex-col gap-2 text-xs" style={{ marginTop: 8 }}>
+          <p style={{ margin: 0, color: 'var(--text-muted)' }}>
+            Paste surveyed and matching reconstructed GCP coordinates as JSON. Residuals are paired x/y/z differences.
+          </p>
+          <textarea
+            value={pointsText}
+            onChange={(e) => setPointsText(e.target.value)}
+            rows={4}
+            style={{
+              width: '100%', background: 'var(--surface-2)', border: '1px solid var(--border)',
+              borderRadius: 'var(--radius-sm)', color: 'var(--text)', fontFamily: 'monospace', fontSize: 11,
+            }}
+          />
+          <Button size="sm" variant="ghost" disabled={mutation.isPending} onClick={() => mutation.mutate()}>
+            {mutation.isPending ? 'Computing…' : 'Compute GCP RMSE'}
+          </Button>
+          {report && (
+            <div style={{ color: 'var(--text-muted)' }}>
+              RMSE: x={report.rmse.x_m?.toFixed(3) ?? 'n/a'} m · y={report.rmse.y_m?.toFixed(3) ?? 'n/a'} m · z={report.rmse.z_m?.toFixed(3) ?? 'n/a'} m · 3D={report.rmse['3d_m']?.toFixed(3) ?? 'n/a'} m
+              {downloadUrl && (
+                <a
+                  href={downloadUrl}
+                  download={`gcp_accuracy_${sessionId}.json`}
+                  style={{ marginLeft: 10, color: 'var(--accent-strong)', textDecoration: 'underline' }}
+                >
+                  Download report
+                </a>
+              )}
+            </div>
           )}
         </div>
       )}
@@ -494,6 +567,7 @@ export default function ReconstructTab() {
                   {job.status === 'complete' && (
                     <div style={{ padding: '0 2px 8px' }}>
                       <QualityReportInline jobId={job.id} />
+                      <GcpAccuracyInline sessionId={job.session_id} />
                     </div>
                   )}
                 </div>

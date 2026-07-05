@@ -38,11 +38,15 @@ class GcpPointIn(BaseModel):
 
 
 class SurveyedGcpIn(BaseModel):
-    """A surveyed GCP in local reconstruction coordinates."""
+    """A paired surveyed/reconstructed GCP in local reconstruction coordinates."""
+
     label: str | None = None
     x: float
     y: float
     z: float
+    reconstructed_x: float
+    reconstructed_y: float
+    reconstructed_z: float
 
 
 class GcpAccuracyRequest(BaseModel):
@@ -126,8 +130,6 @@ def gcp_accuracy_report(
             detail="Stored geo-transform is malformed",
         ) from exc
 
-    survey_points = parse_surveyed_points_3d(
-        [p.model_dump() for p in body.points]
-    )
+    survey_points = parse_surveyed_points_3d([p.model_dump() for p in body.points])
 
     return compute_gcp_accuracy(geo_transform, survey_points)

@@ -40,7 +40,18 @@ def test_gcp_accuracy_report_no_completed_reconstruction(client):
 
     resp = client.post(
         f"/georeferencing/sessions/{session.id}/accuracy-report",
-        json={"points": [{"x": 0, "y": 0, "z": 0}]},
+        json={
+            "points": [
+                {
+                    "x": 0,
+                    "y": 0,
+                    "z": 0,
+                    "reconstructed_x": 0,
+                    "reconstructed_y": 0,
+                    "reconstructed_z": 0,
+                }
+            ]
+        },
     )
     assert resp.status_code == 404
     assert "No completed reconstruction" in resp.json()["detail"]
@@ -65,7 +76,18 @@ def test_gcp_accuracy_report_no_geo_transform(client):
 
     resp = client.post(
         f"/georeferencing/sessions/{session.id}/accuracy-report",
-        json={"points": [{"x": 0, "y": 0, "z": 0}]},
+        json={
+            "points": [
+                {
+                    "x": 0,
+                    "y": 0,
+                    "z": 0,
+                    "reconstructed_x": 0,
+                    "reconstructed_y": 0,
+                    "reconstructed_z": 0,
+                }
+            ]
+        },
     )
     assert resp.status_code == 400
     assert "geo-transform" in resp.json()["detail"]
@@ -74,7 +96,18 @@ def test_gcp_accuracy_report_no_geo_transform(client):
 def test_gcp_accuracy_report_missing_session(client):
     resp = client.post(
         "/georeferencing/sessions/99999/accuracy-report",
-        json={"points": [{"x": 0, "y": 0, "z": 0}]},
+        json={
+            "points": [
+                {
+                    "x": 0,
+                    "y": 0,
+                    "z": 0,
+                    "reconstructed_x": 0,
+                    "reconstructed_y": 0,
+                    "reconstructed_z": 0,
+                }
+            ]
+        },
     )
     assert resp.status_code == 404
 
@@ -100,8 +133,24 @@ def test_gcp_accuracy_report_valid(client):
         f"/georeferencing/sessions/{session.id}/accuracy-report",
         json={
             "points": [
-                {"label": "A", "x": 500000.0, "y": 4500000.0, "z": 100.0},
-                {"label": "B", "x": 500003.0, "y": 4500004.0, "z": 100.0},
+                {
+                    "label": "A",
+                    "x": 500000.0,
+                    "y": 4500000.0,
+                    "z": 100.0,
+                    "reconstructed_x": 500000.0,
+                    "reconstructed_y": 4500000.0,
+                    "reconstructed_z": 100.0,
+                },
+                {
+                    "label": "B",
+                    "x": 500003.0,
+                    "y": 4500004.0,
+                    "z": 100.0,
+                    "reconstructed_x": 500000.0,
+                    "reconstructed_y": 4500000.0,
+                    "reconstructed_z": 100.0,
+                },
             ]
         },
     )
@@ -228,7 +277,18 @@ def test_quality_scorecard_complete(client):
 def test_validate_checkpoints_no_reconstruction(client):
     resp = client.post(
         "/reconstruction/99999/validate-checkpoints",
-        json={"points": [{"x": 0, "y": 0, "z": 0}]},
+        json={
+            "points": [
+                {
+                    "x": 0,
+                    "y": 0,
+                    "z": 0,
+                    "reconstructed_x": 0,
+                    "reconstructed_y": 0,
+                    "reconstructed_z": 0,
+                }
+            ]
+        },
     )
     assert resp.status_code == 404
 
@@ -247,7 +307,18 @@ def test_validate_checkpoints_not_complete(client):
 
     resp = client.post(
         f"/reconstruction/{rec.id}/validate-checkpoints",
-        json={"points": [{"x": 0, "y": 0, "z": 0}]},
+        json={
+            "points": [
+                {
+                    "x": 0,
+                    "y": 0,
+                    "z": 0,
+                    "reconstructed_x": 0,
+                    "reconstructed_y": 0,
+                    "reconstructed_z": 0,
+                }
+            ]
+        },
     )
     assert resp.status_code == 202
 
@@ -274,7 +345,18 @@ def test_validate_checkpoints_no_surface_available(client):
 
     resp = client.post(
         f"/reconstruction/{rec.id}/validate-checkpoints",
-        json={"points": [{"x": 0, "y": 0, "z": 0}]},
+        json={
+            "points": [
+                {
+                    "x": 0,
+                    "y": 0,
+                    "z": 0,
+                    "reconstructed_x": 0,
+                    "reconstructed_y": 0,
+                    "reconstructed_z": 0,
+                }
+            ]
+        },
     )
     assert resp.status_code == 422
     assert "No surface source" in resp.json()["detail"]

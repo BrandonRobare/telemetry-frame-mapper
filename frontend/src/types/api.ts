@@ -374,6 +374,16 @@ export interface GcpResidual {
   distance_3d_m: number
 }
 
+export interface GcpAccuracyPoint {
+  label?: string
+  x: number
+  y: number
+  z: number
+  reconstructed_x: number
+  reconstructed_y: number
+  reconstructed_z: number
+}
+
 export interface GcpAccuracyReport {
   geo_transform: GeoTransform
   point_count: number
