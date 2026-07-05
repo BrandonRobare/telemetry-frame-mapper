@@ -1094,3 +1094,208 @@ def test_coverage_gaps_returns_cells_when_cache_path_commit_fails(client, tmp_pa
 
     assert resp.status_code == 200
     assert isinstance(resp.json(), list)
+
+
+# ---------------------------------------------------------------------------
+# cleanup route
+# ---------------------------------------------------------------------------
+
+
+def test_cleanup_not_found(client):
+    resp = client.post("/reconstruction/999999/cleanup")
+    assert resp.status_code == 404
+    assert "not found" in resp.json()["detail"].lower()
+
+
+def test_cleanup_still_running(client):
+    db = _get_db(client)
+    s = _make_session_with_images(db)
+    rec = Reconstruction(
+        session_id=s.id, preset="quick", status="running_gsplat",
+        progress_pct=95.0, frames_used=3,
+    )
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+
+    resp = client.post(f"/reconstruction/{rec.id}/cleanup")
+    assert resp.status_code == 422
+    assert "must be complete" in resp.json()["detail"]
+
+
+def test_cleanup_no_splat_path(client):
+    db = _get_db(client)
+    s = _make_session_with_images(db)
+    rec = Reconstruction(
+        session_id=s.id, preset="quick", status="complete",
+        progress_pct=100.0, frames_used=3,
+    )
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+
+    resp = client.post(f"/reconstruction/{rec.id}/cleanup")
+    assert resp.status_code == 404
+    assert "no splat" in resp.json()["detail"].lower()
+
+
+def test_cleanup_splat_missing_on_disk(client):
+    db = _get_db(client)
+    s = _make_session_with_images(db)
+    rec = Reconstruction(
+        session_id=s.id, preset="quick", status="complete",
+        progress_pct=100.0, frames_used=3,
+        splat_path="/tmp/nonexistent_splat_cleanup_test.ply",
+    )
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+
+    resp = client.post(f"/reconstruction/{rec.id}/cleanup")
+    assert resp.status_code == 404
+    assert "not found on disk" in resp.json()["detail"].lower()
+
+
+def test_cleanup_succeeds(client, tmp_path):
+    import numpy as np
+
+    from backend.services.ply_io import GaussianCloud, write_3dgs_ply
+
+    db = _get_db(client)
+    s = _make_session_with_images(db)
+
+    # Write a valid 3DGS PLY file.
+    n = 30
+    rng = np.random.default_rng(42)
+    cloud = GaussianCloud(
+        means=rng.normal(size=(n, 3)).astype(np.float32),
+        sh0=rng.normal(size=(n, 3)).astype(np.float32),
+        shN=rng.normal(size=(n, 0, 3)).astype(np.float32),
+        opacities=rng.normal(size=(n,)).astype(np.float32),
+        scales=rng.normal(scale=0.5, size=(n, 3)).astype(np.float32),
+        quats=rng.normal(size=(n, 4)).astype(np.float32),
+    )
+    exports_dir = tmp_path / "exports"
+    rec_dir = exports_dir / "100"  # will match rec.id after DB insert
+    rec_dir.mkdir(parents=True)
+    splat_file = rec_dir / "splat.ply"
+    write_3dgs_ply(splat_file, cloud)
+
+    rec = Reconstruction(
+        id=100, session_id=s.id, preset="quick", status="complete",
+        progress_pct=100.0, frames_used=3,
+        splat_path=str(splat_file),
+    )
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+
+    with patch("backend.routers.reconstruction.get_config") as mock_cfg:
+        mock_cfg.return_value.exports_dir = str(exports_dir)
+        resp = client.post(f"/reconstruction/{rec.id}/cleanup")
+
+    assert resp.status_code == 201
+    data = resp.json()
+    assert data["n_before"] == n
+    assert 1 <= data["n_after"] <= n
+    assert data["cleaned_path"].endswith("splat_cleaned.ply")
+    assert "n_before" in data["stats"]
+    assert "n_after_opacity" in data["stats"]
+    assert "n_after_outlier" in data["stats"]
+
+    # Original file untouched.
+    assert splat_file.exists()
+    from backend.services.ply_io import read_3dgs_ply
+    original = read_3dgs_ply(splat_file)
+    assert original.means.shape[0] == n
+
+    # Cleaned file exists and is valid.
+    cleaned_path = tmp_path / "exports" / "100" / "splat_cleaned.ply"
+    assert cleaned_path.exists()
+    cleaned = read_3dgs_ply(cleaned_path)
+    assert cleaned.means.shape[0] == data["n_after"]
+
+
+def test_cleanup_with_target_area_crops_splat(client, tmp_path):
+    import numpy as np
+
+    from backend.db.models import TargetArea
+    from backend.services.ply_io import GaussianCloud, read_3dgs_ply, write_3dgs_ply
+
+    db = _get_db(client)
+    s = _make_session_with_images(db)
+    target = TargetArea(
+        name="crop",
+        geom_geojson='{"type":"Polygon","coordinates":[[[0,0],[1,0],[1,1],[0,1],[0,0]]]}',
+    )
+    db.add(target)
+    db.commit()
+    db.refresh(target)
+
+    exports_dir = tmp_path / "exports"
+    rec_dir = exports_dir / "101"
+    rec_dir.mkdir(parents=True)
+    splat_file = rec_dir / "splat.ply"
+    cloud = GaussianCloud(
+        means=np.array([[0.5, 0.5, 0.0], [2.0, 2.0, 0.0], [-1.0, 0.5, 0.0]], dtype=np.float32),
+        sh0=np.zeros((3, 3), dtype=np.float32),
+        shN=np.zeros((3, 0, 3), dtype=np.float32),
+        opacities=np.ones(3, dtype=np.float32),
+        scales=np.zeros((3, 3), dtype=np.float32),
+        quats=np.zeros((3, 4), dtype=np.float32),
+    )
+    write_3dgs_ply(splat_file, cloud)
+
+    rec = Reconstruction(
+        id=101, session_id=s.id, preset="quick", status="complete",
+        progress_pct=100.0, frames_used=3, splat_path=str(splat_file),
+    )
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+
+    with patch("backend.routers.reconstruction.get_config") as mock_cfg:
+        mock_cfg.return_value.exports_dir = str(exports_dir)
+        resp = client.post(
+            f"/reconstruction/{rec.id}/cleanup",
+            json={"target_area_id": target.id, "opacity_keep_ratio": 1.0, "outlier_k": 0},
+        )
+
+    assert resp.status_code == 201
+    data = resp.json()
+    assert data["stats"]["target_area_clipped"] == 2
+    assert data["n_after"] == 1
+    cleaned = read_3dgs_ply(exports_dir / "101" / "splat_cleaned.ply")
+    assert cleaned.means.shape[0] == 1
+    assert cleaned.means[0].tolist() == [0.5, 0.5, 0.0]
+
+
+def test_cleanup_target_area_not_found(client, tmp_path):
+    import numpy as np
+
+    from backend.services.ply_io import GaussianCloud, write_3dgs_ply
+
+    db = _get_db(client)
+    s = _make_session_with_images(db)
+    splat_file = tmp_path / "splat.ply"
+    cloud = GaussianCloud(
+        means=np.zeros((1, 3), dtype=np.float32),
+        sh0=np.zeros((1, 3), dtype=np.float32),
+        shN=np.zeros((1, 0, 3), dtype=np.float32),
+        opacities=np.ones(1, dtype=np.float32),
+        scales=np.zeros((1, 3), dtype=np.float32),
+        quats=np.zeros((1, 4), dtype=np.float32),
+    )
+    write_3dgs_ply(splat_file, cloud)
+    rec = Reconstruction(
+        session_id=s.id, preset="quick", status="complete",
+        progress_pct=100.0, frames_used=3, splat_path=str(splat_file),
+    )
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+
+    resp = client.post(f"/reconstruction/{rec.id}/cleanup", json={"target_area_id": 999999})
+
+    assert resp.status_code == 404
+    assert "target area" in resp.json()["detail"].lower()
