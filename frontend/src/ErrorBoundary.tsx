@@ -15,6 +15,14 @@ export class ErrorBoundary extends Component<Props, State> {
     console.error('[ErrorBoundary]', error, info.componentStack)
   }
 
+  private reset = () => {
+    this.setState({ error: null })
+  }
+
+  private reload = () => {
+    window.location.reload()
+  }
+
   render() {
     if (this.state.error) {
       return (
@@ -23,6 +31,14 @@ export class ErrorBoundary extends Component<Props, State> {
           <pre style={{ marginTop: 12, whiteSpace: 'pre-wrap', fontSize: 13 }}>
             {this.state.error.message}
           </pre>
+          <div style={{ display: 'flex', gap: 12, marginTop: 16 }}>
+            <button type="button" onClick={this.reset}>
+              Try again
+            </button>
+            <button type="button" onClick={this.reload}>
+              Reload app
+            </button>
+          </div>
         </div>
       )
     }
