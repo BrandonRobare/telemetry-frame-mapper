@@ -1026,6 +1026,43 @@ def test_coverage_gaps_returns_cached_json(client, tmp_path):
 
 
 def test_coverage_gaps_computes_on_first_call(client, tmp_path):
+    import numpy as np
+
+    db = _get_db(client)
+    s = _make_session_with_images(db)
+
+    ply_path = tmp_path / "splat.ply"
+    header = (
+        b"ply\nformat binary_little_endian 1.0\n"
+        b"element vertex 4\n"
+        b"property float x\nproperty float y\nproperty float z\n"
+        b"end_header\n"
+    )
+    arr = np.array([[0, 0, 0], [0, 0, 0], [0, 0, 0], [5, 5, 5]], dtype=np.float32)
+    ply_path.write_bytes(header + arr.tobytes())
+
+    rec = Reconstruction(
+        session_id=s.id, status="complete", preset="quick",
+        progress_pct=100.0, frames_used=3, step="done",
+        splat_path=str(ply_path),
+    )
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+
+    resp = client.get(f"/reconstruction/{rec.id}/coverage-gaps")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert isinstance(data, list)
+    # Verify coverage_gaps_path stored on record
+    db.expire_all()
+    db.refresh(rec)
+    assert rec.coverage_gaps_path is not None
+    assert rec.coverage_gaps_path == str(ply_path.parent / f"coverage_gaps_{rec.id}.json")
+
+
+def test_coverage_gaps_returns_cells_when_cache_path_commit_fails(client, tmp_path):
     from unittest.mock import patch
 
     import numpy as np
@@ -1052,16 +1089,8 @@ def test_coverage_gaps_computes_on_first_call(client, tmp_path):
     db.commit()
     db.refresh(rec)
 
-    with patch("backend.routers.reconstruction.get_config") as mock_cfg, \
-         patch("backend.services.reconstruction.get_config") as mock_svc_cfg:
-        mock_cfg.return_value.exports_dir = str(tmp_path)
-        mock_svc_cfg.return_value.exports_dir = str(tmp_path)
+    with patch.object(db, "commit", side_effect=RuntimeError("commit failed")):
         resp = client.get(f"/reconstruction/{rec.id}/coverage-gaps")
 
     assert resp.status_code == 200
-    data = resp.json()
-    assert isinstance(data, list)
-    # Verify coverage_gaps_path stored on record
-    db.expire_all()
-    db.refresh(rec)
-    assert rec.coverage_gaps_path is not None
+    assert isinstance(resp.json(), list)
