@@ -8,9 +8,9 @@ First stable release: a complete drone video → gaussian-splat pipeline. The he
 
 ### Added
 - **CLI geotagger** (`drone-video-geotagger`): extracts DJI SRT telemetry from MP4 with ffmpeg, interpolates per-frame GPS positions, writes EXIF via ExifTool, produces an audit CSV. WSL-aware path handling.
-- **FastAPI backend**: session import with quality scoring (sharpness/brightness), DJI XMP parsing (relative altitude, yaw, gimbal pitch), ground-footprint geometry (UTM/Shapely), coverage analysis, lawnmower mission planning with KML/GPX export, flight-log sync, session log, storage management, and system resource reporting — ~53 endpoints across 17 routers, self-documented at `/docs`.
+- **FastAPI backend**: session import with quality scoring (sharpness/brightness), DJI XMP parsing (relative altitude, yaw, gimbal pitch), ground-footprint geometry (UTM/Shapely), coverage analysis, lawnmower mission planning with KML/GPX export, flight-log sync, session log, storage management, and system resource reporting — 77 endpoints across 19 routers, self-documented at `/docs`.
 - **Reconstruction pipeline**: COLMAP SfM orchestration (quick/full presets, target-area crop, manual frame selection), GPS geo-registration (COLMAP↔UTM similarity transform), per-frame reprojection-error reporting, background job management with progress/cancel.
-- **React frontend** (11 tabs): Map, GPS Sync, Review, Plan, Export, Session Log, Reconstruct, Jobs, Storage, Splat Viewer (3D canvas, PSNR/SSIM sparklines, coverage-gap heatmap, GPS annotations, distance/area measurement, ortho/3D split view, flythrough recording), and Compare (voxel change detection between flights).
+- **React frontend** (13 tabs): Overview, Map, GPS Sync, Review, Plan, Export, Session Log, Reconstruct, Jobs, Storage, Splat Viewer (3D canvas, PSNR/SSIM sparklines, coverage-gap heatmap, GPS annotations, distance/area measurement, ortho/3D split view, flythrough recording), Compare (voxel change detection between flights), and Settings.
 - **Exports**: WebODM georeferencing CSV-only zip, GeoJSON, LAS 1.4 point cloud with UTM CRS, optional SuGaR mesh (GLB/OBJ/MTL with geo-reference sidecar), browser-recorded or server-rendered flythrough video.
 - **Documentation suite**: a [user manual](docs/USER-MANUAL.md), end-to-end [workflow tutorial](docs/WORKFLOW.md), [install guide](docs/INSTALL.md), [GPU setup](docs/SETUP.md), [troubleshooting](docs/TROUBLESHOOTING.md), and [architecture overview](docs/ARCHITECTURE.md).
 
@@ -27,7 +27,7 @@ First stable release: a complete drone video → gaussian-splat pipeline. The he
 - CI runs a Python 3.10/3.11/3.12 matrix plus a frontend lint/test/build job.
 
 ### Removed
-- Docker configuration (`docker-compose.yml` referenced Dockerfiles that never existed); native install only for 1.0.
+- Broken legacy Docker Compose files (`docker-compose.yml` referenced Dockerfiles that never existed). A supported single-container Dockerfile was added after 1.0 and is covered by CI build smoke.
 
 ### Fixed
 - Mid-training cancellation now marks the job failed instead of mislabeling it a successful `colmap_only` completion.

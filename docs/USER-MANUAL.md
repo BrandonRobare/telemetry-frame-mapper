@@ -27,7 +27,7 @@ photogrammetry tool (WebODM, OpenDroneMap, COLMAP) can ingest them.
 - Parses DJI SRT into GPS fixes and interpolates latitude, longitude, and
   relative height for every frame's timestamp.
 - Computes absolute altitude as `takeoff altitude (ASL) + relative height`.
-- Writes GPS EXIF tags with `exiftool` (copies by default, or in place).
+- Writes GPS EXIF tags with `exiftool` (copies by default, or in place with `--in-place`).
 - Emits an audit CSV (`frame_geotags.csv`) and the generated ExifTool argument
   file for inspection.
 - WSL-aware path handling for `.exe` binaries on Windows.
@@ -35,8 +35,8 @@ photogrammetry tool (WebODM, OpenDroneMap, COLMAP) can ingest them.
 ### Backend — FastAPI service
 
 A local REST API (binds to localhost, self-documented at `/docs`) covering
-ingest, analysis, planning, reconstruction, and export — roughly 53 endpoints
-across 17 routers.
+ingest, analysis, planning, reconstruction, and export — 77 endpoints
+across 19 routers.
 
 - **Import & quality:** session import; per-image sharpness and brightness
   scoring (OpenCV); DJI XMP parsing for relative altitude, yaw, and gimbal pitch.
@@ -55,10 +55,11 @@ across 17 routers.
 - **System reporting:** CPU/RAM/GPU/VRAM resource readout and
   `colmap_available` / `gsplat_available` tool-presence flags.
 
-### Frontend — React web app (11 tabs)
+### Frontend — React web app (13 tabs)
 
 | Tab | What it does |
 |-----|--------------|
+| **Overview** | Pipeline status, session summary, import call-to-action, and reconstruction readiness |
 | **Map** | Leaflet + ESRI satellite basemap, footprint polygons, coverage overlay, session stats sidebar |
 | **GPS Sync** | DJI FlightRecord CSV matching with timing deltas |
 | **Review** | Thumbnail grid, quality flags, COLMAP reprojection-error badges, per-session frame selection for reconstruction |
@@ -70,6 +71,7 @@ across 17 routers.
 | **Storage** | Disk usage by category and a file browser |
 | **Splat Viewer** | In-browser gaussian-splat rendering, PSNR/SSIM sparklines, coverage-gap heatmap, GPS-pinned annotations, distance/area measurement, ortho/3D split view, flythrough recording |
 | **Compare** | Voxel change detection between two reconstructions of the same site |
+| **Settings** | App preferences, import/storage paths, mission parameters, reconstruction presets, rendering/export defaults |
 
 Light/dark theme with persistence.
 
@@ -261,7 +263,12 @@ ffmpeg -i flight.mp4 -vf fps=8 extracted/frame_%05d.jpg
 drone-video-geotagger --video flight.mp4 --frames extracted --takeoff-altitude 236.94
 ```
 
-Output lands in `extracted_geotagged/`. Full flag list: `drone-video-geotagger --help`.
+Output lands in `extracted_geotagged/`. Add `--in-place` to update the original frame folder instead. Full flag list: `drone-video-geotagger --help`.
+
+
+### Browser upload import
+
+From **Overview** or **Map**, open **Import**. The default **Browser upload** mode lets you choose or drag a local folder of frames; the browser streams those files to the backend in chunks, then the backend starts the normal import pipeline. Use this when the frames are on your workstation and not already under the backend `imports/` folder. Use **Server path** mode only when the folder already exists under `imports/` on the machine running the backend.
 
 ### Run the web app
 
