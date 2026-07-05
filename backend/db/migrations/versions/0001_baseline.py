@@ -10,9 +10,9 @@ Idempotent baseline migration. Handles two cases in one pass:
    ``Base.metadata`` is created.
 2. An existing database created by the old hand-rolled
    ``_ensure_sqlite_schema`` / ``create_all`` path, which already has most
-   tables but may be missing the mesh/flythrough columns that used to be
-   added via manual ``ALTER TABLE`` statements. Only the columns that are
-   actually missing are added.
+   tables but may be missing columns that were introduced before Alembic had
+   explicit owner revisions. Only the columns that are actually missing are
+   added.
 
 Every operation is conditional on the current DB state via
 ``sa.inspect``, so re-running this migration (or running it against a
@@ -37,6 +37,10 @@ depends_on: str | Sequence[str] | None = None
 # Columns that used to be added on the fly by the old _ensure_sqlite_schema
 # shim. Kept here explicitly (rather than diffing against models.py) so this
 # migration's behavior is stable even if the model definition changes later.
+#
+# Convention: keep this baseline limited to legacy columns that have no later
+# Alembic revision owner. Columns introduced by a numbered revision belong only
+# in that revision; the revision should stay idempotent for legacy DB upgrades.
 _RECONSTRUCTIONS_SHIM_COLUMNS: dict[str, sa.types.TypeEngine] = {
     "mesh_glb_path": sa.String(),
     "mesh_obj_path": sa.String(),
@@ -55,16 +59,6 @@ _IMAGES_CALIBRATION_COLUMNS: dict[str, sa.types.TypeEngine] = {
     "focal_length_35mm": sa.Float(),
     "digital_zoom_ratio": sa.Float(),
 }
-
-_IMAGE_FLIGHT_LOG_SYNC_COLUMNS: dict[str, sa.types.TypeEngine] = {
-    "original_latitude": sa.Float(),
-    "original_longitude": sa.Float(),
-    "original_altitude_m": sa.Float(),
-    "synced_latitude": sa.Float(),
-    "synced_longitude": sa.Float(),
-    "synced_altitude_m": sa.Float(),
-}
-
 
 def upgrade() -> None:
     bind = op.get_bind()
@@ -88,11 +82,10 @@ def upgrade() -> None:
 
     if "images" in table_names:
         existing_columns = {col["name"] for col in inspector.get_columns("images")}
-        for column_group in (_IMAGES_CALIBRATION_COLUMNS, _IMAGE_FLIGHT_LOG_SYNC_COLUMNS):
-            for name, col_type in column_group.items():
-                if name not in existing_columns:
-                    op.add_column("images", sa.Column(name, col_type))
-                    existing_columns.add(name)
+        for name, col_type in _IMAGES_CALIBRATION_COLUMNS.items():
+            if name not in existing_columns:
+                op.add_column("images", sa.Column(name, col_type))
+                existing_columns.add(name)
 
 
 def downgrade() -> None:
