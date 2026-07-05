@@ -4,6 +4,7 @@ import time
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
 from fastapi import APIRouter, HTTPException, Query
+from pydantic import BaseModel
 
 from ..core.config import get_config
 from ..services.storage_summary_cache import _cache, invalidate_storage_summary_cache
@@ -165,3 +166,42 @@ def get_storage_summary():
         _cache["data"] = _compute_summary()
         _cache["ts"] = now
     return _cache["data"]
+
+
+class PolicyRuleInput(BaseModel):
+    target: str  # "raw_frames" | "colmap_intermediates" | "reconstruction_artifacts"
+    age_days: int | None = None
+    disk_pct: float | None = None
+
+
+class ApplyPolicyRequest(BaseModel):
+    rules: list[PolicyRuleInput]
+    execute: bool = False
+
+
+@router.post("/apply-policy")
+def apply_storage_policy(body: ApplyPolicyRequest):
+    """Preview or execute storage lifecycle rules.
+
+    **Dry-run** (default, ``execute=false``): returns a side-effect-free
+    listing of every candidate file/directory with ``path``, ``bytes``,
+    ``reason``, and ``action``.
+
+    **Execute** (``execute=true``): performs the actions. Only paths inside
+    the configured storage roots (imports_dir, processed_dir, exports_dir,
+    data_dir) are ever touched. Prefers delete for COLMAP intermediates,
+    archive for raw frames and reconstruction artifacts when age-based.
+    """
+    from ..db.database import SessionLocal
+    from ..services.storage_lifecycle import apply_policy
+
+    rules = [r.model_dump() for r in body.rules]
+    db = SessionLocal() if body.execute else None
+    try:
+        result = apply_policy(rules, execute=body.execute, db=db)
+    finally:
+        if db is not None:
+            db.close()
+    if "error" in result:
+        raise HTTPException(status_code=422, detail=result["error"])
+    return result
