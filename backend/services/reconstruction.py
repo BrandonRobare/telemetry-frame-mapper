@@ -1552,9 +1552,26 @@ def cancel_reconstruction(reconstruction_id: int) -> None:
 
 
 def _update_rec(db: DBSession, rec_id: int, **kwargs) -> None:
+    if "completed_at" in kwargs and "duration_s" not in kwargs:
+        started_at = (
+            db.query(Reconstruction.started_at)
+            .filter(Reconstruction.id == rec_id)
+            .scalar()
+        )
+        kwargs["duration_s"] = _duration_seconds(started_at, kwargs["completed_at"])
     db.query(Reconstruction).filter(Reconstruction.id == rec_id).update(kwargs)
     db.commit()
     notify_reconstruction_status_changed(rec_id)
+
+
+def _duration_seconds(started_at: datetime | None, completed_at: datetime | None) -> float | None:
+    if started_at is None or completed_at is None:
+        return None
+    if started_at.tzinfo is not None and completed_at.tzinfo is None:
+        completed_at = completed_at.replace(tzinfo=timezone.utc)
+    elif started_at.tzinfo is None and completed_at.tzinfo is not None:
+        started_at = started_at.replace(tzinfo=timezone.utc)
+    return max(0.0, (completed_at - started_at).total_seconds())
 
 
 def _run_pipeline(
