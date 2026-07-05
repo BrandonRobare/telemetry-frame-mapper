@@ -28,7 +28,7 @@ def override_get_db():
         db.close()
 
 
-@pytest.fixture(scope="session", autouse=True)
+@pytest.fixture(scope="session")
 def setup_test_db():
     from backend.db import models  # noqa: F401
     Base.metadata.drop_all(bind=test_engine)
@@ -39,7 +39,12 @@ def setup_test_db():
 
 
 @pytest.fixture(autouse=True)
-def clean_tables(setup_test_db):
+def clean_tables(request):
+    if "tests/backend" not in request.node.path.as_posix():
+        yield
+        return
+
+    request.getfixturevalue("setup_test_db")
     clear_rec_logs()
     yield
     clear_rec_logs()
