@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import calendar
+import os
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from sqlalchemy.orm import Session as DBSession
 
-from ..core.config import get_upload_limits_config
+from ..core.config import get_dji_api_key, get_upload_limits_config
 from ..db.database import get_db
 from ..db.models import FlightLog, FlightLogPoint, Image
 from ..db.models import Session as SessionModel
@@ -15,6 +16,9 @@ from ..services.flight_log_sync import build_offset_preview, match_images_to_log
 router = APIRouter(prefix="/flight-logs", tags=["flight-logs"])
 
 _FLIGHT_LOG_CHUNK_SIZE = 1024 * 1024
+
+# Allowed extensions for DJI binary logs.
+_DJI_EXTENSIONS = {".txt"}
 
 
 async def _read_upload_with_limit(file: UploadFile, max_bytes: int) -> bytes:
@@ -106,6 +110,15 @@ async def upload_flight_log(
 
     limits = get_upload_limits_config()
     content = await _read_upload_with_limit(file, limits["flight_log_max_bytes"])
+
+    # --- sniff: DJI binary (.txt) or CSV? -----------------------------------
+    ext = os.path.splitext(file.filename or "")[1].lower()
+    first_bytes = content[:64].strip()
+
+    if ext in _DJI_EXTENSIONS or (first_bytes and is_dji_binary_header(first_bytes)):
+        return await _upload_dji_binary(session_id, file.filename or "", content, db)
+
+    # Fallback: existing CSV path
     points = parse_dji_csv(content)
 
     if not points:
@@ -117,10 +130,11 @@ async def upload_flight_log(
     log = FlightLog(
         session_id=session_id,
         filename=file.filename,
+        format="csv",
         point_count=len(points),
     )
     db.add(log)
-    db.flush()  # get log.id before adding points
+    db.flush()
 
     for p in points:
         point = FlightLogPoint(
@@ -139,8 +153,121 @@ async def upload_flight_log(
         "id": log.id,
         "session_id": log.session_id,
         "filename": log.filename,
+        "format": log.format,
         "point_count": log.point_count,
+        "log_version": None,
+        "aircraft_name": None,
+        "encrypted": False,
     }
+
+
+async def _upload_dji_binary(
+    session_id: int,
+    filename: str,
+    content: bytes,
+    db: DBSession,
+) -> dict:
+    """Parse a DJI .txt binary log and persist FlightLog + FlightLogPoint rows."""
+    from ..services.dji_log_parser import (
+        dji_parser_available,
+        parse_dji_binary_bytes,
+    )
+
+    if not dji_parser_available():
+        raise HTTPException(
+            status_code=501,
+            detail="DJI log parsing requires pydjirecord; install with: pip install pydjirecord",
+        )
+
+    api_key = get_dji_api_key()
+
+    try:
+        result = parse_dji_binary_bytes(content, api_key=api_key)
+    except RuntimeError as exc:
+        msg = str(exc)
+        if "API key" in msg.lower() or "decrypt" in msg.lower():
+            raise HTTPException(status_code=422, detail=msg) from exc
+        raise HTTPException(status_code=422, detail=msg) from exc
+
+    return _persist_dji_result(session_id, filename, content, result, db)
+
+
+def _persist_dji_result(
+    session_id: int,
+    filename: str,
+    _content: bytes,
+    result,
+    db: DBSession,
+) -> dict:
+    log = FlightLog(
+        session_id=session_id,
+        filename=filename,
+        format="dji_binary",
+        point_count=result.frame_count,
+        log_version=result.header.version,
+        aircraft_name=result.header.aircraft_name,
+        aircraft_sn=result.header.aircraft_sn,
+        encrypted=not result.decrypted and result.header.version >= 13,
+    )
+    db.add(log)
+    db.flush()
+
+    for frame in result.frames:
+        point = FlightLogPoint(
+            flight_log_id=log.id,
+            timestamp=_utc_timestamp_to_naive(frame.timestamp_ms / 1000.0),
+            latitude=frame.latitude,
+            longitude=frame.longitude,
+            altitude_m=frame.altitude_m,
+            speed_ms=frame.speed_ms,
+            heading=frame.heading,
+            roll=frame.roll,
+            pitch=frame.pitch,
+            yaw=frame.yaw,
+            gimbal_pitch=frame.gimbal_pitch,
+            gimbal_roll=frame.gimbal_roll,
+            gimbal_yaw=frame.gimbal_yaw,
+            battery_voltage=frame.battery_voltage,
+            battery_charge_pct=frame.battery_charge_pct,
+            battery_temperature_c=frame.battery_temperature_c,
+        )
+        db.add(point)
+
+    db.commit()
+    db.refresh(log)
+
+    return {
+        "id": log.id,
+        "session_id": log.session_id,
+        "filename": log.filename,
+        "format": log.format,
+        "point_count": log.point_count,
+        "log_version": log.log_version,
+        "aircraft_name": log.aircraft_name,
+        "encrypted": log.encrypted,
+    }
+
+
+def is_dji_binary_header(data: bytes) -> bool:
+    """Heuristic: DJI binary logs have a version byte (1-14 or >=128) at offset 10.
+
+    The DJI prefix layout (100 bytes, little-endian)::
+
+        detail_offset : u64   (bytes 0-7)
+        detail_length : u16   (bytes 8-9)
+        version       : u8    (byte 10)
+        ...
+    """
+    if len(data) < 16:
+        return False
+
+    try:
+        version_byte = data[10]
+    except IndexError:
+        return False
+
+    # Log versions 1-14 are unencrypted; 128+ are encrypted
+    return 1 <= version_byte <= 14 or version_byte >= 128
 
 
 @router.get("/match-preview")

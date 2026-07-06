@@ -18,6 +18,7 @@ import CompareTab from './features/compare/CompareTab'
 import SettingsTab from './features/settings/SettingsTab'
 import { ToastStack } from './shared/components/ToastStack'
 import { GlassFilters } from './shared/components/GlassFilters'
+import ShareViewer from './features/share/ShareViewer'
 import { StatusHud } from './shared/components/StatusHud'
 import { usePipelineStatus } from './shared/pipeline/usePipelineStatus'
 import ImportModal from './features/import/ImportModal'
@@ -152,6 +153,11 @@ export default function App() {
   }
 
   return (
+    <>
+      {/* Public share viewer — strip operator UI entirely. */}
+      {window.location.pathname.startsWith('/view/share/') ? (
+        <ShareViewer />
+      ) : (
     <div className="fm-app flex flex-col" style={{ height: '100vh', background: 'var(--bg)' }}>
       <GlassFilters />
       {/* Nav bar */}
@@ -318,5 +324,7 @@ export default function App() {
       <ToastStack />
       <ImportModal open={showImport} onClose={() => setShowImport(false)} />
     </div>
+      )}
+    </>
   )
 }

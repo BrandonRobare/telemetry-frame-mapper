@@ -378,4 +378,6 @@ def test_run_creates_footprint_when_altitude_is_zero(tmp_path, setup_test_db):
     footprint = db.query(Footprint).filter(Footprint.image_id == img.id).one_or_none()
     assert img.altitude_m == 0.0
     assert footprint is not None
-    assert footprint.ground_width_m == 0.0
+    # With the 1 m AGL clamp in compute_footprint, zero barometric altitude
+    # still produces a small (non-degenerate) footprint.
+    assert footprint.ground_width_m > 0

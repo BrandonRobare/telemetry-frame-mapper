@@ -1,7 +1,7 @@
 import { useState } from 'react'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { del, get } from '../../shared/api/client'
-import type { StorageStats, StorageFileItem, StorageFileList } from '../../types/api'
+import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
+import { del, get, post } from '../../shared/api/client'
+import type { StorageStats, StorageFileItem, StorageFileList, PolicyResult } from '../../types/api'
 import { formatBytes } from './formatBytes'
 import TabHeader from '../../shared/components/TabHeader'
 import { Button } from '../../shared/components/Button'
@@ -27,9 +27,269 @@ function useStorageFiles(directory: Directory) {
   })
 }
 
+// ---- Lifecycle Policy Panel ----
+
+interface PolicyRuleInput {
+  target: string
+  age_days: number | null
+  disk_pct: number | null
+}
+
+const TARGETS = [
+  { value: 'raw_frames', label: 'Raw Frames (imports/)' },
+  { value: 'colmap_intermediates', label: 'COLMAP Intermediates (processed/*/colmap/)' },
+  { value: 'reconstruction_artifacts', label: 'Reconstruction Artifacts (splats, meshes, LAS)' },
+]
+
+function LifecyclePolicy() {
+  const { addToast } = useToast()
+  const qc = useQueryClient()
+
+  const [rules, setRules] = useState<PolicyRuleInput[]>([
+    { target: 'raw_frames', age_days: 30, disk_pct: null },
+  ])
+  const [result, setResult] = useState<PolicyResult | null>(null)
+  const [showConfirm, setShowConfirm] = useState(false)
+
+  const policyMutation = useMutation({
+    mutationFn: (execute: boolean) =>
+      post<PolicyResult>('/storage/apply-policy', { rules, execute }),
+    onSuccess: (data) => {
+      setResult(data)
+      if (data.mode === 'execute') {
+        addToast(
+          `Policy applied: ${data.summary.removed_items ?? 0} removed, ${data.summary.failed_items ?? 0} failed`,
+          'success',
+        )
+        qc.invalidateQueries({ queryKey: ['storage-summary'] })
+        qc.invalidateQueries({ queryKey: ['storage-files'] })
+      }
+    },
+    onError: (err: Error) => addToast(`Policy error: ${err.message}`, 'error'),
+  })
+
+  function addRule() {
+    setRules((prev) => [...prev, { target: 'raw_frames', age_days: 30, disk_pct: null }])
+  }
+
+  function removeRule(index: number) {
+    setRules((prev) => prev.filter((_, i) => i !== index))
+  }
+
+  function updateRule(index: number, patch: Partial<PolicyRuleInput>) {
+    setRules((prev) =>
+      prev.map((r, i) => (i === index ? { ...r, ...patch } : r))
+    )
+  }
+
+  const totalSize = result ? formatBytes(result.summary.total_bytes) : '--'
+
+  return (
+    <section
+      className="p-5 flex flex-col gap-4"
+      style={{ background: 'var(--surface)', border: '1px solid var(--border)', marginTop: 20 }}
+    >
+      <div>
+        <h2 className="text-base font-semibold" style={{ color: 'var(--text)', margin: 0 }}>
+          Lifecycle Policy
+        </h2>
+        <p className="text-xs mt-1" style={{ color: 'var(--text-muted)', margin: '4px 0 0' }}>
+          Define retention rules by age or disk pressure. Dry-run first to preview
+          before executing.
+        </p>
+      </div>
+
+      {rules.map((rule, i) => (
+        <div
+          key={i}
+          className="flex flex-col gap-2 p-3"
+          style={{ background: 'var(--surface-2)', border: '1px solid var(--border)' }}
+        >
+          <div className="flex items-center gap-2 flex-wrap">
+            <select
+              value={rule.target}
+              onChange={(e) => updateRule(i, { target: e.target.value })}
+              style={{
+                padding: '4px 8px', fontSize: 12, borderRadius: 'var(--radius-sm)',
+                background: 'var(--surface)', color: 'var(--text)', border: '1px solid var(--border)',
+              }}
+            >
+              {TARGETS.map((t) => (
+                <option key={t.value} value={t.value}>{t.label}</option>
+              ))}
+            </select>
+
+            <label className="text-xs" style={{ color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 4 }}>
+              <input
+                type="radio"
+                checked={rule.age_days !== null}
+                onChange={() => updateRule(i, { age_days: 30, disk_pct: null })}
+              />
+              Age (days)
+            </label>
+            <input
+              type="number"
+              min={0}
+              max={365}
+              value={rule.age_days ?? ''}
+              disabled={rule.age_days === null}
+              onChange={(e) => updateRule(i, { age_days: e.target.value ? Number(e.target.value) : null, disk_pct: null })}
+              style={{
+                width: 64, padding: '4px 6px', fontSize: 12,
+                borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)',
+                background: 'var(--surface)', color: 'var(--text)',
+              }}
+            />
+
+            <label className="text-xs" style={{ color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 4 }}>
+              <input
+                type="radio"
+                checked={rule.disk_pct !== null}
+                onChange={() => updateRule(i, { age_days: null, disk_pct: 80 })}
+              />
+              Disk %
+            </label>
+            <input
+              type="number"
+              min={1}
+              max={99}
+              value={rule.disk_pct ?? ''}
+              disabled={rule.disk_pct === null}
+              onChange={(e) => updateRule(i, { age_days: null, disk_pct: e.target.value ? Number(e.target.value) : null })}
+              style={{
+                width: 56, padding: '4px 6px', fontSize: 12,
+                borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)',
+                background: 'var(--surface)', color: 'var(--text)',
+              }}
+            />
+
+            {rules.length > 1 && (
+              <Button variant="danger" size="sm" onClick={() => removeRule(i)} style={{ fontSize: 11, marginLeft: 'auto' }}>
+                Remove
+              </Button>
+            )}
+          </div>
+        </div>
+      ))}
+
+      <div className="flex items-center gap-2 flex-wrap">
+        <Button variant="ghost" size="sm" onClick={addRule} style={{ fontSize: 12 }}>
+          + Add Rule
+        </Button>
+
+        <Button
+          variant="primary"
+          size="sm"
+          onClick={() => policyMutation.mutate(false)}
+          disabled={policyMutation.isPending}
+          style={{ fontSize: 12, marginLeft: 'auto' }}
+        >
+          {policyMutation.isPending ? 'Running...' : 'Dry Run'}
+        </Button>
+
+        <Button
+          variant="danger"
+          size="sm"
+          onClick={() => setShowConfirm(true)}
+          disabled={policyMutation.isPending || result === null}
+          style={{ fontSize: 12 }}
+        >
+          Execute
+        </Button>
+      </div>
+
+      {policyMutation.isPending && (
+        <div className="text-xs" style={{ color: 'var(--text-muted)' }}>Evaluating policy...</div>
+      )}
+
+      {result && !policyMutation.isPending && (
+        <div
+          className="p-3 flex flex-col gap-2 text-xs"
+          style={{ background: 'var(--surface-2)', border: '1px solid var(--border)' }}
+        >
+          <div style={{ color: 'var(--text)', fontWeight: 600 }}>
+            {result.mode === 'dry-run' ? 'Dry Run Result' : 'Execute Result'}
+          </div>
+          <div style={{ color: 'var(--text-muted)' }}>
+            {result.summary.total_items} candidates · {totalSize}
+            {result.summary.actions && (
+              <span> · {Object.entries(result.summary.actions).map(([k, v]) => `${v} ${k}`).join(', ')}</span>
+            )}
+          </div>
+
+          {result.candidates.length > 0 && (
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+              <thead>
+                <tr style={{ color: 'var(--text-muted)', textAlign: 'left' }}>
+                  <th style={{ padding: '3px 6px', borderBottom: '1px solid var(--border)', fontWeight: 500 }}>Path</th>
+                  <th style={{ padding: '3px 6px', borderBottom: '1px solid var(--border)', fontWeight: 500, textAlign: 'right' }}>Size</th>
+                  <th style={{ padding: '3px 6px', borderBottom: '1px solid var(--border)', fontWeight: 500 }}>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {result.candidates.slice(0, 20).map((c, idx) => (
+                  <tr key={idx} style={{ borderBottom: '1px solid var(--border)' }}>
+                    <td style={{ padding: '3px 6px', color: 'var(--text)', maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={c.path}>
+                      {c.path}
+                    </td>
+                    <td style={{ padding: '3px 6px', color: 'var(--text)', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+                      {formatBytes(c.bytes)}
+                    </td>
+                    <td style={{ padding: '3px 6px', color: c.action === 'delete' ? 'var(--danger)' : 'var(--warning-accent)' }}>
+                      {c.action}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+
+          {result.candidates.length > 20 && (
+            <div className="text-xs" style={{ color: 'var(--text-muted)' }}>
+              ...and {result.candidates.length - 20} more candidates
+            </div>
+          )}
+
+          {result.executed && (
+            <div style={{ color: 'var(--success)', marginTop: 4 }}>
+              Removed: {result.executed.removed.length} files
+              {result.executed.failed.length > 0 && (
+                <span style={{ color: 'var(--danger)' }}>
+                  {' '}Failed: {result.executed.failed.length}
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      <ConfirmDialog
+        open={showConfirm}
+        title="Execute lifecycle policy?"
+        description={
+          <>
+            This will {result?.summary.actions ? Object.entries(result.summary.actions).map(([k, v]) => `${k} ${v} ${k === 'delete' ? 'files/directories' : 'items'}`).join(', ') : 'process'}{' '}
+            ({totalSize}). This action <strong>cannot be undone</strong>.
+          </>
+        }
+        confirmLabel="Execute policy"
+        danger
+        loading={policyMutation.isPending}
+        onCancel={() => setShowConfirm(false)}
+        onConfirm={() => {
+          setShowConfirm(false)
+          policyMutation.mutate(true)
+        }}
+      />
+    </section>
+  )
+}
+
+// ---- File Browser ----
+
 function FileBrowser() {
   const qc = useQueryClient()
-  const addToast = useToast((s) => s.addToast)
+  const { addToast } = useToast()
   const [dir, setDir] = useState<Directory>('imports')
   const [deleting, setDeleting] = useState<string | null>(null)
   const [fileToDelete, setFileToDelete] = useState<StorageFileItem | null>(null)
@@ -69,7 +329,7 @@ function FileBrowser() {
         ))}
       </div>
       {isLoading ? (
-        <div style={{ color: 'var(--text-muted)', fontSize: 12 }}>Loading…</div>
+        <div style={{ color: 'var(--text-muted)', fontSize: 12 }}>Loading...</div>
       ) : (data?.files ?? []).length === 0 ? (
         <div style={{ color: 'var(--text-muted)', fontSize: 12 }}>No files in {dir}.</div>
       ) : (
@@ -148,7 +408,7 @@ export default function StorageTab() {
   if (isLoading) {
     return (
       <div className="flex-1 flex items-center justify-center" style={{ color: 'var(--text-muted)' }}>
-        Loading storage info…
+        Loading storage info...
       </div>
     )
   }
@@ -306,6 +566,8 @@ export default function StorageTab() {
               </table>
             </section>
           )}
+
+          <LifecyclePolicy />
 
           <FileBrowser />
         </div>
