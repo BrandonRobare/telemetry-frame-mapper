@@ -101,6 +101,10 @@ class FlightLog(Base):
     filepath = Column(String)
     format = Column(String)
     point_count = Column(Integer, default=0)
+    log_version = Column(Integer)
+    aircraft_name = Column(String)
+    aircraft_sn = Column(String)
+    encrypted = Column(Boolean, default=False)
     uploaded_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     session = relationship("Session", back_populates="flight_logs")
     points = relationship(
@@ -118,6 +122,15 @@ class FlightLogPoint(Base):
     altitude_m = Column(Float)
     speed_ms = Column(Float)
     heading = Column(Float)
+    roll = Column(Float)
+    pitch = Column(Float)
+    yaw = Column(Float)
+    gimbal_pitch = Column(Float)
+    gimbal_roll = Column(Float)
+    gimbal_yaw = Column(Float)
+    battery_voltage = Column(Float)
+    battery_charge_pct = Column(Float)
+    battery_temperature_c = Column(Float)
     flight_log = relationship("FlightLog", back_populates="points")
 
 
