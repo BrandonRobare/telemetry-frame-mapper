@@ -1298,6 +1298,132 @@ def test_export_point_cloud_uses_nearest_gaussian_color(tmp_path):
     assert list(written["blue"]) == [30 * 257, 220 * 257]
 
 
+
+def test_export_point_cloud_transfers_semantic_labels_to_las_classification(tmp_path):
+    from unittest.mock import patch
+
+    import numpy as np
+
+    from backend.services.reconstruction import _export_point_cloud
+    from backend.services.semantic_labels import write_sidecar
+
+    colmap_dir = tmp_path / "colmap"
+    sparse = colmap_dir / "sparse" / "0"
+    sparse.mkdir(parents=True)
+    (sparse / "points3D.txt").write_text(
+        "1 0 0 0 1 2 3 0.5\n"
+        "2 10 0 0 4 5 6 0.5\n"
+        "3 20 0 0 7 8 9 0.5\n"
+    )
+
+    ply_path = tmp_path / "splat.ply"
+    ply_path.write_text(
+        "ply\n"
+        "format ascii 1.0\n"
+        "element vertex 3\n"
+        "property float x\n"
+        "property float y\n"
+        "property float z\n"
+        "property uchar red\n"
+        "property uchar green\n"
+        "property uchar blue\n"
+        "end_header\n"
+        "0.1 0 0 10 20 30\n"
+        "9.9 0 0 200 210 220\n"
+        "19.9 0 0 100 110 120\n"
+    )
+    write_sidecar(
+        tmp_path,
+        labels=np.array([0, 1, 4], dtype=np.uint8),
+        confidence=np.ones(3, dtype=np.float16),
+        labels_medium=np.array([0, 1, 4], dtype=np.uint8),
+        labels_preview=np.array([0, 1, 4], dtype=np.uint8),
+    )
+
+    written = {}
+
+    class FakeHeader:
+        def __init__(self, point_format, version):
+            self.point_format = point_format
+            self.version = version
+            self.scales = None
+            self.offsets = None
+
+        def add_crs(self, _crs):
+            pass
+
+    class FakeLasData:
+        def __init__(self, header):
+            self.header = header
+
+        def write(self, path):
+            written["classification"] = self.classification.copy()
+            Path(path).write_bytes(b"las")
+
+    fake_laspy = SimpleNamespace(LasHeader=FakeHeader, LasData=FakeLasData)
+
+    with patch.dict("sys.modules", {"laspy": fake_laspy}), \
+         patch("backend.services.reconstruction.get_config") as mock_cfg:
+        mock_cfg.return_value.exports_dir = str(tmp_path)
+        _export_point_cloud(colmap_dir, ply_path, tmp_path / "pointcloud.las")
+
+    assert list(written["classification"]) == [2, 5, 9]
+
+
+def test_export_point_cloud_without_semantic_sidecar_leaves_classification_unset(tmp_path):
+    from unittest.mock import patch
+
+    from backend.services.reconstruction import _export_point_cloud
+
+    colmap_dir = tmp_path / "colmap"
+    sparse = colmap_dir / "sparse" / "0"
+    sparse.mkdir(parents=True)
+    (sparse / "points3D.txt").write_text("1 0 0 0 1 2 3 0.5\n")
+
+    ply_path = tmp_path / "splat.ply"
+    ply_path.write_text(
+        "ply\n"
+        "format ascii 1.0\n"
+        "element vertex 1\n"
+        "property float x\n"
+        "property float y\n"
+        "property float z\n"
+        "property uchar red\n"
+        "property uchar green\n"
+        "property uchar blue\n"
+        "end_header\n"
+        "0 0 0 10 20 30\n"
+    )
+
+    written = {}
+
+    class FakeHeader:
+        def __init__(self, point_format, version):
+            self.point_format = point_format
+            self.version = version
+            self.scales = None
+            self.offsets = None
+
+        def add_crs(self, _crs):
+            pass
+
+    class FakeLasData:
+        def __init__(self, header):
+            self.header = header
+
+        def write(self, path):
+            written["has_classification"] = hasattr(self, "classification")
+            Path(path).write_bytes(b"las")
+
+    fake_laspy = SimpleNamespace(LasHeader=FakeHeader, LasData=FakeLasData)
+
+    with patch.dict("sys.modules", {"laspy": fake_laspy}), \
+         patch("backend.services.reconstruction.get_config") as mock_cfg:
+        mock_cfg.return_value.exports_dir = str(tmp_path)
+        _export_point_cloud(colmap_dir, ply_path, tmp_path / "pointcloud.las")
+
+    assert written["has_classification"] is False
+
 def test_safe_export_path_rejects_sibling_prefix(tmp_path):
     from backend.services.reconstruction import _safe_export_path
 

@@ -25,6 +25,7 @@ from backend.db.models import (
 )
 from backend.services import ply_io, splat_trainer
 from backend.services.camera_calibration import calibration_profile_for_images
+from backend.services.semantic_labels import read_sidecar
 from backend.services.splat_trainer import ReconstructionCancelled, TrainerConfig
 
 # Maps reconstruction_id → cancel Event
@@ -877,6 +878,23 @@ def _load_ply_positions_and_colors(ply_path: Path) -> tuple:
     return xyz, None
 
 
+def _nearest_gaussian_indices(points_xyz, gaussian_xyz):
+    """Return nearest Gaussian index for each point, chunked to bound memory use."""
+    import numpy as np
+
+    if len(gaussian_xyz) == 0:
+        return np.full(len(points_xyz), -1, dtype=np.int64)
+
+    indices = np.empty(len(points_xyz), dtype=np.int64)
+    chunk_size = 512
+    for start in range(0, len(points_xyz), chunk_size):
+        stop = min(start + chunk_size, len(points_xyz))
+        chunk = points_xyz[start:stop]
+        distances = ((chunk[:, None, :] - gaussian_xyz[None, :, :]) ** 2).sum(axis=2)
+        indices[start:stop] = np.argmin(distances, axis=1)
+    return indices
+
+
 def _nearest_gaussian_colors(points_xyz, gaussian_xyz, gaussian_rgb, fallback_rgb):
     """Color each COLMAP point from the nearest Gaussian, falling back to COLMAP RGB."""
     import numpy as np
@@ -884,15 +902,35 @@ def _nearest_gaussian_colors(points_xyz, gaussian_xyz, gaussian_rgb, fallback_rg
     if gaussian_rgb is None or len(gaussian_xyz) == 0:
         return fallback_rgb
 
-    colors = np.empty((len(points_xyz), 3), dtype=np.uint8)
-    chunk_size = 512
-    for start in range(0, len(points_xyz), chunk_size):
-        stop = min(start + chunk_size, len(points_xyz))
-        chunk = points_xyz[start:stop]
-        distances = ((chunk[:, None, :] - gaussian_xyz[None, :, :]) ** 2).sum(axis=2)
-        nearest = np.argmin(distances, axis=1)
-        colors[start:stop] = np.clip(gaussian_rgb[nearest], 0, 255).astype(np.uint8)
-    return colors
+    nearest = _nearest_gaussian_indices(points_xyz, gaussian_xyz)
+    return np.clip(gaussian_rgb[nearest], 0, 255).astype(np.uint8)
+
+
+def _semantic_labels_to_asprs(
+    points_xyz,
+    gaussian_xyz,
+    labels,
+):
+    """Transfer per-Gaussian project classes to ASPRS LAS classification codes."""
+    import numpy as np
+
+    mapping = np.array([2, 5, 6, 1, 9, 1], dtype=np.uint8)
+    classifications = np.zeros(len(points_xyz), dtype=np.uint8)
+    if len(gaussian_xyz) == 0 or len(labels) == 0:
+        return classifications
+
+    nearest = _nearest_gaussian_indices(points_xyz, gaussian_xyz)
+    valid = (nearest >= 0) & (nearest < len(labels))
+    source = np.asarray(labels, dtype=np.uint8)
+    mapped = np.zeros(len(points_xyz), dtype=np.uint8)
+    class_valid = valid & (source[nearest.clip(min=0)] < len(mapping))
+    mapped[class_valid] = mapping[source[nearest[class_valid]]]
+    classifications[valid] = mapped[valid]
+    return classifications
+
+
+def _semantic_sidecar_for_splat(splat_path: Path) -> Path:
+    return splat_path.parent / "semantic_labels.npz"
 
 
 def _utm_epsg(utm_zone: str) -> int | None:
@@ -984,6 +1022,16 @@ def _export_point_cloud(
     gaussian_xyz, gaussian_rgb = _load_ply_positions_and_colors(splat_path)
     colors = _nearest_gaussian_colors(points_xyz, gaussian_xyz, gaussian_rgb, colmap_rgb)
 
+    classifications = None
+    semantic_sidecar = _semantic_sidecar_for_splat(splat_path)
+    if semantic_sidecar.exists():
+        sidecar = read_sidecar(semantic_sidecar)
+        classifications = _semantic_labels_to_asprs(
+            points_xyz,
+            gaussian_xyz,
+            sidecar["labels"],
+        )
+
     geo = _extract_geo_transform(colmap_dir)
     output_xyz = _world_points_to_utm(points_xyz, geo)
 
@@ -1001,6 +1049,8 @@ def _export_point_cloud(
     las.red = colors[:, 0].astype(np.uint16) * 257
     las.green = colors[:, 1].astype(np.uint16) * 257
     las.blue = colors[:, 2].astype(np.uint16) * 257
+    if classifications is not None:
+        las.classification = classifications
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
