@@ -38,6 +38,15 @@ from ..services.reconstruction import (
     wait_for_reconstruction_status_change,
 )
 from ..services.splat_cleanup import cleanup_ply_file
+from ..services.splat_transform import (
+    cleanup_splat as _splat_transform_cleanup,
+)
+from ..services.splat_transform import (
+    compress_splat as _splat_transform_compress,
+)
+from ..services.splat_transform import (
+    splat_transform_available as _splat_transform_probe,
+)
 
 router = APIRouter(prefix="/reconstruction", tags=["reconstruction"])
 logger = logging.getLogger(__name__)
@@ -539,14 +548,19 @@ def download_splat(
 
 
 @router.get("/{reconstruction_id}/pointcloud")
-def download_pointcloud(reconstruction_id: int, db: DBSession = Depends(get_db)):
+def download_pointcloud(
+    reconstruction_id: int,
+    format: str = Query("las", pattern="^(las|laz)$"),
+    db: DBSession = Depends(get_db),
+):
     rec = db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).first()
     if not rec:
         raise HTTPException(status_code=404, detail="Reconstruction not found")
     if rec.status != "complete":
         raise HTTPException(status_code=202, detail="Reconstruction still in progress")
 
-    canonical = _reconstruction_artifact_path(rec.id, "pointcloud.las")
+    ext = "laz" if format == "laz" else "las"
+    canonical = _reconstruction_artifact_path(rec.id, f"pointcloud.{ext}")
 
     if not canonical.exists():
         if not rec.colmap_dir:
@@ -554,18 +568,28 @@ def download_pointcloud(reconstruction_id: int, db: DBSession = Depends(get_db))
         if not rec.splat_path or not Path(rec.splat_path).exists():
             raise HTTPException(status_code=404, detail="Splat file not found on disk")
         try:
-            _export_point_cloud(Path(rec.colmap_dir), Path(rec.splat_path), canonical)
+            _export_point_cloud(
+                Path(rec.colmap_dir),
+                Path(rec.splat_path),
+                canonical,
+                laz_backend=(format == "laz"),
+            )
         except Exception as exc:
             raise HTTPException(
                 status_code=422, detail=f"Failed to export point cloud: {exc}"
             ) from exc
-        rec.pointcloud_path = str(canonical)
+        # Cache the pointcloud path: track both so the reconstruct-out model
+        # can surface which formats are available.
+        if ext == "las":
+            rec.pointcloud_path = str(canonical)
         db.commit()
 
+    media_type = "application/vnd.las" if ext == "las" else "application/octet-stream"
+    filename = f"pointcloud_{reconstruction_id}.{ext}"
     return FileResponse(
         canonical,
-        media_type="application/vnd.las",
-        filename=f"pointcloud_{reconstruction_id}.las",
+        media_type=media_type,
+        filename=filename,
     )
 
 
@@ -913,3 +937,127 @@ def validate_checkpoints(
         )
 
     return result
+
+
+# ---------------------------------------------------------------------------
+# Splat transform: cleanup + compression (Node/npx gated)
+# ---------------------------------------------------------------------------
+
+class SplatTransformCleanupIn(BaseModel):
+    opacity_floor: float | None = Field(default=0.01, ge=0.0, le=1.0)
+    sh_bands: int | None = Field(default=0, ge=0, le=3)
+    decimate: float | None = Field(default=None, gt=0.0, le=1.0)
+    morton: bool = True
+
+
+class SplatTransformCleanupOut(BaseModel):
+    cleaned_path: str
+    returncode: int
+    stdout: str
+    stderr: str
+
+
+@router.post(
+    "/{reconstruction_id}/splat-transform-cleanup",
+    response_model=SplatTransformCleanupOut,
+    status_code=201,
+)
+def splat_transform_cleanup(
+    reconstruction_id: int,
+    body: SplatTransformCleanupIn | None = None,
+    db: DBSession = Depends(get_db),
+):
+    rec = db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Reconstruction not found")
+    if rec.status != "complete":
+        raise HTTPException(
+            status_code=422,
+            detail="Reconstruction must be complete before cleanup",
+        )
+    if not rec.splat_path:
+        raise HTTPException(status_code=404, detail="No splat file available")
+    src = Path(rec.splat_path)
+    if not src.exists():
+        raise HTTPException(status_code=404, detail=f"Splat file not found on disk: {src}")
+
+    options = body.model_dump(exclude_none=False) if body else {}
+    dst = _reconstruction_artifact_path(rec.id, "splat_transform_cleaned.ply")
+
+    try:
+        result = _splat_transform_cleanup(
+            src,
+            dst,
+            opacity_floor=options.get("opacity_floor"),
+            sh_bands=options.get("sh_bands"),
+            decimate=options.get("decimate"),
+            morton=options.get("morton", True),
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    return SplatTransformCleanupOut(
+        cleaned_path=str(dst),
+        returncode=result.returncode,
+        stdout=result.stdout[:5000],
+        stderr=result.stderr[:5000],
+    )
+
+
+class SplatTransformCompressIn(BaseModel):
+    format: str = Field("spz", pattern="^(spz|sog)$")
+    quality: int | None = Field(default=None, ge=1, le=100)
+
+
+class SplatTransformCompressOut(BaseModel):
+    compressed_path: str
+    returncode: int
+    stdout: str
+    stderr: str
+
+
+@router.post(
+    "/{reconstruction_id}/splat-transform-compress",
+    response_model=SplatTransformCompressOut,
+    status_code=201,
+)
+def splat_transform_compress(
+    reconstruction_id: int,
+    body: SplatTransformCompressIn | None = None,
+    db: DBSession = Depends(get_db),
+):
+    rec = db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Reconstruction not found")
+    if rec.status != "complete":
+        raise HTTPException(
+            status_code=422,
+            detail="Reconstruction must be complete before compression",
+        )
+    if not rec.splat_path:
+        raise HTTPException(status_code=404, detail="No splat file available")
+    src = Path(rec.splat_path)
+    if not src.exists():
+        raise HTTPException(status_code=404, detail=f"Splat file not found on disk: {src}")
+
+    fmt = body.format if body else "spz"
+    quality = body.quality if body else None
+    ext = fmt if fmt == "spz" else "sog"
+    dst = _reconstruction_artifact_path(rec.id, f"splat_compressed.{ext}")
+
+    try:
+        result = _splat_transform_compress(src, dst, format=fmt, quality=quality)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    return SplatTransformCompressOut(
+        compressed_path=str(dst),
+        returncode=result.returncode,
+        stdout=result.stdout[:5000],
+        stderr=result.stderr[:5000],
+    )
+
+
+@router.get("/splat-transform-available")
+def splat_transform_status():
+    return _splat_transform_probe()
