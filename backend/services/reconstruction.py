@@ -212,11 +212,26 @@ def _pick_best_submodel(sparse_dir: Path) -> Path:
     return candidates[0]
 
 
-def _run_colmap(colmap_dir: Path, progress_cb, cancel: threading.Event) -> int | None:
+def _run_colmap(
+    colmap_dir: Path,
+    progress_cb,
+    cancel: threading.Event,
+    *,
+    images_have_gps: bool = False,
+    image_count: int = 0,
+) -> int | None:
     """Run COLMAP feature_extractor → matcher → mapper pipeline.
 
     Returns the number of registered images, or None if cancelled before completion.
+
+    When COLMAP 4.x capabilities are detected and the session has GPS data
+    with at least ``spatial_matcher_min_images`` images, the spatial_matcher
+    is used instead of the configured matcher (O(N·k) vs O(N²)).  The
+    ``mapper`` config key selects the mapper backend: ``incremental`` (default)
+    or ``global`` (GLOMAP, gated on capability).
     """
+    from backend.services.colmap_capabilities import get_capabilities as _colmap_cap
+
     db_path = str(colmap_dir / "database.db")
     image_path = str(colmap_dir / "images")
     output_path = str(colmap_dir / "sparse")
@@ -225,10 +240,50 @@ def _run_colmap(colmap_dir: Path, progress_cb, cancel: threading.Event) -> int |
 
     camera_model = cfg.get("camera_model", "PINHOLE")
     matcher_key = cfg.get("matcher", "exhaustive")
-    colmap_matcher, guided_matching = _colmap_matcher_command(matcher_key)
+    mapper_key = cfg.get("mapper", "incremental")
+    spatial_min = int(cfg.get("spatial_matcher_min_images", 150))
+
+    # Resolve feature flags from capability probe
+    colmap_info = _colmap_cap()
+    features: dict = colmap_info.get("features", {})  # type: ignore[assignment]
+
+    # GPS-primed spatial_matcher selection
+    if (
+        images_have_gps
+        and image_count >= spatial_min
+        and features.get("spatial_matcher")
+    ):
+        colmap_matcher = "spatial_matcher"
+        guided_matching = False
+    else:
+        colmap_matcher, guided_matching = _colmap_matcher_command(matcher_key)
+
     matcher_cmd = ["colmap", colmap_matcher, "--database_path", db_path]
     if guided_matching:
         matcher_cmd.append("--SiftMatching.guided_matching=1")
+
+    # Spatial matcher tuning: sane defaults for drone lawnmower surveys
+    if colmap_matcher == "spatial_matcher":
+        matcher_cmd += [
+            "--SpatialMatching.is_gps", "1",
+            "--SpatialMatching.ignore_z", "1",
+            "--SpatialMatching.max_num_neighbors", "50",
+            "--SpatialMatching.max_distance", "100",
+        ]
+
+    # Mapper selection: global vs incremental
+    if mapper_key == "global" and features.get("global_mapper"):
+        mapper_subcommand = "global_mapper"
+    else:
+        mapper_subcommand = "mapper"
+
+    mapper_cmd = [
+        "colmap", mapper_subcommand,
+        "--database_path", db_path,
+        "--image_path", image_path,
+        "--output_path", output_path,
+        f"--Mapper.num_threads={cfg['colmap_threads']}",
+    ]
 
     steps = [
         (
@@ -242,15 +297,7 @@ def _run_colmap(colmap_dir: Path, progress_cb, cancel: threading.Event) -> int |
             8.0,
         ),
         (matcher_cmd, "feature matching", 20.0),
-        (
-            ["colmap", "mapper",
-             "--database_path", db_path,
-             "--image_path", image_path,
-             "--output_path", output_path,
-             f"--Mapper.num_threads={cfg['colmap_threads']}"],
-            "bundle adjustment",
-            38.0,
-        ),
+        (mapper_cmd, "bundle adjustment", 38.0),
         (
             ["colmap", "model_converter",
              "--input_path", str(colmap_dir / "sparse"),
@@ -871,8 +918,59 @@ def _world_points_to_utm(points_xyz, geo: dict):
     return transformed
 
 
-def _export_point_cloud(colmap_dir: Path, splat_path: Path, output_path: Path) -> Path:
-    """Export COLMAP sparse points as a colored LAS 1.4 point cloud."""
+def _write_las_laz(las, output_path: Path) -> None:
+    """Write *las* as a LAZ-compressed file via lazrs or laszip backend.
+
+    Raises RuntimeError if no LAZ backend is available.
+    """
+    import sys
+
+    import laspy
+
+    lazrs_spec = None
+    laszip_spec = None
+    if "laspy" in sys.modules:
+        lazrs_spec = getattr(sys.modules["laspy"], "LazrsBackend", None)
+        laszip_spec = getattr(sys.modules["laspy"], "LaszipBackend", None)
+
+    # laspy >= 2.5 exposes compressed backends via laspy.LazrsBackend
+    for backend_cls in (lazrs_spec, laszip_spec):
+        if backend_cls is not None:
+            try:
+                las.write(str(output_path), do_compress=backend_cls)
+                return
+            except Exception:
+                continue
+
+    # Fallback: try the older laspy.CompressedWriter style
+    try:
+        writer = laspy.CompressedWriter(str(output_path), "laz", las.header)
+        writer.write_points(las.points)
+        writer.close()
+        return
+    except (AttributeError, TypeError):
+        pass
+
+    raise RuntimeError(
+        "No LAZ backend available. Install laspy[lazrs] or laspy[laszip] "
+        "to enable compressed point-cloud export."
+    )
+
+
+def _export_point_cloud(
+    colmap_dir: Path,
+    splat_path: Path,
+    output_path: Path,
+    *,
+    laz_backend: bool = False,
+) -> Path:
+    """Export COLMAP sparse points as a colored LAS 1.4 / LAZ point cloud.
+
+    When *laz_backend* is True and a LAZ-compatible backend (lazrs or laszip)
+    is available, the output is written as a compressed LAZ file.  Falls back
+    to standard LAS 1.4 when the backend is unavailable or *laz_backend* is
+    False (the default).
+    """
     import laspy
     import numpy as np
     from pyproj import CRS
@@ -905,7 +1003,11 @@ def _export_point_cloud(colmap_dir: Path, splat_path: Path, output_path: Path) -
     las.blue = colors[:, 2].astype(np.uint16) * 257
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    las.write(output_path)
+
+    if laz_backend:
+        _write_las_laz(las, output_path)
+    else:
+        las.write(output_path)
     return output_path
 
 
@@ -1629,7 +1731,18 @@ def _run_pipeline(
         def progress_cb(step: str, pct: float) -> None:
             _update_rec(db, reconstruction_id, step=step, progress_pct=pct)
 
-        frames_registered = _run_colmap(colmap_dir, progress_cb, cancel)
+        # Determine GPS presence + image count for spatial_matcher selection
+        gps_images = [
+            img for img in images
+            if img.latitude is not None and img.longitude is not None
+        ]
+        frames_registered = _run_colmap(
+            colmap_dir,
+            progress_cb,
+            cancel,
+            images_have_gps=len(gps_images) == len(images) and len(images) > 0,
+            image_count=len(images),
+        )
         _log_rec(reconstruction_id, "COLMAP: complete")
         _store_reprojection_errors(db, reconstruction_id, colmap_dir)
 

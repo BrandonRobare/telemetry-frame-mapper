@@ -827,7 +827,7 @@ def test_run_pipeline_cancel_after_colmap_marks_cancelled(setup_test_db):
         rec, img, colmap_dir = _pipeline_fixture(db, tmp)
         cancel = threading.Event()
 
-        def colmap_then_cancel(*_args):
+        def colmap_then_cancel(*_args, **_kwargs):
             cancel.set()
             return 1
 
