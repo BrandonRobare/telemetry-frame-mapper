@@ -14,7 +14,12 @@ import type {
   CoverageGapCell,
   Annotation,
   FlythroughStatus,
+  SemanticStatus,
+  SemanticSummary,
+  SystemResources,
+  SemanticClassName,
 } from '../../types/api'
+import { SEMANTIC_CLASS_COLORS } from '../../types/api'
 import { deriveGroundPlaneY, gpsToWorld, worldToGps, useRayCast } from './useViewerCoords'
 import { smoothstep } from './smoothstep'
 import { cleanupFlythroughRecording } from './flythroughRecording'
@@ -28,6 +33,18 @@ import VolumePanel from './VolumePanel'
 const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
 
 const ACTIVE_STATUSES: string[] = ['pending', 'running_colmap', 'running_gsplat']
+const SEMANTIC_CLASS_NAMES: SemanticClassName[] = ['ground', 'vegetation', 'structure', 'vehicle', 'water', 'other']
+
+interface SemanticOverlayPoint {
+  x: number
+  y: number
+  z: number
+  label: number
+}
+
+interface SemanticOverlay {
+  points: SemanticOverlayPoint[]
+}
 
 type ActiveTool = 'none' | 'annotate' | 'measure-dist' | 'measure-area' | 'measure-profile' | 'measure-volume'
 
@@ -84,6 +101,67 @@ function useCoverageGaps(reconstructionId: number | null, isComplete: boolean) {
     queryFn: () => get<CoverageGapCell[]>(`/reconstruction/${reconstructionId!}/coverage-gaps`),
     enabled: reconstructionId !== null && isComplete,
     staleTime: Infinity,
+    retry: false,
+  })
+}
+
+
+function parseSemanticOverlay(buffer: ArrayBuffer): SemanticOverlay {
+  const view = new DataView(buffer)
+  const count = view.getUint32(0, true)
+  const xyzOffset = 4
+  const labelOffset = xyzOffset + count * 3 * 4
+  const points: SemanticOverlayPoint[] = []
+  for (let i = 0; i < count; i += 1) {
+    const base = xyzOffset + i * 12
+    points.push({
+      x: view.getFloat32(base, true),
+      y: view.getFloat32(base + 4, true),
+      z: view.getFloat32(base + 8, true),
+      label: view.getUint8(labelOffset + i),
+    })
+  }
+  return { points }
+}
+
+function useSystemResources() {
+  return useQuery<SystemResources>({
+    queryKey: ['system-resources'],
+    queryFn: () => get<SystemResources>('/system/resources'),
+    staleTime: 30_000,
+  })
+}
+
+function useSemanticStatus(reconstructionId: number | null) {
+  return useQuery<SemanticStatus>({
+    queryKey: ['semantic-status', reconstructionId],
+    queryFn: () => get<SemanticStatus>(`/reconstruction/${reconstructionId!}/semantic-labels/status`),
+    enabled: reconstructionId !== null,
+    refetchInterval: (query) => {
+      const status = query.state.data?.semantic_status
+      return status === 'pending' || status === 'running' ? 2000 : false
+    },
+  })
+}
+
+function useSemanticSummary(reconstructionId: number | null, enabled: boolean) {
+  return useQuery<SemanticSummary>({
+    queryKey: ['semantic-summary', reconstructionId, 'preview'],
+    queryFn: () => get<SemanticSummary>(`/reconstruction/${reconstructionId!}/semantic-labels?lod=preview`),
+    enabled: reconstructionId !== null && enabled,
+    retry: false,
+  })
+}
+
+function useSemanticOverlay(reconstructionId: number | null, enabled: boolean) {
+  return useQuery<SemanticOverlay>({
+    queryKey: ['semantic-overlay', reconstructionId, 'preview'],
+    queryFn: async () => {
+      const res = await fetch(`${BASE_URL}/reconstruction/${reconstructionId!}/semantic-labels/overlay?lod=preview`)
+      if (!res.ok) throw new Error(`Semantic overlay fetch failed: ${res.status}`)
+      return parseSemanticOverlay(await res.arrayBuffer())
+    },
+    enabled: reconstructionId !== null && enabled,
     retry: false,
   })
 }
@@ -611,6 +689,9 @@ interface SplatCanvasProps {
   reconstructionId: number
   coverageGaps: CoverageGapCell[] | null
   showCoverageGaps: boolean
+  semanticOverlay: SemanticOverlay | null
+  visibleSemanticClasses: Set<number>
+  showSemanticOverlay: boolean
   activeTool: ActiveTool
   geoTransform: GeoTransform | undefined
   annotations: Annotation[]
@@ -625,6 +706,9 @@ function SplatCanvas({
   reconstructionId,
   coverageGaps,
   showCoverageGaps,
+  semanticOverlay,
+  visibleSemanticClasses,
+  showSemanticOverlay,
   activeTool,
   geoTransform,
   annotations,
@@ -638,6 +722,8 @@ function SplatCanvas({
   const viewerRef = useRef<unknown>(null)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const gapGroupRef = useRef<any>(null)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const semanticGroupRef = useRef<any>(null)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const annotationGroupRef = useRef<any>(null)
   const recorderRef = useRef<MediaRecorder | null>(null)
@@ -978,6 +1064,64 @@ function SplatCanvas({
     }
   }, [coverageGaps, showCoverageGaps, viewerReady])
 
+
+  // Semantic overlay point groups
+  useEffect(() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const viewer = viewerRef.current as any
+    if (!viewer?.scene) return
+    const scene = viewer.scene
+    if (semanticGroupRef.current) {
+      scene.remove(semanticGroupRef.current)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      semanticGroupRef.current.traverse((obj: any) => {
+        if (obj.isPoints) { obj.geometry.dispose(); obj.material.dispose() }
+      })
+      semanticGroupRef.current = null
+    }
+    if (!semanticOverlay || !showSemanticOverlay || semanticOverlay.points.length === 0) return
+    let cancelled = false
+    import('three').then((THREE) => {
+      if (cancelled) return
+      const group = new THREE.Group()
+      for (const [classIndex, className] of SEMANTIC_CLASS_NAMES.entries()) {
+        if (!visibleSemanticClasses.has(classIndex)) continue
+        const points = semanticOverlay.points.filter((pt) => pt.label === classIndex)
+        if (points.length === 0) continue
+        const positions = new Float32Array(points.length * 3)
+        points.forEach((pt, idx) => {
+          positions[idx * 3] = pt.x
+          positions[idx * 3 + 1] = pt.y
+          positions[idx * 3 + 2] = pt.z
+        })
+        const geo = new THREE.BufferGeometry()
+        geo.setAttribute('position', new THREE.BufferAttribute(positions, 3))
+        const mat = new THREE.PointsMaterial({
+          color: SEMANTIC_CLASS_COLORS[className],
+          size: 0.05,
+          transparent: true,
+          opacity: 0.88,
+          depthWrite: false,
+        })
+        const cloud = new THREE.Points(geo, mat)
+        group.add(cloud)
+      }
+      scene.add(group)
+      semanticGroupRef.current = group
+    })
+    return () => {
+      cancelled = true
+      if (semanticGroupRef.current) {
+        scene.remove(semanticGroupRef.current)
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        semanticGroupRef.current.traverse((obj: any) => {
+          if (obj.isPoints) { obj.geometry.dispose(); obj.material.dispose() }
+        })
+        semanticGroupRef.current = null
+      }
+    }
+  }, [semanticOverlay, showSemanticOverlay, visibleSemanticClasses, viewerReady])
+
   // Annotation sprites
   useEffect(() => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1260,6 +1404,10 @@ export default function SplatViewerTab() {
   const { data: allJobs, isLoading } = useAllJobsForSession(selectedSessionId)
   const [selectedJobId, setSelectedJobId] = useState<number | null>(null)
   const [showCoverageGaps, setShowCoverageGaps] = useState(false)
+  const [showSemanticOverlay, setShowSemanticOverlay] = useState(false)
+  const [visibleSemanticClasses, setVisibleSemanticClasses] = useState<Set<number>>(
+    () => new Set([0, 1, 2, 3, 4, 5]),
+  )
   const [activeTool, setActiveTool] = useState<ActiveTool>('none')
   const [measurePoints, setMeasurePoints] = useState<MeasurePoint[]>([])
   const [measureMode, setMeasureMode] = useState<'measure-dist' | 'measure-area' | 'measure-profile' | 'measure-volume' | null>(null)
@@ -1278,6 +1426,19 @@ export default function SplatViewerTab() {
     selectedJobComplete ?? false,
   )
   const { data: annotations = [] } = useAnnotations(activeId)
+  const { data: systemResources } = useSystemResources()
+  const { data: semanticStatus } = useSemanticStatus(activeId)
+  const { data: semanticSummary } = useSemanticSummary(activeId, showSemanticOverlay)
+  const { data: semanticOverlay } = useSemanticOverlay(activeId, showSemanticOverlay)
+  const queryClient = useQueryClient()
+  const semanticWorkflow = systemResources?.workflows.find((workflow) => workflow.key === 'semantic_labeling')
+  const semanticAvailable = semanticWorkflow?.available ?? false
+  const semanticMutation = useMutation({
+    mutationFn: () => post<SemanticStatus>(`/reconstruction/${activeId!}/semantic-labels`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['semantic-status', activeId] })
+    },
+  })
 
   const geoAvailable = !!geoTransform && geoTransform.utm_zone !== 'unknown'
 
@@ -1303,6 +1464,8 @@ export default function SplatViewerTab() {
       setMeasureMode(null)
       setProfileSamples([])
       setVolumeResult(null)
+      setShowSemanticOverlay(false)
+      setVisibleSemanticClasses(new Set([0, 1, 2, 3, 4, 5]))
     })
   }, [activeId])
 
@@ -1531,6 +1694,63 @@ export default function SplatViewerTab() {
           </div>
         )}
 
+        {activeId !== null && selectedJobComplete && reconstructionDetails?.splat_path && (
+          <div style={{ marginTop: 8 }}>
+            <button
+              onClick={() => {
+                if (semanticStatus?.semantic_status === 'complete') {
+                  setShowSemanticOverlay((v) => !v)
+                } else {
+                  semanticMutation.mutate()
+                }
+              }}
+              disabled={!semanticAvailable || semanticMutation.isPending || semanticStatus?.semantic_status === 'pending' || semanticStatus?.semantic_status === 'running'}
+              title={semanticAvailable ? 'Compute or show semantic labels' : `Semantic labeling unavailable: ${(semanticWorkflow?.missing ?? []).join(', ')}`}
+              style={{
+                width: '100%', padding: '4px 8px', borderRadius: 'var(--radius-sm)',
+                border: showSemanticOverlay ? '1px solid var(--accent)' : '1px solid var(--border)',
+                background: showSemanticOverlay ? 'var(--accent-soft)' : 'var(--surface-2)',
+                color: showSemanticOverlay ? 'var(--accent-strong)' : 'var(--text-muted)',
+                cursor: semanticAvailable ? 'pointer' : 'not-allowed', fontFamily: 'inherit', fontSize: 11,
+                textAlign: 'left', opacity: semanticAvailable ? 1 : 0.55,
+              }}
+            >
+              {semanticStatus?.semantic_status === 'pending' || semanticStatus?.semantic_status === 'running'
+                ? '⟳ Semantic labels…'
+                : semanticStatus?.semantic_status === 'complete'
+                  ? showSemanticOverlay ? '◉ Semantic Labels' : '○ Semantic Labels'
+                  : 'Compute semantic labels'}
+            </button>
+            {semanticStatus?.semantic_error && (
+              <p style={{ color: 'var(--danger)', fontSize: 9, margin: '4px 0 0' }}>{semanticStatus.semantic_error}</p>
+            )}
+            {showSemanticOverlay && semanticSummary && (
+              <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 4 }}>
+                {SEMANTIC_CLASS_NAMES.map((name, idx) => (
+                  <button
+                    key={name}
+                    onClick={() => setVisibleSemanticClasses((prev) => {
+                      const next = new Set(prev)
+                      if (next.has(idx)) next.delete(idx); else next.add(idx)
+                      return next
+                    })}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 3, fontSize: 9,
+                      border: '1px solid var(--border)', borderRadius: 2, padding: '2px 4px',
+                      background: visibleSemanticClasses.has(idx) ? 'var(--surface-2)' : 'transparent',
+                      color: 'var(--text-muted)', cursor: 'pointer', fontFamily: 'inherit',
+                    }}
+                  >
+                    <span style={{ width: 7, height: 7, background: SEMANTIC_CLASS_COLORS[name], display: 'inline-block' }} />
+                    {name} {semanticSummary.class_counts[name] ?? 0}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+
         {activeId !== null && (
           <AnnotationsList reconstructionId={activeId} annotations={annotations} />
         )}
@@ -1556,6 +1776,9 @@ export default function SplatViewerTab() {
               reconstructionId={activeId}
               coverageGaps={coverageGaps ?? null}
               showCoverageGaps={showCoverageGaps}
+              semanticOverlay={semanticOverlay ?? null}
+              visibleSemanticClasses={visibleSemanticClasses}
+              showSemanticOverlay={showSemanticOverlay}
               activeTool={activeTool}
               geoTransform={geoTransform}
               annotations={annotations}
