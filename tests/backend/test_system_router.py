@@ -47,6 +47,7 @@ def test_system_resources_reports_tools_unavailable(client):
         "torch",
         "gsplat",
         "sugar",
+        "transformers",
     }
     assert body["workflows"][0]["available"] is False
 
