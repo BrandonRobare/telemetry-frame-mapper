@@ -489,7 +489,8 @@ def test_download_pointcloud_computes_on_first_call(client, tmp_path):
     db.commit()
     db.refresh(rec)
 
-    def fake_export(_colmap_dir, _splat_path, output_path):
+    def fake_export(_colmap_dir, _splat_path, output_path, *, laz_backend=False):
+        assert laz_backend is False
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_bytes(b"generated las")
         return output_path
@@ -1299,3 +1300,55 @@ def test_cleanup_target_area_not_found(client, tmp_path):
 
     assert resp.status_code == 404
     assert "target area" in resp.json()["detail"].lower()
+
+
+def test_download_pointcloud_laz_format_requested(client, tmp_path):
+    """GET /reconstruction/{id}/pointcloud?format=laz returns .laz content type."""
+    from unittest.mock import patch
+
+    db = _get_db(client)
+    s = _make_session_with_images(db)
+    colmap_dir = tmp_path / "colmap"
+    colmap_dir.mkdir()
+    splat_file = tmp_path / "splat.ply"
+    splat_file.write_bytes(b"ply data")
+
+    rec = Reconstruction(
+        session_id=s.id, preset="quick", status="complete",
+        progress_pct=100.0, frames_used=3,
+        colmap_dir=str(colmap_dir), splat_path=str(splat_file),
+    )
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+
+    def fake_export(_colmap_dir, _splat_path, output_path, *, laz_backend=False):
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_bytes(b"compressed laz data")
+        return output_path
+
+    with patch("backend.routers.reconstruction.get_config") as mock_cfg, \
+         patch("backend.routers.reconstruction._export_point_cloud", side_effect=fake_export):
+        mock_cfg.return_value.exports_dir = str(tmp_path)
+        resp = client.get(f"/reconstruction/{rec.id}/pointcloud?format=laz")
+
+    assert resp.status_code == 200
+    assert resp.content == b"compressed laz data"
+    assert "pointcloud_" in resp.headers["content-disposition"]
+    assert ".laz" in resp.headers["content-disposition"]
+
+
+def test_download_pointcloud_format_validation(client):
+    """Query parameter format must be 'las' or 'laz'."""
+    db = _get_db(client)
+    s = _make_session_with_images(db)
+    rec = Reconstruction(
+        session_id=s.id, preset="quick", status="complete",
+        progress_pct=100.0, frames_used=3,
+    )
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+
+    resp = client.get(f"/reconstruction/{rec.id}/pointcloud?format=xyz")
+    assert resp.status_code == 422  # FastAPI query validation

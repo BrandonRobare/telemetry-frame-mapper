@@ -290,6 +290,22 @@ def get_resources():
     binaries = {check.key: _binary_status(check) for check in BINARY_CHECKS}
     python_deps = _python_dependency_statuses()
 
+    colmap_probe: dict[str, object] = {}
+    try:
+        from backend.services.colmap_capabilities import get_capabilities as _colmap_cap
+
+        colmap_probe = _colmap_cap()
+    except Exception:  # pragma: no cover
+        colmap_probe = {}
+
+    splat_transform_probe: dict[str, object] = {}
+    try:
+        from backend.services.splat_transform import splat_transform_available as _st_probe
+
+        splat_transform_probe = _st_probe()
+    except Exception:  # pragma: no cover
+        splat_transform_probe = {}
+
     return {
         "cpu_pct": cpu_pct,
         "ram_used_gb": round(mem.used / 1024**3, 2),
@@ -305,6 +321,8 @@ def get_resources():
         "tools": [*binaries.values(), *python_deps.values()],
         "workflows": _workflow_statuses(binaries, python_deps, gpu),
         "colmap_available": binaries["colmap"]["available"],
+        "colmap_capabilities": colmap_probe,
+        "splat_transform_available": bool(splat_transform_probe.get("available")),
         # Spec lookup only — importing gsplat can trigger a multi-minute CUDA JIT compile.
         "gsplat_available": python_deps["gsplat"]["available"],
     }
