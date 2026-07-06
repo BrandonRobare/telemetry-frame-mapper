@@ -31,6 +31,7 @@ from .routers import reconstruction as reconstruction_router
 from .routers import session_log as session_log_router
 from .routers import sessions as sessions_router
 from .routers import settings as settings_router
+from .routers import share_links as share_links_router
 from .routers import srt as srt_router
 from .routers import storage as storage_router
 from .routers import system as system_router
@@ -78,6 +79,7 @@ app.include_router(jobs_router.router)
 app.include_router(storage_router.router)
 app.include_router(settings_router.router)
 app.include_router(uploads_router.router)
+app.include_router(share_links_router.router)
 
 app.add_middleware(
     CORSMiddleware,
