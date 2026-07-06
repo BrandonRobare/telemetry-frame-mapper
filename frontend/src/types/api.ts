@@ -237,6 +237,13 @@ export interface WorkflowStatus {
   missing: string[]
 }
 
+export interface OrthoStatus {
+  id: number
+  ortho_status: "pending" | "running" | "complete" | "failed" | null
+  ortho_error: string | null
+  ortho_path: string | null
+}
+
 export interface GeoTransform {
   scale: number
   rotation: [[number, number, number], [number, number, number], [number, number, number]]
