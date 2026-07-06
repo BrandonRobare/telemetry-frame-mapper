@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres to [Semantic Versioning](https://semver.org/).
 
+
+## [1.2.0] — Unreleased
+
+### Added
+- Semantic-label sidecars can drive LAS ASPRS classifications: ground -> 2, vegetation -> 5, structure -> 6, water -> 9, vehicle/other -> 1, and unlabeled -> 0.
+- GPU semantic-labeling smoke documentation now includes an expected-depth (`render_mode="ED"`) gsplat micro-check and manual quick-preset labeling path.
+- User manual documents semantic-label quality expectations and the ADE20K aerial-domain gap.
+
 ## [1.0.0] — 2026-06-14
 
 First stable release: a complete drone video → gaussian-splat pipeline. The headline of the 1.0 cycle was replacing a non-functional gsplat hook with a real in-process trainer, validated end-to-end on GPU hardware (PSNR 27.5 / SSIM 0.79 on a full-preset run).
