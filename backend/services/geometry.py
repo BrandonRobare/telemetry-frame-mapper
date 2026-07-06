@@ -17,6 +17,7 @@ def compute_footprint(
     yaw_deg: float | None,
     target_crs: str,
     gimbal_pitch: float | None = None,
+    ground_elevation_m: float = 0.0,
 ) -> dict:
     """Compute ground footprint polygon for an aerial photo.
 
@@ -29,6 +30,13 @@ def compute_footprint(
     Returns dict with geom_wkt (UTM), geom_geojson (WGS84), ground dimensions,
     heading_estimated flag, and a boolean `pitch_oblique` (True when the
     computed footprint assumes a non-nadir, approximate projection).
+
+    *ground_elevation_m* is the terrain elevation at (lat, lon) in metres
+    above sea level (MSL).  When provided, the effective altitude used for
+    footprint math is ``altitude_m - ground_elevation_m`` (above ground level).
+    If the result is ≤ 0 (rare — e.g. negative MSL valley or bad sensor data),
+    the footprint dimension blows up; we clamp to 1 m AGL in that case and
+    flag the result.
     """
 
     # ---- helpers -----------------------------------------------------------
@@ -36,6 +44,11 @@ def compute_footprint(
     to_wgs = Transformer.from_crs(target_crs, "EPSG:4326", always_xy=True)
 
     cx, cy = to_utm.transform(lon, lat)
+
+    # Effective AGL altitude for footprint dimensions
+    agl_m = altitude_m - ground_elevation_m
+    if agl_m <= 0.0:
+        agl_m = 1.0  # clamp to avoid degenerate footprint
 
     # Pitch: -90 => straight down.  We treat abs(pitch + 90) <= 2 as nadir.
     is_oblique = (
@@ -45,8 +58,8 @@ def compute_footprint(
     if is_oblique:
         # Convert to radians from vertical: 0 = nadir, positive = forward tilt
         tilt_rad = math.radians(90 + gimbal_pitch)
-        slant = altitude_m / max(math.cos(tilt_rad), 0.001)
-        ground_offset = altitude_m * math.tan(tilt_rad)
+        slant = agl_m / max(math.cos(tilt_rad), 0.001)
+        ground_offset = agl_m * math.tan(tilt_rad)
 
         # Angular FOV spread at the slant range is wider
         ground_width_m = 2 * slant * math.tan(math.radians(fov_horizontal_deg / 2))
@@ -57,8 +70,8 @@ def compute_footprint(
         dx = ground_offset * math.sin(yaw_rad)
         dy = ground_offset * math.cos(yaw_rad)
     else:
-        ground_width_m = 2 * altitude_m * math.tan(math.radians(fov_horizontal_deg / 2))
-        ground_height_m = 2 * altitude_m * math.tan(math.radians(fov_vertical_deg / 2))
+        ground_width_m = 2 * agl_m * math.tan(math.radians(fov_horizontal_deg / 2))
+        ground_height_m = 2 * agl_m * math.tan(math.radians(fov_vertical_deg / 2))
         dx = dy = 0.0
 
     hw = ground_width_m / 2
