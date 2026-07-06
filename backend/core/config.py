@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import os
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
@@ -49,6 +50,7 @@ class AppConfig:
         ]
     )
     flight_log_match_tolerance_sec: float = 2.0
+    dji_api_key_path: str = ""
     battery_range_m: float = 3000
     mission_buffer_pct: float = 0.10
     thumbnail_size_px: int = 200
@@ -238,6 +240,33 @@ def get_upload_limits_config(path: str = "config.yaml") -> dict:
     }
     upload_limits = data.get("upload_limits", {})
     return {**defaults, **upload_limits}
+
+
+def get_dji_api_key(config_path: str = "config.yaml") -> str | None:
+    """Return the DJI API key from the configured file path or env var.
+
+    Priority: ``DJI_API_KEY`` env var → file at ``dji_api_key_path``.
+    Returns *None* when no key is available.
+    """
+    env_val = os.environ.get("DJI_API_KEY", "").strip()
+    if env_val:
+        return env_val
+
+    try:
+        with open(config_path) as f:
+            data = yaml.safe_load(f) or {}
+    except FileNotFoundError:
+        return None
+
+    key_path = data.get("dji_api_key_path", "")
+    if not key_path:
+        return None
+
+    try:
+        with open(key_path) as f:
+            return f.read().strip()
+    except FileNotFoundError:
+        return None
 
 
 def get_browser_upload_config(path: str = "config.yaml") -> dict:
