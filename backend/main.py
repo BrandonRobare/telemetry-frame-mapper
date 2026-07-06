@@ -42,12 +42,21 @@ from .routers import uploads as uploads_router
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
+    from backend.services.job_queue import claim_stale_jobs, shutdown_worker, start_worker
+
+    claimed = claim_stale_jobs()
+    if claimed:
+        logging.getLogger("backend").info(
+            "JobQueue: marked %d orphaned running jobs as failed", claimed
+        )
+    start_worker()
     if shutil.which("colmap") is None:
         logging.getLogger("backend").warning(
             "COLMAP not found on PATH — reconstruction jobs will fail until it is installed "
             "(see docs/INSTALL.md)"
         )
     yield
+    shutdown_worker(timeout=10.0)
 
 
 app = FastAPI(title="Drone Mapping API", version="1.0.0", lifespan=lifespan)

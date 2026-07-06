@@ -64,6 +64,16 @@ def test_init_db_upgrades_legacy_shimmed_db(isolated_engine):
     database_module.Base.metadata.create_all(bind=isolated_engine)
 
     shim_columns_to_drop = ["mesh_glb_path", "mesh_status", "flythrough_path"]
+    # Drop job_queue table from the legacy schema since we're simulating
+    # pre-job-queue state; the Alembic migration will recreate it properly.
+    # The engine's NullPool (check_same_thread=False) makes it tricky to drop
+    # across connections, so drop via a raw sqlite3 connection directly.
+    import sqlite3
+    db_path = str(isolated_engine.url).split("///")[1]
+    raw_conn = sqlite3.connect(db_path)
+    raw_conn.execute("DROP TABLE IF EXISTS job_queue")
+    raw_conn.commit()
+    raw_conn.close()
     with isolated_engine.begin() as conn:
         for col in shim_columns_to_drop:
             conn.execute(sa.text(f"ALTER TABLE reconstructions DROP COLUMN {col}"))

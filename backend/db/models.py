@@ -282,3 +282,26 @@ class SessionComparison(Base):
     error_msg = Column(String)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     completed_at = Column(DateTime)
+
+
+class JobQueueEntry(Base):
+    """Persistent job queue for resource-heavy async work (reconstruction, mesh, flythrough,
+    comparison).  Jobs survive API restarts and are dispatched by a background worker that
+    enforces GPU and concurrency caps.
+
+    Each entry references a single target entity (Reconstruction, SessionComparison) via
+    target_id; the job_type column discriminates so the worker knows which handler to call.
+    """
+    __tablename__ = "job_queue"
+    id = Column(Integer, primary_key=True, index=True)
+    job_type = Column(String, nullable=False)
+    target_id = Column(Integer, nullable=False)
+    status = Column(String, default="pending")
+    priority = Column(Integer, default=0)
+    payload_json = Column(Text)
+    error_msg = Column(String)
+    attempt = Column(Integer, default=0)
+    max_attempts = Column(Integer, default=1)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    started_at = Column(DateTime)
+    completed_at = Column(DateTime)
