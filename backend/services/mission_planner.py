@@ -7,6 +7,8 @@ from pathlib import Path
 
 from shapely.geometry import shape
 
+from .terrain import TerrainService, get_terrain_service
+
 
 def generate_lawnmower(
     target_geojson: str,
@@ -15,8 +17,18 @@ def generate_lawnmower(
     forward_overlap: float,
     fov_h_deg: float = 84.0,
     fov_v_deg: float = 64.0,
+    terrain_follow: bool = False,
+    terrain_service: TerrainService | None = None,
 ) -> dict:
-    """Returns lanes_geojson, lane_count, total_distance_m, waypoint_spacing_m."""
+    """Returns lanes_geojson, lane_count, total_distance_m, waypoint_spacing_m.
+
+    When *terrain_follow* is True, waypoints embed per-point ground elevation
+    sampled from *terrain_service* so that the requested AGL is maintained
+    across varying terrain.  The lanes GeoJSON includes a 3rd coordinate
+    (altitude in metres above sea level) set to ``requested_agl_m + ground_elevation_m``
+    for each vertex.  OOB / missing DEM points fall back to the requested AGL
+    (i.e. ground elevation = 0).
+    """
     if side_overlap >= 1.0:
         raise ValueError(f"side_overlap must be < 1.0, got {side_overlap}")
     if forward_overlap >= 1.0:
@@ -74,15 +86,65 @@ def generate_lawnmower(
         )
     total_dist = along_lane_dist + transit_dist
 
-    return {
-        "lanes_geojson": json.dumps({
+    # ---- terrain-following altitude enrichment ---------------------------
+    if terrain_follow:
+        svc = terrain_service or get_terrain_service()
+        # Build altitude-enriched lane coordinates
+        enriched_lanes = _enrich_lanes_with_terrain(
+            lanes, altitude_m, svc
+        )
+        lanes_geojson = json.dumps({
+            "type": "GeometryCollection",
+            "geometries": [{"type": "LineString", "coordinates": ln} for ln in enriched_lanes],
+        })
+    else:
+        lanes_geojson = json.dumps({
             "type": "GeometryCollection",
             "geometries": [{"type": "LineString", "coordinates": ln} for ln in lanes],
-        }),
+        })
+
+    return {
+        "lanes_geojson": lanes_geojson,
         "lane_count": len(lanes),
         "total_distance_m": round(total_dist, 1),
         "waypoint_spacing_m": round(waypoint_spacing_m, 2),
     }
+
+
+def _enrich_lanes_with_terrain(
+    lanes: list,
+    requested_agl_m: float,
+    svc: TerrainService,
+) -> list:
+    """Insert per-vertex ground-elevation-based MSL altitudes into lane coords.
+
+    Each lane vertex gets a 3rd coordinate: ``requested_agl_m + ground_elevation_m``.
+    OOB / missing DEM points default to ``requested_agl_m`` (ground elevation = 0).
+    """
+    point_set: dict[tuple[float, float], int] = {}
+    all_points: list[tuple[float, float]] = []
+    for ln in lanes:
+        for pt in ln:
+            key = (pt[1], pt[0])  # (lat, lon)
+            if key not in point_set:
+                point_set[key] = len(all_points)
+                all_points.append(key)
+
+    elev_results = svc.elevation_batch(all_points)
+
+    altitude_map: dict[tuple[float, float], float] = {}
+    for (lat, lon), result in zip(all_points, elev_results, strict=True):
+        ground = result.elevation_m if not result.out_of_bounds else 0.0
+        altitude_map[(lat, lon)] = requested_agl_m + ground
+
+    enriched: list = []
+    for ln in lanes:
+        enriched_ln = []
+        for pt in ln:
+            msl = altitude_map.get((pt[1], pt[0]), requested_agl_m)
+            enriched_ln.append([pt[0], pt[1], round(msl, 2)])
+        enriched.append(enriched_ln)
+    return enriched
 
 
 def write_kml(plan_id: int, lanes_geojson: str, exports_dir: Path, suffix: str = "") -> Path:
