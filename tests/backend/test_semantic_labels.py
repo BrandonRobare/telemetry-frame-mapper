@@ -143,3 +143,60 @@ class TestPruneOrder:
         # stable sort: indices in ascending order for equal values.
         assert order[0] == 0
         assert order[1] == 1
+
+class TestVotingCore:
+    def test_project_visibility_and_vote_finalize(self):
+        from backend.services.semantic_labels import (
+            accumulate_votes,
+            finalize_labels,
+            project_to_view,
+            visibility_mask,
+        )
+
+        points = np.array([[0.0, 0.0, 2.0], [1.0, 0.0, 2.0], [0.0, 0.0, 4.0]])
+        viewmat = np.eye(4)
+        k = np.array([[10.0, 0.0, 5.0], [0.0, 10.0, 5.0], [0.0, 0.0, 1.0]])
+        projected = project_to_view(points, viewmat, k)
+        np.testing.assert_allclose(projected["u"], [5.0, 10.0, 5.0])
+        np.testing.assert_allclose(projected["v"], [5.0, 5.0, 5.0])
+
+        expected_depth = np.zeros((12, 12), dtype=np.float32)
+        expected_depth[5, 5] = 2.0
+        expected_depth[5, 10] = 2.0
+        visible = visibility_mask(projected, expected_depth, tau=0.08)
+        assert visible.tolist() == [True, True, False]
+
+        seg_a = np.full((12, 12), 5, dtype=np.uint8)
+        seg_a[5, 5] = 2
+        seg_a[5, 10] = 1
+        votes = np.zeros((3, 6), dtype=np.float32)
+        accumulate_votes(votes, seg_a, projected, visible, np.array([0.0, 2.0, 0.0]))
+        labels, confidence = finalize_labels(votes)
+        assert labels.tolist() == [2, 1, 255]
+        assert float(confidence[0]) == 1.0
+
+    def test_three_gaussian_two_view_majority_vote(self):
+        from backend.services.semantic_labels import (
+            accumulate_votes,
+            finalize_labels,
+            project_to_view,
+        )
+
+        points = np.array([[0.0, 0.0, 2.0], [1.0, 0.0, 2.0], [2.0, 0.0, 2.0]])
+        viewmat = np.eye(4)
+        k = np.array([[2.0, 0.0, 2.0], [0.0, 2.0, 2.0], [0.0, 0.0, 1.0]])
+        projected = project_to_view(points, viewmat, k)
+        visible = np.array([True, True, True])
+        votes = np.zeros((3, 6), dtype=np.float32)
+        seg1 = np.full((6, 6), 5, dtype=np.uint8)
+        seg2 = np.full((6, 6), 5, dtype=np.uint8)
+        for seg, labels in ((seg1, [0, 1, 1]), (seg2, [0, 2, 1])):
+            for idx, cls in enumerate(labels):
+                seg[int(round(projected["v"][idx])), int(round(projected["u"][idx]))] = cls
+        opacities = np.zeros(3, dtype=np.float32)
+        accumulate_votes(votes, seg1, projected, visible, opacities)
+        accumulate_votes(votes, seg2, projected, visible, opacities)
+        labels, confidence = finalize_labels(votes)
+        assert labels.tolist() == [0, 1, 1]
+        assert float(confidence[0]) == 1.0
+        assert float(confidence[1]) == 0.5

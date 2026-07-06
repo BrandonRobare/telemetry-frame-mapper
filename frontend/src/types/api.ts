@@ -100,6 +100,9 @@ export interface Reconstruction {
   flythrough_path: string | null;
   flythrough_status: "pending" | "running" | "complete" | "failed" | null;
   flythrough_error: string | null;
+  semantic_status: "pending" | "running" | "complete" | "failed" | null;
+  semantic_error: string | null;
+  semantic_labels_path: string | null;
   coverage_gaps_path: string | null;
 }
 
@@ -117,6 +120,33 @@ export interface FlythroughStatus {
   flythrough_status: "pending" | "running" | "complete" | "failed" | null
   flythrough_error: string | null
   flythrough_path: string | null
+}
+
+export type SemanticClassName = 'ground' | 'vegetation' | 'structure' | 'vehicle' | 'water' | 'other'
+
+export interface SemanticStatus {
+  id: number
+  semantic_status: 'pending' | 'running' | 'complete' | 'failed' | null
+  semantic_error: string | null
+  semantic_labels_path: string | null
+}
+
+export interface SemanticSummary {
+  lod: 'full' | 'medium' | 'preview'
+  count: number
+  class_counts: Record<SemanticClassName, number>
+  unlabeled: number
+  confidence_mean: number | null
+  meta: Record<string, unknown>
+}
+
+export const SEMANTIC_CLASS_COLORS: Record<SemanticClassName, string> = {
+  ground: '#8a7a5c',
+  vegetation: '#4F6349',
+  structure: '#9A5E32',
+  vehicle: '#3b82f6',
+  water: '#38bdf8',
+  other: '#9ca3af',
 }
 
 export interface HistogramBin {
