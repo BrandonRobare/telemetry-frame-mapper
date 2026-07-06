@@ -55,3 +55,60 @@ def test_footprint_center_near_input_coords():
     centroid_lat = sum(lats) / len(lats)
     assert abs(centroid_lat - LAT) < 0.001
     assert abs(centroid_lon - LON) < 0.001
+
+
+# ---------------------------------------------------------------------------
+# Terrain-aware footprint tests (ground_elevation_m parameter)
+# ---------------------------------------------------------------------------
+
+
+class TestFootprintWithGroundElevation:
+    """Footprint dimensions shrink when ground elevation is subtracted from MSL altitude."""
+
+    def test_high_ground_reduces_agl_and_footprint(self):
+        # Drone at 100 m MSL, ground at 50 m → AGL = 50 m
+        result_flat = compute_footprint(LAT, LON, 100.0, FOV_H, FOV_V, None, TARGET_CRS)
+        result_high = compute_footprint(
+            LAT, LON, 100.0, FOV_H, FOV_V, None, TARGET_CRS, ground_elevation_m=50.0
+        )
+        # High ground → smaller footprint
+        assert result_high["ground_width_m"] < result_flat["ground_width_m"]
+        assert result_high["ground_height_m"] < result_flat["ground_height_m"]
+
+    def test_zero_ground_elevation_is_noop(self):
+        result_default = compute_footprint(
+            LAT, LON, ALT_M, FOV_H, FOV_V, None, TARGET_CRS
+        )
+        result_explicit = compute_footprint(
+            LAT, LON, ALT_M, FOV_H, FOV_V, None, TARGET_CRS, ground_elevation_m=0.0
+        )
+        assert result_default["ground_width_m"] == pytest.approx(
+            result_explicit["ground_width_m"]
+        )
+        assert result_default["ground_height_m"] == pytest.approx(
+            result_explicit["ground_height_m"]
+        )
+
+    def test_negative_ground_clamped_to_1m_agl(self):
+        # Drone at 50 m MSL, ground at 100 m (drone below terrain) — clamp to 1 m AGL
+        result = compute_footprint(
+            LAT, LON, 50.0, FOV_H, FOV_V, None, TARGET_CRS, ground_elevation_m=100.0
+        )
+        # With AGL clamped to 1 m, footprint should be very small
+        assert result["ground_width_m"] < 5.0
+        assert result["ground_height_m"] < 5.0
+
+    def test_oblique_with_ground_elevation(self):
+        """Oblique footprint also uses AGL altitude accounting for ground elevation."""
+        result_flat = compute_footprint(
+            LAT, LON, 100.0, FOV_H, FOV_V, 45.0, TARGET_CRS, gimbal_pitch=-60
+        )
+        result_high = compute_footprint(
+            LAT, LON, 100.0, FOV_H, FOV_V, 45.0, TARGET_CRS,
+            gimbal_pitch=-60, ground_elevation_m=30.0
+        )
+        assert result_high["ground_width_m"] < result_flat["ground_width_m"]
+        assert result_high["ground_height_m"] < result_flat["ground_height_m"]
+        # Both should still be flagged as oblique
+        assert result_high["pitch_oblique"] is True
+        assert result_flat["pitch_oblique"] is True

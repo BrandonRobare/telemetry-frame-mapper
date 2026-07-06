@@ -13,6 +13,7 @@ from ..db.models import Image, Reconstruction
 from ..db.models import Session as SessionModel
 from ..services.artifact_cleanup import cleanup_session_artifacts
 from ..services.ingest_orchestrator import get_progress, start_import
+from ..services.preflight_quality import build_quick_report
 from ..services.reconstruction import cancel_reconstruction
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
@@ -102,3 +103,55 @@ def import_session(req: ImportRequest, db: DBSession = Depends(get_db)):
 @router.get("/{session_id}/progress")
 def session_progress(session_id: int):
     return get_progress(session_id)
+
+
+class QuickReportOut(BaseModel):
+    session_id: int
+    total_frames: int
+    usable_frames: int
+    score: int
+    safe_to_reconstruct: str
+    recommended_action: str
+    warnings: list[str]
+    gps_completeness_pct: float
+    timestamp_completeness_pct: float
+    blur_pct: float
+    exposure_issue_pct: float
+    estimated_overlap_pct: float | None
+    match_density_weak_ratio: float | None = None
+    match_density_avg_matches: float | None = None
+
+
+@router.get("/{session_id}/quick-report", response_model=QuickReportOut)
+def get_quick_report(session_id: int, db: DBSession = Depends(get_db)):
+    s = db.query(SessionModel).filter(SessionModel.id == session_id).first()
+    if not s:
+        raise HTTPException(status_code=404, detail="Session not found")
+    try:
+        report = build_quick_report(session_id, db)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    match_density = report.get("match_density")
+    weak_ratio = None
+    avg_matches = None
+    if isinstance(match_density, dict):
+        weak_ratio = match_density.get("weak_ratio")
+        avg_matches = match_density.get("avg_matches")
+
+    return QuickReportOut(
+        session_id=report["session_id"],
+        total_frames=report["total_frames"],
+        usable_frames=report["usable_frames"],
+        score=report["score"],
+        safe_to_reconstruct=report["safe_to_reconstruct"],
+        recommended_action=report["recommended_action"],
+        warnings=report["warnings"],
+        gps_completeness_pct=report["gps"]["completeness_pct"],
+        timestamp_completeness_pct=report["timestamps"]["completeness_pct"],
+        blur_pct=report["quality"]["blur_pct"],
+        exposure_issue_pct=report["quality"]["dark_pct"] + report["quality"]["bright_pct"],
+        estimated_overlap_pct=report["coverage"]["estimated_overlap_pct"],
+        match_density_weak_ratio=weak_ratio,
+        match_density_avg_matches=avg_matches,
+    )
