@@ -99,7 +99,7 @@ def parse_share_token(token: str) -> ShareToken:
     payload_bytes = _b64url_decode(payload_b64)
     expected_sig = hmac.digest(_signing_key(), payload_bytes, hashlib.sha256)
     actual_sig = _b64url_decode(sig_b64)
-    if not hmac.compare_digest(expected_sig, actual_sig):
+    if _b64url(actual_sig) != sig_b64 or not hmac.compare_digest(expected_sig, actual_sig):
         raise ValueError("Invalid token signature")
     try:
         data = json.loads(payload_bytes)
