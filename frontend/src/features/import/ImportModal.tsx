@@ -8,6 +8,8 @@ import {
   type BrowserUploadProgress,
 } from '../../shared/api/browserUpload'
 import { useMapStore } from '../../shared/stores/mapStore'
+import { useQuickReport } from '../map/hooks/useQuickReport'
+import RapidQACard from '../overview/RapidQACard'
 import { Button } from '../../shared/components/Button'
 import { validateImportPath } from './validateImportPath'
 
@@ -87,6 +89,12 @@ export default function ImportModal({ open, onClose }: ImportModalProps) {
   const dialogRef = useRef<HTMLDivElement>(null)
   const prevFocusRef = useRef<HTMLElement | null>(null)
   const backendStatus = useBackendHealth(open)
+  const lastDoneSessionRef = useRef<number | null>(null)
+  const [postImportDismissed, setPostImportDismissed] = useState(false)
+  const importDoneSessionId = (!isImporting && importedSession && progress?.status === 'done')
+    ? importedSession.id
+    : null
+  const { data: quickReport } = useQuickReport(importDoneSessionId)
 
   // Auto-focus name input when modal opens; remember what to restore focus to.
   useEffect(() => {
@@ -109,11 +117,16 @@ export default function ImportModal({ open, onClose }: ImportModalProps) {
     else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus() }
   }
 
-  // When the background import finishes successfully, switch session and close
+  // When the background import finishes successfully, switch session and show QA
   useEffect(() => {
     if (!isImporting && importedSession && progress?.status === 'done') {
+      // If a new import completed (different session), reset dismiss state
+      if (lastDoneSessionRef.current !== importedSession.id) {
+        lastDoneSessionRef.current = importedSession.id
+        setPostImportDismissed(false)
+      }
       setSession(importedSession.id)
-      handleClose()
+      // Don't auto-close — let the user see the QA card and dismiss
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isImporting, progress?.status])
@@ -527,6 +540,40 @@ export default function ImportModal({ open, onClose }: ImportModalProps) {
               }}
             >
               {errorMessage}
+            </div>
+          )}
+
+          {/* Post-import QA card */}
+          {importDoneSessionId && quickReport && !postImportDismissed && !isBusy && (
+            <div style={{ marginBottom: 16 }}>
+              <div className="flex items-center justify-between mb-2">
+                <span
+                  className="text-xs font-semibold"
+                  style={{ color: 'var(--text)', fontFamily: 'var(--font-display)' }}
+                >
+                  Import complete — Quick QA
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPostImportDismissed(true)
+                    handleClose()
+                  }}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    cursor: 'pointer',
+                    color: 'var(--text-muted)',
+                    fontSize: 14,
+                    lineHeight: 1,
+                    padding: '2px 4px',
+                  }}
+                  aria-label="Dismiss and close"
+                >
+                  ✕
+                </button>
+              </div>
+              <RapidQACard report={quickReport} compact />
             </div>
           )}
 
