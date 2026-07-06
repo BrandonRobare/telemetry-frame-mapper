@@ -335,6 +335,56 @@ export default function ExportTab() {
           )}
         </section>
 
+        {/* ---- Survey Report card ---- */}
+        <section
+          className="p-5 flex flex-col gap-4"
+          style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}
+        >
+          <div>
+            <h2
+              className="text-base font-semibold"
+              style={{ color: 'var(--text)', margin: 0 }}
+            >
+              Survey Report
+            </h2>
+            <p
+              className="text-sm mt-1"
+              style={{ color: 'var(--text-muted)', margin: '4px 0 0' }}
+            >
+              Professional survey report with session metadata, quality assessment,
+              coverage summary, annotations, and reconstruction metrics.
+            </p>
+          </div>
+
+          <div className="flex items-center gap-3 flex-wrap">
+            <Button
+              variant="primary"
+              onClick={() => {
+                window.open(
+                  `${BASE_URL}/export/survey-report?session_id=${selectedSessionId}&format=html`,
+                  '_blank',
+                )
+              }}
+            >
+              View / Print Report
+            </Button>
+            <a
+              href={`${BASE_URL}/export/survey-report?session_id=${selectedSessionId}&format=json`}
+              download={`survey_report_session_${selectedSessionId}.json`}
+              style={downloadLinkStyle}
+            >
+              Download JSON
+            </a>
+          </div>
+          <p
+            className="text-xs"
+            style={{ color: 'var(--text-muted)', margin: 0 }}
+          >
+            PDF: use browser Print (Ctrl/Cmd+P) → Save as PDF on the HTML report.
+            WeasyPrint or other PDF backends may be added in a future release.
+          </p>
+        </section>
+
         {/* ---- WebODM georeferencing CSV-only export card ---- */}
         <section
           className="p-5 flex flex-col gap-4"

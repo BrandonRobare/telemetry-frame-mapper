@@ -8,15 +8,20 @@ from collections.abc import Iterator
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session as DBSession
 
 from ..core.config import get_config, get_render_config
 from ..db.database import get_db
-from ..db.models import Reconstruction, SessionFrameSelection, TargetArea
+from ..db.models import Reconstruction, ReconstructionFrame, SessionFrameSelection, TargetArea
 from ..services.artifact_cleanup import cleanup_reconstruction_artifacts
 from ..services.preflight_quality import build_preflight_quality_report
+from ..services.quality_report import (
+    build_quality_scorecard,
+    parse_surveyed_points_3d,
+    validate_held_out_checkpoints,
+)
 from ..services.reconstruction import (
     _export_point_cloud,
     _load_geo_transform_for_reconstruction,
@@ -27,10 +32,23 @@ from ..services.reconstruction import (
     compute_coverage_gaps,
     current_reconstruction_status_version,
     get_rec_log,
+    semantic_overlay_bytes,
     start_flythrough_render,
     start_mesh_export,
     start_reconstruction,
+    start_semantic_labeling,
     wait_for_reconstruction_status_change,
+)
+from ..services.semantic_labels import semantic_summary
+from ..services.splat_cleanup import cleanup_ply_file
+from ..services.splat_transform import (
+    cleanup_splat as _splat_transform_cleanup,
+)
+from ..services.splat_transform import (
+    compress_splat as _splat_transform_compress,
+)
+from ..services.splat_transform import (
+    splat_transform_available as _splat_transform_probe,
 )
 
 router = APIRouter(prefix="/reconstruction", tags=["reconstruction"])
@@ -116,6 +134,9 @@ class ReconstructionOut(BaseModel):
     flythrough_path: str | None = None
     flythrough_status: str | None = None
     flythrough_error: str | None = None
+    semantic_status: str | None = None
+    semantic_error: str | None = None
+    semantic_labels_path: str | None = None
 
     model_config = {"from_attributes": True}
 
@@ -183,6 +204,7 @@ class PreflightReportOut(BaseModel):
     safe_to_reconstruct: str
     score: int
     recommended_action: str
+    match_density: dict | None = None
 
 class ReconstructionImageDiagnostic(BaseModel):
     id: int
@@ -250,6 +272,15 @@ class FlythroughStatusOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+
+class SemanticStatusOut(BaseModel):
+    id: int
+    semantic_status: str | None = None
+    semantic_error: str | None = None
+    semantic_labels_path: str | None = None
+
+    model_config = {"from_attributes": True}
+
 class FlythroughKeyframe(BaseModel):
     position: list[float]
     target: list[float] = Field(default_factory=lambda: [0.0, 0.0, 0.0])
@@ -293,6 +324,28 @@ class RenderVideoIn(BaseModel):
     def validate_keyframes(cls, v: list[FlythroughKeyframe]) -> list[FlythroughKeyframe]:
         if len(v) < 2:
             raise ValueError("At least two keyframes are required")
+        return v
+
+
+# ---- Quality report request / response models ----
+
+
+class SurveyedPointIn(BaseModel):
+    """A surveyed checkpoint in local reconstruction coordinates."""
+    label: str | None = None
+    x: float
+    y: float
+    z: float
+
+
+class CheckpointValidationIn(BaseModel):
+    points: list[SurveyedPointIn]
+
+    @field_validator("points")
+    @classmethod
+    def at_least_one(cls, v: list[SurveyedPointIn]) -> list[SurveyedPointIn]:
+        if len(v) == 0:
+            raise ValueError("At least one checkpoint is required")
         return v
 
 
@@ -510,14 +563,19 @@ def download_splat(
 
 
 @router.get("/{reconstruction_id}/pointcloud")
-def download_pointcloud(reconstruction_id: int, db: DBSession = Depends(get_db)):
+def download_pointcloud(
+    reconstruction_id: int,
+    format: str = Query("las", pattern="^(las|laz)$"),
+    db: DBSession = Depends(get_db),
+):
     rec = db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).first()
     if not rec:
         raise HTTPException(status_code=404, detail="Reconstruction not found")
     if rec.status != "complete":
         raise HTTPException(status_code=202, detail="Reconstruction still in progress")
 
-    canonical = _reconstruction_artifact_path(rec.id, "pointcloud.las")
+    ext = "laz" if format == "laz" else "las"
+    canonical = _reconstruction_artifact_path(rec.id, f"pointcloud.{ext}")
 
     if not canonical.exists():
         if not rec.colmap_dir:
@@ -525,18 +583,28 @@ def download_pointcloud(reconstruction_id: int, db: DBSession = Depends(get_db))
         if not rec.splat_path or not Path(rec.splat_path).exists():
             raise HTTPException(status_code=404, detail="Splat file not found on disk")
         try:
-            _export_point_cloud(Path(rec.colmap_dir), Path(rec.splat_path), canonical)
+            _export_point_cloud(
+                Path(rec.colmap_dir),
+                Path(rec.splat_path),
+                canonical,
+                laz_backend=(format == "laz"),
+            )
         except Exception as exc:
             raise HTTPException(
                 status_code=422, detail=f"Failed to export point cloud: {exc}"
             ) from exc
-        rec.pointcloud_path = str(canonical)
+        # Cache the pointcloud path: track both so the reconstruct-out model
+        # can surface which formats are available.
+        if ext == "las":
+            rec.pointcloud_path = str(canonical)
         db.commit()
 
+    media_type = "application/vnd.las" if ext == "las" else "application/octet-stream"
+    filename = f"pointcloud_{reconstruction_id}.{ext}"
     return FileResponse(
         canonical,
-        media_type="application/vnd.las",
-        filename=f"pointcloud_{reconstruction_id}.las",
+        media_type=media_type,
+        filename=filename,
     )
 
 
@@ -701,6 +769,72 @@ def download_flythrough(reconstruction_id: int, db: DBSession = Depends(get_db))
     )
 
 
+@router.post(
+    "/{reconstruction_id}/semantic-labels",
+    response_model=SemanticStatusOut,
+    status_code=202,
+)
+def generate_semantic_labels(reconstruction_id: int, db: DBSession = Depends(get_db)):
+    try:
+        return start_semantic_labeling(reconstruction_id, db)
+    except ValueError as exc:
+        _raise_start_error(exc)
+
+
+@router.get("/{reconstruction_id}/semantic-labels/status", response_model=SemanticStatusOut)
+def get_semantic_status(reconstruction_id: int, db: DBSession = Depends(get_db)):
+    rec = db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Reconstruction not found")
+    return rec
+
+
+@router.get("/{reconstruction_id}/semantic-labels")
+def get_semantic_labels_summary(
+    reconstruction_id: int,
+    lod: str = Query("full", pattern="^(full|medium|preview)$"),
+    db: DBSession = Depends(get_db),
+):
+    rec = db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Reconstruction not found")
+    if rec.semantic_status in {"pending", "running"}:
+        raise HTTPException(status_code=202, detail="Semantic labeling still in progress")
+    labels_path = Path(rec.semantic_labels_path) if rec.semantic_labels_path else None
+    if labels_path is None or not labels_path.exists():
+        if rec.splat_path:
+            fallback = Path(rec.splat_path).parent / "semantic_labels.npz"
+            if fallback.exists():
+                labels_path = fallback
+    if labels_path is None or not labels_path.exists():
+        raise HTTPException(status_code=404, detail="Semantic labels not found")
+    try:
+        return semantic_summary(labels_path, lod=lod)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Failed to read semantic labels: {exc}",
+        ) from exc
+
+
+@router.get("/{reconstruction_id}/semantic-labels/overlay")
+def get_semantic_overlay(
+    reconstruction_id: int,
+    lod: str = Query("preview", pattern="^(preview|medium)$"),
+    db: DBSession = Depends(get_db),
+):
+    rec = db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Reconstruction not found")
+    if rec.semantic_status in {"pending", "running"}:
+        raise HTTPException(status_code=202, detail="Semantic labeling still in progress")
+    try:
+        payload = semantic_overlay_bytes(rec, lod=lod)
+    except Exception as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return Response(content=payload, media_type="application/octet-stream")
+
+
 @router.get("/{reconstruction_id}/geo-transform")
 def get_geo_transform(reconstruction_id: int, db: DBSession = Depends(get_db)):
     rec = db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).first()
@@ -727,6 +861,66 @@ def get_log(
         raise HTTPException(status_code=404, detail="Reconstruction not found")
     lines = get_rec_log(reconstruction_id)
     return {"lines": lines[-limit:]}
+
+
+class CleanupOut(BaseModel):
+    n_before: int
+    n_after: int
+    cleaned_path: str
+    stats: dict
+
+
+class CleanupIn(BaseModel):
+    opacity_keep_ratio: float | None = Field(default=None, gt=0.0, le=1.0)
+    scale_std_threshold: float | None = Field(default=None, gt=0.0)
+    outlier_k: int | None = Field(default=None, ge=0)
+    outlier_std_threshold: float | None = Field(default=None, gt=0.0)
+    target_area_id: int | None = None
+
+
+@router.post("/{reconstruction_id}/cleanup", response_model=CleanupOut, status_code=201)
+def cleanup_splat(
+    reconstruction_id: int,
+    body: CleanupIn | None = None,
+    db: DBSession = Depends(get_db),
+):
+    rec = db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Reconstruction not found")
+    if rec.status != "complete":
+        raise HTTPException(
+            status_code=422, detail="Reconstruction must be complete before cleanup"
+        )
+    if not rec.splat_path:
+        raise HTTPException(
+            status_code=404, detail="No splat file available for this reconstruction"
+        )
+    src = Path(rec.splat_path)
+    if not src.exists():
+        raise HTTPException(status_code=404, detail=f"Splat file not found on disk: {src}")
+
+    dst = _reconstruction_artifact_path(rec.id, "splat_cleaned.ply")
+    options = body.model_dump(exclude_none=True) if body else {}
+    target_area_id = options.pop("target_area_id", None)
+    if target_area_id is not None:
+        ta = db.query(TargetArea).filter(TargetArea.id == target_area_id).first()
+        if not ta:
+            raise HTTPException(status_code=404, detail="Target area not found")
+        if not ta.geom_geojson:
+            raise HTTPException(status_code=422, detail="Target area has no geometry defined")
+        options["target_area_geojson"] = ta.geom_geojson
+    try:
+        stats, n_before, n_after = cleanup_ply_file(src, dst, **options)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=422, detail=f"Splat cleanup failed: {exc}"
+        ) from exc
+    return CleanupOut(
+        n_before=n_before,
+        n_after=n_after,
+        cleaned_path=str(dst),
+        stats=stats,
+    )
 
 
 @router.get("/{reconstruction_id}/coverage-gaps")
@@ -758,3 +952,193 @@ def get_coverage_gaps(reconstruction_id: int, db: DBSession = Depends(get_db)):
         db.rollback()
         logger.exception("Failed to persist coverage gaps cache path")
     return cells
+
+
+# ---- Quality report endpoints ----
+
+
+def _parse_training_metrics(rec: Reconstruction) -> list[dict] | None:
+    if rec.training_metrics:
+        try:
+            return json.loads(rec.training_metrics)
+        except (json.JSONDecodeError, TypeError):
+            return None
+    return None
+
+
+def _load_coverage_gaps_from_disk(rec: Reconstruction) -> list[dict] | None:
+    if rec.coverage_gaps_path:
+        gaps_path = Path(rec.coverage_gaps_path)
+        if gaps_path.exists():
+            try:
+                return json.loads(gaps_path.read_text())
+            except (json.JSONDecodeError, OSError):
+                return None
+    return None
+
+
+@router.get("/{reconstruction_id}/quality-scorecard")
+def get_quality_scorecard(reconstruction_id: int, db: DBSession = Depends(get_db)):
+    rec = db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Reconstruction not found")
+    if rec.status != "complete":
+        raise HTTPException(status_code=202, detail="Reconstruction still in progress")
+
+    frames = db.query(ReconstructionFrame).filter(
+        ReconstructionFrame.reconstruction_id == reconstruction_id
+    ).all()
+    training_metrics = _parse_training_metrics(rec)
+    coverage_gaps = _load_coverage_gaps_from_disk(rec)
+
+    return build_quality_scorecard(rec, frames, training_metrics, coverage_gaps)
+
+
+@router.post("/{reconstruction_id}/validate-checkpoints")
+def validate_checkpoints(
+    reconstruction_id: int,
+    body: CheckpointValidationIn,
+    db: DBSession = Depends(get_db),
+):
+    rec = db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Reconstruction not found")
+    if rec.status != "complete":
+        raise HTTPException(status_code=202, detail="Reconstruction still in progress")
+
+    survey_points = parse_surveyed_points_3d(
+        [p.model_dump() for p in body.points]
+    )
+    result = validate_held_out_checkpoints(rec, survey_points)
+
+    if not result.get("available"):
+        raise HTTPException(
+            status_code=422,
+            detail=result.get("reason", "No surface source available for validation"),
+        )
+
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Splat transform: cleanup + compression (Node/npx gated)
+# ---------------------------------------------------------------------------
+
+class SplatTransformCleanupIn(BaseModel):
+    opacity_floor: float | None = Field(default=0.01, ge=0.0, le=1.0)
+    sh_bands: int | None = Field(default=0, ge=0, le=3)
+    decimate: float | None = Field(default=None, gt=0.0, le=1.0)
+    morton: bool = True
+
+
+class SplatTransformCleanupOut(BaseModel):
+    cleaned_path: str
+    returncode: int
+    stdout: str
+    stderr: str
+
+
+@router.post(
+    "/{reconstruction_id}/splat-transform-cleanup",
+    response_model=SplatTransformCleanupOut,
+    status_code=201,
+)
+def splat_transform_cleanup(
+    reconstruction_id: int,
+    body: SplatTransformCleanupIn | None = None,
+    db: DBSession = Depends(get_db),
+):
+    rec = db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Reconstruction not found")
+    if rec.status != "complete":
+        raise HTTPException(
+            status_code=422,
+            detail="Reconstruction must be complete before cleanup",
+        )
+    if not rec.splat_path:
+        raise HTTPException(status_code=404, detail="No splat file available")
+    src = Path(rec.splat_path)
+    if not src.exists():
+        raise HTTPException(status_code=404, detail=f"Splat file not found on disk: {src}")
+
+    options = body.model_dump(exclude_none=False) if body else {}
+    dst = _reconstruction_artifact_path(rec.id, "splat_transform_cleaned.ply")
+
+    try:
+        result = _splat_transform_cleanup(
+            src,
+            dst,
+            opacity_floor=options.get("opacity_floor"),
+            sh_bands=options.get("sh_bands"),
+            decimate=options.get("decimate"),
+            morton=options.get("morton", True),
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    return SplatTransformCleanupOut(
+        cleaned_path=str(dst),
+        returncode=result.returncode,
+        stdout=result.stdout[:5000],
+        stderr=result.stderr[:5000],
+    )
+
+
+class SplatTransformCompressIn(BaseModel):
+    format: str = Field("spz", pattern="^(spz|sog)$")
+    quality: int | None = Field(default=None, ge=1, le=100)
+
+
+class SplatTransformCompressOut(BaseModel):
+    compressed_path: str
+    returncode: int
+    stdout: str
+    stderr: str
+
+
+@router.post(
+    "/{reconstruction_id}/splat-transform-compress",
+    response_model=SplatTransformCompressOut,
+    status_code=201,
+)
+def splat_transform_compress(
+    reconstruction_id: int,
+    body: SplatTransformCompressIn | None = None,
+    db: DBSession = Depends(get_db),
+):
+    rec = db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Reconstruction not found")
+    if rec.status != "complete":
+        raise HTTPException(
+            status_code=422,
+            detail="Reconstruction must be complete before compression",
+        )
+    if not rec.splat_path:
+        raise HTTPException(status_code=404, detail="No splat file available")
+    src = Path(rec.splat_path)
+    if not src.exists():
+        raise HTTPException(status_code=404, detail=f"Splat file not found on disk: {src}")
+
+    fmt = body.format if body else "spz"
+    quality = body.quality if body else None
+    ext = fmt if fmt == "spz" else "sog"
+    dst = _reconstruction_artifact_path(rec.id, f"splat_compressed.{ext}")
+
+    try:
+        result = _splat_transform_compress(src, dst, format=fmt, quality=quality)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    return SplatTransformCompressOut(
+        compressed_path=str(dst),
+        returncode=result.returncode,
+        stdout=result.stdout[:5000],
+        stderr=result.stderr[:5000],
+    )
+
+
+@router.get("/splat-transform-available")
+def splat_transform_status():
+    return _splat_transform_probe()

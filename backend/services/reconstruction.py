@@ -25,6 +25,17 @@ from backend.db.models import (
 )
 from backend.services import ply_io, splat_trainer
 from backend.services.camera_calibration import calibration_profile_for_images
+from backend.services.semantic_labels import (
+    NUM_CLASSES,
+    accumulate_votes,
+    finalize_labels,
+    lod_labels,
+    project_to_view,
+    read_sidecar,
+    visibility_mask,
+    write_sidecar,
+)
+from backend.services.semantic_segmenter import segment_frame
 from backend.services.splat_trainer import ReconstructionCancelled, TrainerConfig
 
 # Maps reconstruction_id → cancel Event
@@ -49,6 +60,9 @@ _mesh_jobs: set[int] = set()
 _mesh_jobs_lock = threading.Lock()
 _flythrough_jobs: set[int] = set()
 _flythrough_jobs_lock = threading.Lock()
+_semantic_jobs: set[int] = set()
+_semantic_jobs_lock = threading.Lock()
+_semantic_cancel_events: dict[int, threading.Event] = {}
 _comparison_jobs: set[int] = set()
 _comparison_jobs_lock = threading.Lock()
 _rec_status_condition = threading.Condition()
@@ -212,11 +226,26 @@ def _pick_best_submodel(sparse_dir: Path) -> Path:
     return candidates[0]
 
 
-def _run_colmap(colmap_dir: Path, progress_cb, cancel: threading.Event) -> int | None:
+def _run_colmap(
+    colmap_dir: Path,
+    progress_cb,
+    cancel: threading.Event,
+    *,
+    images_have_gps: bool = False,
+    image_count: int = 0,
+) -> int | None:
     """Run COLMAP feature_extractor → matcher → mapper pipeline.
 
     Returns the number of registered images, or None if cancelled before completion.
+
+    When COLMAP 4.x capabilities are detected and the session has GPS data
+    with at least ``spatial_matcher_min_images`` images, the spatial_matcher
+    is used instead of the configured matcher (O(N·k) vs O(N²)).  The
+    ``mapper`` config key selects the mapper backend: ``incremental`` (default)
+    or ``global`` (GLOMAP, gated on capability).
     """
+    from backend.services.colmap_capabilities import get_capabilities as _colmap_cap
+
     db_path = str(colmap_dir / "database.db")
     image_path = str(colmap_dir / "images")
     output_path = str(colmap_dir / "sparse")
@@ -225,10 +254,50 @@ def _run_colmap(colmap_dir: Path, progress_cb, cancel: threading.Event) -> int |
 
     camera_model = cfg.get("camera_model", "PINHOLE")
     matcher_key = cfg.get("matcher", "exhaustive")
-    colmap_matcher, guided_matching = _colmap_matcher_command(matcher_key)
+    mapper_key = cfg.get("mapper", "incremental")
+    spatial_min = int(cfg.get("spatial_matcher_min_images", 150))
+
+    # Resolve feature flags from capability probe
+    colmap_info = _colmap_cap()
+    features: dict = colmap_info.get("features", {})  # type: ignore[assignment]
+
+    # GPS-primed spatial_matcher selection
+    if (
+        images_have_gps
+        and image_count >= spatial_min
+        and features.get("spatial_matcher")
+    ):
+        colmap_matcher = "spatial_matcher"
+        guided_matching = False
+    else:
+        colmap_matcher, guided_matching = _colmap_matcher_command(matcher_key)
+
     matcher_cmd = ["colmap", colmap_matcher, "--database_path", db_path]
     if guided_matching:
         matcher_cmd.append("--SiftMatching.guided_matching=1")
+
+    # Spatial matcher tuning: sane defaults for drone lawnmower surveys
+    if colmap_matcher == "spatial_matcher":
+        matcher_cmd += [
+            "--SpatialMatching.is_gps", "1",
+            "--SpatialMatching.ignore_z", "1",
+            "--SpatialMatching.max_num_neighbors", "50",
+            "--SpatialMatching.max_distance", "100",
+        ]
+
+    # Mapper selection: global vs incremental
+    if mapper_key == "global" and features.get("global_mapper"):
+        mapper_subcommand = "global_mapper"
+    else:
+        mapper_subcommand = "mapper"
+
+    mapper_cmd = [
+        "colmap", mapper_subcommand,
+        "--database_path", db_path,
+        "--image_path", image_path,
+        "--output_path", output_path,
+        f"--Mapper.num_threads={cfg['colmap_threads']}",
+    ]
 
     steps = [
         (
@@ -242,15 +311,7 @@ def _run_colmap(colmap_dir: Path, progress_cb, cancel: threading.Event) -> int |
             8.0,
         ),
         (matcher_cmd, "feature matching", 20.0),
-        (
-            ["colmap", "mapper",
-             "--database_path", db_path,
-             "--image_path", image_path,
-             "--output_path", output_path,
-             f"--Mapper.num_threads={cfg['colmap_threads']}"],
-            "bundle adjustment",
-            38.0,
-        ),
+        (mapper_cmd, "bundle adjustment", 38.0),
         (
             ["colmap", "model_converter",
              "--input_path", str(colmap_dir / "sparse"),
@@ -830,6 +891,23 @@ def _load_ply_positions_and_colors(ply_path: Path) -> tuple:
     return xyz, None
 
 
+def _nearest_gaussian_indices(points_xyz, gaussian_xyz):
+    """Return nearest Gaussian index for each point, chunked to bound memory use."""
+    import numpy as np
+
+    if len(gaussian_xyz) == 0:
+        return np.full(len(points_xyz), -1, dtype=np.int64)
+
+    indices = np.empty(len(points_xyz), dtype=np.int64)
+    chunk_size = 512
+    for start in range(0, len(points_xyz), chunk_size):
+        stop = min(start + chunk_size, len(points_xyz))
+        chunk = points_xyz[start:stop]
+        distances = ((chunk[:, None, :] - gaussian_xyz[None, :, :]) ** 2).sum(axis=2)
+        indices[start:stop] = np.argmin(distances, axis=1)
+    return indices
+
+
 def _nearest_gaussian_colors(points_xyz, gaussian_xyz, gaussian_rgb, fallback_rgb):
     """Color each COLMAP point from the nearest Gaussian, falling back to COLMAP RGB."""
     import numpy as np
@@ -837,15 +915,35 @@ def _nearest_gaussian_colors(points_xyz, gaussian_xyz, gaussian_rgb, fallback_rg
     if gaussian_rgb is None or len(gaussian_xyz) == 0:
         return fallback_rgb
 
-    colors = np.empty((len(points_xyz), 3), dtype=np.uint8)
-    chunk_size = 512
-    for start in range(0, len(points_xyz), chunk_size):
-        stop = min(start + chunk_size, len(points_xyz))
-        chunk = points_xyz[start:stop]
-        distances = ((chunk[:, None, :] - gaussian_xyz[None, :, :]) ** 2).sum(axis=2)
-        nearest = np.argmin(distances, axis=1)
-        colors[start:stop] = np.clip(gaussian_rgb[nearest], 0, 255).astype(np.uint8)
-    return colors
+    nearest = _nearest_gaussian_indices(points_xyz, gaussian_xyz)
+    return np.clip(gaussian_rgb[nearest], 0, 255).astype(np.uint8)
+
+
+def _semantic_labels_to_asprs(
+    points_xyz,
+    gaussian_xyz,
+    labels,
+):
+    """Transfer per-Gaussian project classes to ASPRS LAS classification codes."""
+    import numpy as np
+
+    mapping = np.array([2, 5, 6, 1, 9, 1], dtype=np.uint8)
+    classifications = np.zeros(len(points_xyz), dtype=np.uint8)
+    if len(gaussian_xyz) == 0 or len(labels) == 0:
+        return classifications
+
+    nearest = _nearest_gaussian_indices(points_xyz, gaussian_xyz)
+    valid = (nearest >= 0) & (nearest < len(labels))
+    source = np.asarray(labels, dtype=np.uint8)
+    mapped = np.zeros(len(points_xyz), dtype=np.uint8)
+    class_valid = valid & (source[nearest.clip(min=0)] < len(mapping))
+    mapped[class_valid] = mapping[source[nearest[class_valid]]]
+    classifications[valid] = mapped[valid]
+    return classifications
+
+
+def _semantic_sidecar_for_splat(splat_path: Path) -> Path:
+    return splat_path.parent / "semantic_labels.npz"
 
 
 def _utm_epsg(utm_zone: str) -> int | None:
@@ -871,8 +969,59 @@ def _world_points_to_utm(points_xyz, geo: dict):
     return transformed
 
 
-def _export_point_cloud(colmap_dir: Path, splat_path: Path, output_path: Path) -> Path:
-    """Export COLMAP sparse points as a colored LAS 1.4 point cloud."""
+def _write_las_laz(las, output_path: Path) -> None:
+    """Write *las* as a LAZ-compressed file via lazrs or laszip backend.
+
+    Raises RuntimeError if no LAZ backend is available.
+    """
+    import sys
+
+    import laspy
+
+    lazrs_spec = None
+    laszip_spec = None
+    if "laspy" in sys.modules:
+        lazrs_spec = getattr(sys.modules["laspy"], "LazrsBackend", None)
+        laszip_spec = getattr(sys.modules["laspy"], "LaszipBackend", None)
+
+    # laspy >= 2.5 exposes compressed backends via laspy.LazrsBackend
+    for backend_cls in (lazrs_spec, laszip_spec):
+        if backend_cls is not None:
+            try:
+                las.write(str(output_path), do_compress=backend_cls)
+                return
+            except Exception:
+                continue
+
+    # Fallback: try the older laspy.CompressedWriter style
+    try:
+        writer = laspy.CompressedWriter(str(output_path), "laz", las.header)
+        writer.write_points(las.points)
+        writer.close()
+        return
+    except (AttributeError, TypeError):
+        pass
+
+    raise RuntimeError(
+        "No LAZ backend available. Install laspy[lazrs] or laspy[laszip] "
+        "to enable compressed point-cloud export."
+    )
+
+
+def _export_point_cloud(
+    colmap_dir: Path,
+    splat_path: Path,
+    output_path: Path,
+    *,
+    laz_backend: bool = False,
+) -> Path:
+    """Export COLMAP sparse points as a colored LAS 1.4 / LAZ point cloud.
+
+    When *laz_backend* is True and a LAZ-compatible backend (lazrs or laszip)
+    is available, the output is written as a compressed LAZ file.  Falls back
+    to standard LAS 1.4 when the backend is unavailable or *laz_backend* is
+    False (the default).
+    """
     import laspy
     import numpy as np
     from pyproj import CRS
@@ -885,6 +1034,16 @@ def _export_point_cloud(colmap_dir: Path, splat_path: Path, output_path: Path) -
     )
     gaussian_xyz, gaussian_rgb = _load_ply_positions_and_colors(splat_path)
     colors = _nearest_gaussian_colors(points_xyz, gaussian_xyz, gaussian_rgb, colmap_rgb)
+
+    classifications = None
+    semantic_sidecar = _semantic_sidecar_for_splat(splat_path)
+    if semantic_sidecar.exists():
+        sidecar = read_sidecar(semantic_sidecar)
+        classifications = _semantic_labels_to_asprs(
+            points_xyz,
+            gaussian_xyz,
+            sidecar["labels"],
+        )
 
     geo = _extract_geo_transform(colmap_dir)
     output_xyz = _world_points_to_utm(points_xyz, geo)
@@ -903,11 +1062,204 @@ def _export_point_cloud(colmap_dir: Path, splat_path: Path, output_path: Path) -
     las.red = colors[:, 0].astype(np.uint16) * 257
     las.green = colors[:, 1].astype(np.uint16) * 257
     las.blue = colors[:, 2].astype(np.uint16) * 257
+    if classifications is not None:
+        las.classification = classifications
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    las.write(output_path)
+
+    if laz_backend:
+        _write_las_laz(las, output_path)
+    else:
+        las.write(output_path)
     return output_path
 
+
+
+# ---------------------------------------------------------------------------
+# Semantic label sidecar generation
+# ---------------------------------------------------------------------------
+
+def render_expected_depth(cloud: ply_io.GaussianCloud, view: dict, *, device: str = "cuda"):
+    """Render expected depth for one COLMAP view using gsplat ED mode."""
+    import gsplat
+    import torch
+
+    means = torch.from_numpy(cloud.means).float().to(device)
+    quats = torch.from_numpy(cloud.quats).float().to(device)
+    scales = torch.from_numpy(cloud.scales).float().to(device)
+    opacities = torch.from_numpy(cloud.opacities).float().to(device)
+    colors = torch.zeros((len(cloud.means), 1, 3), dtype=torch.float32, device=device)
+    renders, _, _ = gsplat.rasterization(
+        means=means,
+        quats=quats,
+        scales=torch.exp(scales),
+        opacities=torch.sigmoid(opacities),
+        colors=colors,
+        viewmats=torch.from_numpy(view["viewmat"][None]).float().to(device),
+        Ks=torch.from_numpy(view["intrinsics"][None]).float().to(device),
+        width=int(view["width"]),
+        height=int(view["height"]),
+        render_mode="ED",
+        sh_degree=0,
+        packed=True,
+    )
+    return renders[0, ..., 0].detach().cpu().numpy()
+
+
+def compute_semantic_labels(
+    rec: Reconstruction,
+    *,
+    log_cb=None,
+    cancel: threading.Event | None = None,
+) -> Path:
+    """Compute per-gaussian semantic labels and write semantic_labels.npz."""
+    import numpy as np
+
+    from backend.services import colmap_io
+
+    if not rec.colmap_dir:
+        raise RuntimeError("COLMAP workspace not found")
+    if not rec.splat_path or not Path(rec.splat_path).exists():
+        raise RuntimeError("Splat file not found on disk")
+    cancel = cancel or threading.Event()
+    splat_path = Path(rec.splat_path)
+    colmap_dir = Path(rec.colmap_dir)
+    cloud = ply_io.read_3dgs_ply(splat_path)
+    model = colmap_io.read_model(_pick_best_submodel(colmap_dir / "sparse"))
+    views = splat_trainer._load_dataset(__import__("torch"), colmap_dir, model, 1)
+    votes = np.zeros((len(cloud.means), NUM_CLASSES), dtype=np.float32)
+    with splat_trainer._GPU_LOCK:
+        segmenter = None
+        for index, view in enumerate(views, start=1):
+            if cancel.is_set():
+                raise ReconstructionCancelled("semantic labeling cancelled")
+            labels_2d, _confidence = segment_frame(view["pixels"].numpy(), segmenter=segmenter)
+            expected_depth = render_expected_depth(cloud, view)
+            projected = project_to_view(cloud.means, view["viewmat"], view["intrinsics"])
+            visible = visibility_mask(projected, expected_depth)
+            accumulate_votes(votes, labels_2d, projected, visible, cloud.opacities)
+            if log_cb:
+                log_cb(f"Semantic labels: processed view {index}/{len(views)}")
+    labels, confidence = finalize_labels(votes)
+    render_cfg = get_render_config()
+    labels_medium = lod_labels(
+        labels,
+        cloud.opacities,
+        float(render_cfg.get("lod_medium_ratio", 0.5)),
+    )
+    labels_preview = lod_labels(
+        labels,
+        cloud.opacities,
+        float(render_cfg.get("lod_preview_ratio", 0.1)),
+    )
+    out_path = write_sidecar(
+        _reconstruction_export_dir(rec.id),
+        labels,
+        confidence,
+        labels_medium,
+        labels_preview,
+        extra_meta={"source": "semantic_labeling"},
+    )
+    return out_path
+
+
+def start_semantic_labeling(reconstruction_id: int, db: DBSession) -> Reconstruction:
+    rec = db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).first()
+    if rec is None:
+        raise ValueError("Reconstruction not found")
+    if rec.status != "complete":
+        raise ValueError("Reconstruction must be complete before semantic labeling")
+    if not rec.splat_path:
+        raise ValueError("Splat file not found on disk")
+    if rec.semantic_status in {"pending", "running"} and reconstruction_id not in _semantic_jobs:
+        rec.semantic_status = None
+        db.commit()
+    if rec.semantic_status in {"pending", "running"}:
+        raise ValueError(
+            f"Semantic labeling already running for reconstruction {reconstruction_id}"
+        )
+    with _semantic_jobs_lock:
+        if reconstruction_id in _semantic_jobs:
+            raise ValueError(
+            f"Semantic labeling already running for reconstruction {reconstruction_id}"
+        )
+        _semantic_jobs.add(reconstruction_id)
+    cancel = threading.Event()
+    _semantic_cancel_events[reconstruction_id] = cancel
+    rec.semantic_status = "pending"
+    rec.semantic_error = None
+    db.commit()
+    db.refresh(rec)
+    threading.Thread(target=_run_semantic_job, args=(reconstruction_id,), daemon=True).start()
+    return rec
+
+
+def _run_semantic_job(reconstruction_id: int) -> None:
+    db = SessionLocal()
+    try:
+        rec = db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).first()
+        if rec is None:
+            return
+        rec.semantic_status = "running"
+        rec.semantic_error = None
+        db.commit()
+        cancel = _semantic_cancel_events.get(reconstruction_id, threading.Event())
+        path = compute_semantic_labels(
+            rec,
+            log_cb=lambda msg: _log_rec(reconstruction_id, msg),
+            cancel=cancel,
+        )
+        rec.semantic_labels_path = str(path)
+        rec.semantic_status = "complete"
+        rec.semantic_error = None
+        if rec.pointcloud_path:
+            cached = Path(rec.pointcloud_path)
+            if cached.exists():
+                cached.unlink()
+            rec.pointcloud_path = None
+        db.commit()
+    except Exception as exc:
+        db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).update({
+            "semantic_status": "failed",
+            "semantic_error": str(exc)[:_ERROR_MSG_MAX_CHARS],
+        })
+        db.commit()
+    finally:
+        db.close()
+        _semantic_cancel_events.pop(reconstruction_id, None)
+        with _semantic_jobs_lock:
+            _semantic_jobs.discard(reconstruction_id)
+
+
+def semantic_overlay_bytes(rec: Reconstruction, lod: str = "preview") -> bytes:
+    import struct
+
+    import numpy as np
+
+    if not rec.splat_path:
+        raise RuntimeError("Splat file not found on disk")
+    labels_path = (
+        Path(rec.semantic_labels_path)
+        if rec.semantic_labels_path
+        else _semantic_sidecar_for_splat(Path(rec.splat_path))
+    )
+    if not labels_path.exists():
+        raise RuntimeError("Semantic labels not found")
+    cloud = ply_io.read_3dgs_ply(Path(rec.splat_path))
+    data = read_sidecar(labels_path)
+    render_cfg = get_render_config()
+    if lod == "preview":
+        order = ply_io.prune_order(cloud.opacities, float(render_cfg.get("lod_preview_ratio", 0.1)))
+        labels = data["labels_preview"]
+    elif lod == "medium":
+        order = ply_io.prune_order(cloud.opacities, float(render_cfg.get("lod_medium_ratio", 0.5)))
+        labels = data["labels_medium"]
+    else:
+        order = np.arange(len(cloud.means))
+        labels = data["labels"]
+    xyz = np.asarray(cloud.means[order], dtype="<f4")
+    labels = np.asarray(labels, dtype=np.uint8)
+    return struct.pack("<I", len(labels)) + xyz.tobytes() + labels.tobytes()
 
 # ---------------------------------------------------------------------------
 # Phase 7 exports: mesh, flythrough video, multi-session comparison
@@ -1629,7 +1981,18 @@ def _run_pipeline(
         def progress_cb(step: str, pct: float) -> None:
             _update_rec(db, reconstruction_id, step=step, progress_pct=pct)
 
-        frames_registered = _run_colmap(colmap_dir, progress_cb, cancel)
+        # Determine GPS presence + image count for spatial_matcher selection
+        gps_images = [
+            img for img in images
+            if img.latitude is not None and img.longitude is not None
+        ]
+        frames_registered = _run_colmap(
+            colmap_dir,
+            progress_cb,
+            cancel,
+            images_have_gps=len(gps_images) == len(images) and len(images) > 0,
+            image_count=len(images),
+        )
         _log_rec(reconstruction_id, "COLMAP: complete")
         _store_reprojection_errors(db, reconstruction_id, colmap_dir)
 
