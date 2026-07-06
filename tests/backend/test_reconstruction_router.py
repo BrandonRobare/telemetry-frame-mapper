@@ -1352,3 +1352,96 @@ def test_download_pointcloud_format_validation(client):
 
     resp = client.get(f"/reconstruction/{rec.id}/pointcloud?format=xyz")
     assert resp.status_code == 422  # FastAPI query validation
+
+
+def test_semantic_label_routes_lifecycle_and_overlay(client, tmp_path):
+    from unittest.mock import patch
+
+    import numpy as np
+
+    from backend.services.ply_io import GaussianCloud, write_3dgs_ply
+    from backend.services.semantic_labels import write_sidecar
+
+    db = _get_db(client)
+    session = _make_session_with_images(db)
+    cloud = GaussianCloud(
+        means=np.array([[0, 0, 0], [1, 0, 0]], dtype=np.float32),
+        sh0=np.zeros((2, 3), dtype=np.float32),
+        shN=np.zeros((2, 0, 3), dtype=np.float32),
+        opacities=np.array([0.1, 0.9], dtype=np.float32),
+        scales=np.zeros((2, 3), dtype=np.float32),
+        quats=np.tile(np.array([1, 0, 0, 0], dtype=np.float32), (2, 1)),
+    )
+    splat = write_3dgs_ply(tmp_path / "splat.ply", cloud)
+    sidecar = write_sidecar(
+        tmp_path,
+        labels=np.array([0, 1], dtype=np.uint8),
+        confidence=np.ones(2, dtype=np.float16),
+        labels_medium=np.array([1], dtype=np.uint8),
+        labels_preview=np.array([1], dtype=np.uint8),
+    )
+    rec = Reconstruction(
+        session_id=session.id,
+        preset="quick",
+        status="complete",
+        progress_pct=100.0,
+        frames_used=2,
+        splat_path=str(splat),
+    )
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+
+    def fake_start(rec_id, db_arg):
+        started = db_arg.query(Reconstruction).filter(Reconstruction.id == rec_id).first()
+        started.semantic_status = "complete"
+        started.semantic_labels_path = str(sidecar)
+        db_arg.commit()
+        db_arg.refresh(started)
+        return started
+
+    with patch("backend.routers.reconstruction.start_semantic_labeling", side_effect=fake_start):
+        start = client.post(f"/reconstruction/{rec.id}/semantic-labels")
+    assert start.status_code == 202
+    assert start.json()["semantic_status"] == "complete"
+
+    status = client.get(f"/reconstruction/{rec.id}/semantic-labels/status")
+    assert status.status_code == 200
+    assert status.json()["semantic_labels_path"] == str(sidecar)
+
+    summary = client.get(f"/reconstruction/{rec.id}/semantic-labels?lod=preview")
+    assert summary.status_code == 200
+    assert summary.json()["class_counts"]["vegetation"] == 1
+
+    overlay = client.get(f"/reconstruction/{rec.id}/semantic-labels/overlay?lod=preview")
+    assert overlay.status_code == 200
+    assert overlay.content[:4] == (1).to_bytes(4, "little")
+
+
+def test_semantic_label_start_error_matrix(client, tmp_path):
+    db = _get_db(client)
+    session = _make_session_with_images(db)
+    rec = Reconstruction(
+        session_id=session.id,
+        preset="quick",
+        status="complete",
+        progress_pct=100.0,
+        frames_used=2,
+        splat_path=str(tmp_path / "missing.ply"),
+        semantic_status="running",
+    )
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+
+    with patch("backend.routers.reconstruction.start_semantic_labeling") as mock_start:
+        mock_start.side_effect = ValueError(
+            "Semantic labeling already running for reconstruction 1"
+        )
+        assert client.post(f"/reconstruction/{rec.id}/semantic-labels").status_code == 409
+        mock_start.side_effect = ValueError("Splat file not found on disk")
+        assert client.post(f"/reconstruction/{rec.id}/semantic-labels").status_code == 404
+        mock_start.side_effect = ValueError(
+            "Reconstruction must be complete before semantic labeling"
+        )
+        assert client.post(f"/reconstruction/{rec.id}/semantic-labels").status_code == 422
