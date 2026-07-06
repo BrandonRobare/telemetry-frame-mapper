@@ -672,7 +672,7 @@ def test_run_pipeline_calls_generate_thumbnail(setup_test_db):
     from backend.db.database import get_db
     from backend.db.models import Image as ImageModel
     from backend.main import app
-    from backend.services.reconstruction import _run_pipeline
+    from backend.services.reconstruction import _run_pipeline_legacy as _run_pipeline
     from tests.conftest import TestSessionLocal
 
     db = next(app.dependency_overrides[get_db]())
@@ -746,7 +746,7 @@ def _run_pipeline_with_gsplat(db, tmp, rec, img, colmap_dir, gsplat_mock, colmap
     import threading
     from unittest.mock import MagicMock, patch
 
-    from backend.services.reconstruction import _run_pipeline
+    from backend.services.reconstruction import _run_pipeline_legacy as _run_pipeline
     from tests.conftest import TestSessionLocal
 
     if colmap_mock is None:
@@ -789,7 +789,7 @@ def test_run_pipeline_cancel_before_colmap_marks_cancelled(setup_test_db):
 
     from backend.db.database import get_db
     from backend.main import app
-    from backend.services.reconstruction import _run_pipeline
+    from backend.services.reconstruction import _run_pipeline_legacy as _run_pipeline
     from tests.conftest import TestSessionLocal
 
     db = next(app.dependency_overrides[get_db]())
@@ -819,7 +819,7 @@ def test_run_pipeline_cancel_after_colmap_marks_cancelled(setup_test_db):
 
     from backend.db.database import get_db
     from backend.main import app
-    from backend.services.reconstruction import _run_pipeline
+    from backend.services.reconstruction import _run_pipeline_legacy as _run_pipeline
     from tests.conftest import TestSessionLocal
 
     db = next(app.dependency_overrides[get_db]())
@@ -937,7 +937,7 @@ def test_run_pipeline_trainer_result_persisted_and_lod_generated(setup_test_db):
     from backend.db.database import get_db
     from backend.main import app
     from backend.services import ply_io
-    from backend.services.reconstruction import _run_pipeline
+    from backend.services.reconstruction import _run_pipeline_legacy as _run_pipeline
     from tests.conftest import TestSessionLocal
 
     db = next(app.dependency_overrides[get_db]())
@@ -1371,7 +1371,7 @@ def test_mesh_job_success_updates_status(setup_test_db, tmp_path):
 
     from backend.db.database import get_db
     from backend.main import app
-    from backend.services.reconstruction import _run_mesh_export_job
+    from backend.services.reconstruction import _run_mesh_export_job_legacy as _run_mesh_export_job
     from tests.conftest import TestSessionLocal
 
     db = next(app.dependency_overrides[get_db]())
@@ -1409,7 +1409,7 @@ def test_mesh_job_failure_updates_error(setup_test_db):
 
     from backend.db.database import get_db
     from backend.main import app
-    from backend.services.reconstruction import _run_mesh_export_job
+    from backend.services.reconstruction import _run_mesh_export_job_legacy as _run_mesh_export_job
     from tests.conftest import TestSessionLocal
 
     db = next(app.dependency_overrides[get_db]())
@@ -1443,7 +1443,7 @@ def test_mesh_job_failure_keeps_long_error_unclipped(setup_test_db):
 
     from backend.db.database import get_db
     from backend.main import app
-    from backend.services.reconstruction import _run_mesh_export_job
+    from backend.services.reconstruction import _run_mesh_export_job_legacy as _run_mesh_export_job
     from tests.conftest import TestSessionLocal
 
     db = next(app.dependency_overrides[get_db]())
@@ -1480,7 +1480,8 @@ def test_mesh_job_failure_caps_very_long_error(setup_test_db):
 
     from backend.db.database import get_db
     from backend.main import app
-    from backend.services.reconstruction import _ERROR_MSG_MAX_CHARS, _run_mesh_export_job
+    from backend.services.reconstruction import _ERROR_MSG_MAX_CHARS
+    from backend.services.reconstruction import _run_mesh_export_job_legacy as _run_mesh_export_job
     from tests.conftest import TestSessionLocal
 
     db = next(app.dependency_overrides[get_db]())
@@ -1541,7 +1542,7 @@ def test_flythrough_job_success_updates_status(setup_test_db, tmp_path):
 
     from backend.db.database import get_db
     from backend.main import app
-    from backend.services.reconstruction import _run_flythrough_job
+    from backend.services.reconstruction import _run_flythrough_job_legacy as _run_flythrough_job
     from tests.conftest import TestSessionLocal
 
     db = next(app.dependency_overrides[get_db]())

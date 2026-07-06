@@ -18,6 +18,7 @@ from backend.core.config import get_config, get_reconstruction_config, get_rende
 from backend.db.database import SessionLocal
 from backend.db.models import (
     Image,
+    JobQueueEntry,
     Reconstruction,
     ReconstructionFrame,
     SessionComparison,
@@ -25,6 +26,15 @@ from backend.db.models import (
 )
 from backend.services import ply_io, splat_trainer
 from backend.services.camera_calibration import calibration_profile_for_images
+from backend.services.job_queue import (
+    FLYTHROUGH_RENDER,
+    MESH_EXPORT,
+    RECONSTRUCTION,
+    SESSION_COMPARISON,
+    enqueue,
+    mark_complete,
+    register_handler,
+)
 from backend.services.splat_trainer import ReconstructionCancelled, TrainerConfig
 
 # Maps reconstruction_id → cancel Event
@@ -1064,30 +1074,26 @@ def start_mesh_export(reconstruction_id: int, db: DBSession) -> Reconstruction:
     if rec.mesh_status in {"pending", "running"}:
         raise ValueError(f"Mesh export already running for reconstruction {reconstruction_id}")
 
-    with _mesh_jobs_lock:
-        if reconstruction_id in _mesh_jobs:
-            raise ValueError(f"Mesh export already running for reconstruction {reconstruction_id}")
-        _mesh_jobs.add(reconstruction_id)
-
     rec.mesh_status = "pending"
     rec.mesh_error = None
     db.commit()
     db.refresh(rec)
 
-    threading.Thread(target=_run_mesh_export_job, args=(reconstruction_id,), daemon=True).start()
+    enqueue(MESH_EXPORT, reconstruction_id, priority=5)
     return rec
 
 
-def _run_mesh_export_job(reconstruction_id: int) -> None:
-    db = SessionLocal()
-    try:
-        rec = db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).first()
-        if rec is None:
-            return
-        rec.mesh_status = "running"
-        rec.mesh_error = None
-        db.commit()
+def _run_mesh_export_job(entry, db, cancel: threading.Event) -> None:
+    """Job queue handler for mesh export."""
+    reconstruction_id = entry.target_id
+    rec = db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).first()
+    if rec is None:
+        return
+    rec.mesh_status = "running"
+    rec.mesh_error = None
+    db.commit()
 
+    try:
         outputs = _export_mesh_assets(rec)
         rec.mesh_glb_path = str(outputs["glb"]) if outputs["glb"] else None
         rec.mesh_obj_path = str(outputs["obj"]) if outputs["obj"] else None
@@ -1095,16 +1101,14 @@ def _run_mesh_export_job(reconstruction_id: int) -> None:
         rec.mesh_status = "complete"
         rec.mesh_error = None
         db.commit()
+        mark_complete(entry.id)
     except Exception as exc:
         db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).update({
             "mesh_status": "failed",
             "mesh_error": str(exc)[:_ERROR_MSG_MAX_CHARS],
         })
         db.commit()
-    finally:
-        db.close()
-        with _mesh_jobs_lock:
-            _mesh_jobs.discard(reconstruction_id)
+        raise
 
 
 def _validate_keyframes(keyframes: list[dict]) -> list[dict]:
@@ -1168,42 +1172,44 @@ def start_flythrough_render(
         )
 
     normalized_keyframes = _validate_keyframes(keyframes)
-    with _flythrough_jobs_lock:
-        if reconstruction_id in _flythrough_jobs:
-            raise ValueError(
-                f"Flythrough render already running for reconstruction {reconstruction_id}"
-            )
-        _flythrough_jobs.add(reconstruction_id)
 
     rec.flythrough_status = "pending"
     rec.flythrough_error = None
     db.commit()
     db.refresh(rec)
 
-    threading.Thread(
-        target=_run_flythrough_job,
-        args=(reconstruction_id, normalized_keyframes, fps, width, height),
-        daemon=True,
-    ).start()
+    enqueue(
+        FLYTHROUGH_RENDER,
+        reconstruction_id,
+        payload={
+            "keyframes": normalized_keyframes,
+            "fps": fps,
+            "width": width,
+            "height": height,
+        },
+        priority=3,
+    )
     return rec
 
 
-def _run_flythrough_job(
-    reconstruction_id: int,
-    keyframes: list[dict],
-    fps: int,
-    width: int,
-    height: int,
-) -> None:
-    db = SessionLocal()
-    try:
-        rec = db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).first()
-        if rec is None:
-            return
-        rec.flythrough_status = "running"
-        rec.flythrough_error = None
-        db.commit()
+def _run_flythrough_job(entry, db, cancel: threading.Event) -> None:
+    """Job queue handler for flythrough render."""
+    reconstruction_id = entry.target_id
+    payload = entry.payload_json
+    kw: dict = json.loads(payload) if payload else {}
+    keyframes = kw.get("keyframes", [])
+    fps = kw.get("fps", 30)
+    width = kw.get("width", 1920)
+    height = kw.get("height", 1080)
 
+    rec = db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).first()
+    if rec is None:
+        return
+    rec.flythrough_status = "running"
+    rec.flythrough_error = None
+    db.commit()
+
+    try:
         if not rec.splat_path or not Path(rec.splat_path).exists():
             raise RuntimeError("Splat file not found on disk")
         output_path = _reconstruction_export_dir(rec.id) / "flythrough.mp4"
@@ -1219,16 +1225,14 @@ def _run_flythrough_job(
         rec.flythrough_status = "complete"
         rec.flythrough_error = None
         db.commit()
+        mark_complete(entry.id)
     except Exception as exc:
         db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).update({
             "flythrough_status": "failed",
             "flythrough_error": str(exc)[:_ERROR_MSG_MAX_CHARS],
         })
         db.commit()
-    finally:
-        db.close()
-        with _flythrough_jobs_lock:
-            _flythrough_jobs.discard(reconstruction_id)
+        raise
 
 
 def _load_las_positions(pointcloud_path: Path):
@@ -1408,29 +1412,32 @@ def start_session_comparison(
     db.commit()
     db.refresh(comparison)
 
-    with _comparison_jobs_lock:
-        _comparison_jobs.add(comparison.id)
-
-    threading.Thread(
-        target=_run_comparison_job,
-        args=(comparison.id, voxel_size_m),
-        daemon=True,
-    ).start()
+    enqueue(
+        SESSION_COMPARISON,
+        comparison.id,
+        payload={"voxel_size_m": voxel_size_m},
+        priority=1,
+    )
     return comparison
 
 
-def _run_comparison_job(comparison_id: int, voxel_size_m: float) -> None:
-    db = SessionLocal()
-    try:
-        comparison = (
-            db.query(SessionComparison).filter(SessionComparison.id == comparison_id).first()
-        )
-        if comparison is None:
-            return
-        comparison.status = "running"
-        comparison.error_msg = None
-        db.commit()
+def _run_comparison_job(entry, db, cancel: threading.Event) -> None:
+    """Job queue handler for session comparison."""
+    comparison_id = entry.target_id
+    payload = entry.payload_json
+    kw: dict = json.loads(payload) if payload else {}
+    voxel_size_m = kw.get("voxel_size_m", 0.5)
 
+    comparison = (
+        db.query(SessionComparison).filter(SessionComparison.id == comparison_id).first()
+    )
+    if comparison is None:
+        return
+    comparison.status = "running"
+    comparison.error_msg = None
+    db.commit()
+
+    try:
         rec_a = db.query(Reconstruction).filter(
             Reconstruction.id == comparison.reconstruction_a_id
         ).first()
@@ -1447,6 +1454,7 @@ def _run_comparison_job(comparison_id: int, voxel_size_m: float) -> None:
         comparison.status = "complete"
         comparison.completed_at = datetime.now(timezone.utc)
         db.commit()
+        mark_complete(entry.id)
     except Exception as exc:
         db.query(SessionComparison).filter(SessionComparison.id == comparison_id).update({
             "status": "failed",
@@ -1454,10 +1462,7 @@ def _run_comparison_job(comparison_id: int, voxel_size_m: float) -> None:
             "completed_at": datetime.now(timezone.utc),
         })
         db.commit()
-    finally:
-        db.close()
-        with _comparison_jobs_lock:
-            _comparison_jobs.discard(comparison_id)
+        raise
 
 
 # ---------------------------------------------------------------------------
@@ -1471,7 +1476,7 @@ def start_reconstruction(
     *,
     target_area_geojson: str | None = None,
 ) -> Reconstruction:
-    """Create Reconstruction record and launch background thread. Returns the record."""
+    """Create Reconstruction record and enqueue a background job. Returns the record."""
     running = db.query(Reconstruction).filter(
         Reconstruction.session_id == session_id,
         Reconstruction.status.in_(["pending", "running_colmap", "running_gsplat"]),
@@ -1502,9 +1507,6 @@ def start_reconstruction(
         raise ValueError("No usable images in session")
 
     cfg = get_config()
-    # Create the record first to get an id for the workspace directory.
-    # Workspace is keyed by reconstruction id, not session id, to prevent
-    # cross-run contamination when the same session is reconstructed twice.
     rec = Reconstruction(
         session_id=session_id,
         preset=preset,
@@ -1524,15 +1526,16 @@ def start_reconstruction(
         db.add(ReconstructionFrame(reconstruction_id=rec.id, image_id=img.id))
     db.commit()
 
-    cancel_event = threading.Event()
-    _cancel_events[rec.id] = cancel_event
-
     image_ids = [img.id for img in images]
-    threading.Thread(
-        target=_run_pipeline,
-        args=(rec.id, preset, colmap_dir, image_ids, cancel_event),
-        daemon=True,
-    ).start()
+
+    # Enqueue persistent job instead of daemon thread
+    enqueue(
+        RECONSTRUCTION,
+        rec.id,
+        payload={"preset": preset, "colmap_dir": str(colmap_dir), "image_ids": image_ids},
+        priority=10,
+        max_attempts=2,
+    )
 
     db.refresh(rec)
     return rec
@@ -1549,6 +1552,23 @@ def cancel_reconstruction(reconstruction_id: int) -> None:
     if event and not event.is_set():
         event.set()
     _kill_running_subprocess(reconstruction_id)
+    # Cancel any pending job queue entry for this reconstruction
+    from backend.services.job_queue import cancel_job as _cancel_job
+    db = SessionLocal()
+    try:
+        entry = (
+            db.query(JobQueueEntry)
+            .filter(
+                JobQueueEntry.job_type == "reconstruction",
+                JobQueueEntry.target_id == reconstruction_id,
+                JobQueueEntry.status.in_(["pending", "running"]),
+            )
+            .first()
+        )
+        if entry is not None:
+            _cancel_job(entry.id)
+    finally:
+        db.close()
 
 
 def _update_rec(db: DBSession, rec_id: int, **kwargs) -> None:
@@ -1574,14 +1594,14 @@ def _duration_seconds(started_at: datetime | None, completed_at: datetime | None
     return max(0.0, (completed_at - started_at).total_seconds())
 
 
-def _run_pipeline(
-    reconstruction_id: int,
-    preset: str,
-    colmap_dir: Path,
-    image_ids: list[int],
-    cancel: threading.Event,
-) -> None:
-    db = SessionLocal()
+def _run_pipeline(entry, db, cancel: threading.Event) -> None:
+    """Job queue handler for reconstruction pipeline."""
+    reconstruction_id = entry.target_id
+    payload = entry.payload_json
+    kw: dict = json.loads(payload) if payload else {}
+    preset = kw.get("preset", "quick")
+    colmap_dir = Path(kw.get("colmap_dir", ""))
+    image_ids = kw.get("image_ids", [])
     try:
         images = db.query(Image).filter(Image.id.in_(image_ids)).all()
         recon_cfg = get_reconstruction_config()
@@ -1737,6 +1757,87 @@ def _run_pipeline(
             error_msg=str(exc)[:_ERROR_MSG_MAX_CHARS],
             completed_at=datetime.now(timezone.utc),
         )
+        raise
+    else:
+        mark_complete(entry.id)
+
+
+# Register job queue handlers at import time so they're available when
+# the worker drains the queue.
+register_handler(RECONSTRUCTION, _run_pipeline)
+register_handler(MESH_EXPORT, _run_mesh_export_job)
+register_handler(FLYTHROUGH_RENDER, _run_flythrough_job)
+register_handler(SESSION_COMPARISON, _run_comparison_job)
+
+
+# ---------------------------------------------------------------------------
+# Backward-compatible wrappers — called directly by unit tests.
+# These construct a mock JobQueueEntry and delegate to the new handler
+# signature so existing tests don't need to change.
+# ---------------------------------------------------------------------------
+
+class _FakeEntry:
+    """Minimal duck-type so tests can call handlers directly."""
+    __slots__ = ("id", "job_type", "target_id", "payload_json", "status",
+                 "priority", "attempt", "max_attempts", "created_at",
+                 "started_at", "completed_at", "error_msg")
+
+    def __init__(self, **kw):
+        for k, v in kw.items():
+            setattr(self, k, v)
+
+
+def _run_pipeline_legacy(
+    reconstruction_id: int,
+    preset: str,
+    colmap_dir: Path,
+    image_ids: list[int],
+    cancel: threading.Event,
+) -> None:
+    db = SessionLocal()
+    try:
+        entry = _FakeEntry(
+            id=-1, job_type=RECONSTRUCTION, target_id=reconstruction_id,
+            payload_json=json.dumps({"preset": preset, "colmap_dir": str(colmap_dir),
+                                     "image_ids": image_ids}),
+            max_attempts=1, attempt=0,
+        )
+        _run_pipeline(entry, db, cancel)
+    except Exception:
+        pass  # Target entity already updated; legacy caller just needs the side effect
     finally:
         db.close()
-        _cancel_events.pop(reconstruction_id, None)
+
+
+def _run_mesh_export_job_legacy(reconstruction_id: int) -> None:
+    db = SessionLocal()
+    try:
+        entry = _FakeEntry(id=-1, job_type=MESH_EXPORT, target_id=reconstruction_id,
+                          max_attempts=1, attempt=0)
+        _run_mesh_export_job(entry, db, threading.Event())
+    except Exception:
+        pass  # Target entity already updated; legacy caller just needs the side effect
+    finally:
+        db.close()
+
+
+def _run_flythrough_job_legacy(
+    reconstruction_id: int,
+    keyframes: list[dict],
+    fps: int,
+    width: int,
+    height: int,
+) -> None:
+    db = SessionLocal()
+    try:
+        entry = _FakeEntry(
+            id=-1, job_type=FLYTHROUGH_RENDER, target_id=reconstruction_id,
+            payload_json=json.dumps({"keyframes": keyframes, "fps": fps,
+                                     "width": width, "height": height}),
+            max_attempts=1, attempt=0,
+        )
+        _run_flythrough_job(entry, db, threading.Event())
+    except Exception:
+        pass  # Target entity already updated; legacy caller just needs the side effect
+    finally:
+        db.close()
