@@ -93,6 +93,28 @@ def export_reconstruction_share_bundle(reconstruction_id: int, db: DBSession = D
     )
 
 
+@router.post("/reconstructions/{reconstruction_id}/share-link")
+def create_share_link(reconstruction_id: int, db: DBSession = Depends(get_db)):
+    """Create a signed, time-limited public share link for a completed reconstruction."""
+    from ..db.models import Reconstruction
+    from ..services.share_links import SHARE_LINK_PREFIX, create_share_token
+
+    rec = db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Reconstruction not found")
+    if rec.status != "complete":
+        raise HTTPException(
+            status_code=422, detail="Only completed reconstructions can be shared"
+        )
+    token = create_share_token(rec.id, rec.session_id)
+    # The full share link is <prefix><token> — the frontend builds the URL.
+    return {
+        "share_token": SHARE_LINK_PREFIX + token,
+        "reconstruction_id": rec.id,
+        "session_id": rec.session_id,
+    }
+
+
 @router.post("/survey-report")
 def export_survey_report(
     session_id: int,
@@ -137,6 +159,7 @@ def export_survey_report(
     if format != "json":
         raise HTTPException(status_code=422, detail="format must be json, html, or pdf")
     return report
+
 
 
 @router.post("/webodm-package")
