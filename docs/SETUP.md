@@ -42,6 +42,26 @@ set "NVCC_APPEND_FLAGS=-Xcompiler /Zc:preprocessor"
 python -c "import torch, gsplat; d='cuda'; import torch.nn.functional as F; n=8; gsplat.rasterization(means=torch.randn(n,3,device=d), quats=F.normalize(torch.randn(n,4,device=d),dim=-1), scales=torch.rand(n,3,device=d)*0.1, opacities=torch.rand(n,device=d), colors=torch.rand(n,1,3,device=d), viewmats=torch.eye(4,device=d)[None], Ks=torch.tensor([[[100.,0.,32.],[0.,100.,32.],[0.,0.,1.]]],device=d), width=64, height=64, sh_degree=0, packed=True)"
 ```
 
+### Semantic-labeling GPU smoke
+
+After a quick-preset reconstruction completes with a `splat.ply`, warm up ED-mode
+rasterization before running semantic labels. This mirrors the gsplat JIT check but
+asserts the expected-depth output is present and positive:
+
+```bat
+python -c "import torch, gsplat; d='cuda'; import torch.nn.functional as F; n=8; renders,_,_=gsplat.rasterization(means=torch.randn(n,3,device=d), quats=F.normalize(torch.randn(n,4,device=d),dim=-1), scales=torch.rand(n,3,device=d)*0.1, opacities=torch.rand(n,device=d), colors=torch.rand(n,1,3,device=d), viewmats=torch.eye(4,device=d)[None], Ks=torch.tensor([[[100.,0.,32.],[0.,100.,32.],[0.,0.,1.]]],device=d), width=64, height=64, render_mode='ED', sh_degree=0, packed=True); assert renders.shape[1:3] == (64,64); assert torch.isfinite(renders).all(); assert renders[...,0].max() > 0"
+```
+
+Then start the backend and request labeling for the reconstruction id:
+
+```bat
+curl -X POST http://localhost:8000/reconstruction/RECONSTRUCTION_ID/semantic-labels
+```
+
+On the validated RTX 3050 Ti target, a normal quick-preset survey should finish in
+under two minutes after kernels are warm, and `/reconstruction/RECONSTRUCTION_ID/semantic-labels`
+should report less than 30% `unlabeled` for a typical well-covered scene.
+
 Known issues (all hit during the v1.0 release validation):
 
 - The torch and `nvcc` CUDA **major versions must match**: CUDA Toolkit 13.2 pairs with
