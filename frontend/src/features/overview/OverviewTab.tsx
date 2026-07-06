@@ -1,11 +1,13 @@
 import { useQuery } from '@tanstack/react-query'
 import { useMapStore } from '../../shared/stores/mapStore'
 import { useSession } from '../map/hooks/useSession'
+import { useQuickReport } from '../map/hooks/useQuickReport'
 import { useCoverageResult } from '../map/hooks/useCoverageResult'
 import { get } from '../../shared/api/client'
 import type { Job } from '../../types/api'
 import { deriveStageStates } from '../../shared/pipeline/stages'
 import PipelineOverview from './PipelineOverview'
+import RapidQACard from './RapidQACard'
 import ReconstructionLogo3D from '../hero/ReconstructionLogo3D'
 import LogoMark from '../../shared/components/LogoMark'
 import GlassSurface from '../../shared/components/GlassSurface'
@@ -40,6 +42,7 @@ export default function OverviewTab({ onImport }: Props) {
   const selectedSessionId = useMapStore((s) => s.selectedSessionId)
   const { data: session } = useSession(selectedSessionId)
   const { data: coverage } = useCoverageResult(selectedSessionId)
+  const { data: quickReport } = useQuickReport(selectedSessionId)
   const { data: jobs = [] } = useQuery<Job[]>({
     queryKey: ['jobs'],
     queryFn: () => get<Job[]>('/jobs/'),
@@ -77,6 +80,13 @@ export default function OverviewTab({ onImport }: Props) {
             </p>
           </div>
         </div>
+
+        {/* Rapid QA card */}
+        {quickReport && (
+          <div className="mt-5">
+            <RapidQACard report={quickReport} />
+          </div>
+        )}
 
         {/* The pipeline */}
         <GlassSurface interactive={false} refraction={false} radius={0} className="mt-5" style={{ padding: '20px 22px', border: '1px solid var(--border)' }}>

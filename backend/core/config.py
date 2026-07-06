@@ -120,6 +120,8 @@ def _reconstruction_config_from_data(data: dict) -> dict:
         "colmap_threads": 8,
         "sift_max_features": 8192,
         "matcher": "exhaustive",
+        "mapper": "incremental",
+        "spatial_matcher_min_images": 150,
         "camera_model": "PINHOLE",
         "camera_profiles": default_camera_profiles(),
         "presets": {

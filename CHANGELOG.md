@@ -2,6 +2,18 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres to [Semantic Versioning](https://semver.org/).
 
+
+## [1.2.0] — Unreleased
+
+### Added
+- **Semantic Splats** (#331): per-gaussian class labels (ground / vegetation / structure / vehicle / water / other) stored in an atomic NPZ sidecar that never mutates `splat.ply`. Produced by an opt-in background job using a GPU segmentation pipeline (SegFormer-B0/ADE20K → multi-view opacity-weighted vote with gsplat expected-depth rasterization).
+  - `prune_order` extracted from `ply_io.prune_by_opacity` so LOD subsets and label arrays stay index-aligned (#334).
+  - Lazy `[semantic]` extra (`transformers>=4.48`, `safetensors`) with runtime gating via `/system/resources` `semantic_labeling` workflow (#335).
+  - Pure-NumPy voting core (`project_to_view`, `visibility_mask`, `accumulate_votes`, `finalize_labels`), background job runner, atomic NPZ sidecar write, 3 DB columns + Alembic migration, and REST routes for status / summary / binary overlay (#336).
+  - Viewer class overlay in the Splat Viewer tab with per-class Three.js `Points` groups, legend chips, and filter toggles (#337).
+  - LAS 1.4 / LAZ point-cloud exports now carry real ASPRS classification codes (ground→2, vegetation→5, structure→6, water→9, vehicle→1, other→1, unlabeled→0) when a semantic sidecar is present (#338).
+  - GPU smoke-guide micro-check (`render_mode="ED"`) in `docs/SETUP.md` and a quality-expectations section in the user manual documenting the ADE20K aerial domain gap (#339).
+
 ## [1.0.0] — 2026-06-14
 
 First stable release: a complete drone video → gaussian-splat pipeline. The headline of the 1.0 cycle was replacing a non-functional gsplat hook with a real in-process trainer, validated end-to-end on GPU hardware (PSNR 27.5 / SSIM 0.79 on a full-preset run).

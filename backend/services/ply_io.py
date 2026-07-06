@@ -193,6 +193,18 @@ def read_3dgs_ply(path: Path) -> GaussianCloud:
     )
 
 
+def prune_order(opacities: np.ndarray, keep_ratio: float) -> np.ndarray:
+    """Return the index array that picks the top *keep_ratio* fraction by opacity.
+
+    The returned indices are the *order* argument previously computed inline in
+    ``prune_by_opacity``.  Extracted so label arrays can be sorted identically
+    for LOD sidecar alignment.
+    """
+    n = len(opacities)
+    keep = max(1, int(n * keep_ratio))
+    return np.argsort(-opacities, kind="stable")[:keep]
+
+
 def prune_by_opacity(src: Path, dst: Path, keep_ratio: float) -> Path:
     """Write the top *keep_ratio* fraction of Gaussians (by opacity) to *dst*.
 
@@ -201,9 +213,7 @@ def prune_by_opacity(src: Path, dst: Path, keep_ratio: float) -> Path:
     is always kept.
     """
     cloud = read_3dgs_ply(src)
-    n = cloud.means.shape[0]
-    keep = max(1, int(n * keep_ratio))
-    order = np.argsort(-cloud.opacities, kind="stable")[:keep]
+    order = prune_order(cloud.opacities, keep_ratio)
     pruned = GaussianCloud(
         means=cloud.means[order],
         sh0=cloud.sh0[order],
