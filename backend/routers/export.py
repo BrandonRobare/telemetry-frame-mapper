@@ -76,9 +76,7 @@ def export_reproducibility_manifest(workflow: str, artifact_path: str | None = N
         for k in ("target_crs", "default_basemap", "exports_dir", "processed_dir")
     }
     artifacts = [_safe_manifest_artifact_path(artifact_path)] if artifact_path else []
-    return build_reproducibility_manifest(
-        workflow=workflow, settings=settings, artifacts=artifacts
-    )
+    return build_reproducibility_manifest(workflow=workflow, settings=settings, artifacts=artifacts)
 
 
 @router.post("/reconstructions/{reconstruction_id}/share-bundle")
@@ -93,6 +91,75 @@ def export_reconstruction_share_bundle(reconstruction_id: int, db: DBSession = D
     return build_share_bundle(
         Path(get_config().exports_dir) / f"reconstruction_{reconstruction_id}_share.zip", rec
     )
+
+
+@router.post("/reconstructions/{reconstruction_id}/share-link")
+def create_share_link(reconstruction_id: int, db: DBSession = Depends(get_db)):
+    """Create a signed, time-limited public share link for a completed reconstruction."""
+    from ..db.models import Reconstruction
+    from ..services.share_links import SHARE_LINK_PREFIX, create_share_token
+
+    rec = db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Reconstruction not found")
+    if rec.status != "complete":
+        raise HTTPException(
+            status_code=422, detail="Only completed reconstructions can be shared"
+        )
+    token = create_share_token(rec.id, rec.session_id)
+    # The full share link is <prefix><token> — the frontend builds the URL.
+    return {
+        "share_token": SHARE_LINK_PREFIX + token,
+        "reconstruction_id": rec.id,
+        "session_id": rec.session_id,
+    }
+
+
+@router.post("/survey-report")
+def export_survey_report(
+    session_id: int,
+    format: str = "json",
+    db: DBSession = Depends(get_db),
+):
+    """Generate a professional survey report for a session.
+
+    Returns structured JSON by default. Pass ``format=html`` for self-contained
+    HTML, or ``format=pdf`` for a PDF when WeasyPrint is installed.
+    """
+    from fastapi.responses import HTMLResponse, Response
+
+    from ..services.survey_report import build_survey_report
+
+    session = db.query(SessionModel).filter(SessionModel.id == session_id).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    try:
+        report = build_survey_report(session_id, db)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    if format == "html":
+        return HTMLResponse(content=report["html"], status_code=200)
+    if format == "pdf":
+        try:
+            from weasyprint import HTML
+        except ImportError as exc:
+            raise HTTPException(
+                status_code=422,
+                detail="PDF export requires the optional weasyprint package",
+            ) from exc
+        pdf_bytes = HTML(string=report["html"]).write_pdf()
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": (f'attachment; filename="survey_report_{session_id}.pdf"')
+            },
+        )
+    if format != "json":
+        raise HTTPException(status_code=422, detail="format must be json, html, or pdf")
+    return report
+
 
 
 @router.post("/webodm-package")
