@@ -17,6 +17,13 @@ _COVERAGE_HIGH_OVERLAP_RATIO = 0.85
 _TIMESTAMP_GAP_MULTIPLIER = 3.0
 _TIMESTAMP_GAP_MIN_SECONDS = 2.0
 
+# Match-density diagnostics
+_MATCH_SAMPLE_STRIDE = 10  # only sample every Nth usable image pair
+_MATCH_MIN_INLIERS = 12
+_MATCH_LOW_DENSITY_THRESHOLD = 24  # matches below this flag a weak-texture stretch
+_MATCH_MAX_PAIRS = 30
+_MATCH_WEAK_RATIO_THRESHOLD = 0.3  # fraction of sampled pairs that are low-density
+
 
 def _pct(part: int, total: int) -> float:
     if total <= 0:
@@ -182,6 +189,80 @@ def _coverage_quality(db: DBSession, images: list[Image]) -> dict:
     }
 
 
+def _match_density_diagnostics(images: list[Image]) -> dict | None:
+    """Sample sequential frame pairs for SIFT/ORB match density.
+
+    Returns None when the diagnostic could not run (e.g. missing OpenCV
+    or zero usable images).  Best-effort: individual pair failures
+    (missing file, feature extraction error) are skipped without
+    crashing the whole report.
+    """
+    try:
+        import cv2  # noqa: PLC0415
+    except ImportError:
+        return None
+
+    usable = [img for img in images if img.usable]
+    if len(usable) < 2:
+        return None
+
+    orb = cv2.ORB_create(nfeatures=800)
+    bf = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True)
+
+    pairs_sampled = 0
+    pairs_failed = 0
+    pairs_low = 0
+    densities: list[float] = []
+
+    # Stride through usable images, spreading sample across the timeline.
+    end = min(len(usable) - 1, _MATCH_SAMPLE_STRIDE * _MATCH_MAX_PAIRS)
+    for i in range(0, end, _MATCH_SAMPLE_STRIDE):
+        img_a = usable[i]
+        img_b = usable[i + 1]
+        try:
+            if not img_a.filepath or not img_b.filepath:
+                pairs_failed += 1
+                continue
+            gray_a = cv2.imread(img_a.filepath, cv2.IMREAD_GRAYSCALE)
+            gray_b = cv2.imread(img_b.filepath, cv2.IMREAD_GRAYSCALE)
+            if gray_a is None or gray_b is None:
+                pairs_failed += 1
+                continue
+            kp_a, des_a = orb.detectAndCompute(gray_a, None)
+            kp_b, des_b = orb.detectAndCompute(gray_b, None)
+            if (
+                des_a is None
+                or des_b is None
+                or len(des_a) < _MATCH_MIN_INLIERS
+                or len(des_b) < _MATCH_MIN_INLIERS
+            ):
+                pairs_failed += 1
+                continue
+            matches = bf.match(des_a, des_b)
+            pairs_sampled += 1
+            densities.append(float(len(matches)))
+            if len(matches) < _MATCH_LOW_DENSITY_THRESHOLD:
+                pairs_low += 1
+        except Exception:
+            pairs_failed += 1
+            continue
+
+    if pairs_sampled == 0:
+        return None
+
+    weak_ratio = pairs_low / pairs_sampled if pairs_sampled > 0 else 0.0
+    avg_density = sum(densities) / len(densities) if densities else 0.0
+
+    return {
+        "samples": pairs_sampled,
+        "failed_pairs": pairs_failed,
+        "low_count": pairs_low,
+        "weak_ratio": round(weak_ratio, 2),
+        "low_threshold": _MATCH_LOW_DENSITY_THRESHOLD,
+        "avg_matches": round(avg_density, 1),
+    }
+
+
 def build_preflight_quality_report(session_id: int, db: DBSession) -> dict:
     session = db.query(Session).filter(Session.id == session_id).first()
     if not session:
@@ -231,6 +312,16 @@ def build_preflight_quality_report(session_id: int, db: DBSession) -> dict:
         warnings.extend(coverage["warnings"])
         score -= 12
 
+    # Optional match-density diagnostics (best-effort)
+    match_density = _match_density_diagnostics(images)
+    if match_density is not None and match_density["weak_ratio"] >= _MATCH_WEAK_RATIO_THRESHOLD:
+        warnings.append(
+            "Weak-texture stretches detected: many frame pairs have low feature-match "
+            "density: may cause COLMAP registration failures on uniform surfaces "
+            "(water, pavement, snow)"
+        )
+        score -= 15
+
     score = max(0, min(100, score))
     if score >= 80:
         safe = "yes"
@@ -256,4 +347,14 @@ def build_preflight_quality_report(session_id: int, db: DBSession) -> dict:
         "safe_to_reconstruct": safe,
         "score": score,
         "recommended_action": action,
+        "match_density": match_density,
     }
+
+
+def build_quick_report(session_id: int, db: DBSession) -> dict:
+    """Compact post-landing QA summary (pass/caution/fail) from preflight checks.
+
+    Returns the full preflight report augmented with match-density diagnostics
+    and a simplified status field suitable for a rapid UI card.
+    """
+    return build_preflight_quality_report(session_id, db)

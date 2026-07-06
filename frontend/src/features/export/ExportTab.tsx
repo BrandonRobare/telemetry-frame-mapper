@@ -285,6 +285,13 @@ export default function ExportTab() {
   const visibleWebodmResult =
     webodmResult?.session_id === selectedSessionId ? webodmResult : null
 
+  // Share link state
+  const [shareResult, setShareResult] = useState<{
+    reconstruction_id: number
+    session_id: number
+    share_token: string
+  } | null>(null)
+
   const webodmMutation = useMutation({
     mutationFn: () =>
       post<{ zip_path: string; image_count: number }>(
@@ -298,6 +305,24 @@ export default function ExportTab() {
       addToast(`WebODM georeferencing CSV export failed: ${err.message}`, 'error')
     },
   })
+
+
+  // Share link mutation
+  function handleShareLink(reconstructionId: number) {
+    const fn = async () => {
+      const data = await post<{
+        share_token: string
+        reconstruction_id: number
+        session_id: number
+      }>(`/export/reconstructions/${reconstructionId}/share-link`)
+      setShareResult(data)
+      return data
+    }
+    fn().catch((err: Error) => {
+      setShareResult(null)
+      addToast(`Share link generation failed: ${err.message}`, 'error')
+    })
+  }
 
   // GeoJSON export — fetches images on demand then triggers browser download
   const { refetch: fetchImages, isFetching: imagesFetching } = useImages(selectedSessionId)
@@ -424,6 +449,135 @@ export default function ExportTab() {
               </dd>
             </dl>
           )}
+        </section>
+
+        {/* ---- Share Link card ---- */}
+        <section
+          className="p-5 flex flex-col gap-4"
+          style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}
+        >
+          <div>
+            <h2
+              className="text-base font-semibold"
+              style={{ color: 'var(--text)', margin: 0 }}
+            >
+              Public Share Link
+            </h2>
+            <p
+              className="text-sm mt-1"
+              style={{ color: 'var(--text-muted)', margin: '4px 0 0' }}
+            >
+              Generate a signed, time-limited share link for a completed reconstruction.
+              The public viewer is read-only — it shows geo-referenced splats and meshes
+              without exposing operator controls.
+            </p>
+          </div>
+
+          {reconstructionsLoading && (
+            <p className="text-sm" style={{ color: 'var(--text-muted)', margin: 0 }}>
+              Loading reconstructions…
+            </p>
+          )}
+
+          {!reconstructionsLoading && (completedReconstructions ?? []).length === 0 && (
+            <p className="text-sm" style={{ color: 'var(--text-muted)', margin: 0 }}>
+              No completed reconstructions available to share.
+            </p>
+          )}
+
+          {(completedReconstructions ?? []).length > 0 && (
+            <div style={{ borderTop: '1px solid var(--border)' }}>
+              {(completedReconstructions ?? []).map((job, idx, arr) => (
+                <div
+                  key={job.id}
+                  className="py-3 flex items-center gap-3"
+                  style={{ borderBottom: idx < arr.length - 1 ? '1px solid var(--border)' : 'none' }}
+                >
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div className="text-sm" style={{ color: 'var(--text)', fontWeight: 600 }}>
+                      Reconstruction #{job.id}
+                    </div>
+                    <div className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                      {job.preset} · {job.frames_used} frames
+                    </div>
+                  </div>
+                  {shareResult?.reconstruction_id === job.id ? (
+                    <div
+                      className="px-3 py-2 text-sm flex flex-col gap-0.5"
+                      style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', maxWidth: 360 }}
+                    >
+                      <span style={{ color: 'var(--success)', fontWeight: 600 }}>
+                        Share link ready:
+                      </span>
+                      <span
+                        className="font-mono text-xs"
+                        style={{ color: 'var(--text-muted)', wordBreak: 'break-all', userSelect: 'all' }}
+                      >
+                        {BASE_URL}/view/share/{shareResult.share_token}
+                      </span>
+                    </div>
+                  ) : (
+                    <Button
+                      variant="ghost"
+                      onClick={() => handleShareLink(job.id)}
+                    >
+                      Generate Share Link
+                    </Button>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+
+        {/* ---- Survey Report card ---- */}
+        <section
+          className="p-5 flex flex-col gap-4"
+          style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}
+        >
+          <div>
+            <h2
+              className="text-base font-semibold"
+              style={{ color: 'var(--text)', margin: 0 }}
+            >
+              Survey Report
+            </h2>
+            <p
+              className="text-sm mt-1"
+              style={{ color: 'var(--text-muted)', margin: '4px 0 0' }}
+            >
+              Professional survey report with session metadata, quality assessment,
+              coverage summary, annotations, and reconstruction metrics.
+            </p>
+          </div>
+
+          <div className="flex items-center gap-3 flex-wrap">
+            <Button
+              variant="primary"
+              onClick={() => {
+                window.open(
+                  `${BASE_URL}/export/survey-report?session_id=${selectedSessionId}&format=html`,
+                  '_blank',
+                )
+              }}
+            >
+              View / Print Report
+            </Button>
+            <a
+              href={`${BASE_URL}/export/survey-report?session_id=${selectedSessionId}&format=json`}
+              download={`survey_report_session_${selectedSessionId}.json`}
+              style={downloadLinkStyle}
+            >
+              Download JSON
+            </a>
+          </div>
+          <p
+            className="text-xs"
+            style={{ color: 'var(--text-muted)', margin: 0 }}
+          >
+            PDF: use browser Print (Ctrl/Cmd+P) → Save as PDF on the HTML report.
+            WeasyPrint or other PDF backends may be added in a future release.
+          </p>
         </section>
 
         {/* ---- WebODM georeferencing CSV-only export card ---- */}

@@ -17,6 +17,8 @@ venv
 .env.*
 .creds.json
 *.key
+# Share link signing key (generated at first share-link creation)
+.share_signing_key
 *.pem
 
 # Drone media and flight data

@@ -101,6 +101,10 @@ class FlightLog(Base):
     filepath = Column(String)
     format = Column(String)
     point_count = Column(Integer, default=0)
+    log_version = Column(Integer)
+    aircraft_name = Column(String)
+    aircraft_sn = Column(String)
+    encrypted = Column(Boolean, default=False)
     uploaded_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     session = relationship("Session", back_populates="flight_logs")
     points = relationship(
@@ -118,6 +122,15 @@ class FlightLogPoint(Base):
     altitude_m = Column(Float)
     speed_ms = Column(Float)
     heading = Column(Float)
+    roll = Column(Float)
+    pitch = Column(Float)
+    yaw = Column(Float)
+    gimbal_pitch = Column(Float)
+    gimbal_roll = Column(Float)
+    gimbal_yaw = Column(Float)
+    battery_voltage = Column(Float)
+    battery_charge_pct = Column(Float)
+    battery_temperature_c = Column(Float)
     flight_log = relationship("FlightLog", back_populates="points")
 
 
@@ -213,6 +226,9 @@ class Reconstruction(Base):
     ortho_path = Column(String)
     ortho_status = Column(String)
     ortho_error = Column(String)
+    semantic_status = Column(String)
+    semantic_error = Column(String)
+    semantic_labels_path = Column(String)
     geo_transform = Column(Text)
     error_msg = Column(String)
     started_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
@@ -268,4 +284,27 @@ class SessionComparison(Base):
     diff_path = Column(String)
     error_msg = Column(String)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    completed_at = Column(DateTime)
+
+
+class JobQueueEntry(Base):
+    """Persistent job queue for resource-heavy async work (reconstruction, mesh, flythrough,
+    comparison).  Jobs survive API restarts and are dispatched by a background worker that
+    enforces GPU and concurrency caps.
+
+    Each entry references a single target entity (Reconstruction, SessionComparison) via
+    target_id; the job_type column discriminates so the worker knows which handler to call.
+    """
+    __tablename__ = "job_queue"
+    id = Column(Integer, primary_key=True, index=True)
+    job_type = Column(String, nullable=False)
+    target_id = Column(Integer, nullable=False)
+    status = Column(String, default="pending")
+    priority = Column(Integer, default=0)
+    payload_json = Column(Text)
+    error_msg = Column(String)
+    attempt = Column(Integer, default=0)
+    max_attempts = Column(Integer, default=1)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    started_at = Column(DateTime)
     completed_at = Column(DateTime)
