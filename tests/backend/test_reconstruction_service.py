@@ -1920,3 +1920,109 @@ def test_generate_thumbnail_uses_configured_size_and_quality(tmp_path):
 
     mock_render.assert_called_once_with(splat, out, width=256, height=256, quality=70)
     assert result == out
+
+
+def test_new_model_columns_include_semantic_fields(setup_test_db):
+    from backend.db.database import get_db
+    from backend.main import app
+
+    db = next(app.dependency_overrides[get_db]())
+    s = _make_session(db)
+    rec = Reconstruction(session_id=s.id, preset="quick", status="complete", frames_used=0)
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+
+    assert rec.semantic_status is None
+    assert rec.semantic_error is None
+    assert rec.semantic_labels_path is None
+    rec.semantic_status = "complete"
+    rec.semantic_labels_path = "/tmp/semantic_labels.npz"
+    db.commit()
+    db.refresh(rec)
+    assert rec.semantic_status == "complete"
+    assert rec.semantic_labels_path == "/tmp/semantic_labels.npz"
+
+
+def test_semantic_job_success_updates_status_and_invalidates_las(setup_test_db, tmp_path):
+    from unittest.mock import patch
+
+    from backend.db.database import get_db
+    from backend.main import app
+    from backend.services.reconstruction import _run_semantic_job
+    from tests.conftest import TestSessionLocal
+
+    db = next(app.dependency_overrides[get_db]())
+    s = _make_session(db)
+    splat = tmp_path / "splat.ply"
+    splat.write_bytes(b"ply")
+    cached_las = tmp_path / "pointcloud.las"
+    cached_las.write_bytes(b"las")
+    rec = Reconstruction(
+        session_id=s.id,
+        preset="quick",
+        status="complete",
+        frames_used=1,
+        splat_path=str(splat),
+        pointcloud_path=str(cached_las),
+        semantic_status="pending",
+    )
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+    labels = tmp_path / "semantic_labels.npz"
+
+    def fake_compute(_rec, **_kwargs):
+        labels.write_bytes(b"npz")
+        _kwargs["log_cb"]("Semantic labels: processed view 1/1")
+        return labels
+
+    with patch("backend.services.reconstruction.SessionLocal", TestSessionLocal), \
+         patch("backend.services.reconstruction.compute_semantic_labels", side_effect=fake_compute):
+        _run_semantic_job(rec.id)
+
+    db.expire_all()
+    db.refresh(rec)
+    assert rec.semantic_status == "complete"
+    assert rec.semantic_labels_path == str(labels)
+    assert rec.pointcloud_path is None
+    assert not cached_las.exists()
+
+
+def test_semantic_overlay_bytes_frames_preview_payload(tmp_path, monkeypatch):
+    import struct
+
+    import numpy as np
+
+    from backend.services.ply_io import GaussianCloud, write_3dgs_ply
+    from backend.services.reconstruction import semantic_overlay_bytes
+    from backend.services.semantic_labels import write_sidecar
+
+    cloud = GaussianCloud(
+        means=np.array([[0, 0, 0], [1, 0, 0], [2, 0, 0]], dtype=np.float32),
+        sh0=np.zeros((3, 3), dtype=np.float32),
+        shN=np.zeros((3, 0, 3), dtype=np.float32),
+        opacities=np.array([0.1, 0.9, 0.5], dtype=np.float32),
+        scales=np.zeros((3, 3), dtype=np.float32),
+        quats=np.tile(np.array([1, 0, 0, 0], dtype=np.float32), (3, 1)),
+    )
+    splat = write_3dgs_ply(tmp_path / "splat.ply", cloud)
+    write_sidecar(
+        tmp_path,
+        labels=np.array([0, 1, 2], dtype=np.uint8),
+        confidence=np.ones(3, dtype=np.float16),
+        labels_medium=np.array([1, 2], dtype=np.uint8),
+        labels_preview=np.array([1], dtype=np.uint8),
+    )
+    monkeypatch.setattr(
+        "backend.services.reconstruction.get_render_config",
+        lambda: {"lod_preview_ratio": 0.34, "lod_medium_ratio": 0.67},
+    )
+    rec = SimpleNamespace(
+        splat_path=str(splat),
+        semantic_labels_path=str(tmp_path / "semantic_labels.npz"),
+    )
+    payload = semantic_overlay_bytes(rec, lod="preview")
+    count = struct.unpack("<I", payload[:4])[0]
+    assert count == 1
+    assert payload[-1] == 1

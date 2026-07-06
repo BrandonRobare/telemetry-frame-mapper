@@ -8,7 +8,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session as DBSession
 
@@ -32,11 +32,14 @@ from ..services.reconstruction import (
     compute_coverage_gaps,
     current_reconstruction_status_version,
     get_rec_log,
+    semantic_overlay_bytes,
     start_flythrough_render,
     start_mesh_export,
     start_reconstruction,
+    start_semantic_labeling,
     wait_for_reconstruction_status_change,
 )
+from ..services.semantic_labels import semantic_summary
 from ..services.splat_cleanup import cleanup_ply_file
 from ..services.splat_transform import (
     cleanup_splat as _splat_transform_cleanup,
@@ -131,6 +134,9 @@ class ReconstructionOut(BaseModel):
     flythrough_path: str | None = None
     flythrough_status: str | None = None
     flythrough_error: str | None = None
+    semantic_status: str | None = None
+    semantic_error: str | None = None
+    semantic_labels_path: str | None = None
 
     model_config = {"from_attributes": True}
 
@@ -265,6 +271,15 @@ class FlythroughStatusOut(BaseModel):
 
     model_config = {"from_attributes": True}
 
+
+
+class SemanticStatusOut(BaseModel):
+    id: int
+    semantic_status: str | None = None
+    semantic_error: str | None = None
+    semantic_labels_path: str | None = None
+
+    model_config = {"from_attributes": True}
 
 class FlythroughKeyframe(BaseModel):
     position: list[float]
@@ -752,6 +767,72 @@ def download_flythrough(reconstruction_id: int, db: DBSession = Depends(get_db))
         media_type="video/mp4",
         filename=f"flythrough_{reconstruction_id}.mp4",
     )
+
+
+@router.post(
+    "/{reconstruction_id}/semantic-labels",
+    response_model=SemanticStatusOut,
+    status_code=202,
+)
+def generate_semantic_labels(reconstruction_id: int, db: DBSession = Depends(get_db)):
+    try:
+        return start_semantic_labeling(reconstruction_id, db)
+    except ValueError as exc:
+        _raise_start_error(exc)
+
+
+@router.get("/{reconstruction_id}/semantic-labels/status", response_model=SemanticStatusOut)
+def get_semantic_status(reconstruction_id: int, db: DBSession = Depends(get_db)):
+    rec = db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Reconstruction not found")
+    return rec
+
+
+@router.get("/{reconstruction_id}/semantic-labels")
+def get_semantic_labels_summary(
+    reconstruction_id: int,
+    lod: str = Query("full", pattern="^(full|medium|preview)$"),
+    db: DBSession = Depends(get_db),
+):
+    rec = db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Reconstruction not found")
+    if rec.semantic_status in {"pending", "running"}:
+        raise HTTPException(status_code=202, detail="Semantic labeling still in progress")
+    labels_path = Path(rec.semantic_labels_path) if rec.semantic_labels_path else None
+    if labels_path is None or not labels_path.exists():
+        if rec.splat_path:
+            fallback = Path(rec.splat_path).parent / "semantic_labels.npz"
+            if fallback.exists():
+                labels_path = fallback
+    if labels_path is None or not labels_path.exists():
+        raise HTTPException(status_code=404, detail="Semantic labels not found")
+    try:
+        return semantic_summary(labels_path, lod=lod)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Failed to read semantic labels: {exc}",
+        ) from exc
+
+
+@router.get("/{reconstruction_id}/semantic-labels/overlay")
+def get_semantic_overlay(
+    reconstruction_id: int,
+    lod: str = Query("preview", pattern="^(preview|medium)$"),
+    db: DBSession = Depends(get_db),
+):
+    rec = db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Reconstruction not found")
+    if rec.semantic_status in {"pending", "running"}:
+        raise HTTPException(status_code=202, detail="Semantic labeling still in progress")
+    try:
+        payload = semantic_overlay_bytes(rec, lod=lod)
+    except Exception as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return Response(content=payload, media_type="application/octet-stream")
 
 
 @router.get("/{reconstruction_id}/geo-transform")

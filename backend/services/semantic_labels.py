@@ -180,3 +180,103 @@ def read_sidecar(sidecar_path: Path) -> dict[str, np.ndarray | str]:
             "class_names": list(data["class_names"]),
             "meta": str(data["meta"]),
         }
+
+# -- voting / projection core -------------------------------------------------
+UNLABELED_CLASS = 255
+
+
+def project_to_view(
+    points_xyz: np.ndarray,
+    viewmat: np.ndarray,
+    intrinsics: np.ndarray,
+) -> dict[str, np.ndarray]:
+    """Project world-space points into one pinhole view.
+
+    Returns pixel coordinates, camera-space depth, and an in-frame/in-front mask.
+    """
+    points = np.asarray(points_xyz, dtype=np.float64)
+    homog = np.concatenate([points, np.ones((len(points), 1), dtype=np.float64)], axis=1)
+    camera = homog @ np.asarray(viewmat, dtype=np.float64).T
+    z = camera[:, 2]
+    with np.errstate(divide="ignore", invalid="ignore"):
+        u = intrinsics[0, 0] * (camera[:, 0] / z) + intrinsics[0, 2]
+        v = intrinsics[1, 1] * (camera[:, 1] / z) + intrinsics[1, 2]
+    return {"u": u, "v": v, "z": z, "camera_xyz": camera[:, :3]}
+
+
+def visibility_mask(
+    projected: dict[str, np.ndarray],
+    expected_depth: np.ndarray,
+    *,
+    tau: float = 0.08,
+) -> np.ndarray:
+    """Visible when projected in-frame and |z - ED| < tau * ED."""
+    depth = np.asarray(expected_depth, dtype=np.float32)
+    h, w = depth.shape[:2]
+    u = np.rint(projected["u"]).astype(np.int64)
+    v = np.rint(projected["v"]).astype(np.int64)
+    z = np.asarray(projected["z"], dtype=np.float64)
+    in_frame = (z > 0) & (u >= 0) & (u < w) & (v >= 0) & (v < h)
+    mask = np.zeros(len(z), dtype=bool)
+    if not np.any(in_frame):
+        return mask
+    ed = depth[v[in_frame], u[in_frame]].astype(np.float64)
+    mask[in_frame] = np.isfinite(ed) & (ed > 0) & (np.abs(z[in_frame] - ed) < tau * ed)
+    return mask
+
+
+def accumulate_votes(
+    votes: np.ndarray,
+    labels_2d: np.ndarray,
+    projected: dict[str, np.ndarray],
+    visible: np.ndarray,
+    opacities: np.ndarray,
+) -> None:
+    """Accumulate opacity-sigmoid weighted class votes in-place."""
+    seg = np.asarray(labels_2d)
+    h, w = seg.shape[:2]
+    u = np.rint(projected["u"]).astype(np.int64)
+    v = np.rint(projected["v"]).astype(np.int64)
+    weights = 1.0 / (1.0 + np.exp(-np.asarray(opacities, dtype=np.float64)))
+    valid = visible & (u >= 0) & (u < w) & (v >= 0) & (v < h)
+    for idx in np.flatnonzero(valid):
+        cls = int(seg[v[idx], u[idx]])
+        if 0 <= cls < votes.shape[1]:
+            votes[idx, cls] += weights[idx]
+
+
+def finalize_labels(votes: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Return uint8 labels and confidence from vote matrix; no votes -> 255."""
+    totals = votes.sum(axis=1)
+    labels = np.full(votes.shape[0], UNLABELED_CLASS, dtype=np.uint8)
+    confidence = np.zeros(votes.shape[0], dtype=np.float32)
+    has_votes = totals > 0
+    if np.any(has_votes):
+        winners = np.argmax(votes[has_votes], axis=1).astype(np.uint8)
+        labels[has_votes] = winners
+        confidence[has_votes] = votes[has_votes, winners] / totals[has_votes]
+    return labels, confidence.astype(np.float16)
+
+
+def semantic_summary(sidecar_path: Path, lod: str = "full") -> dict:
+    """Build JSON-safe class-count summary for a semantic sidecar."""
+    data = read_sidecar(sidecar_path)
+    key = {"full": "labels", "medium": "labels_medium", "preview": "labels_preview"}.get(lod)
+    if key is None:
+        raise ValueError("lod must be full, medium, or preview")
+    labels = np.asarray(data[key], dtype=np.uint8)
+    counts = {name: int(np.count_nonzero(labels == idx)) for idx, name in enumerate(CLASS_NAMES)}
+    unlabeled = int(np.count_nonzero(labels == UNLABELED_CLASS))
+    meta = json.loads(str(data["meta"]))
+    return {
+        "lod": lod,
+        "count": int(labels.shape[0]),
+        "class_counts": counts,
+        "unlabeled": unlabeled,
+        "confidence_mean": (
+            float(np.asarray(data["confidence"], dtype=np.float32).mean())
+            if key == "labels" and len(data["confidence"])
+            else None
+        ),
+        "meta": meta,
+    }

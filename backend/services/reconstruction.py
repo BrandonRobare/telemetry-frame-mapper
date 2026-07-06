@@ -25,7 +25,17 @@ from backend.db.models import (
 )
 from backend.services import ply_io, splat_trainer
 from backend.services.camera_calibration import calibration_profile_for_images
-from backend.services.semantic_labels import read_sidecar
+from backend.services.semantic_labels import (
+    NUM_CLASSES,
+    accumulate_votes,
+    finalize_labels,
+    lod_labels,
+    project_to_view,
+    read_sidecar,
+    visibility_mask,
+    write_sidecar,
+)
+from backend.services.semantic_segmenter import segment_frame
 from backend.services.splat_trainer import ReconstructionCancelled, TrainerConfig
 
 # Maps reconstruction_id → cancel Event
@@ -50,6 +60,9 @@ _mesh_jobs: set[int] = set()
 _mesh_jobs_lock = threading.Lock()
 _flythrough_jobs: set[int] = set()
 _flythrough_jobs_lock = threading.Lock()
+_semantic_jobs: set[int] = set()
+_semantic_jobs_lock = threading.Lock()
+_semantic_cancel_events: dict[int, threading.Event] = {}
 _comparison_jobs: set[int] = set()
 _comparison_jobs_lock = threading.Lock()
 _rec_status_condition = threading.Condition()
@@ -1060,6 +1073,193 @@ def _export_point_cloud(
         las.write(output_path)
     return output_path
 
+
+
+# ---------------------------------------------------------------------------
+# Semantic label sidecar generation
+# ---------------------------------------------------------------------------
+
+def render_expected_depth(cloud: ply_io.GaussianCloud, view: dict, *, device: str = "cuda"):
+    """Render expected depth for one COLMAP view using gsplat ED mode."""
+    import gsplat
+    import torch
+
+    means = torch.from_numpy(cloud.means).float().to(device)
+    quats = torch.from_numpy(cloud.quats).float().to(device)
+    scales = torch.from_numpy(cloud.scales).float().to(device)
+    opacities = torch.from_numpy(cloud.opacities).float().to(device)
+    colors = torch.zeros((len(cloud.means), 1, 3), dtype=torch.float32, device=device)
+    renders, _, _ = gsplat.rasterization(
+        means=means,
+        quats=quats,
+        scales=torch.exp(scales),
+        opacities=torch.sigmoid(opacities),
+        colors=colors,
+        viewmats=torch.from_numpy(view["viewmat"][None]).float().to(device),
+        Ks=torch.from_numpy(view["intrinsics"][None]).float().to(device),
+        width=int(view["width"]),
+        height=int(view["height"]),
+        render_mode="ED",
+        sh_degree=0,
+        packed=True,
+    )
+    return renders[0, ..., 0].detach().cpu().numpy()
+
+
+def compute_semantic_labels(
+    rec: Reconstruction,
+    *,
+    log_cb=None,
+    cancel: threading.Event | None = None,
+) -> Path:
+    """Compute per-gaussian semantic labels and write semantic_labels.npz."""
+    import numpy as np
+
+    from backend.services import colmap_io
+
+    if not rec.colmap_dir:
+        raise RuntimeError("COLMAP workspace not found")
+    if not rec.splat_path or not Path(rec.splat_path).exists():
+        raise RuntimeError("Splat file not found on disk")
+    cancel = cancel or threading.Event()
+    splat_path = Path(rec.splat_path)
+    colmap_dir = Path(rec.colmap_dir)
+    cloud = ply_io.read_3dgs_ply(splat_path)
+    model = colmap_io.read_model(_pick_best_submodel(colmap_dir / "sparse"))
+    views = splat_trainer._load_dataset(__import__("torch"), colmap_dir, model, 1)
+    votes = np.zeros((len(cloud.means), NUM_CLASSES), dtype=np.float32)
+    with splat_trainer._GPU_LOCK:
+        segmenter = None
+        for index, view in enumerate(views, start=1):
+            if cancel.is_set():
+                raise ReconstructionCancelled("semantic labeling cancelled")
+            labels_2d, _confidence = segment_frame(view["pixels"].numpy(), segmenter=segmenter)
+            expected_depth = render_expected_depth(cloud, view)
+            projected = project_to_view(cloud.means, view["viewmat"], view["intrinsics"])
+            visible = visibility_mask(projected, expected_depth)
+            accumulate_votes(votes, labels_2d, projected, visible, cloud.opacities)
+            if log_cb:
+                log_cb(f"Semantic labels: processed view {index}/{len(views)}")
+    labels, confidence = finalize_labels(votes)
+    render_cfg = get_render_config()
+    labels_medium = lod_labels(
+        labels,
+        cloud.opacities,
+        float(render_cfg.get("lod_medium_ratio", 0.5)),
+    )
+    labels_preview = lod_labels(
+        labels,
+        cloud.opacities,
+        float(render_cfg.get("lod_preview_ratio", 0.1)),
+    )
+    out_path = write_sidecar(
+        _reconstruction_export_dir(rec.id),
+        labels,
+        confidence,
+        labels_medium,
+        labels_preview,
+        extra_meta={"source": "semantic_labeling"},
+    )
+    return out_path
+
+
+def start_semantic_labeling(reconstruction_id: int, db: DBSession) -> Reconstruction:
+    rec = db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).first()
+    if rec is None:
+        raise ValueError("Reconstruction not found")
+    if rec.status != "complete":
+        raise ValueError("Reconstruction must be complete before semantic labeling")
+    if not rec.splat_path:
+        raise ValueError("Splat file not found on disk")
+    if rec.semantic_status in {"pending", "running"} and reconstruction_id not in _semantic_jobs:
+        rec.semantic_status = None
+        db.commit()
+    if rec.semantic_status in {"pending", "running"}:
+        raise ValueError(
+            f"Semantic labeling already running for reconstruction {reconstruction_id}"
+        )
+    with _semantic_jobs_lock:
+        if reconstruction_id in _semantic_jobs:
+            raise ValueError(
+            f"Semantic labeling already running for reconstruction {reconstruction_id}"
+        )
+        _semantic_jobs.add(reconstruction_id)
+    cancel = threading.Event()
+    _semantic_cancel_events[reconstruction_id] = cancel
+    rec.semantic_status = "pending"
+    rec.semantic_error = None
+    db.commit()
+    db.refresh(rec)
+    threading.Thread(target=_run_semantic_job, args=(reconstruction_id,), daemon=True).start()
+    return rec
+
+
+def _run_semantic_job(reconstruction_id: int) -> None:
+    db = SessionLocal()
+    try:
+        rec = db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).first()
+        if rec is None:
+            return
+        rec.semantic_status = "running"
+        rec.semantic_error = None
+        db.commit()
+        cancel = _semantic_cancel_events.get(reconstruction_id, threading.Event())
+        path = compute_semantic_labels(
+            rec,
+            log_cb=lambda msg: _log_rec(reconstruction_id, msg),
+            cancel=cancel,
+        )
+        rec.semantic_labels_path = str(path)
+        rec.semantic_status = "complete"
+        rec.semantic_error = None
+        if rec.pointcloud_path:
+            cached = Path(rec.pointcloud_path)
+            if cached.exists():
+                cached.unlink()
+            rec.pointcloud_path = None
+        db.commit()
+    except Exception as exc:
+        db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).update({
+            "semantic_status": "failed",
+            "semantic_error": str(exc)[:_ERROR_MSG_MAX_CHARS],
+        })
+        db.commit()
+    finally:
+        db.close()
+        _semantic_cancel_events.pop(reconstruction_id, None)
+        with _semantic_jobs_lock:
+            _semantic_jobs.discard(reconstruction_id)
+
+
+def semantic_overlay_bytes(rec: Reconstruction, lod: str = "preview") -> bytes:
+    import struct
+
+    import numpy as np
+
+    if not rec.splat_path:
+        raise RuntimeError("Splat file not found on disk")
+    labels_path = (
+        Path(rec.semantic_labels_path)
+        if rec.semantic_labels_path
+        else _semantic_sidecar_for_splat(Path(rec.splat_path))
+    )
+    if not labels_path.exists():
+        raise RuntimeError("Semantic labels not found")
+    cloud = ply_io.read_3dgs_ply(Path(rec.splat_path))
+    data = read_sidecar(labels_path)
+    render_cfg = get_render_config()
+    if lod == "preview":
+        order = ply_io.prune_order(cloud.opacities, float(render_cfg.get("lod_preview_ratio", 0.1)))
+        labels = data["labels_preview"]
+    elif lod == "medium":
+        order = ply_io.prune_order(cloud.opacities, float(render_cfg.get("lod_medium_ratio", 0.5)))
+        labels = data["labels_medium"]
+    else:
+        order = np.arange(len(cloud.means))
+        labels = data["labels"]
+    xyz = np.asarray(cloud.means[order], dtype="<f4")
+    labels = np.asarray(labels, dtype=np.uint8)
+    return struct.pack("<I", len(labels)) + xyz.tobytes() + labels.tobytes()
 
 # ---------------------------------------------------------------------------
 # Phase 7 exports: mesh, flythrough video, multi-session comparison
