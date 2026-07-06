@@ -1,7 +1,7 @@
 """add job_queue table
 
 Revision ID: db8522027afe
-Revises: 0002
+Revises: 0004
 Create Date: 2026-07-06 06:38:45.368742
 
 """
@@ -14,7 +14,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = 'db8522027afe'
-down_revision: str | None = '0002'
+down_revision: str | None = '0004'
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
