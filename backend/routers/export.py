@@ -93,6 +93,39 @@ def export_reconstruction_share_bundle(reconstruction_id: int, db: DBSession = D
     )
 
 
+@router.post("/reconstructions/{reconstruction_id}/orthomosaic", status_code=202)
+def export_orthomosaic(reconstruction_id: int, db: DBSession = Depends(get_db)):
+    """Start an orthomosaic GeoTIFF export for a completed reconstruction.
+
+    The export runs asynchronously. Poll ``/reconstruction/{id}/ortho/status`` for progress.
+    Returns 202 with the updated reconstruction object (including ``ortho_status``).
+    """
+    from ..db.models import Reconstruction
+    from ..services.orthomosaic_export import start_orthomosaic_export
+
+    rec = db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Reconstruction not found")
+
+    # Guard: must have a point source
+    if not rec.splat_path and not rec.pointcloud_path and not rec.colmap_dir:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "Reconstruction has no splat, point cloud, or COLMAP workspace. "
+                "At least one point source is required for orthomosaic export."
+            ),
+        )
+
+    try:
+        rec = start_orthomosaic_export(reconstruction_id, db)
+        return rec
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except ImportError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
 @router.post("/reconstructions/{reconstruction_id}/share-link")
 def create_share_link(reconstruction_id: int, db: DBSession = Depends(get_db)):
     """Create a signed, time-limited public share link for a completed reconstruction."""
@@ -159,7 +192,6 @@ def export_survey_report(
     if format != "json":
         raise HTTPException(status_code=422, detail="format must be json, html, or pdf")
     return report
-
 
 
 @router.post("/webodm-package")

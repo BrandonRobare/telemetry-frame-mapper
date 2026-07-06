@@ -850,6 +850,44 @@ def get_geo_transform(reconstruction_id: int, db: DBSession = Depends(get_db)):
         ) from exc
 
 
+@router.get("/{reconstruction_id}/ortho/status")
+def get_ortho_status(reconstruction_id: int, db: DBSession = Depends(get_db)):
+    rec = db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Reconstruction not found")
+    return {
+        "id": rec.id,
+        "ortho_status": getattr(rec, "ortho_status", None),
+        "ortho_error": getattr(rec, "ortho_error", None),
+        "ortho_path": getattr(rec, "ortho_path", None),
+    }
+
+
+@router.get("/{reconstruction_id}/ortho")
+def download_ortho(reconstruction_id: int, db: DBSession = Depends(get_db)):
+    rec = db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Reconstruction not found")
+
+    ortho_status = getattr(rec, "ortho_status", None)
+    if ortho_status != "complete":
+        raise HTTPException(status_code=202, detail="Orthomosaic export still in progress")
+
+    ortho_path_str = getattr(rec, "ortho_path", None)
+    if not ortho_path_str:
+        raise HTTPException(status_code=404, detail="Orthomosaic file path not recorded")
+
+    canonical = _safe_export_http_path(Path(ortho_path_str))
+    if not canonical.exists():
+        raise HTTPException(status_code=404, detail="Orthomosaic file not found on disk")
+
+    return FileResponse(
+        canonical,
+        media_type="image/tiff",
+        filename=f"orthomosaic_{reconstruction_id}.tif",
+    )
+
+
 @router.get("/{reconstruction_id}/log")
 def get_log(
     reconstruction_id: int,

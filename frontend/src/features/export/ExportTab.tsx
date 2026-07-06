@@ -8,7 +8,7 @@ import TabHeader from '../../shared/components/TabHeader'
 import EmptyState from '../../shared/components/EmptyState'
 import { useCoverageResult } from '../map/hooks/useCoverageResult'
 import { formatCoveragePct } from './coverageSummary'
-import type { Session, Image, Job, MeshStatus } from '../../types/api'
+import type { Session, Image, Job, MeshStatus, OrthoStatus } from '../../types/api'
 
 const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
 
@@ -45,6 +45,17 @@ function useMeshStatus(reconstructionId: number) {
     queryFn: () => get<MeshStatus>(`/reconstruction/${reconstructionId}/mesh/status`),
     refetchInterval: (query) => {
       const status = query.state.data?.mesh_status
+      return status === 'pending' || status === 'running' ? 2000 : false
+    },
+  })
+}
+
+function useOrthoStatus(reconstructionId: number) {
+  return useQuery<OrthoStatus>({
+    queryKey: ['ortho-status', reconstructionId],
+    queryFn: () => get<OrthoStatus>(`/reconstruction/${reconstructionId}/ortho/status`),
+    refetchInterval: (query) => {
+      const status = query.state.data?.ortho_status
       return status === 'pending' || status === 'running' ? 2000 : false
     },
   })
@@ -172,6 +183,86 @@ const downloadLinkStyle: CSSProperties = {
   color: 'var(--accent-strong)',
   textDecoration: 'none',
   whiteSpace: 'nowrap',
+}
+
+function OrthoExportCard({ job }: { job: Job }) {
+  const { addToast } = useToast()
+  const qc = useQueryClient()
+  const { data: ortho } = useOrthoStatus(job.id)
+
+  const orthoMutation = useMutation({
+    mutationFn: () => post<OrthoStatus>(`/export/reconstructions/${job.id}/orthomosaic`),
+    onSuccess: () => {
+      addToast(`Orthomosaic export started for reconstruction #${job.id}`, 'success')
+      qc.invalidateQueries({ queryKey: ['ortho-status', job.id] })
+    },
+    onError: (err: Error) => addToast(`Orthomosaic export failed: ${err.message}`, 'error'),
+  })
+
+  const status = ortho?.ortho_status ?? null
+  const running = status === 'pending' || status === 'running'
+  const complete = status === 'complete'
+
+  return (
+    <div
+      className="py-3 flex flex-col gap-3"
+      style={{ borderBottom: '1px solid var(--border)' }}
+    >
+      <div className="flex items-center gap-3">
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div className="text-sm" style={{ color: 'var(--text)', fontWeight: 600 }}>
+            Reconstruction #{job.id}
+          </div>
+          <div className="text-xs" style={{ color: 'var(--text-muted)' }}>
+            {job.preset} · {job.frames_used} frames
+          </div>
+        </div>
+        {!complete && (
+          <Button
+            variant="ghost"
+            disabled={running || orthoMutation.isPending}
+            onClick={() => orthoMutation.mutate()}
+          >
+            {running || orthoMutation.isPending ? 'Generating…' : 'Generate Orthomosaic'}
+          </Button>
+        )}
+      </div>
+
+      {running && (
+        <div style={{ height: 5, background: 'var(--surface-2)', borderRadius: 3, overflow: 'hidden' }}>
+          <div
+            className="tg-indeterminate"
+            style={{
+              height: '100%',
+              width: '40%',
+              background: 'var(--accent)',
+              borderRadius: 3,
+            }}
+          />
+        </div>
+      )}
+
+      {status === 'failed' && ortho?.ortho_error && (
+        <p className="text-xs" style={{ color: 'var(--danger, #f85149)', margin: 0 }}>
+          {ortho.ortho_error}
+        </p>
+      )}
+
+      {complete && (
+        <div className="flex gap-2 flex-wrap">
+          {ortho?.ortho_path && (
+            <a
+              href={`${BASE_URL}/reconstruction/${job.id}/ortho`}
+              download={`orthomosaic_${job.id}.tif`}
+              style={downloadLinkStyle}
+            >
+              Download GeoTIFF
+            </a>
+          )}
+        </div>
+      )}
+    </div>
+  )
 }
 
 // ---- main component ----
@@ -731,6 +822,47 @@ export default function ExportTab() {
           <div style={{ borderTop: '1px solid var(--border)' }}>
           {(completedReconstructions ?? []).map((job) => (
             <MeshExportCard key={job.id} job={job} />
+          ))}
+          </div>
+          )}
+        </section>
+
+        {/* ---- Orthomosaic Export card ---- */}
+        <section
+          className="p-5 flex flex-col gap-4"
+          style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}
+        >
+          <div>
+            <h2
+              className="text-base font-semibold"
+              style={{ color: 'var(--text)', margin: 0 }}
+            >
+              Orthomosaic Export
+            </h2>
+            <p
+              className="text-sm mt-1"
+              style={{ color: 'var(--text-muted)', margin: '4px 0 0' }}
+            >
+              Generate georeferenced RGB GeoTIFF orthomosaics from completed reconstructions.
+            </p>
+          </div>
+
+          {reconstructionsLoading && (
+            <p className="text-sm" style={{ color: 'var(--text-muted)', margin: 0 }}>
+              Loading reconstructions…
+            </p>
+          )}
+
+          {!reconstructionsLoading && (completedReconstructions ?? []).length === 0 && (
+            <p className="text-sm" style={{ color: 'var(--text-muted)', margin: 0 }}>
+              No completed reconstruction is ready for orthomosaic export.
+            </p>
+          )}
+
+          {(completedReconstructions ?? []).length > 0 && (
+          <div style={{ borderTop: '1px solid var(--border)' }}>
+          {(completedReconstructions ?? []).map((job) => (
+            <OrthoExportCard key={job.id} job={job} />
           ))}
           </div>
           )}
