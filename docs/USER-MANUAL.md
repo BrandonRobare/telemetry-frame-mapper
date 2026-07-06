@@ -288,3 +288,21 @@ in **Splat Viewer**.
 External binaries: `ffmpeg` and `exiftool` are required for the CLI; `colmap`
 plus a CUDA GPU with torch + gsplat are required for reconstruction (all optional
 and detected at runtime). See [INSTALL.md](INSTALL.md) and [SETUP.md](SETUP.md).
+
+
+## Semantic labels
+
+For completed splat reconstructions, the Semantic Labels workflow can attach a
+sidecar `semantic_labels.npz` without changing `splat.ply`. The workflow maps
+each gaussian to one of six operator classes: ground, vegetation, structure,
+vehicle, water, or other. The viewer can use the sidecar as a class overlay, and
+LAS exports use it to populate ASPRS classification codes when present.
+
+Quality expectations are intentionally conservative. The default SegFormer/ADE20K
+model is small enough for field hardware, but ADE20K is not an aerial-survey
+dataset. Expect good separation for broad ground/vegetation/structure regions and
+more mistakes on oblique imagery, tiny vehicles, reflective water, shadows, or
+classes absent from ADE20K. Treat the output as an operator QA aid, not a surveyed
+truth layer. If more than about 30% of points are unlabeled on a normal survey,
+recheck frame coverage, COLMAP registration, and GPU dependency status before
+trusting downstream LAS classifications.
