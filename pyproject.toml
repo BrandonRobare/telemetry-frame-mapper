@@ -59,6 +59,10 @@ dev = [
 reconstruction = [
   "laspy>=2.5"
 ]
+semantic = [
+  "transformers>=4.48",
+  "safetensors",
+]
 
 [project.scripts]
 drone-video-geotagger = "drone_video_geotagger.cli:main"

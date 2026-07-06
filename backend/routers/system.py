@@ -81,6 +81,10 @@ PYTHON_DEPENDENCIES = {
         "label": "SuGaR",
         "install": {"pip": "uv pip install git+https://github.com/Anttwo/SuGaR.git"},
     },
+    "transformers": {
+        "label": "transformers",
+        "install": {"pip": "uv pip install -e '.[semantic]'"},
+    },
 }
 
 
@@ -129,6 +133,7 @@ def _python_dependency_statuses() -> dict[str, dict[str, object]]:
     sugar_available = shutil.which("sugar_trainers") is not None or _module_available(
         "sugar_scene", "sugar_utils"
     )
+    transformers_available = _module_available("transformers", "safetensors")
 
     statuses: dict[str, dict[str, object]] = {
         "torch": {
@@ -157,6 +162,15 @@ def _python_dependency_statuses() -> dict[str, dict[str, object]]:
             "version": None,
             "path": shutil.which("sugar_trainers"),
             "install_commands": PYTHON_DEPENDENCIES["sugar"]["install"],
+            "error": None,
+        },
+        "transformers": {
+            "key": "transformers",
+            "label": PYTHON_DEPENDENCIES["transformers"]["label"],
+            "available": transformers_available,
+            "version": None,
+            "path": None,
+            "install_commands": PYTHON_DEPENDENCIES["transformers"]["install"],
             "error": None,
         },
     }
@@ -229,6 +243,7 @@ def _workflow_statuses(
     gsplat = bool(python_deps["gsplat"]["available"])
     gpu_available = bool(gpu["available"])
     sugar = bool(python_deps["sugar"]["available"])
+    transformers = bool(python_deps["transformers"]["available"])
 
     return [
         {
@@ -268,6 +283,22 @@ def _workflow_statuses(
                     ("colmap", colmap),
                     ("torch_cuda", torch_cuda),
                     ("sugar", sugar),
+                    ("nvidia_gpu", gpu_available),
+                )
+                if not ok
+            ],
+        },
+        {
+            "key": "semantic_labeling",
+            "label": "Semantic labeling",
+            "available": colmap and torch_cuda and gsplat and transformers and gpu_available,
+            "missing": [
+                key
+                for key, ok in (
+                    ("colmap", colmap),
+                    ("torch_cuda", torch_cuda),
+                    ("gsplat", gsplat),
+                    ("transformers", transformers),
                     ("nvidia_gpu", gpu_available),
                 )
                 if not ok
