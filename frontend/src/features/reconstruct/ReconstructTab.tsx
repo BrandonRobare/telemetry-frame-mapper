@@ -252,7 +252,7 @@ function jobStatusBadgeColor(status: string): ComponentProps<typeof Badge>['colo
 // ---- main component ----
 
 export default function ReconstructTab() {
-  const { selectedSessionId, setRequestedTab } = useMapStore()
+  const { selectedProjectId, selectedSessionId, setRequestedTab } = useMapStore()
   const { addToast } = useToast()
   const qc = useQueryClient()
 
@@ -262,7 +262,7 @@ export default function ReconstructTab() {
   const [multiSessionMode, setMultiSessionMode] = useState(false)
   const [selectedSessionIds, setSelectedSessionIds] = useState<ReadonlySet<number>>(new Set())
 
-  const { data: sessions } = useSessions()
+  const { data: sessions } = useSessions(selectedProjectId)
   const { data: allJobs } = useJobs(sseConnectedIds)
   const { data: targetAreas } = useTargetAreas()
   const { data: frameSelection } = useFrameSelection(selectedSessionId)

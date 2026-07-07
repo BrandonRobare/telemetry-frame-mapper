@@ -106,8 +106,8 @@ def test_validate_sessions_far_apart(setup_test_db):
     # Also add a first image for the session to have GPS data
     db.add(Image(
         session_id=s2.id,
-        filename=f"frame_00000.jpg",
-        filepath=f"/tmp/frame_00000.jpg",
+        filename="frame_00000.jpg",
+        filepath="/tmp/frame_00000.jpg",
         usable=True,
         latitude=35.2,
         longitude=-80.1,
