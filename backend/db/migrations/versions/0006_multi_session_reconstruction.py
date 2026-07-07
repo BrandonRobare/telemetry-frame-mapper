@@ -1,7 +1,7 @@
 """add source_session_ids column for multi-session reconstruction
 
-Revision ID: 0005
-Revises: 0004
+Revision ID: 0006
+Revises: 0005
 Create Date: 2026-07-07
 
 """
@@ -13,8 +13,8 @@ import sqlalchemy as sa
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision: str = "0005"
-down_revision: str | None = "0004"
+revision: str = "0006"
+down_revision: str | None = "0005"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
@@ -24,7 +24,10 @@ def upgrade() -> None:
     inspector = sa.inspect(bind)
     columns = {c["name"] for c in inspector.get_columns("reconstructions")}
     if "source_session_ids" not in columns:
-        op.add_column("reconstructions", sa.Column("source_session_ids", sa.Text(), nullable=True))
+        op.add_column(
+            "reconstructions",
+            sa.Column("source_session_ids", sa.Text(), nullable=True),
+        )
 
 
 def downgrade() -> None:

@@ -1546,7 +1546,10 @@ def test_start_reconstruction_multi_session_with_target_area(client):
     s2 = _make_session_named(db, "Flight B")
 
     from backend.db.models import TargetArea as TargetAreaModel
-    ta = TargetAreaModel(name="Test Area", geom_geojson='{"type":"Polygon","coordinates":[[[0,0],[1,0],[1,1],[0,1],[0,0]]]}')
+    target_area_geojson = (
+        '{"type":"Polygon","coordinates":[[[0,0],[1,0],[1,1],[0,1],[0,0]]]}'
+    )
+    ta = TargetAreaModel(name="Test Area", geom_geojson=target_area_geojson)
     db.add(ta)
     db.commit()
     db.refresh(ta)
