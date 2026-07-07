@@ -1,3 +1,11 @@
+export interface Project {
+  id: number;
+  name: string;
+  description: string | null;
+  created_at: string | null;
+  session_count: number;
+}
+
 export interface Session {
   id: number;
   name: string;
@@ -7,6 +15,7 @@ export interface Session {
   photo_count: number;
   usable_count: number;
   notes: string | null;
+  project_id: number | null;
 }
 
 export interface Image {
