@@ -86,6 +86,9 @@ def _bundle_metadata(rec: Reconstruction, files: dict[str, str | None]) -> dict:
     return {
         "id": rec.id,
         "session_id": rec.session_id,
+        "source_session_ids": (
+            json.loads(rec.source_session_ids) if rec.source_session_ids else None
+        ),
         "status": rec.status,
         "mesh_status": rec.mesh_status,
         "frames_used": rec.frames_used,
@@ -97,7 +100,8 @@ def _bundle_metadata(rec: Reconstruction, files: dict[str, str | None]) -> dict:
 
 
 class StartIn(BaseModel):
-    session_id: int
+    session_id: int | None = None
+    session_ids: list[int] | None = None
     preset: str = "quick"
     target_area_id: int | None = None
 
@@ -108,10 +112,18 @@ class StartIn(BaseModel):
             raise ValueError(f"preset must be one of {VALID_PRESETS}")
         return v
 
+    @field_validator("session_ids")
+    @classmethod
+    def validate_session_ids(cls, v: list[int] | None) -> list[int] | None:
+        if v is not None and len(v) < 2:
+            raise ValueError("session_ids must contain at least two session IDs")
+        return v
+
 
 class ReconstructionOut(BaseModel):
     id: int
     session_id: int
+    source_session_ids: list[int] | None = None
     status: str
     preset: str
     progress_pct: float
@@ -146,6 +158,17 @@ class ReconstructionOut(BaseModel):
         if isinstance(v, str):
             return json.loads(v)
         return v  # type: ignore[return-value]
+
+    @field_validator("source_session_ids", mode="before")
+    @classmethod
+    def parse_source_session_ids(cls, v: object) -> list[int] | None:
+        if v is None:
+            return None
+        if isinstance(v, str):
+            return json.loads(v)
+        if isinstance(v, list):
+            return v  # type: ignore[return-value]
+        return None
 
 
 class HistogramBin(BaseModel):
@@ -368,6 +391,50 @@ def get_preflight_report(session_id: int, db: DBSession = Depends(get_db)):
 
 @router.post("/start", response_model=ReconstructionOut, status_code=201)
 def start(body: StartIn, db: DBSession = Depends(get_db)):
+    if body.session_ids is not None:
+        # Multi-session merge
+        from ..services.session_merge import (
+            SessionMergeError,
+            validate_sessions_for_merge,
+        )
+
+        try:
+            validate_sessions_for_merge(body.session_ids, db)
+        except SessionMergeError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        target_area_geojson: str | None = None
+        if body.target_area_id is not None:
+            ta = db.query(TargetArea).filter(TargetArea.id == body.target_area_id).first()
+            if not ta:
+                raise HTTPException(status_code=404, detail="Target area not found")
+            if not ta.geom_geojson:
+                raise HTTPException(
+                    status_code=422, detail="Target area has no geometry defined"
+                )
+            target_area_geojson = ta.geom_geojson
+
+        try:
+            rec = start_reconstruction(
+                body.session_id or body.session_ids[0],
+                body.preset,
+                db,
+                target_area_geojson=target_area_geojson,
+                source_session_ids=body.session_ids,
+            )
+        except ValueError as exc:
+            msg = str(exc)
+            if "already in progress" in msg:
+                raise HTTPException(status_code=409, detail=msg) from exc
+            raise HTTPException(status_code=422, detail=msg) from exc
+        return rec
+
+    # Single-session path (backward compatible)
+    if body.session_id is None:
+        raise HTTPException(
+            status_code=422,
+            detail="Either session_id or session_ids must be provided",
+        )
+
     target_area_geojson: str | None = None
     if body.target_area_id is not None:
         ta = db.query(TargetArea).filter(TargetArea.id == body.target_area_id).first()

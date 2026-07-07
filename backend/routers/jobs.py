@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json as _json
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session as DBSession
 
@@ -33,6 +35,11 @@ def list_jobs(
             "id": r.id,
             "type": "reconstruction",
             "session_id": r.session_id,
+            "source_session_ids": (
+                _json.loads(r.source_session_ids)
+                if r.source_session_ids
+                else None
+            ),
             "status": r.status,
             "preset": r.preset,
             "progress_pct": r.progress_pct,

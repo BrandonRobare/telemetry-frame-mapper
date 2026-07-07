@@ -1445,3 +1445,150 @@ def test_semantic_label_start_error_matrix(client, tmp_path):
             "Reconstruction must be complete before semantic labeling"
         )
         assert client.post(f"/reconstruction/{rec.id}/semantic-labels").status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# Multi-session reconstruction tests
+# ---------------------------------------------------------------------------
+
+
+def _make_session_named(db, name):
+    s = SessionModel(name=name, folder_path=f"/tmp/{name.lower().replace(' ', '_')}",
+                     photo_count=3, usable_count=3)
+    db.add(s)
+    db.commit()
+    db.refresh(s)
+    for i in range(3):
+        db.add(Image(
+            session_id=s.id,
+            filename=f"{name}_frame_{i:05d}.jpg",
+            filepath=f"/tmp/{name}_frame_{i:05d}.jpg",
+            usable=True,
+            latitude=35.0 + i * 0.001,
+            longitude=-80.0,
+            altitude_m=100.0,
+        ))
+    db.commit()
+    return s
+
+
+def test_start_reconstruction_multi_session(client):
+    db = _get_db(client)
+    s1 = _make_session_named(db, "Flight A")
+    s2 = _make_session_named(db, "Flight B")
+
+    with patch("backend.routers.reconstruction.start_reconstruction") as mock_start:
+        rec_mock = Reconstruction(
+            id=100, session_id=s1.id, preset="quick", status="pending",
+            progress_pct=0.0, step="", frames_used=6,
+            source_session_ids=_json.dumps([s1.id, s2.id]),
+        )
+        mock_start.return_value = rec_mock
+        resp = client.post("/reconstruction/start", json={
+            "session_ids": [s1.id, s2.id],
+            "preset": "quick",
+        })
+
+    assert resp.status_code == 201
+    data = resp.json()
+    assert data["id"] == 100
+    assert data["source_session_ids"] == [s1.id, s2.id]
+    kwargs = mock_start.call_args.kwargs
+    assert kwargs["source_session_ids"] == [s1.id, s2.id]
+    assert mock_start.call_args.args[0] == s1.id
+
+
+def test_start_reconstruction_multi_session_missing_sessions(client):
+    db = _get_db(client)
+    s1 = _make_session_named(db, "Flight A")
+
+    resp = client.post("/reconstruction/start", json={
+        "session_ids": [s1.id, 99999],
+        "preset": "quick",
+    })
+    assert resp.status_code == 422
+
+
+def test_start_reconstruction_session_ids_empty_list(client):
+    resp = client.post("/reconstruction/start", json={
+        "session_ids": [],
+        "preset": "quick",
+    })
+    assert resp.status_code == 422
+
+
+def test_start_reconstruction_both_session_id_and_session_ids(client):
+    db = _get_db(client)
+    s1 = _make_session_named(db, "Flight A")
+    s2 = _make_session_named(db, "Flight B")
+
+    with patch("backend.routers.reconstruction.start_reconstruction") as mock_start:
+        rec_mock = Reconstruction(
+            id=101, session_id=s1.id, preset="full", status="pending",
+            progress_pct=0.0, step="", frames_used=6,
+            source_session_ids=_json.dumps([s1.id, s2.id]),
+        )
+        mock_start.return_value = rec_mock
+        resp = client.post("/reconstruction/start", json={
+            "session_id": 99999,
+            "session_ids": [s1.id, s2.id],
+            "preset": "full",
+        })
+
+    assert resp.status_code == 201
+    kwargs = mock_start.call_args.kwargs
+    assert kwargs["source_session_ids"] == [s1.id, s2.id]
+
+
+def test_start_reconstruction_multi_session_with_target_area(client):
+    db = _get_db(client)
+    s1 = _make_session_named(db, "Flight A")
+    s2 = _make_session_named(db, "Flight B")
+
+    from backend.db.models import TargetArea as TargetAreaModel
+    target_area_geojson = (
+        '{"type":"Polygon","coordinates":[[[0,0],[1,0],[1,1],[0,1],[0,0]]]}'
+    )
+    ta = TargetAreaModel(name="Test Area", geom_geojson=target_area_geojson)
+    db.add(ta)
+    db.commit()
+    db.refresh(ta)
+
+    with patch("backend.routers.reconstruction.start_reconstruction") as mock_start:
+        rec_mock = Reconstruction(
+            id=102, session_id=s1.id, preset="quick", status="pending",
+            progress_pct=0.0, step="", frames_used=4,
+            source_session_ids=_json.dumps([s1.id, s2.id]),
+        )
+        mock_start.return_value = rec_mock
+        resp = client.post("/reconstruction/start", json={
+            "session_ids": [s1.id, s2.id],
+            "preset": "quick",
+            "target_area_id": ta.id,
+        })
+
+    assert resp.status_code == 201
+    kwargs = mock_start.call_args.kwargs
+    assert kwargs["source_session_ids"] == [s1.id, s2.id]
+    assert kwargs["target_area_geojson"] == ta.geom_geojson
+
+
+def test_list_all_jobs_includes_source_session_ids(client):
+    db = _get_db(client)
+    s1 = _make_session_named(db, "Flight A")
+    s2 = _make_session_named(db, "Flight B")
+    rec = Reconstruction(
+        session_id=s1.id, preset="quick", status="pending",
+        progress_pct=0.0, step="", frames_used=4,
+        source_session_ids=_json.dumps([s1.id, s2.id]),
+    )
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+
+    resp = client.get("/jobs/")
+    assert resp.status_code == 200
+    assert resp.json()
+    found = [j for j in resp.json() if j["id"] == rec.id]
+    assert len(found) == 1
+    assert found[0]["source_session_ids"] == [s1.id, s2.id]

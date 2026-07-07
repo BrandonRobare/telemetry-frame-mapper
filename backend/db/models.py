@@ -247,6 +247,8 @@ class Reconstruction(Base):
     duration_s = Column(Float)
     training_metrics = Column(Text)       # JSON: [{iter, psnr, ssim}, ...]
     coverage_gaps_path = Column(String)   # path to cached coverage_gaps.json
+    # JSON list of source session IDs for multi-session reconstructions
+    source_session_ids = Column(Text)
     session = relationship("Session", back_populates="reconstructions")
     frames = relationship(
         "ReconstructionFrame", back_populates="reconstruction", cascade="all, delete-orphan"
