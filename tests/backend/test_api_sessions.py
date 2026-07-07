@@ -13,6 +13,7 @@ def test_tables_created(client, db_engine):
     inspector = inspect(db_engine)
     tables = inspector.get_table_names()
     for expected in [
+        "projects",
         "sessions",
         "images",
         "footprints",
