@@ -27,6 +27,7 @@ from .routers import georeferencing as georeferencing_router
 from .routers import images as images_router
 from .routers import jobs as jobs_router
 from .routers import plans as plans_router
+from .routers import projects as projects_router
 from .routers import reconstruction as reconstruction_router
 from .routers import session_log as session_log_router
 from .routers import sessions as sessions_router
@@ -66,6 +67,7 @@ app.include_router(coverage_router.router)
 app.include_router(flight_log_router.router)
 app.include_router(srt_router.router)
 app.include_router(plans_router.router)
+app.include_router(projects_router.router)
 app.include_router(images_router.router)
 app.include_router(export_router.router)
 app.include_router(georeferencing_router.router)

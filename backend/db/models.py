@@ -8,12 +8,22 @@ from sqlalchemy.orm import relationship
 from backend.db.database import Base
 
 
+class Project(Base):
+    __tablename__ = "projects"
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False, unique=True)
+    description = Column(Text)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    sessions = relationship("Session", back_populates="project", cascade="all, delete-orphan")
+
+
 class Session(Base):
     __tablename__ = "sessions"
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, nullable=False)
     folder_path = Column(String)
     import_mode = Column(String, default="full")
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=True)
     imported_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     photo_count = Column(Integer, default=0)
     usable_count = Column(Integer, default=0)
@@ -39,6 +49,7 @@ class Session(Base):
     frame_selections = relationship(
         "SessionFrameSelection", cascade="all, delete-orphan", passive_deletes=True
     )
+    project = relationship("Project", back_populates="sessions")
 
 
 class Image(Base):
