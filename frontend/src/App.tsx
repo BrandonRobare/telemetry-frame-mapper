@@ -23,6 +23,7 @@ import { StatusHud } from './shared/components/StatusHud'
 import { usePipelineStatus } from './shared/pipeline/usePipelineStatus'
 import ImportModal from './features/import/ImportModal'
 import SessionPicker from './features/sessions/SessionPicker'
+import ProjectPicker from './features/sessions/ProjectPicker'
 import { splatBloom, reducedFade, bloomTransition, easeOut } from './shared/motion'
 import { getUrlParam, setUrlParam } from './shared/hooks/useUrlState'
 
@@ -89,6 +90,7 @@ export default function App() {
   const [showImport, setShowImport] = useState(false)
   const { requestedTab, setRequestedTab } = useMapStore()
   const selectedSessionId = useMapStore((s) => s.selectedSessionId)
+  const selectedProjectId = useMapStore((s) => s.selectedProjectId)
   const status = usePipelineStatus(selectedSessionId)
   const [toolsOpen, setToolsOpen] = useState(false)
   const toolActive = TOOL_TABS.some((t) => t.id === activeTab)
@@ -274,9 +276,14 @@ export default function App() {
           )}
         </div>
 
+        {/* Project picker */}
+        <div className="fm-project-slot flex items-center shrink-0" style={{ padding: '0 8px' }}>
+          <ProjectPicker onCreateProject={() => {}} />
+        </div>
+
         {/* Session picker */}
         <div className="fm-session-slot flex items-center shrink-0" style={{ padding: '0 8px', borderLeft: '1px solid var(--border)' }}>
-          <SessionPicker onImport={() => setShowImport(true)} />
+          <SessionPicker projectId={selectedProjectId} onImport={() => setShowImport(true)} />
         </div>
 
         {/* Controls */}

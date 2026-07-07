@@ -6,6 +6,8 @@ import { Skeleton } from '../../shared/components/Skeleton'
 interface SessionPickerProps {
   /** Called when the user clicks the empty-state "Import" prompt */
   onImport?: () => void
+  /** The selected project ID; sessions will be scoped to this project */
+  projectId: number | null
 }
 
 const SELECT_STYLE: React.CSSProperties = {
@@ -21,8 +23,8 @@ const SELECT_STYLE: React.CSSProperties = {
   height: 28,
 }
 
-export default function SessionPicker({ onImport }: SessionPickerProps) {
-  const { data: sessions, isLoading } = useSessions()
+export default function SessionPicker({ onImport, projectId }: SessionPickerProps) {
+  const { data: sessions, isLoading } = useSessions(projectId)
   const { selectedSessionId, setSession } = useMapStore()
 
   // Auto-select the most recent session (index 0 — backend returns desc order)
