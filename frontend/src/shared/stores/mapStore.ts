@@ -18,12 +18,14 @@ interface SyncedViewport {
 }
 
 interface MapStore {
+  selectedProjectId: number | null
   selectedSessionId: number | null
   activeLayers: ActiveLayers
   theme: Theme
   sidebarOpen: boolean
   basemapId: BasemapId
   setBasemapId: (id: BasemapId) => void
+  setProject: (id: number | null) => void
   setSession: (id: number | null) => void
   toggleLayer: (key: keyof ActiveLayers) => void
   toggleTheme: () => void
@@ -88,6 +90,7 @@ function saveBasemap(id: BasemapId) {
 }
 
 export const useMapStore = create<MapStore>((set) => ({
+  selectedProjectId: null,
   selectedSessionId: null,
   activeLayers: { footprints: true, coverage: true, heatmap: false, targetArea: true },
   theme: savedTheme,
@@ -97,6 +100,8 @@ export const useMapStore = create<MapStore>((set) => ({
     saveBasemap(id)
     return { basemapId: id }
   }),
+
+  setProject: (id) => set({ selectedProjectId: id }),
 
   setSession: (id) => set({ selectedSessionId: id }),
 
