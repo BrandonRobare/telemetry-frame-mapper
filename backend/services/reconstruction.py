@@ -1827,6 +1827,7 @@ def start_reconstruction(
     db: DBSession,
     *,
     target_area_geojson: str | None = None,
+    source_session_ids: list[int] | None = None,
 ) -> Reconstruction:
     """Create Reconstruction record and enqueue a background job. Returns the record."""
     running = db.query(Reconstruction).filter(
@@ -1838,22 +1839,46 @@ def start_reconstruction(
             f"Reconstruction {running.id} already in progress for session {session_id}"
         )
 
-    images = db.query(Image).filter(
-        Image.session_id == session_id,
-        Image.usable == True,  # noqa: E712
-    ).all()
+    if source_session_ids is not None:
+        # Multi-session merge: collect images from all sessions
+        images = []
+        for sid in source_session_ids:
+            session_images = db.query(Image).filter(
+                Image.session_id == sid,
+                Image.usable == True,  # noqa: E712
+            ).all()
 
-    # Manual frame selection overrides the usable pool
-    selected_rows = db.query(SessionFrameSelection).filter(
-        SessionFrameSelection.session_id == session_id
-    ).all()
-    if selected_rows:
-        selected_ids = {row.image_id for row in selected_rows}
-        images = [img for img in images if img.id in selected_ids]
+            # Manual frame selection per session
+            selected_rows = db.query(SessionFrameSelection).filter(
+                SessionFrameSelection.session_id == sid
+            ).all()
+            if selected_rows:
+                selected_ids_set = {row.image_id for row in selected_rows}
+                session_images = [
+                    img for img in session_images if img.id in selected_ids_set
+                ]
 
-    # Target area crop filters the pool
-    if target_area_geojson:
-        images = _filter_images_to_target_area(images, target_area_geojson)
+            images.extend(session_images)
+
+        if target_area_geojson:
+            images = _filter_images_to_target_area(images, target_area_geojson)
+    else:
+        images = db.query(Image).filter(
+            Image.session_id == session_id,
+            Image.usable == True,  # noqa: E712
+        ).all()
+
+        # Manual frame selection overrides the usable pool
+        selected_rows = db.query(SessionFrameSelection).filter(
+            SessionFrameSelection.session_id == session_id
+        ).all()
+        if selected_rows:
+            selected_ids = {row.image_id for row in selected_rows}
+            images = [img for img in images if img.id in selected_ids]
+
+        # Target area crop filters the pool
+        if target_area_geojson:
+            images = _filter_images_to_target_area(images, target_area_geojson)
 
     if not images:
         raise ValueError("No usable images in session")
@@ -1864,6 +1889,7 @@ def start_reconstruction(
         preset=preset,
         status="pending",
         frames_used=len(images),
+        source_session_ids=json.dumps(source_session_ids) if source_session_ids else None,
     )
     db.add(rec)
     db.commit()
