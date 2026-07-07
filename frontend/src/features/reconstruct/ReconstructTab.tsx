@@ -1,4 +1,4 @@
-import { useState, type ComponentProps } from 'react'
+import { useState, useMemo, type ComponentProps } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { get, post } from '../../shared/api/client'
 import {
@@ -7,6 +7,7 @@ import {
 } from '../../shared/api/reconstructionStatusEvents'
 import { useMapStore } from '../../shared/stores/mapStore'
 import { useToast } from '../../shared/hooks/useToast'
+import { useSessions } from '../sessions/useSessions'
 import { Button } from '../../shared/components/Button'
 import { Badge } from '../../shared/components/Badge'
 import TabHeader from '../../shared/components/TabHeader'
@@ -258,25 +259,55 @@ export default function ReconstructTab() {
   const [preset, setPreset] = useState<'quick' | 'full'>('quick')
   const [targetAreaId, setTargetAreaId] = useState<number | null>(null)
   const [sseConnectedIds, setSseConnectedIds] = useState<ReadonlySet<number>>(new Set())
+  const [multiSessionMode, setMultiSessionMode] = useState(false)
+  const [selectedSessionIds, setSelectedSessionIds] = useState<ReadonlySet<number>>(new Set())
 
+  const { data: sessions } = useSessions()
   const { data: allJobs } = useJobs(sseConnectedIds)
   const { data: targetAreas } = useTargetAreas()
   const { data: frameSelection } = useFrameSelection(selectedSessionId)
   const { data: preflightReport, isLoading: preflightLoading } = usePreflightReport(selectedSessionId)
   useReconstructionStatusEvents(allJobs, setSseConnectedIds)
 
-  const sessionJobs = (allJobs ?? []).filter((j) => j.session_id === selectedSessionId)
+  // Collect sessions for display name resolution
+  const sessionMap = useMemo(() => {
+    const map = new Map<number, string>()
+    if (sessions) {
+      for (const s of sessions) {
+        map.set(s.id, s.name)
+      }
+    }
+    return map
+  }, [sessions])
+
+  // When multi-session, jobs from any selected session are shown
+  const activeSessionIds = multiSessionMode && selectedSessionIds.size >= 2
+    ? Array.from(selectedSessionIds)
+    : selectedSessionId !== null
+    ? [selectedSessionId]
+    : []
+
+  const sessionJobs = (allJobs ?? []).filter((j) => activeSessionIds.includes(j.session_id))
   const activeJob = sessionJobs.find((j) => isLiveReconstructionStatus(j.status))
   const selectedCount = frameSelection?.image_ids.length ?? 0
   const activeEta = activeJob ? formatEta(activeJob.started_at, activeJob.progress_pct) : null
 
   const startMutation = useMutation({
-    mutationFn: () =>
-      post<{ id: number; status: string }>('/reconstruction/start', {
+    mutationFn: () => {
+      if (multiSessionMode && selectedSessionIds.size >= 2) {
+        const ids = Array.from(selectedSessionIds)
+        return post<{ id: number; status: string }>('/reconstruction/start', {
+          session_ids: ids,
+          preset,
+          ...(targetAreaId != null ? { target_area_id: targetAreaId } : {}),
+        })
+      }
+      return post<{ id: number; status: string }>('/reconstruction/start', {
         session_id: selectedSessionId,
         preset,
         ...(targetAreaId != null ? { target_area_id: targetAreaId } : {}),
-      }),
+      })
+    },
     onSuccess: () => {
       addToast('Reconstruction started', 'success')
       qc.invalidateQueries({ queryKey: ['jobs'] })
@@ -296,7 +327,7 @@ export default function ReconstructTab() {
       addToast(err.message || 'Failed to cancel reconstruction', 'error'),
   })
 
-  if (selectedSessionId === null) {
+  if (!multiSessionMode && selectedSessionId === null) {
     return (
       <EmptyState
         title="No session selected"
@@ -306,6 +337,30 @@ export default function ReconstructTab() {
       />
     )
   }
+
+  const toggleSession = (sid: number) => {
+    setSelectedSessionIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(sid)) {
+        next.delete(sid)
+      } else {
+        next.add(sid)
+      }
+      return next
+    })
+  }
+
+  const canStart = multiSessionMode
+    ? selectedSessionIds.size >= 2
+    : selectedSessionId !== null
+
+  const startButtonLabel = startMutation.isPending
+    ? 'Starting…'
+    : activeJob
+    ? 'Reconstruction already in progress'
+    : multiSessionMode
+    ? `Start Merge Reconstruction (${selectedSessionIds.size} sessions)`
+    : 'Start Reconstruction'
 
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
@@ -318,7 +373,75 @@ export default function ReconstructTab() {
       <div className="flex-1 overflow-y-auto p-6" style={{ color: 'var(--text)' }}>
       <div className="mx-auto flex flex-col gap-6" style={{ maxWidth: 720 }}>
 
+        {/* ---- Multi-session toggle ---- */}
+        <section
+          className="p-5 flex flex-col gap-4"
+          style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 13 }}>
+              <input
+                type="checkbox"
+                checked={multiSessionMode}
+                onChange={(e) => {
+                  setMultiSessionMode(e.target.checked)
+                  if (!e.target.checked) {
+                    setSelectedSessionIds(new Set())
+                  }
+                }}
+                style={{ accentColor: 'var(--accent)' }}
+              />
+              <span style={{ color: 'var(--text)' }}>
+                Merge multiple sessions into one reconstruction
+              </span>
+            </label>
+          </div>
+
+          {multiSessionMode && (
+            <div
+              className="flex flex-col gap-2"
+              style={{
+                padding: 10,
+                background: 'var(--surface-2)',
+                border: '1px solid var(--border)',
+                borderRadius: 'var(--radius-sm)',
+                maxHeight: 200, overflowY: 'auto',
+              }}
+            >
+              <p className="text-xs" style={{ color: 'var(--text-muted)', margin: 0 }}>
+                Select two or more sessions with overlapping geography:
+              </p>
+              {(sessions ?? []).map((s) => (
+                <label
+                  key={s.id}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 8,
+                    cursor: 'pointer', fontSize: 13,
+                    padding: '4px 6px',
+                    borderRadius: 'var(--radius-sm)',
+                    background: selectedSessionIds.has(s.id) ? 'var(--accent-soft)' : 'transparent',
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={selectedSessionIds.has(s.id)}
+                    onChange={() => toggleSession(s.id)}
+                    style={{ accentColor: 'var(--accent)' }}
+                  />
+                  <span style={{ color: 'var(--text)' }}>
+                    {s.name}
+                  </span>
+                  <span className="text-xs" style={{ color: 'var(--text-muted)', marginLeft: 'auto' }}>
+                    {s.photo_count} photos
+                  </span>
+                </label>
+              ))}
+            </div>
+          )}
+        </section>
+
         {/* ---- Start card ---- */}
+        {!multiSessionMode && (
         <section
           className="p-5 flex flex-col gap-4"
           style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}
@@ -461,6 +584,74 @@ export default function ReconstructTab() {
               : 'Start Reconstruction'}
           </Button>
         </section>
+        )}
+
+        {/* ---- Multi-session start button ---- */}
+        {multiSessionMode && (
+        <section
+          className="p-5 flex flex-col gap-4"
+          style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}
+        >
+          <h2 className="text-base font-semibold" style={{ color: 'var(--text)', margin: 0 }}>
+            Merge & Start Reconstruction
+          </h2>
+
+          <p className="text-xs" style={{ color: 'var(--text-muted)', margin: 0 }}>
+            {selectedSessionIds.size >= 2
+              ? `Merging ${selectedSessionIds.size} sessions: ${Array.from(selectedSessionIds).map((id) => sessionMap.get(id) ?? `#${id}`).join(', ')}`
+              : 'Select at least two sessions above to begin.'}
+          </p>
+
+          {/* Preset (shared) */}
+          <div className="flex gap-6">
+            {(['quick', 'full'] as const).map((p) => (
+              <label key={p} style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 13 }}>
+                <input
+                  type="radio"
+                  name="preset-merge"
+                  value={p}
+                  checked={preset === p}
+                  onChange={() => setPreset(p)}
+                  style={{ accentColor: 'var(--accent)' }}
+                />
+                <span style={{ color: preset === p ? 'var(--text)' : 'var(--text-muted)' }}>
+                  {p === 'quick' ? 'Quick: fewer iterations, faster' : 'Full: best quality, slower'}
+                </span>
+              </label>
+            ))}
+          </div>
+
+          {/* Target area */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <label className="text-xs" style={{ color: 'var(--text-muted)' }}>
+              Target area (optional, crops images to polygon before COLMAP)
+            </label>
+            <select
+              value={targetAreaId ?? ''}
+              onChange={(e) => setTargetAreaId(e.target.value ? Number(e.target.value) : null)}
+              style={{
+                background: 'var(--surface-2)', border: '1px solid var(--border)',
+                borderRadius: 'var(--radius-sm)', padding: '5px 8px', color: 'var(--text)',
+                fontSize: 13, fontFamily: 'inherit', maxWidth: 280,
+              }}
+            >
+              <option value="">No crop: use all usable frames</option>
+              {(targetAreas ?? []).map((ta) => (
+                <option key={ta.id} value={ta.id}>{ta.name}</option>
+              ))}
+            </select>
+          </div>
+
+          <Button
+            variant="primary"
+            disabled={!canStart || !!activeJob || startMutation.isPending}
+            onClick={() => startMutation.mutate()}
+            style={{ alignSelf: 'flex-start' }}
+          >
+            {startButtonLabel}
+          </Button>
+        </section>
+        )}
 
         {/* ---- Active job progress ---- */}
         {activeJob && (
@@ -471,6 +662,11 @@ export default function ReconstructTab() {
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <h2 className="text-base font-semibold" style={{ color: 'var(--text)', margin: 0 }}>
                 Reconstruction #{activeJob.id}: In Progress
+                {activeJob.source_session_ids && activeJob.source_session_ids.length > 1 && (
+                  <span className="text-xs ml-2" style={{ color: 'var(--text-muted)' }}>
+                    (merged {activeJob.source_session_ids.length} sessions)
+                  </span>
+                )}
               </h2>
               <Button
                 type="button"
@@ -538,6 +734,9 @@ export default function ReconstructTab() {
                     <StatusBadge status={job.status} />
                     <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
                       {job.preset} · {job.frames_used} frames
+                      {job.source_session_ids && job.source_session_ids.length > 1 && (
+                        <> · merged {job.source_session_ids.length} sessions</>
+                      )}
                     </span>
                     {job.started_at && (
                       <span className="text-xs" style={{ color: 'var(--text-muted)', marginLeft: 'auto' }}>
@@ -578,7 +777,7 @@ export default function ReconstructTab() {
 
         {sessionJobs.length === 0 && !activeJob && (
           <p className="text-sm" style={{ color: 'var(--text-muted)', textAlign: 'center', padding: '2rem 0' }}>
-            No reconstructions for this session yet.
+            No reconstructions yet.
           </p>
         )}
       </div>

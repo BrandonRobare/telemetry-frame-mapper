@@ -222,6 +222,7 @@ export interface Job {
   id: number;
   type: "reconstruction";
   session_id: number;
+  source_session_ids: number[] | null;
   status: "pending" | "running_colmap" | "running_gsplat" | "cancelling" | "cancelled" | "complete" | "failed";
   preset: string;
   progress_pct: number;
