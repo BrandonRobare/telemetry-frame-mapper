@@ -31,6 +31,7 @@ drone-video-geotagger \
 
 - `--takeoff-altitude` is the launch point's elevation in **meters above sea level** (find it on a topo map or your flight log). DJI telemetry stores altitude relative to takeoff; the CLI adds the two so the EXIF carries absolute altitude, while DJI XMP relative altitude drives footprint sizing later.
 - The SRT telemetry is extracted from the video automatically. If you already have it, pass `--srt flight.srt`; if you know the extraction rate, pass `--frame-rate 2` (otherwise it is estimated from the telemetry duration).
+- After parsing the telemetry the CLI checks for signs of a weak or missing GPS lock — points stuck at (0, 0), coordinates frozen across many consecutive points, implausible position jumps — and prints a `WARNING:` line to stderr for each finding. Tagging still proceeds; treat the warnings as a prompt to inspect `frame_geotags.csv` before importing.
 - Add `--in-place` to tag the original frames instead of writing copies.
 
 Outputs, in `frames_geotagged/` by default:
@@ -58,6 +59,8 @@ The backend creates `data/drone_mapping.db` (SQLite) on first run. Start it from
 3. The progress bar polls until done; the session then appears in the sidebar.
 
 During import the backend reads GPS EXIF and DJI XMP (relative altitude, yaw, gimbal pitch), scores each image for sharpness/brightness, computes ground footprints, and generates thumbnails.
+
+When the import finishes, the modal shows a Quick QA card. Alongside completeness and blur checks it runs GPS-lock heuristics over the imported coordinates: frames stuck at (0, 0), coordinates frozen across many consecutive frames, and implausible position jumps all produce warnings. If any appear, re-check the flight's GPS quality (or sync a flight log in the GPS Sync tab) before reconstructing.
 
 ## 5. Review on the map, plan, and flag
 
