@@ -392,6 +392,17 @@ export interface Annotation {
   created_at: string
 }
 
+export interface FlightEntry {
+  id: number
+  session_id: number
+  battery_id: string | null
+  start_pct: number | null
+  end_pct: number | null
+  duration_s: number | null
+  notes: string | null
+  created_at: string
+}
+
 export interface SessionComparison {
   id: number
   session_a_id: number
