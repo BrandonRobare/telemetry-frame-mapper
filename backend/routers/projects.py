@@ -12,6 +12,7 @@ from ..db.database import SessionLocal, get_db
 from ..db.models import Project as ProjectModel
 from ..db.models import Session as SessionModel
 from ..services.ingest_orchestrator import start_import
+from .sessions import SessionOut
 
 router = APIRouter(prefix="/projects", tags=["projects"])
 
@@ -27,18 +28,6 @@ class ProjectOut(BaseModel):
     description: str | None
     created_at: datetime.datetime | None
     session_count: int
-
-    model_config = {"from_attributes": True}
-
-
-class SessionOut(BaseModel):
-    id: int
-    name: str
-    folder_path: str
-    imported_at: datetime.datetime | None
-    photo_count: int
-    usable_count: int
-    project_id: int | None
 
     model_config = {"from_attributes": True}
 
