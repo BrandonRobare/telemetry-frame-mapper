@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { detectJobTransitions, formatJobNotification, nextStatusMap } from './jobNotifications'
+import {
+  detectJobTransitions,
+  formatJobNotification,
+  nextStatusMap,
+  shouldShowDesktopNotification,
+} from './jobNotifications'
 import type { Job } from '../../types/api'
 
 function makeJob(overrides: Partial<Job> = {}): Job {
@@ -110,5 +115,24 @@ describe('formatJobNotification', () => {
     const result = formatJobNotification(job, 'cancelled')
     expect(result.toastType).toBe('info')
     expect(result.title).toContain('cancelled')
+  })
+})
+
+describe('shouldShowDesktopNotification', () => {
+  it('shows only when the tab is hidden and permission is granted', () => {
+    expect(shouldShowDesktopNotification(true, 'granted')).toBe(true)
+  })
+
+  it('does not show when the tab is focused', () => {
+    expect(shouldShowDesktopNotification(false, 'granted')).toBe(false)
+  })
+
+  it('does not show without permission', () => {
+    expect(shouldShowDesktopNotification(true, 'denied')).toBe(false)
+    expect(shouldShowDesktopNotification(true, 'default')).toBe(false)
+  })
+
+  it('degrades silently when the Notification API is unavailable', () => {
+    expect(shouldShowDesktopNotification(true, undefined)).toBe(false)
   })
 })
