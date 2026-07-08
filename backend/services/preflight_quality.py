@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session as DBSession
 
 from backend.db.models import Footprint, Image, Session
 from backend.services.quality import BRIGHT_THRESHOLD, DARK_THRESHOLD, _ingest_thresholds
+from src.drone_video_geotagger.gps_quality import GpsSample, assess_gps_lock
 
 _DUPLICATE_TIMESTAMP_EPSILON_S = 0.001
 _COVERAGE_MIN_FOOTPRINTS = 3
@@ -104,6 +105,28 @@ def _gps_quality(images: list[Image]) -> dict:
     return {
         "missing": len(images) - len(complete),
         "completeness_pct": _pct(len(complete), len(images)),
+    }
+
+
+def _gps_lock_quality(images: list[Image]) -> dict:
+    """Run GPS-lock heuristics over the per-image coordinates (in id order)."""
+    samples = []
+    for img in images:
+        if img.latitude is None or img.longitude is None:
+            continue
+        t_s = _timestamp_seconds(img.timestamp) if img.timestamp is not None else None
+        samples.append(GpsSample(lat=float(img.latitude), lon=float(img.longitude), t_s=t_s))
+
+    report = assess_gps_lock(samples)
+    return {
+        "sample_count": report.sample_count,
+        "near_zero_count": report.near_zero_count,
+        "longest_frozen_run": report.longest_frozen_run,
+        "jump_count": report.jump_count,
+        "max_speed_ms": (
+            round(report.max_speed_ms, 1) if report.max_speed_ms is not None else None
+        ),
+        "warnings": list(report.warnings),
     }
 
 
@@ -272,6 +295,7 @@ def build_preflight_quality_report(session_id: int, db: DBSession) -> dict:
     total = len(images)
     usable_images = [img for img in images if img.usable]
     gps = _gps_quality(usable_images)
+    gps_lock = _gps_lock_quality(usable_images)
     timestamps = _timestamp_quality(usable_images)
     quality = _image_quality(usable_images)
     coverage = _coverage_quality(db, usable_images)
@@ -290,6 +314,9 @@ def build_preflight_quality_report(session_id: int, db: DBSession) -> dict:
     elif gps["missing"]:
         warnings.append("Some usable frames are missing GPS coordinates")
         score -= 10
+    if gps_lock["warnings"]:
+        warnings.extend(gps_lock["warnings"])
+        score -= 20
     if timestamps["completeness_pct"] < 90:
         warnings.append("Timestamp completeness is low; inspect EXIF or flight log alignment")
         score -= 20
@@ -340,6 +367,7 @@ def build_preflight_quality_report(session_id: int, db: DBSession) -> dict:
         "total_frames": total,
         "usable_frames": len(usable_images),
         "gps": gps,
+        "gps_lock": gps_lock,
         "timestamps": timestamps,
         "quality": quality,
         "coverage": coverage,
