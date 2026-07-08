@@ -17,7 +17,7 @@
     "@turf/distance": "^7.3.5",
     "@types/leaflet-draw": "^1.0.13",
     "@types/proj4": "^2.19.0",
-    "framer-motion": "^12.41.0",
+    "framer-motion": "^12.42.2",
     "leaflet": "^1.9.4",
     "leaflet-draw": "^1.0.4",
     "proj4": "^2.20.9",
