@@ -114,3 +114,83 @@ def test_preflight_report_estimates_overlap_from_footprints(client):
 def test_preflight_report_404_for_missing_session(client):
     resp = client.get("/reconstruction/preflight/999999")
     assert resp.status_code == 404
+
+
+def test_preflight_report_flags_frozen_gps_coordinates(client):
+    from backend.db.database import get_db
+    from backend.main import app
+
+    db = next(app.dependency_overrides[get_db]())
+    session = _make_session(db)
+    t0 = datetime(2026, 1, 1, 12, 0, 0)
+    for index in range(12):
+        _add_image(
+            db,
+            session.id,
+            index,
+            timestamp=t0 + timedelta(seconds=index),
+            latitude=35.0,
+            longitude=-80.0,
+        )
+
+    report = build_preflight_quality_report(session.id, db)
+
+    assert report["gps_lock"]["longest_frozen_run"] == 12
+    assert any("frozen" in warning for warning in report["warnings"])
+    assert any("frozen" in warning for warning in report["gps_lock"]["warnings"])
+
+
+def test_preflight_report_flags_implausible_gps_jump(client):
+    from backend.db.database import get_db
+    from backend.main import app
+
+    db = next(app.dependency_overrides[get_db]())
+    session = _make_session(db)
+    t0 = datetime(2026, 1, 1, 12, 0, 0)
+    for index in range(4):
+        _add_image(
+            db,
+            session.id,
+            index,
+            timestamp=t0 + timedelta(seconds=index),
+            latitude=35.0 + index * 0.0001,
+            longitude=-80.0,
+        )
+    # ~1.1 km jump one second after the previous frame (~1113 m/s).
+    _add_image(
+        db,
+        session.id,
+        4,
+        timestamp=t0 + timedelta(seconds=4),
+        latitude=35.0 + 3 * 0.0001 + 0.01,
+        longitude=-80.0,
+    )
+
+    report = build_preflight_quality_report(session.id, db)
+
+    assert report["gps_lock"]["jump_count"] == 1
+    assert any("jump" in warning for warning in report["warnings"])
+
+
+def test_preflight_report_clean_track_has_no_gps_lock_warnings(client):
+    from backend.db.database import get_db
+    from backend.main import app
+
+    db = next(app.dependency_overrides[get_db]())
+    session = _make_session(db)
+    t0 = datetime(2026, 1, 1, 12, 0, 0)
+    for index in range(12):
+        _add_image(
+            db,
+            session.id,
+            index,
+            timestamp=t0 + timedelta(seconds=index),
+            latitude=35.0 + index * 0.0001,
+            longitude=-80.0,
+        )
+
+    report = build_preflight_quality_report(session.id, db)
+
+    assert report["gps_lock"]["warnings"] == []
+    assert report["gps_lock"]["jump_count"] == 0
+    assert report["gps_lock"]["longest_frozen_run"] < 10
