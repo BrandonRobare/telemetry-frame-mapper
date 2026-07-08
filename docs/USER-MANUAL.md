@@ -63,7 +63,7 @@ across 19 routers.
 | **Map** | Leaflet + ESRI satellite basemap, footprint polygons, coverage overlay, session stats sidebar |
 | **GPS Sync** | DJI FlightRecord CSV matching with timing deltas |
 | **Review** | Thumbnail grid, quality flags, COLMAP reprojection-error badges, per-session frame selection for reconstruction |
-| **Plan** | Target-area drawing, lawnmower plan generation, KML/GPX export |
+| **Plan** | Target-area drawing, lawnmower plan generation, KML/GPX export, shutter-interval calculator (photo spacing and timed-shot interval from speed, altitude, overlap, and camera FOV) |
 | **Export** | WebODM georeferencing CSV-only zip, GeoJSON, LAS point cloud, mesh (GLB/OBJ/MTL) |
 | **Session Log** | Event history per session |
 | **Reconstruct** | Start quick/full reconstruction jobs |
