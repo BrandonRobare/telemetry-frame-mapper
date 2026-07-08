@@ -40,6 +40,10 @@ across 19 routers.
 
 - **Import & quality:** session import; per-image sharpness and brightness
   scoring (OpenCV); DJI XMP parsing for relative altitude, yaw, and gimbal pitch.
+  GPS-lock heuristics flag telemetry that suggests a weak or missing satellite
+  fix — coordinates stuck at (0, 0), coordinates frozen across many consecutive
+  frames, and implausible position jumps — as warnings in the post-import
+  Quick QA card and the preflight quality report.
 - **Geometry & coverage:** ground-footprint computation (Shapely/UTM from
   altitude + heading); coverage analysis against drawn target areas with gap and
   overlap detection.
