@@ -111,6 +111,46 @@ def test_plausible_speed_is_measured_but_not_flagged() -> None:
     assert report.max_speed_ms == pytest.approx(11.13, abs=0.5)
 
 
+def test_cli_warn_gps_lock_prints_warnings_to_stream() -> None:
+    import io
+
+    from drone_video_geotagger.cli import warn_gps_lock
+
+    frozen = [
+        TelemetryPoint(start_s=float(i), end_s=float(i + 1), lat=41.1, lon=-81.1, rel_alt_m=100.0)
+        for i in range(FROZEN_MIN_RUN)
+    ]
+    stream = io.StringIO()
+
+    warn_gps_lock(frozen, stream=stream)
+
+    output = stream.getvalue()
+    assert "WARNING" in output
+    assert "frozen" in output
+
+
+def test_cli_warn_gps_lock_silent_for_healthy_track() -> None:
+    import io
+
+    from drone_video_geotagger.cli import warn_gps_lock
+
+    healthy = [
+        TelemetryPoint(
+            start_s=float(i),
+            end_s=float(i + 1),
+            lat=41.1 + i * 0.0001,
+            lon=-81.1,
+            rel_alt_m=100.0,
+        )
+        for i in range(12)
+    ]
+    stream = io.StringIO()
+
+    warn_gps_lock(healthy, stream=stream)
+
+    assert stream.getvalue() == ""
+
+
 def test_samples_from_telemetry_uses_start_seconds() -> None:
     points = [
         TelemetryPoint(start_s=0.0, end_s=1.0, lat=41.1, lon=-81.1, rel_alt_m=100.0),
