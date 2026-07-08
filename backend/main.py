@@ -21,6 +21,7 @@ from .routers import annotations as annotations_router
 from .routers import comparisons as comparisons_router
 from .routers import coverage as coverage_router
 from .routers import export as export_router
+from .routers import flight_entries as flight_entries_router
 from .routers import flight_log as flight_log_router
 from .routers import footprints as footprints_router
 from .routers import georeferencing as georeferencing_router
@@ -65,6 +66,7 @@ app.include_router(sessions_router.router)
 app.include_router(target_areas_router.router)
 app.include_router(coverage_router.router)
 app.include_router(flight_log_router.router)
+app.include_router(flight_entries_router.router)
 app.include_router(srt_router.router)
 app.include_router(plans_router.router)
 app.include_router(projects_router.router)
