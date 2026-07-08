@@ -47,6 +47,19 @@ export function detectJobTransitions(
   return transitions
 }
 
+/**
+ * Desktop (browser) notifications fire only when the tab is hidden — the
+ * in-app toast already covers the focused case — and only with permission
+ * already granted. `permission` is undefined when the Notification API is
+ * unavailable, which degrades to no desktop notification.
+ */
+export function shouldShowDesktopNotification(
+  documentHidden: boolean,
+  permission: NotificationPermission | undefined
+): boolean {
+  return documentHidden && permission === 'granted'
+}
+
 export function formatJobNotification(job: Job, outcome: JobOutcome): JobNotificationContent {
   const label = `Reconstruction #${job.id}`
   const context = `Session ${job.session_id} · ${job.preset} · ${job.frames_used} frames`

@@ -21,6 +21,7 @@ import { GlassFilters } from './shared/components/GlassFilters'
 import ShareViewer from './features/share/ShareViewer'
 import { StatusHud } from './shared/components/StatusHud'
 import { usePipelineStatus } from './shared/pipeline/usePipelineStatus'
+import { useJobCompletionNotifications } from './shared/notifications/useJobCompletionNotifications'
 import ImportModal from './features/import/ImportModal'
 import SessionPicker from './features/sessions/SessionPicker'
 import ProjectPicker from './features/sessions/ProjectPicker'
@@ -92,6 +93,8 @@ export default function App() {
   const selectedSessionId = useMapStore((s) => s.selectedSessionId)
   const selectedProjectId = useMapStore((s) => s.selectedProjectId)
   const status = usePipelineStatus(selectedSessionId)
+  // Job-completion notifications (toast + desktop when tab is hidden), #380.
+  useJobCompletionNotifications()
   const [toolsOpen, setToolsOpen] = useState(false)
   const toolActive = TOOL_TABS.some((t) => t.id === activeTab)
   const toolsBtnRef = useRef<HTMLButtonElement>(null)
