@@ -1,8 +1,10 @@
-import { lazy, Suspense } from 'react'
+import { lazy, Suspense, useEffect, useRef } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { useMapStore } from '../../shared/stores/mapStore'
 import { useSession } from './hooks/useSession'
 import { useFootprints } from './hooks/useFootprints'
 import { useCoverageResult } from './hooks/useCoverageResult'
+import { isLiveImportStatus, useSessionProgress } from '../../shared/api/useSessionProgress'
 import LeafletMapView from './LeafletMap'
 import LayerControls from './LayerControls'
 import SessionSidebar from './SessionSidebar'
@@ -16,10 +18,27 @@ interface Props {
 
 export default function MapTab({ onImport }: Props) {
   const { selectedSessionId, sidebarOpen, toggleSidebar } = useMapStore()
+  const queryClient = useQueryClient()
 
   const { data: session } = useSession(selectedSessionId)
-  const { data: footprints = [], isLoading, error } = useFootprints(selectedSessionId)
+  const { data: importProgress } = useSessionProgress(selectedSessionId)
+  const isImporting = isLiveImportStatus(importProgress?.status)
+  const { data: footprints = [], isLoading, error } = useFootprints(selectedSessionId, {
+    live: isImporting,
+  })
   const { data: coverage } = useCoverageResult(selectedSessionId)
+
+  // Once the live import settles (done/error), refetch once more so the map
+  // reflects the authoritative final footprint/session state, then drop back
+  // to the normal (non-polling) fetch policy.
+  const wasImporting = useRef(false)
+  useEffect(() => {
+    if (wasImporting.current && !isImporting) {
+      queryClient.invalidateQueries({ queryKey: ['footprints', selectedSessionId] })
+      queryClient.invalidateQueries({ queryKey: ['session', selectedSessionId] })
+    }
+    wasImporting.current = isImporting
+  }, [isImporting, selectedSessionId, queryClient])
 
   const sidebarWidth = sidebarOpen ? 200 : 20
 
@@ -36,6 +55,34 @@ export default function MapTab({ onImport }: Props) {
     <div className="fm-map-layout flex flex-1 overflow-hidden relative">
       {/* Map + floating controls */}
       <div className="fm-map-canvas relative flex-1 flex flex-col">
+        {isImporting && (
+          <div
+            className="absolute z-20 flex items-center gap-2 text-xs"
+            style={{
+              top: 12,
+              left: 12,
+              background: 'var(--surface)',
+              border: '1px solid var(--border)',
+              borderRadius: 'var(--radius-sm)',
+              padding: '6px 10px',
+              color: 'var(--text)',
+            }}
+          >
+            <span
+              aria-hidden
+              style={{
+                width: 7, height: 7, borderRadius: '50%',
+                background: 'var(--accent)',
+                display: 'inline-block',
+                animation: 'fm-pulse 1.2s var(--ease) infinite',
+              }}
+            />
+            Importing…{' '}
+            {importProgress && importProgress.total > 0
+              ? `${importProgress.processed}/${importProgress.total} frames mapped`
+              : `${footprints.length} frames mapped`}
+          </div>
+        )}
         <LeafletMapView
           footprints={footprints}
           coverage={coverage ?? null}
