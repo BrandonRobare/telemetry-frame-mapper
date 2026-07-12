@@ -4,11 +4,13 @@ import argparse
 import shutil
 import sys
 from pathlib import Path
+from typing import TextIO
 
 from drone_video_geotagger.audit import write_audit_csv
 from drone_video_geotagger.exiftool import write_exif
 from drone_video_geotagger.frames import build_frame_tags, collect_frames, infer_frame_rate
-from drone_video_geotagger.telemetry import parse_srt
+from drone_video_geotagger.gps_quality import assess_gps_lock, samples_from_telemetry
+from drone_video_geotagger.telemetry import TelemetryPoint, parse_srt
 from drone_video_geotagger.video import extract_srt, read_video_start
 
 
@@ -75,6 +77,13 @@ def resolve_srt_path(video: Path, output_dir: Path, requested_srt: Path | None) 
     return output_dir / f"{video.stem}.srt"
 
 
+def warn_gps_lock(telemetry: list[TelemetryPoint], stream: TextIO | None = None) -> None:
+    """Print GPS-lock heuristic warnings for the parsed telemetry, if any."""
+    report = assess_gps_lock(samples_from_telemetry(telemetry))
+    for warning in report.warnings:
+        print(f"WARNING: {warning}", file=stream if stream is not None else sys.stderr)
+
+
 def run(args: argparse.Namespace) -> int:
     output_dir = args.frames if args.in_place else args.output or default_output_dir(args.frames)
     srt_path = resolve_srt_path(args.video, output_dir, args.srt)
@@ -83,6 +92,7 @@ def run(args: argparse.Namespace) -> int:
         extract_srt(args.ffmpeg, args.video, srt_path)
 
     telemetry = parse_srt(srt_path)
+    warn_gps_lock(telemetry)
     frames = collect_frames(args.frames)
     frame_rate = args.frame_rate or infer_frame_rate(frames, telemetry[-1].end_s)
     video_start = read_video_start(args.ffmpeg, args.video)
