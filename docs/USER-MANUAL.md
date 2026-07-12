@@ -81,7 +81,7 @@ across 19 routers.
 | **Reconstruct** | Start quick/full reconstruction jobs |
 | **Jobs** | Resource monitor (CPU/RAM/GPU) with live job logs; job completion/failure fires an in-app toast (and a desktop notification when the tab is hidden and permission is granted) |
 | **Storage** | Disk usage by category and a file browser |
-| **Splat Viewer** | In-browser gaussian-splat rendering, PSNR/SSIM sparklines, coverage-gap heatmap, GPS-pinned annotations, distance/area measurement, ortho/3D split view, flythrough recording |
+| **Splat Viewer** | In-browser gaussian-splat rendering, PSNR/SSIM sparklines, coverage-gap heatmap, GPS-pinned annotations, distance/area measurement, ortho/3D split view, flythrough recording, presentation/narration mode |
 | **Compare** | Voxel change detection between two reconstructions of the same site |
 | **Settings** | App preferences, import/storage paths, mission parameters, reconstruction presets, rendering/export defaults |
 
@@ -243,6 +243,13 @@ high-quality splat.
 - **Flythrough**: the in-browser recorder is the primary path; the server-side
   MP4 render (raw frames piped to `ffmpeg`/libx264, smoothstep keyframe easing
   that matches the browser preview exactly) needs the full GPU stack.
+- **Presentation mode**: in the Splat Viewer, once you've captured at least two
+  flythrough keyframes, click **▶ Present** to enter a chrome-free walkthrough —
+  the sidebar, toolbar, and split-pane map hide and the camera flies the same
+  keyframe path with pause/resume and 0.5x/1x/1.5x/2x speed. GPS-pinned
+  annotations surface as narration callouts as the camera passes near them.
+  Keyboard: `Space` pause/resume, `←`/`→` jump to the previous/next keyframe,
+  `Esc` exit.
 
 ### Validated performance (RTX 3050 Ti, 4 GB)
 
