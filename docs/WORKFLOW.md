@@ -85,6 +85,8 @@ The job pipeline (watch it in the **Jobs tab**, which also shows CPU/RAM/GPU/VRA
 
 If a job fails, the Jobs tab's log panel has the stage-specific error; match it against [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
 
+When a job finishes (complete, failed, or cancelled) the app shows a toast from any tab, so you don't have to sit on the Jobs tab. If you grant the browser's notification permission (the app asks once, while a job is running), a desktop notification also fires when the tab is in the background.
+
 ## 7. View the splat
 
 **Splat Viewer tab** (needs a `complete` reconstruction with a splat):

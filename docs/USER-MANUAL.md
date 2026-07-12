@@ -67,7 +67,7 @@ across 19 routers.
 | **Export** | WebODM georeferencing CSV-only zip, GeoJSON, LAS point cloud, mesh (GLB/OBJ/MTL) |
 | **Session Log** | Event history per session |
 | **Reconstruct** | Start quick/full reconstruction jobs |
-| **Jobs** | Resource monitor (CPU/RAM/GPU) with live job logs |
+| **Jobs** | Resource monitor (CPU/RAM/GPU) with live job logs; job completion/failure fires an in-app toast (and a desktop notification when the tab is hidden and permission is granted) |
 | **Storage** | Disk usage by category and a file browser |
 | **Splat Viewer** | In-browser gaussian-splat rendering, PSNR/SSIM sparklines, coverage-gap heatmap, GPS-pinned annotations, distance/area measurement, ortho/3D split view, flythrough recording |
 | **Compare** | Voxel change detection between two reconstructions of the same site |
