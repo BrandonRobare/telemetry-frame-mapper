@@ -31,13 +31,26 @@ class FootprintOut(BaseModel):
 
 
 @router.get("", response_model=list[FootprintOut])
-def list_footprints(session_id: int, db: DBSession = Depends(get_db)):
-    return (
+def list_footprints(
+    session_id: int,
+    since_id: int | None = Query(
+        None,
+        ge=0,
+        description=(
+            "Only return footprints with id > since_id. Lets a live-import client "
+            "poll incrementally instead of re-fetching the whole session each tick."
+        ),
+    ),
+    db: DBSession = Depends(get_db),
+):
+    query = (
         db.query(Footprint)
         .join(Image, Image.id == Footprint.image_id)
         .filter(Image.session_id == session_id)
-        .all()
     )
+    if since_id is not None:
+        query = query.filter(Footprint.id > since_id)
+    return query.order_by(Footprint.id).all()
 
 
 @router.get("/export")

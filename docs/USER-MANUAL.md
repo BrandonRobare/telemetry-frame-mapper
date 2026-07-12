@@ -66,7 +66,7 @@ across 19 routers.
 | Tab | What it does |
 |-----|--------------|
 | **Overview** | Pipeline status, session summary, import call-to-action, and reconstruction readiness |
-| **Map** | Leaflet + ESRI satellite basemap, footprint polygons, coverage overlay, session stats sidebar with tags and operator notes |
+| **Map** | Leaflet + ESRI satellite basemap, footprint polygons, coverage overlay, session stats sidebar with tags and operator notes. While a session is still importing, footprints stream in live (an "Importing…" badge shows frame progress) so coverage gaps are visible before the import finishes — the coverage-gap analysis itself still requires the explicit "Run coverage analysis" button |
 | **GPS Sync** | DJI FlightRecord CSV matching with timing deltas |
 | **Review** | Thumbnail grid, quality flags, COLMAP reprojection-error badges, per-session frame selection for reconstruction |
 | **Plan** | Target-area drawing, lawnmower plan generation, KML/GPX export, shutter-interval calculator (photo spacing and timed-shot interval from speed, altitude, overlap, and camera FOV) |
