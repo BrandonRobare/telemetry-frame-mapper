@@ -20,6 +20,8 @@ import SettingsTab from './features/settings/SettingsTab'
 import { ToastStack } from './shared/components/ToastStack'
 import { GlassFilters } from './shared/components/GlassFilters'
 import ShareViewer from './features/share/ShareViewer'
+import MobileQuickCheck from './features/mobile/MobileQuickCheck'
+import { isMobileRoute } from './features/mobile/mobileRoute'
 import { StatusHud } from './shared/components/StatusHud'
 import { usePipelineStatus } from './shared/pipeline/usePipelineStatus'
 import { useJobCompletionNotifications } from './shared/notifications/useJobCompletionNotifications'
@@ -166,6 +168,9 @@ export default function App() {
       {/* Public share viewer — strip operator UI entirely. */}
       {window.location.pathname.startsWith('/view/share/') ? (
         <ShareViewer />
+      ) : isMobileRoute(window.location.pathname) ? (
+        /* Phone-sized quick-check view (#364) — bypasses the desktop tab shell. */
+        <MobileQuickCheck />
       ) : (
     <div className="fm-app flex flex-col" style={{ height: '100vh', background: 'var(--bg)' }}>
       <GlassFilters />
