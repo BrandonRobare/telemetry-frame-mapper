@@ -12,6 +12,7 @@ default_basemap: "esri_satellite"
 flight_log_match_tolerance_sec: 2.0
 battery_range_m: 3000
 mission_buffer_pct: 0.10
+rth_altitude_ft: 100
 thumbnail_size_px: 200
 imports_dir: "./imports"
 processed_dir: "./processed"
