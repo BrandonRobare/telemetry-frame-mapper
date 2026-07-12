@@ -117,7 +117,17 @@ export default function ImportModal({ open, onClose }: ImportModalProps) {
     else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus() }
   }
 
-  // When the background import finishes successfully, switch session and show QA
+  // Select the session as soon as it's created (server-path mode) — well before
+  // ingest finishes — so the Map tab can render footprints accumulating live
+  // and make coverage gaps visible during the import, not just after (#361).
+  useEffect(() => {
+    if (importedSession) {
+      setSession(importedSession.id)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [importedSession?.id])
+
+  // When the background import finishes successfully, show the post-import QA card.
   useEffect(() => {
     if (!isImporting && importedSession && progress?.status === 'done') {
       // If a new import completed (different session), reset dismiss state
@@ -125,7 +135,6 @@ export default function ImportModal({ open, onClose }: ImportModalProps) {
         lastDoneSessionRef.current = importedSession.id
         setPostImportDismissed(false)
       }
-      setSession(importedSession.id)
       // Don't auto-close — let the user see the QA card and dismiss
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -203,6 +212,10 @@ export default function ImportModal({ open, onClose }: ImportModalProps) {
         signal: controller.signal,
         onProgress: setBrowserProgress,
       })
+      // Ingest keeps running server-side after this resolves; selecting the
+      // session now (rather than waiting for it to finish) lets the Map tab
+      // pick up the live coverage-gap overlay while frames are still being
+      // processed (#361).
       setSession(result.session.id)
       setIsBrowserUploading(false)
       handleClose()
