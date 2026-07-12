@@ -6,7 +6,9 @@ import { Button } from '../../shared/components/Button'
 import TabHeader from '../../shared/components/TabHeader'
 import FlightSettingsPanel, { type FlightSettings } from './FlightSettingsPanel'
 import ShutterIntervalPanel from './ShutterIntervalPanel'
+import WeatherAdvisorPanel from './WeatherAdvisorPanel'
 import PlanMap from './PlanMap'
+import { computeCentroid, type CentroidGeometry } from './weatherAdvisor'
 
 const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
 
@@ -68,6 +70,7 @@ export default function PlanTab() {
   const [validation, setValidation] = useState<ValidationOut | null>(null)
   const [segments, setSegments] = useState<SegmentOut[] | null>(null)
   const [coverageRunId, setCoverageRunId] = useState<number | null>(null)  // re-fly source
+  const [drawnGeometry, setDrawnGeometry] = useState<CentroidGeometry | null>(null)
 
   // Step 1: create target area from drawn polygon
   const createArea = useMutation({
@@ -160,8 +163,15 @@ export default function PlanTab() {
   const isBusy = createArea.isPending || generatePlan.isPending
 
   function handlePolygonDrawn(geojsonStr: string) {
+    try {
+      setDrawnGeometry(JSON.parse(geojsonStr) as CentroidGeometry)
+    } catch {
+      setDrawnGeometry(null)
+    }
     createArea.mutate(geojsonStr)
   }
+
+  const weatherCentroid = computeCentroid(drawnGeometry)
 
   function downloadFile(url: string) {
     window.open(url, '_blank')
@@ -206,6 +216,11 @@ export default function PlanTab() {
         <ShutterIntervalPanel
           altitudeFt={settings.altitudeFt}
           forwardOverlapPct={settings.forwardOverlapPct}
+        />
+
+        <WeatherAdvisorPanel
+          lat={weatherCentroid?.lat ?? null}
+          lon={weatherCentroid?.lon ?? null}
         />
 
         {/* Re-fly section */}
