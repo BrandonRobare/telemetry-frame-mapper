@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" role="img" aria-label="Telemetry Frame Mapper">
+  <rect width="24" height="24" fill="#F7F1DE"/>
+  <ellipse cx="10.5" cy="13" rx="6.2" ry="4.2" fill="#B87C4C" opacity="0.85"/>
+  <ellipse cx="14" cy="10.5" rx="4.8" ry="6" fill="#A8BBA3" opacity="0.8" transform="rotate(18 14 10.5)"/>
+  <ellipse cx="11.8" cy="12" rx="3.2" ry="3" fill="#C4A484" opacity="0.92"/>
+  <circle cx="12" cy="12" r="1.8" fill="#9A5E32"/>
+</svg>

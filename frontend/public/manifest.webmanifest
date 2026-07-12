@@ -1,0 +1,25 @@
+{
+  "name": "Telemetry Frame Mapper — Quick Check",
+  "short_name": "Quick Check",
+  "description": "Field operator quick-check: session status, post-landing QA, and running jobs.",
+  "start_url": "/mobile",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#F7F1DE",
+  "theme_color": "#F7F1DE",
+  "icons": [
+    {
+      "src": "/pwa-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-icon-maskable.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ]
+}

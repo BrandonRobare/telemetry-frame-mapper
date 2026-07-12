@@ -87,6 +87,32 @@ across 19 routers.
 
 Light/dark theme with persistence.
 
+### Mobile quick-check (PWA)
+
+`/mobile` (or the `/m` shorthand) is a phone-sized, read-only view for an
+operator glancing at their phone in the field — it bypasses the desktop tab
+shell entirely. It shows:
+
+- A compact session picker (auto-selects the most recent session).
+- Session status: frame/usable counts, coverage %, and which pipeline stage
+  is active.
+- The post-landing quick QA summary — the same `RapidQACard` and
+  `/sessions/{id}/quick-report` data as the Overview tab's Rapid QA card,
+  with GPS-lock heuristic warnings (frozen fix, no-lock points, implausible
+  jumps — see #384) surfaced ahead of other warnings since space is tight.
+- Running-job progress, both for the selected session and any other session
+  with a job in flight.
+
+Everything is read-only and reuses existing queries — no new endpoints.
+`GET /` from a phone still opens the full desktop app.
+
+The app is installable: `frontend/public/manifest.webmanifest` sets
+`start_url` to `/mobile`, so "Add to Home Screen" opens straight to the
+quick-check view. A minimal service worker (`frontend/public/sw.js`,
+production-only) cache-first-serves the app shell (`/`, `/mobile`, the
+manifest, and icons) — it does not cache API responses or provide offline
+data sync.
+
 ---
 
 ## 2. The data pipeline
