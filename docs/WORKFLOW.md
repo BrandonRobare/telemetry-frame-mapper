@@ -63,7 +63,7 @@ During import the backend reads GPS EXIF and DJI XMP (relative altitude, yaw, gi
 
 - **Map tab** — footprint polygons and the coverage overlay on ESRI satellite imagery. The sidebar shows session stats, coverage %, and quality flags; "Run Coverage Analysis" recomputes coverage.
 - **Review tab** — thumbnail grid; cycle per-image flags (good / blurry / no_gps / dark / bright), and toggle which frames feed reconstruction. After a reconstruction has run, per-frame COLMAP reprojection-error badges appear here — sort by them to find weak frames.
-- **Plan tab** — draw a target-area polygon, set altitude/overlap, generate a lawnmower flight plan, export KML/GPX (written under `exports/`).
+- **Plan tab** — draw a target-area polygon, set altitude/overlap, generate a lawnmower flight plan, export KML/GPX (written under `exports/`). The Shutter Interval panel converts the current altitude/overlap plus a flight speed and camera preset into the photo spacing (m) and timed-shot interval (s) to dial into the DJI controller, and warns when the interval drops below the ~2 s DJI minimum.
 - **GPS Sync tab** — optionally match a DJI FlightRecord CSV against the session to refine timestamps.
 
 ## 6. Reconstruct: COLMAP → gaussian splat

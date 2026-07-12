@@ -5,6 +5,7 @@ import { useToast } from '../../shared/hooks/useToast'
 import { Button } from '../../shared/components/Button'
 import TabHeader from '../../shared/components/TabHeader'
 import FlightSettingsPanel, { type FlightSettings } from './FlightSettingsPanel'
+import ShutterIntervalPanel from './ShutterIntervalPanel'
 import PlanMap from './PlanMap'
 
 const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
@@ -201,6 +202,11 @@ export default function PlanTab() {
         </div>
 
         <FlightSettingsPanel settings={settings} onChange={setSettings} disabled={isBusy} />
+
+        <ShutterIntervalPanel
+          altitudeFt={settings.altitudeFt}
+          forwardOverlapPct={settings.forwardOverlapPct}
+        />
 
         {/* Re-fly section */}
         <div style={{ marginTop: 12 }}>
