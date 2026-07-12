@@ -192,6 +192,7 @@ class ValidationResult:
     valid: bool = True
     warnings: list[str] = field(default_factory=list)
     violations: list[str] = field(default_factory=list)
+    info: list[str] = field(default_factory=list)
 
 
 def validate_plan(
@@ -273,6 +274,168 @@ def validate_plan(
             f"Waypoint spacing ({waypoint_spacing_m:.1f} m) is large; "
             "overlap may be too low for reliable reconstruction"
         )
+
+    return result
+
+
+# ---------------------------------------------------------------------------
+# RTH / obstacle sanity check
+# ---------------------------------------------------------------------------
+
+_RTH_PATH_SAMPLES = 9
+_RTH_CLEARANCE_MARGIN_M = 5.0
+
+
+def _flatten_lane_points(geo: dict) -> list[tuple[float, float]]:
+    """Return unique (lat, lon) points from a lanes GeometryCollection, in order."""
+    seen: set[tuple[float, float]] = set()
+    points: list[tuple[float, float]] = []
+    for geom in geo.get("geometries", []):
+        for coord in geom.get("coordinates", []):
+            key = (coord[1], coord[0])
+            if key not in seen:
+                seen.add(key)
+                points.append(key)
+    return points
+
+
+def _planar_distance_m(a: tuple[float, float], b: tuple[float, float]) -> float:
+    """Approximate flat-earth distance in meters between two (lat, lon) points."""
+    lat_rad = math.radians((a[0] + b[0]) / 2)
+    meters_per_deg_lon = max(111_320 * math.cos(lat_rad), 1_000)
+    dx = (b[1] - a[1]) * meters_per_deg_lon
+    dy = (b[0] - a[0]) * 111_320
+    return math.hypot(dx, dy)
+
+
+def _interpolate_path(
+    a: tuple[float, float], b: tuple[float, float], n: int
+) -> list[tuple[float, float]]:
+    """Return *n* evenly spaced (lat, lon) points from *a* to *b*, inclusive."""
+    if n < 2:
+        return [a, b]
+    return [
+        (a[0] + (b[0] - a[0]) * i / (n - 1), a[1] + (b[1] - a[1]) * i / (n - 1))
+        for i in range(n)
+    ]
+
+
+def evaluate_rth_terrain_safety(
+    lanes_geojson: str,
+    altitude_ft: float,
+    rth_altitude_ft: float,
+    home_point: tuple[float, float] | None = None,
+    terrain_service: TerrainService | None = None,
+    total_distance_m: float | None = None,
+    battery_range_m: float | None = None,
+    mission_buffer_pct: float = 0.0,
+    clearance_margin_m: float = _RTH_CLEARANCE_MARGIN_M,
+) -> ValidationResult:
+    """Evaluate RTH-altitude-vs-terrain and home-elevation sanity checks for a plan.
+
+    Uses the configured terrain service (DEM) to check:
+
+      1. Whether the configured RTH altitude clears the highest terrain sampled
+         along the direct return path from the farthest waypoint back to the
+         home point.
+      2. Whether the home point sits below the highest terrain in the survey
+         area such that the planned cruise altitude would fly below that
+         terrain elsewhere in the survey.
+      3. (Only when *battery_range_m* and *total_distance_m* are supplied)
+         whether the plan distance plus the RTH leg back to home leaves an
+         adequate battery reserve, using *mission_buffer_pct* as the safety
+         margin. Skipped entirely when either datum is missing.
+
+    *home_point* defaults to the first vertex of the plan's lanes when not
+    supplied — a reasonable stand-in for "launch near the survey area" when no
+    explicit home point is tracked.
+
+    When the terrain service has no usable data for the area (no DEM
+    configured, or the area falls outside DEM coverage), checks 1 and 2 are
+    skipped and an informational message is added to ``result.info`` instead
+    of raising a warning or violation.
+    """
+    result = ValidationResult()
+
+    geo = json.loads(lanes_geojson)
+    points = _flatten_lane_points(geo)
+    if not points:
+        result.valid = False
+        result.violations.append("No lanes in plan geometry")
+        return result
+
+    home = home_point or points[0]
+
+    # ---- Check 3: battery/RTH-reserve (independent of terrain data) --------
+    if battery_range_m is not None and total_distance_m is not None:
+        rth_leg_m = _planar_distance_m(points[-1], home)
+        required_m = total_distance_m + rth_leg_m
+        reserved_range_m = battery_range_m * (1 - mission_buffer_pct)
+        if required_m > reserved_range_m:
+            result.warnings.append(
+                f"Plan distance plus RTH leg back to home ({required_m:.0f} m) exceeds "
+                f"the battery-safe range with reserve ({reserved_range_m:.0f} m, "
+                f"{mission_buffer_pct * 100:.0f}% margin); battery reserve for RTH is doubtful"
+            )
+
+    # ---- Checks 1 & 2: terrain-based -----------------------------------------
+    svc = terrain_service or get_terrain_service()
+
+    farthest = max(points, key=lambda p: _planar_distance_m(home, p))
+    path_points = _interpolate_path(farthest, home, _RTH_PATH_SAMPLES)
+
+    query_points = [home, *path_points, *points]
+    elevations = svc.elevation_batch(query_points)
+
+    home_result = elevations[0]
+    path_results = elevations[1 : 1 + len(path_points)]
+    survey_results = elevations[1 + len(path_points) :]
+
+    def _usable_elevations(results: list) -> list[float]:
+        return [r.elevation_m for r in results if not r.out_of_bounds and r.source != "noop"]
+
+    home_usable = home_result.source != "noop" and not home_result.out_of_bounds
+    path_usable = _usable_elevations(path_results)
+    survey_usable = _usable_elevations(survey_results)
+
+    if not home_usable or not path_usable or not survey_usable:
+        result.info.append(
+            "Terrain data unavailable for this area; RTH/terrain elevation checks were skipped."
+        )
+        return result
+
+    home_elev_m = home_result.elevation_m
+    max_path_terrain_m = max(path_usable)
+    max_survey_terrain_m = max(survey_usable)
+
+    # Check 1: RTH altitude vs. terrain relief on the direct return path.
+    rth_msl_m = home_elev_m + rth_altitude_ft * 0.3048
+    clearance_m = rth_msl_m - max_path_terrain_m
+    if clearance_m < 0:
+        result.valid = False
+        result.violations.append(
+            f"RTH altitude ({rth_altitude_ft:.0f} ft AGL from home) would be "
+            f"{abs(clearance_m):.1f} m below the highest terrain on the return path "
+            f"from the farthest waypoint; raise the RTH height to avoid a collision"
+        )
+    elif clearance_m < clearance_margin_m:
+        result.warnings.append(
+            f"RTH altitude clears the highest terrain on the return path by only "
+            f"{clearance_m:.1f} m (recommended margin {clearance_margin_m:.0f} m); "
+            f"consider raising the RTH height"
+        )
+
+    # Check 2: home-point elevation vs. highest terrain in the survey area.
+    relief_m = max_survey_terrain_m - home_elev_m
+    if relief_m > 0:
+        cruise_msl_m = home_elev_m + altitude_ft * 0.3048
+        cruise_clearance_m = cruise_msl_m - max_survey_terrain_m
+        if cruise_clearance_m < 0:
+            result.warnings.append(
+                f"Home point sits {relief_m:.1f} m below the highest terrain in the "
+                f"survey area; at the planned cruise altitude ({altitude_ft:.0f} ft AGL) "
+                f"the aircraft would fly below that terrain elsewhere in the survey area"
+            )
 
     return result
 
