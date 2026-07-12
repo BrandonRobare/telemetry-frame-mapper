@@ -37,6 +37,7 @@ interface ValidationOut {
   valid: boolean
   warnings: string[]
   violations: string[]
+  info: string[]
 }
 
 interface SegmentOut {
@@ -370,13 +371,25 @@ export default function PlanTab() {
               </div>
             )}
             {validation.warnings.length > 0 && (
-              <div>
+              <div style={{ marginBottom: validation.info.length > 0 ? 8 : 0 }}>
                 <span className="text-xs" style={{ color: 'var(--warning, #d97706)', fontWeight: 600 }}>
                   Warnings:
                 </span>
                 {validation.warnings.map((w, i) => (
                   <div key={i} className="text-xs" style={{ color: 'var(--text-muted)' }}>
                     • {w}
+                  </div>
+                ))}
+              </div>
+            )}
+            {validation.info.length > 0 && (
+              <div>
+                <span className="text-xs" style={{ color: 'var(--text-muted)', fontWeight: 600 }}>
+                  Info:
+                </span>
+                {validation.info.map((msg, i) => (
+                  <div key={i} className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                    • {msg}
                   </div>
                 ))}
               </div>
