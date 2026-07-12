@@ -129,6 +129,27 @@ def test_validate_plan_ok(client):
     assert data["valid"] is True
     assert isinstance(data["warnings"], list)
     assert data["violations"] == []
+    assert isinstance(data["info"], list)
+
+
+def test_validate_plan_reports_terrain_unavailable_without_dem(client):
+    """No DEM is configured in the test environment, so the RTH/terrain checks
+    degrade to an informational message rather than a warning or violation."""
+    area = _make_target_area(client, name="Terrain Info Area")
+    plan = client.post(
+        "/plans/generate",
+        json={
+            "target_area_id": area["id"],
+            "altitude_ft": 200,
+            "side_overlap_pct": 0.7,
+            "forward_overlap_pct": 0.8,
+        },
+    ).json()
+
+    resp = client.post(f"/plans/{plan['id']}/validate")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert any("Terrain data unavailable" in msg for msg in data["info"])
 
 
 def test_validate_plan_not_found(client):

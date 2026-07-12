@@ -53,6 +53,7 @@ class AppConfig:
     dji_api_key_path: str = ""
     battery_range_m: float = 3000
     mission_buffer_pct: float = 0.10
+    rth_altitude_ft: float = 100
     thumbnail_size_px: int = 200
     imports_dir: str = "./imports"
     processed_dir: str = "./processed"
