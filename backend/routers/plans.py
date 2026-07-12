@@ -12,6 +12,7 @@ from ..db.database import get_db
 from ..db.models import CoverageRun, MissionPlan, TargetArea
 from ..services.mission_planner import (
     estimate_batteries,
+    evaluate_rth_terrain_safety,
     generate_lawnmower,
     generate_lawnmower_from_gaps,
     segment_plan,
@@ -62,6 +63,7 @@ class ValidationOut(BaseModel):
     valid: bool
     warnings: list[str]
     violations: list[str]
+    info: list[str] = []
 
 
 class SegmentOut(BaseModel):
@@ -151,11 +153,21 @@ def validate_mission_plan(plan_id: int, db: DBSession = Depends(get_db)):
         battery_range_m=config.battery_range_m,
     )
 
+    rth_result = evaluate_rth_terrain_safety(
+        lanes_geojson=plan.lanes_geojson,
+        altitude_ft=plan.altitude_ft or 200,
+        rth_altitude_ft=config.rth_altitude_ft,
+        total_distance_m=plan.total_distance_m,
+        battery_range_m=config.battery_range_m,
+        mission_buffer_pct=config.mission_buffer_pct,
+    )
+
     return ValidationOut(
         plan_id=plan_id,
-        valid=result.valid,
-        warnings=result.warnings,
-        violations=result.violations,
+        valid=result.valid and rth_result.valid,
+        warnings=result.warnings + rth_result.warnings,
+        violations=result.violations + rth_result.violations,
+        info=rth_result.info,
     )
 
 
