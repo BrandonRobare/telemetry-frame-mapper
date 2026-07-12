@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import datetime
+import json
 from pathlib import Path, PurePosixPath
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from sqlalchemy.orm import Session as DBSession
 
 from ..core.config import get_config
@@ -18,6 +19,10 @@ from ..services.reconstruction import cancel_reconstruction
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 
+# Tags are short organizational labels ("roof", "north-field"); cap the length so
+# they stay chip-sized in the UI and cheap to filter on.
+MAX_TAG_LENGTH = 40
+
 
 class SessionOut(BaseModel):
     id: int
@@ -26,8 +31,47 @@ class SessionOut(BaseModel):
     imported_at: datetime.datetime | None
     photo_count: int
     usable_count: int
+    project_id: int | None = None
+    tags: list[str] = []
+    notes: str | None = None
 
     model_config = {"from_attributes": True}
+
+    @field_validator("tags", mode="before")
+    @classmethod
+    def parse_tags(cls, v: object) -> list[str]:
+        """The DB stores tags as a JSON string in a Text column; decode for the API."""
+        if v is None:
+            return []
+        if isinstance(v, str):
+            return json.loads(v)
+        return v  # type: ignore[return-value]
+
+
+class SessionPatch(BaseModel):
+    """PATCH body — omitted (None) fields are left unchanged.
+
+    ``tags`` replaces the whole list; ``notes: ""`` clears the notes.
+    """
+
+    tags: list[str] | None = None
+    notes: str | None = None
+
+    @field_validator("tags")
+    @classmethod
+    def normalize_tags(cls, v: list[str] | None) -> list[str] | None:
+        if v is None:
+            return None
+        cleaned: list[str] = []
+        for tag in v:
+            stripped = tag.strip()
+            if not stripped:
+                continue
+            if len(stripped) > MAX_TAG_LENGTH:
+                raise ValueError(f"tag must be at most {MAX_TAG_LENGTH} characters: {stripped!r}")
+            if stripped not in cleaned:
+                cleaned.append(stripped)
+        return cleaned
 
 
 class DeleteOut(BaseModel):
@@ -44,6 +88,21 @@ def get_session(session_id: int, db: DBSession = Depends(get_db)):
     s = db.query(SessionModel).filter(SessionModel.id == session_id).first()
     if not s:
         raise HTTPException(status_code=404, detail="Session not found")
+    return s
+
+
+@router.patch("/{session_id}", response_model=SessionOut)
+def patch_session(session_id: int, body: SessionPatch, db: DBSession = Depends(get_db)):
+    """Update field-organization metadata (tags, operator notes) on a session."""
+    s = db.query(SessionModel).filter(SessionModel.id == session_id).first()
+    if not s:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if body.tags is not None:
+        s.tags = json.dumps(body.tags) if body.tags else None
+    if body.notes is not None:
+        s.notes = body.notes.strip() or None
+    db.commit()
+    db.refresh(s)
     return s
 
 
