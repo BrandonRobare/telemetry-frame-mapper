@@ -40,6 +40,9 @@ across 19 routers.
 
 - **Import & quality:** session import; per-image sharpness and brightness
   scoring (OpenCV); DJI XMP parsing for relative altitude, yaw, and gimbal pitch.
+- **Session organization:** tags (short labels, max 40 chars) and free-text
+  operator notes per session via `PATCH /sessions/{id}`; edit them in the Map
+  tab's session sidebar and filter the session picker by tag.
 - **Geometry & coverage:** ground-footprint computation (Shapely/UTM from
   altitude + heading); coverage analysis against drawn target areas with gap and
   overlap detection.
@@ -60,7 +63,7 @@ across 19 routers.
 | Tab | What it does |
 |-----|--------------|
 | **Overview** | Pipeline status, session summary, import call-to-action, and reconstruction readiness |
-| **Map** | Leaflet + ESRI satellite basemap, footprint polygons, coverage overlay, session stats sidebar |
+| **Map** | Leaflet + ESRI satellite basemap, footprint polygons, coverage overlay, session stats sidebar with tags and operator notes |
 | **GPS Sync** | DJI FlightRecord CSV matching with timing deltas |
 | **Review** | Thumbnail grid, quality flags, COLMAP reprojection-error badges, per-session frame selection for reconstruction |
 | **Plan** | Target-area drawing, lawnmower plan generation, KML/GPX export, shutter-interval calculator (photo spacing and timed-shot interval from speed, altitude, overlap, and camera FOV) |
