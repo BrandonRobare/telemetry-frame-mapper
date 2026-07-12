@@ -52,6 +52,11 @@ across 19 routers.
 - **Battery/flight records:** per-session operator field records
   (`/sessions/{id}/flight-entries`) — battery ID, start/end charge %, flight
   duration (derived from flight-log telemetry when omitted), and notes.
+- **Defect flagging:** per-session defect records (`/sessions/{id}/defects`) —
+  category (crack, corrosion, vegetation, water damage, missing material,
+  other), optional severity (low/medium/high) and note, linked to one or more
+  source photos (which carry the GPS coordinates). Flagged from the Review tab;
+  listed per-session in Session Log.
 - **Reconstruction jobs:** COLMAP structure-from-motion plus gaussian-splat
   training, run as cancellable background jobs with live progress and logs.
 - **Geo-registration:** a COLMAP↔UTM similarity transform so reconstructions
@@ -68,10 +73,10 @@ across 19 routers.
 | **Overview** | Pipeline status, session summary, import call-to-action, and reconstruction readiness |
 | **Map** | Leaflet + ESRI satellite basemap, footprint polygons, coverage overlay, session stats sidebar with tags and operator notes |
 | **GPS Sync** | DJI FlightRecord CSV matching with timing deltas |
-| **Review** | Thumbnail grid, quality flags, COLMAP reprojection-error badges, per-session frame selection for reconstruction |
+| **Review** | Thumbnail grid, quality flags, COLMAP reprojection-error badges, per-session frame selection for reconstruction, flag a defect (category + optional severity/note) directly from a photo |
 | **Plan** | Target-area drawing, lawnmower plan generation, KML/GPX export, shutter-interval calculator (photo spacing and timed-shot interval from speed, altitude, overlap, and camera FOV) |
 | **Export** | WebODM georeferencing CSV-only zip, GeoJSON, LAS point cloud, mesh (GLB/OBJ/MTL) |
-| **Session Log** | Event history per session, plus battery/flight records: log battery ID, start/end %, duration, and a note per flight (duration is auto-filled from the flight log when left blank) |
+| **Session Log** | Event history per session, plus battery/flight records (battery ID, start/end %, duration, note) and flagged defects (category, severity, note, linked photos) |
 | **Reconstruct** | Start quick/full reconstruction jobs |
 | **Jobs** | Resource monitor (CPU/RAM/GPU) with live job logs; job completion/failure fires an in-app toast (and a desktop notification when the tab is hidden and permission is granted) |
 | **Storage** | Disk usage by category and a file browser |
