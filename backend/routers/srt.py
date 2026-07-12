@@ -7,6 +7,7 @@ from pathlib import Path
 from fastapi import APIRouter, File, HTTPException, UploadFile
 
 from backend.core.config import get_upload_limits_config
+from src.drone_video_geotagger.gps_quality import assess_gps_lock, samples_from_telemetry
 from src.drone_video_geotagger.telemetry import parse_srt
 
 router = APIRouter(prefix="/srt", tags=["srt"])
@@ -45,15 +46,19 @@ async def process_srt(file: UploadFile = File(...)):
             points = parse_srt(Path(tmp_path))
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
-        return [
-            {
-                "start_s": p.start_s,
-                "end_s": p.end_s,
-                "lat": p.lat,
-                "lon": p.lon,
-                "alt_m": p.rel_alt_m,
-            }
-            for p in points
-        ]
+        gps_lock = assess_gps_lock(samples_from_telemetry(points))
+        return {
+            "points": [
+                {
+                    "start_s": p.start_s,
+                    "end_s": p.end_s,
+                    "lat": p.lat,
+                    "lon": p.lon,
+                    "alt_m": p.rel_alt_m,
+                }
+                for p in points
+            ],
+            "gps_lock_warnings": list(gps_lock.warnings),
+        }
     finally:
         os.unlink(tmp_path)
