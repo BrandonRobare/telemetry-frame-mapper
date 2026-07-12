@@ -3,6 +3,7 @@ import { get } from '../../shared/api/client'
 import { useMapStore } from '../../shared/stores/mapStore'
 import TabHeader from '../../shared/components/TabHeader'
 import EmptyState from '../../shared/components/EmptyState'
+import DefectsSection from './DefectsSection'
 import FlightEntriesSection from './FlightEntriesSection'
 import { formatLogTimestamp } from './formatLogTimestamp'
 
@@ -143,6 +144,7 @@ export default function SessionLogTab() {
         description="A timeline of imports, coverage runs, and jobs for this session."
       />
       {selectedSessionId !== null && <FlightEntriesSection sessionId={selectedSessionId} />}
+      {selectedSessionId !== null && <DefectsSection sessionId={selectedSessionId} />}
       {body}
     </div>
   )
