@@ -12,6 +12,7 @@ export type SettingsTab =
   | 'plan'
   | 'export'
   | 'session-log'
+  | 'checklist'
   | 'reconstruct'
   | 'jobs'
   | 'storage'

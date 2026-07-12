@@ -59,6 +59,7 @@ const TABS: { id: SettingsTab; label: string }[] = [
   { id: 'plan', label: 'Plan' },
   { id: 'export', label: 'Export' },
   { id: 'session-log', label: 'Session Log' },
+  { id: 'checklist', label: 'Field Checklist' },
   { id: 'reconstruct', label: 'Reconstruct' },
   { id: 'jobs', label: 'Jobs' },
   { id: 'storage', label: 'Storage' },
