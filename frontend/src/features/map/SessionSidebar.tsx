@@ -4,6 +4,7 @@ import { useMapStore } from '../../shared/stores/mapStore'
 import { get } from '../../shared/api/client'
 import { Skeleton } from '../../shared/components/Skeleton'
 import GlassSurface from '../../shared/components/GlassSurface'
+import SessionTagsNotes from '../sessions/SessionTagsNotes'
 
 const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
 
@@ -147,6 +148,9 @@ export default function SessionSidebar({ session, coverage, frameCount, isLoadin
           </div>
         </div>
       )}
+
+      {/* Tags + operator notes */}
+      <SessionTagsNotes key={session.id} session={session} />
 
       {/* Quality flags */}
       <div className="px-3 py-2 flex-1" style={{ borderBottom: '1px solid var(--border)' }}>

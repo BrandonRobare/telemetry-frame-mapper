@@ -28,6 +28,7 @@ class Session(Base):
     photo_count = Column(Integer, default=0)
     usable_count = Column(Integer, default=0)
     notes = Column(Text)
+    tags = Column(Text)  # JSON list of short strings, e.g. '["roof", "solar"]'
     images = relationship("Image", back_populates="session", cascade="all, delete-orphan")
     flight_logs = relationship("FlightLog", back_populates="session", cascade="all, delete-orphan")
     log_entries = relationship(

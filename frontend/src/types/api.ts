@@ -15,6 +15,7 @@ export interface Session {
   photo_count: number;
   usable_count: number;
   notes: string | null;
+  tags: string[];
   project_id: number | null;
 }
 
