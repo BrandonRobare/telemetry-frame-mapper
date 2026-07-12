@@ -29,8 +29,20 @@ import type { ProfileSample } from './measurementMath'
 import type { VolumeResult } from './measurementMath'
 import ProfilePanel from './ProfilePanel'
 import VolumePanel from './VolumePanel'
+import {
+  cycleSpeed,
+  interpolateKeyframes,
+  scaledSegmentDurationMs,
+  selectNarrationCallout,
+  stepKeyframeIndex,
+  type NarrationPoint,
+} from './presentationMode'
 
 const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
+
+// Radius (world units, ~meters) within which a flown-through camera position
+// triggers an annotation's narration callout during presentation mode.
+const NARRATION_ENTER_RADIUS_M = 6
 
 const ACTIVE_STATUSES: string[] = ['pending', 'running_colmap', 'running_gsplat']
 const SEMANTIC_CLASS_NAMES: SemanticClassName[] = ['ground', 'vegetation', 'structure', 'vehicle', 'water', 'other']
@@ -589,6 +601,7 @@ interface FlythroughControlsProps {
   onPreview: () => void
   onRecord: () => void
   onServerRender: () => void
+  onPresent: () => void
 }
 
 function FlythroughControls({
@@ -601,6 +614,7 @@ function FlythroughControls({
   onPreview,
   onRecord,
   onServerRender,
+  onPresent,
 }: FlythroughControlsProps) {
   const canRun = keyframeCount >= 2 && !recording
   const serverRunning = status?.flythrough_status === 'pending' || status?.flythrough_status === 'running'
@@ -654,6 +668,22 @@ function FlythroughControls({
         >
           {serverRunning ? 'Rendering…' : 'Server MP4'}
         </button>
+        <button
+          type="button"
+          onClick={onPresent}
+          disabled={!canRun}
+          title={canRun ? 'Enter presentation mode' : 'Add at least two keyframes to present'}
+          style={{
+            ...btnStyle,
+            opacity: canRun ? 1 : 0.5,
+            border: '1px solid rgba(226,168,119,0.5)',
+            background: 'rgba(226,168,119,0.14)',
+            color: '#E2A877',
+            fontWeight: 600,
+          }}
+        >
+          ▶ Present
+        </button>
       </div>
       {message && (
         <p style={{ margin: 0, color: '#B9B2A6', fontSize: 10 }}>{message}</p>
@@ -673,6 +703,127 @@ function FlythroughControls({
         </a>
       )}
     </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Presentation mode overlay — playback controls + narration callout
+// ---------------------------------------------------------------------------
+
+interface PresentationCallout {
+  id: number
+  label: string
+  color: string
+}
+
+interface PresentationOverlayProps {
+  keyframeIndex: number
+  keyframeCount: number
+  paused: boolean
+  speed: number
+  callout: PresentationCallout | null
+  onTogglePause: () => void
+  onPrev: () => void
+  onNext: () => void
+  onSpeedChange: (direction: 1 | -1) => void
+  onExit: () => void
+}
+
+function PresentationOverlay({
+  keyframeIndex,
+  keyframeCount,
+  paused,
+  speed,
+  callout,
+  onTogglePause,
+  onPrev,
+  onNext,
+  onSpeedChange,
+  onExit,
+}: PresentationOverlayProps) {
+  const btnStyle = {
+    padding: '4px 8px',
+    borderRadius: 2,
+    border: '1px solid rgba(255,255,255,0.18)',
+    background: 'rgba(255,255,255,0.06)',
+    color: '#D8D2C7',
+    cursor: 'pointer',
+    fontSize: 11,
+    fontFamily: 'inherit',
+  }
+
+  return (
+    <>
+      <div
+        style={{
+          position: 'absolute',
+          right: 12,
+          top: 12,
+          zIndex: 20,
+          padding: 10,
+          borderRadius: 'var(--radius-md)',
+          background: 'rgba(28,27,25,0.9)',
+          border: '1px solid rgba(255,255,255,0.14)',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 8,
+        }}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12 }}>
+          <span style={{ color: '#F2ECE0', fontSize: 11, fontWeight: 700 }}>Presenting</span>
+          <span style={{ color: '#B9B2A6', fontSize: 10 }}>
+            {Math.min(keyframeIndex + 1, keyframeCount)} / {keyframeCount}
+          </span>
+        </div>
+        <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+          <button type="button" onClick={onPrev} style={btnStyle} title="Previous keyframe (←)">⏮</button>
+          <button type="button" onClick={onTogglePause} style={btnStyle} title="Play/pause (space)">
+            {paused ? '▶ Play' : '⏸ Pause'}
+          </button>
+          <button type="button" onClick={onNext} style={btnStyle} title="Next keyframe (→)">⏭</button>
+          <button type="button" onClick={() => onSpeedChange(1)} style={btnStyle} title="Cycle playback speed">
+            {speed}×
+          </button>
+        </div>
+        <button
+          type="button"
+          onClick={onExit}
+          style={{ ...btnStyle, textAlign: 'center' }}
+          title="Exit presentation (Esc)"
+        >
+          ✕ Exit
+        </button>
+      </div>
+      <AnimatePresence>
+        {callout && (
+          <motion.div
+            key={callout.id}
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 12 }}
+            transition={{ duration: 0.25, ease: easeOut }}
+            style={{
+              position: 'absolute',
+              left: '50%',
+              bottom: 28,
+              transform: 'translateX(-50%)',
+              zIndex: 20,
+              maxWidth: 420,
+              padding: '10px 18px',
+              borderRadius: 'var(--radius-md)',
+              background: 'rgba(28,27,25,0.92)',
+              border: `1px solid ${callout.color}`,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+            }}
+          >
+            <span style={{ width: 10, height: 10, borderRadius: 2, background: callout.color, flexShrink: 0 }} />
+            <span style={{ color: '#F2ECE0', fontSize: 13, fontWeight: 600 }}>{callout.label}</span>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </>
   )
 }
 
@@ -700,6 +851,9 @@ interface SplatCanvasProps {
   measureMode: 'measure-dist' | 'measure-area' | 'measure-profile' | 'measure-volume' | null
   onMeasurePoint: (pt: MeasurePoint) => void
   onMeasureClose: () => void
+  presenting: boolean
+  onEnterPresentation: () => void
+  onExitPresentation: () => void
 }
 
 function SplatCanvas({
@@ -717,6 +871,9 @@ function SplatCanvas({
   measureMode,
   onMeasurePoint,
   onMeasureClose,
+  presenting,
+  onEnterPresentation,
+  onExitPresentation,
 }: SplatCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const viewerRef = useRef<unknown>(null)
@@ -728,6 +885,9 @@ function SplatCanvas({
   const annotationGroupRef = useRef<any>(null)
   const recorderRef = useRef<MediaRecorder | null>(null)
   const rafRef = useRef<number | null>(null)
+  const presentationRafRef = useRef<number | null>(null)
+  const presentationStateRef = useRef({ segment: 0, elapsedInSegment: 0, paused: false, speed: 1 })
+  const activeCalloutIdRef = useRef<number | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [viewerReady, setViewerReady] = useState(false)
@@ -735,10 +895,26 @@ function SplatCanvas({
   const [flythroughKeyframes, setFlythroughKeyframes] = useState<FlythroughKeyframe[]>([])
   const [recording, setRecording] = useState(false)
   const [flythroughMessage, setFlythroughMessage] = useState<string | null>(null)
+  const [presentationDisplay, setPresentationDisplay] = useState<{
+    keyframeIndex: number
+    paused: boolean
+    speed: number
+    callout: PresentationCallout | null
+  }>({ keyframeIndex: 0, paused: false, speed: 1, callout: null })
 
   const queryClient = useQueryClient()
   const { data: flythroughStatus } = useFlythroughStatus(reconstructionId)
   const groundY = useMemo(() => deriveGroundPlaneY(geoTransform), [geoTransform])
+  const calloutPoints = useMemo<(NarrationPoint & PresentationCallout)[]>(() => {
+    if (!geoTransform) return []
+    const points: (NarrationPoint & PresentationCallout)[] = []
+    for (const ann of annotations) {
+      const wp = gpsToWorld({ lat: ann.lat, lon: ann.lon, alt: ann.alt_m }, geoTransform)
+      if (!wp) continue
+      points.push({ id: ann.id, label: ann.label, color: ann.color, position: [wp.x, wp.y, wp.z] })
+    }
+    return points
+  }, [annotations, geoTransform])
   const { castRay } = useRayCast(
     viewerRef as React.RefObject<unknown>,
     containerRef,
@@ -810,16 +986,11 @@ function SplatCanvas({
           return
         }
         if (startTime === null) startTime = now
-        const durationMs = Math.max(250, next.duration_s * 1000)
+        const durationMs = scaledSegmentDurationMs(next.duration_s, 1)
         const t = Math.min(1, (now - startTime) / durationMs)
         const ease = smoothstep(t)
-        const pos = current.position.map((value, i) =>
-          value + (next.position[i] - value) * ease
-        )
-        const target = current.target.map((value, i) =>
-          value + (next.target[i] - value) * ease
-        )
-        camera.position.set(pos[0], pos[1], pos[2])
+        const { position, target } = interpolateKeyframes(current, next, ease)
+        camera.position.set(position[0], position[1], position[2])
         if (controls?.target?.set) controls.target.set(target[0], target[1], target[2])
         controls?.update?.()
         if (t < 1) {
@@ -886,6 +1057,136 @@ function SplatCanvas({
     }
   }
 
+  function enterPresentation() {
+    if (flythroughKeyframes.length < 2) {
+      setFlythroughMessage('Add at least two keyframes to present.')
+      return
+    }
+    presentationStateRef.current = {
+      segment: 0,
+      elapsedInSegment: 0,
+      paused: false,
+      speed: presentationStateRef.current.speed || 1,
+    }
+    activeCalloutIdRef.current = null
+    onEnterPresentation()
+  }
+
+  function jumpToKeyframe(direction: 1 | -1) {
+    const state = presentationStateRef.current
+    state.segment = stepKeyframeIndex(state.segment, direction, flythroughKeyframes.length)
+    state.elapsedInSegment = 0
+    state.paused = false
+  }
+
+  // Presentation playback — plays the same keyframe path as the flythrough
+  // preview (interpolateKeyframes/scaledSegmentDurationMs from
+  // presentationMode.ts), but supports pause/resume, adjustable speed, and
+  // proximity-triggered annotation callouts. Mutable playback state lives in
+  // presentationStateRef so keyboard/UI controls can steer it without
+  // restarting this effect.
+  useEffect(() => {
+    if (!presenting) return
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const viewer = viewerRef.current as any
+    const camera = viewer?.camera
+    const controls = viewer?.orbitControls ?? viewer?.controls ?? null
+    if (!camera || flythroughKeyframes.length < 2) {
+      onExitPresentation()
+      return
+    }
+
+    let lastFrameTime: number | null = null
+
+    function frame(now: number) {
+      const state = presentationStateRef.current
+      if (lastFrameTime === null) lastFrameTime = now
+      const delta = now - lastFrameTime
+      lastFrameTime = now
+      if (!state.paused) state.elapsedInSegment += delta
+
+      const current = flythroughKeyframes[state.segment]
+      const next = flythroughKeyframes[state.segment + 1]
+
+      if (current && next) {
+        const durationMs = scaledSegmentDurationMs(next.duration_s, state.speed)
+        const t = Math.min(1, state.elapsedInSegment / durationMs)
+        const ease = smoothstep(t)
+        const { position, target } = interpolateKeyframes(current, next, ease)
+        camera.position.set(position[0], position[1], position[2])
+        if (controls?.target?.set) controls.target.set(target[0], target[1], target[2])
+        controls?.update?.()
+
+        if (t >= 1) {
+          const advanced = stepKeyframeIndex(state.segment, 1, flythroughKeyframes.length)
+          if (advanced === state.segment) {
+            state.paused = true
+          } else {
+            state.segment = advanced
+            state.elapsedInSegment = 0
+          }
+        }
+      } else if (current) {
+        camera.position.set(current.position[0], current.position[1], current.position[2])
+        if (controls?.target?.set) controls.target.set(current.target[0], current.target[1], current.target[2])
+        controls?.update?.()
+        state.paused = true
+      }
+
+      const cameraPos: [number, number, number] = [camera.position.x, camera.position.y, camera.position.z]
+      const callout = selectNarrationCallout(
+        cameraPos,
+        calloutPoints,
+        activeCalloutIdRef.current,
+        NARRATION_ENTER_RADIUS_M,
+      )
+      activeCalloutIdRef.current = callout?.id ?? null
+
+      setPresentationDisplay({
+        keyframeIndex: state.segment,
+        paused: state.paused,
+        speed: state.speed,
+        callout: callout ? { id: callout.id, label: callout.label, color: callout.color } : null,
+      })
+
+      presentationRafRef.current = window.requestAnimationFrame(frame)
+    }
+
+    presentationRafRef.current = window.requestAnimationFrame(frame)
+    return () => {
+      if (presentationRafRef.current !== null) {
+        window.cancelAnimationFrame(presentationRafRef.current)
+        presentationRafRef.current = null
+      }
+    }
+  }, [presenting, flythroughKeyframes, calloutPoints, onExitPresentation])
+
+  // Keyboard controls for presentation mode: space = pause/resume,
+  // arrows = prev/next keyframe, Esc = exit.
+  useEffect(() => {
+    if (!presenting) return
+
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === ' ' || e.code === 'Space') {
+        e.preventDefault()
+        presentationStateRef.current.paused = !presentationStateRef.current.paused
+      } else if (e.key === 'ArrowRight') {
+        e.preventDefault()
+        jumpToKeyframe(1)
+      } else if (e.key === 'ArrowLeft') {
+        e.preventDefault()
+        jumpToKeyframe(-1)
+      } else if (e.key === 'Escape') {
+        e.preventDefault()
+        onExitPresentation()
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [presenting, flythroughKeyframes.length, onExitPresentation])
+
   // Viewer init
   useEffect(() => {
     if (!containerRef.current) return
@@ -929,6 +1230,10 @@ function SplatCanvas({
       cancelled = true
       setViewerReady(false)
       cleanupFlythroughRecording({ rafRef, recorderRef })
+      if (presentationRafRef.current !== null) {
+        window.cancelAnimationFrame(presentationRafRef.current)
+        presentationRafRef.current = null
+      }
       setRecording(false)
       if (viewerRef.current) {
         try {
@@ -1224,7 +1529,7 @@ function SplatCanvas({
         )}
       </AnimatePresence>
       <div ref={containerRef} style={{ width: '100%', height: '100%' }} />
-      {viewerReady && (
+      {viewerReady && !presenting && (
         <FlythroughControls
           reconstructionId={reconstructionId}
           keyframeCount={flythroughKeyframes.length}
@@ -1237,9 +1542,28 @@ function SplatCanvas({
           }}
           onRecord={() => { void recordFlythrough() }}
           onServerRender={() => renderVideo.mutate(flythroughKeyframes)}
+          onPresent={enterPresentation}
         />
       )}
-      {pendingAnnotation && geoTransform && (
+      {viewerReady && presenting && (
+        <PresentationOverlay
+          keyframeIndex={presentationDisplay.keyframeIndex}
+          keyframeCount={flythroughKeyframes.length}
+          paused={presentationDisplay.paused}
+          speed={presentationDisplay.speed}
+          callout={presentationDisplay.callout}
+          onTogglePause={() => {
+            presentationStateRef.current.paused = !presentationStateRef.current.paused
+          }}
+          onPrev={() => jumpToKeyframe(-1)}
+          onNext={() => jumpToKeyframe(1)}
+          onSpeedChange={(direction) => {
+            presentationStateRef.current.speed = cycleSpeed(presentationStateRef.current.speed, direction)
+          }}
+          onExit={onExitPresentation}
+        />
+      )}
+      {!presenting && pendingAnnotation && geoTransform && (
         <LabelPopover
           screenX={pendingAnnotation.screenPos.x}
           screenY={pendingAnnotation.screenPos.y}
@@ -1413,6 +1737,7 @@ export default function SplatViewerTab() {
   const [measureMode, setMeasureMode] = useState<'measure-dist' | 'measure-area' | 'measure-profile' | 'measure-volume' | null>(null)
   const [profileSamples, setProfileSamples] = useState<ProfileSample[]>([])
   const [volumeResult, setVolumeResult] = useState<VolumeResult | null>(null)
+  const [presenting, setPresenting] = useState(false)
 
   const jobs = allJobs ?? []
   const running = jobs.filter((j) => ACTIVE_STATUSES.includes(j.status))
@@ -1466,8 +1791,23 @@ export default function SplatViewerTab() {
       setVolumeResult(null)
       setShowSemanticOverlay(false)
       setVisibleSemanticClasses(new Set([0, 1, 2, 3, 4, 5]))
+      setPresenting(false)
     })
   }, [activeId])
+
+  function enterPresentationMode() {
+    // Presentation mode is a clean, chrome-free view of the flythrough — drop
+    // out of any editing tool first so annotate/measure clicks don't fire
+    // underneath it.
+    setActiveTool('none')
+    setMeasurePoints([])
+    setMeasureMode(null)
+    setPresenting(true)
+  }
+
+  function exitPresentationMode() {
+    setPresenting(false)
+  }
 
   function handleMeasurePoint(pt: MeasurePoint) {
     setMeasurePoints((prev) => {
@@ -1550,7 +1890,8 @@ export default function SplatViewerTab() {
 
   return (
     <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
-      {/* Sidebar */}
+      {/* Sidebar — hidden in presentation mode for a clean, chrome-free view */}
+      {!presenting && (
       <div
         style={{
           width: 200, padding: 12, borderRight: '1px solid var(--border)',
@@ -1765,10 +2106,11 @@ export default function SplatViewerTab() {
           />
         )}
       </div>
+      )}
 
       {/* Viewer */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'row', background: '#0a0a0a', overflow: 'hidden' }}>
-        {splitPaneActive && activeId !== null && <MiniLeafletPane />}
+        {splitPaneActive && !presenting && activeId !== null && <MiniLeafletPane />}
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
           {activeId !== null ? (
             <SplatCanvas
@@ -1787,6 +2129,9 @@ export default function SplatViewerTab() {
               measureMode={measureMode}
               onMeasurePoint={handleMeasurePoint}
               onMeasureClose={handleMeasureClose}
+              presenting={presenting}
+              onEnterPresentation={enterPresentationMode}
+              onExitPresentation={exitPresentationMode}
             />
           ) : (
             <div className="flex-1 flex items-center justify-center" style={{ color: 'var(--text-muted)' }}>
