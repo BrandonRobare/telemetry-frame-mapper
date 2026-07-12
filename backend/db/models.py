@@ -53,6 +53,7 @@ class Session(Base):
     frame_selections = relationship(
         "SessionFrameSelection", cascade="all, delete-orphan", passive_deletes=True
     )
+    defects = relationship("Defect", back_populates="session", cascade="all, delete-orphan")
     project = relationship("Project", back_populates="sessions")
 
 
@@ -296,6 +297,34 @@ class Annotation(Base):
     color = Column(String, default="#ff6b35")
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     reconstruction = relationship("Reconstruction", back_populates="annotations")
+
+
+class Defect(Base):
+    """Operator-flagged defect (crack, corrosion, etc.) linked to one or more source photos.
+
+    Scoped to a session rather than a reconstruction so defects can be flagged during photo
+    review, before any reconstruction has run. The linked images carry the GPS coordinates.
+    """
+    __tablename__ = "defects"
+    id = Column(Integer, primary_key=True, index=True)
+    session_id = Column(Integer, ForeignKey("sessions.id"), nullable=False)
+    category = Column(String, nullable=False)
+    severity = Column(String)
+    note = Column(Text)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    session = relationship("Session", back_populates="defects")
+    image_links = relationship(
+        "DefectImage", back_populates="defect", cascade="all, delete-orphan"
+    )
+
+
+class DefectImage(Base):
+    """Many-to-many link between a Defect and the source Image(s) it was flagged from."""
+    __tablename__ = "defect_images"
+    defect_id = Column(Integer, ForeignKey("defects.id"), primary_key=True)
+    image_id = Column(Integer, ForeignKey("images.id"), primary_key=True)
+    defect = relationship("Defect", back_populates="image_links")
+    image = relationship("Image")
 
 
 class SessionFrameSelection(Base):
