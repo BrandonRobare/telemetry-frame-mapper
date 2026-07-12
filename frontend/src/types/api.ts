@@ -404,6 +404,35 @@ export interface FlightEntry {
   created_at: string
 }
 
+export type DefectCategory =
+  | 'crack'
+  | 'corrosion'
+  | 'vegetation'
+  | 'water_damage'
+  | 'missing_material'
+  | 'other'
+
+export type DefectSeverity = 'low' | 'medium' | 'high'
+
+export interface DefectImageRef {
+  id: number
+  filename: string
+  latitude: number | null
+  longitude: number | null
+  thumb_path: string | null
+}
+
+export interface Defect {
+  id: number
+  session_id: number
+  category: DefectCategory
+  severity: DefectSeverity | null
+  note: string | null
+  created_at: string
+  image_ids: number[]
+  images: DefectImageRef[]
+}
+
 export interface SessionComparison {
   id: number
   session_a_id: number

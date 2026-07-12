@@ -28,7 +28,7 @@ A standalone geotagging tool (`drone-video-geotagger`). Pipeline order inside `c
 
 FastAPI app (`backend.main:app`), SQLite via SQLAlchemy (PostgreSQL-swappable through `DATABASE_URL`), with Alembic migrations in `backend/db/migrations/` for schema upgrades.
 
-- **Routers** (19): sessions, images, footprints, coverage, flight_log, srt, plans, export, session_log, reconstruction, annotations, comparisons, system, jobs, storage, target_areas, georeferencing, settings, uploads — 77 endpoints, self-documented at `/docs`.
+- **Routers** (20): sessions, images, footprints, coverage, flight_log, srt, plans, export, session_log, reconstruction, annotations, defects, comparisons, system, jobs, storage, target_areas, georeferencing, settings, uploads — self-documented at `/docs`.
 - **Key services:**
   - `ingest.py` / `ingest_orchestrator.py` — EXIF GPS + DJI XMP extraction (relative altitude → AGL, yaw, gimbal pitch), quality scoring (OpenCV sharpness/brightness), thumbnails, footprint computation, case-insensitive file dedupe. Each image (and its footprint) is committed individually as it's processed, so footprints are queryable mid-import, not just after it finishes.
   - `geometry.py` — ground footprint math: UTM projection, FOV-based extent from AGL, yaw rotation (Shapely/pyproj).
