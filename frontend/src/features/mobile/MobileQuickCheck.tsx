@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useMapStore } from '../../shared/stores/mapStore'
 import { useSessions } from '../sessions/useSessions'
@@ -138,6 +139,15 @@ export default function MobileQuickCheck() {
   const { data: quickReport, isLoading: reportLoading } = useQuickReport(selectedSessionId)
   const status = usePipelineStatus(selectedSessionId)
   const { data: allJobs = [] } = useAllJobs()
+
+  // Auto-select a session so the field operator isn't left staring at an empty
+  // page — mirrors SessionPicker's behavior on the desktop shell (#364).
+  useEffect(() => {
+    if (!sessions || sessions.length === 0) return
+    if (selectedSessionId === null || !sessions.some((s) => s.id === selectedSessionId)) {
+      setSession(sessions[0].id)
+    }
+  }, [sessions, selectedSessionId, setSession])
 
   const sessionJobs = selectJobsForSession(allJobs, selectedSessionId)
   const runningJobs = selectRunningJobs(allJobs)
