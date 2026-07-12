@@ -10,6 +10,7 @@ import ReviewTab from './features/review/ReviewTab'
 import ExportTab from './features/export/ExportTab'
 import PlanTab from './features/plan/PlanTab'
 import SessionLogTab from './features/session-log/SessionLogTab'
+import ChecklistTab from './features/checklist/ChecklistTab'
 import ReconstructTab from './features/reconstruct/ReconstructTab'
 import JobsTab from './features/jobs/JobsTab'
 import StorageTab from './features/storage/StorageTab'
@@ -36,6 +37,7 @@ type Tab =
   | 'plan'
   | 'export'
   | 'session-log'
+  | 'checklist'
   | 'reconstruct'
   | 'jobs'
   | 'storage'
@@ -58,6 +60,7 @@ const TABS: { id: Tab; label: string; group: 'pipeline' | 'tools' }[] = [
   { id: 'compare', label: 'Compare', group: 'tools' },
   { id: 'storage', label: 'Storage', group: 'tools' },
   { id: 'session-log', label: 'Session Log', group: 'tools' },
+  { id: 'checklist', label: 'Field Checklist', group: 'tools' },
   { id: 'settings', label: 'Settings', group: 'tools' },
 ]
 
@@ -73,6 +76,7 @@ function renderTab(tab: Tab, onImport: () => void) {
     case 'plan': return <PlanTab />
     case 'export': return <ExportTab />
     case 'session-log': return <SessionLogTab />
+    case 'checklist': return <ChecklistTab />
     case 'reconstruct': return <ReconstructTab />
     case 'jobs': return <JobsTab />
     case 'storage': return <StorageTab />
