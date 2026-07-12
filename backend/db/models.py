@@ -31,6 +31,9 @@ class Session(Base):
     tags = Column(Text)  # JSON list of short strings, e.g. '["roof", "solar"]'
     images = relationship("Image", back_populates="session", cascade="all, delete-orphan")
     flight_logs = relationship("FlightLog", back_populates="session", cascade="all, delete-orphan")
+    flight_entries = relationship(
+        "FlightEntry", back_populates="session", cascade="all, delete-orphan"
+    )
     log_entries = relationship(
         "SessionLogEntry", back_populates="session", cascade="all, delete-orphan"
     )
@@ -144,6 +147,20 @@ class FlightLogPoint(Base):
     battery_charge_pct = Column(Float)
     battery_temperature_c = Column(Float)
     flight_log = relationship("FlightLog", back_populates="points")
+
+
+class FlightEntry(Base):
+    """Operator-recorded battery/flight metadata for a session (field records)."""
+    __tablename__ = "flight_entries"
+    id = Column(Integer, primary_key=True, index=True)
+    session_id = Column(Integer, ForeignKey("sessions.id"), nullable=False)
+    battery_id = Column(String)
+    start_pct = Column(Float)
+    end_pct = Column(Float)
+    duration_s = Column(Float)
+    notes = Column(Text)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    session = relationship("Session", back_populates="flight_entries")
 
 
 class TargetArea(Base):
