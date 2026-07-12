@@ -9,7 +9,8 @@ import { FrustumCard, FrustumMark } from '../../shared/components/FrustumCard'
 import { ReconstructLoader } from '../../shared/components/Skeleton'
 import { useToast } from '../../shared/hooks/useToast'
 import { getUrlParam, setUrlParam } from '../../shared/hooks/useUrlState'
-import type { Image } from '../../types/api'
+import { CATEGORY_LABELS, SEVERITY_LABELS } from '../session-log/defects'
+import type { Defect, DefectCategory, DefectSeverity, Image } from '../../types/api'
 
 const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
 
@@ -215,6 +216,7 @@ interface CardProps {
 function ImageCard({ img, sessionId, isSelected, onSelect }: CardProps) {
   const qc = useQueryClient()
   const addToast = useToast((s) => s.addToast)
+  const [showDefectForm, setShowDefectForm] = useState(false)
 
   const flagMutation = useMutation({
     mutationFn: ({ id, flag }: { id: number; flag: string }) =>
@@ -248,6 +250,17 @@ function ImageCard({ img, sessionId, isSelected, onSelect }: CardProps) {
       if (context?.previous) qc.setQueryData(['images', sessionId], context.previous)
     },
     onSettled: () => qc.invalidateQueries({ queryKey: ['images', sessionId] }),
+  })
+
+  const createDefect = useMutation({
+    mutationFn: (body: { category: DefectCategory; severity: DefectSeverity | null; note: string | null }) =>
+      post<Defect>(`/sessions/${sessionId}/defects`, { ...body, image_ids: [img.id] }),
+    onSuccess: (defect) => {
+      qc.invalidateQueries({ queryKey: ['defects', sessionId] })
+      setShowDefectForm(false)
+      addToast(`${img.filename} → flagged as ${defect.category}`, 'success')
+    },
+    onError: (err: Error) => addToast(err.message, 'error'),
   })
 
   const badge = FLAG_BADGE[img.flag]
@@ -400,6 +413,111 @@ function ImageCard({ img, sessionId, isSelected, onSelect }: CardProps) {
       >
         {img.usable ? '✓ Usable' : '✗ Skip'}
       </button>
+
+      {/* flag defect toggle + inline form */}
+      <button
+        onClick={() => setShowDefectForm((v) => !v)}
+        className="text-xs cursor-pointer"
+        style={{
+          margin: '0 8px 8px', padding: '3px 0', borderRadius: 'var(--radius-sm)',
+          fontSize: 11, fontWeight: 600, border: '1px solid var(--border-strong)',
+          background: showDefectForm ? 'var(--surface-2)' : 'transparent',
+          color: 'var(--text-muted)', fontFamily: 'inherit',
+          width: 'calc(100% - 16px)',
+        }}
+        aria-expanded={showDefectForm}
+        title="Flag a defect on this photo"
+      >
+        ⚑ Flag defect
+      </button>
+      {showDefectForm && (
+        <DefectQuickForm
+          isSubmitting={createDefect.isPending}
+          onCancel={() => setShowDefectForm(false)}
+          onSubmit={(category, severity, note) => createDefect.mutate({ category, severity, note })}
+        />
+      )}
+    </div>
+  )
+}
+
+// ---- inline defect quick-flag form (category + optional severity/note) ----
+interface DefectQuickFormProps {
+  isSubmitting: boolean
+  onCancel: () => void
+  onSubmit: (category: DefectCategory, severity: DefectSeverity | null, note: string | null) => void
+}
+
+const DEFECT_CATEGORIES = Object.keys(CATEGORY_LABELS) as DefectCategory[]
+const DEFECT_SEVERITIES = Object.keys(SEVERITY_LABELS) as DefectSeverity[]
+
+function DefectQuickForm({ isSubmitting, onCancel, onSubmit }: DefectQuickFormProps) {
+  const [category, setCategory] = useState<DefectCategory>('crack')
+  const [severity, setSeverity] = useState<DefectSeverity | ''>('')
+  const [note, setNote] = useState('')
+
+  const selectStyle: CSSProperties = {
+    background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--text)',
+    fontFamily: 'inherit', fontSize: 11, padding: '3px 4px', width: '100%',
+  }
+
+  return (
+    <div
+      className="flex flex-col gap-1.5"
+      style={{ margin: '0 8px 8px', padding: 8, background: 'var(--surface-2)', borderRadius: 'var(--radius-sm)' }}
+    >
+      <select
+        aria-label="Defect category"
+        value={category}
+        onChange={(e) => setCategory(e.target.value as DefectCategory)}
+        style={selectStyle}
+      >
+        {DEFECT_CATEGORIES.map((c) => (
+          <option key={c} value={c}>{CATEGORY_LABELS[c]}</option>
+        ))}
+      </select>
+      <select
+        aria-label="Defect severity"
+        value={severity}
+        onChange={(e) => setSeverity(e.target.value as DefectSeverity | '')}
+        style={selectStyle}
+      >
+        <option value="">Severity (optional)</option>
+        {DEFECT_SEVERITIES.map((s) => (
+          <option key={s} value={s}>{SEVERITY_LABELS[s]}</option>
+        ))}
+      </select>
+      <input
+        aria-label="Defect note"
+        value={note}
+        onChange={(e) => setNote(e.target.value)}
+        placeholder="Note (optional)"
+        style={selectStyle}
+      />
+      <div className="flex gap-1.5">
+        <button
+          onClick={() => onSubmit(category, severity === '' ? null : severity, note.trim() === '' ? null : note.trim())}
+          disabled={isSubmitting}
+          className="text-xs cursor-pointer"
+          style={{
+            flex: 1, padding: '3px 0', border: 'none', borderRadius: 'var(--radius-sm)',
+            background: 'var(--accent-strong)', color: 'var(--on-accent)', fontFamily: 'inherit',
+            opacity: isSubmitting ? 0.7 : 1,
+          }}
+        >
+          {isSubmitting ? 'Saving…' : 'Save'}
+        </button>
+        <button
+          onClick={onCancel}
+          className="text-xs cursor-pointer"
+          style={{
+            padding: '3px 8px', border: '1px solid var(--border-strong)', borderRadius: 'var(--radius-sm)',
+            background: 'transparent', color: 'var(--text-muted)', fontFamily: 'inherit',
+          }}
+        >
+          Cancel
+        </button>
+      </div>
     </div>
   )
 }
