@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from backend.services.camera_calibration import (
+    build_calibration_drift_report,
     calibration_profile_for_images,
     dimension_fov_warnings,
     focal_pixels_from_metadata,
@@ -12,6 +13,39 @@ from backend.services.camera_calibration import (
     normalize_profiles,
     suggest_colmap_camera_model,
 )
+
+
+def _camera(camera_id, params):
+    return SimpleNamespace(
+        camera_id=camera_id, model="PINHOLE", width=2000, height=1000, params=params
+    )
+
+
+def test_calibration_drift_report_is_stable_for_close_colmap_estimates():
+    report = build_calibration_drift_report(
+        [_camera(1, [1000, 1000, 1000, 500]), _camera(2, [1005, 1005, 1001, 500])]
+    )
+
+    assert report["available"] is True
+    assert report["status"] == "stable"
+    assert report["metrics"]["focal_length_relative_range_pct"] < 1.0
+
+
+def test_calibration_drift_report_flags_divergent_colmap_estimates():
+    report = build_calibration_drift_report(
+        [_camera(1, [1000, 1000, 1000, 500]), _camera(2, [1040, 1040, 1010, 500])]
+    )
+
+    assert report["status"] == "unstable"
+    assert report["metrics"]["focal_length_relative_range_pct"] > 1.0
+
+
+def test_calibration_drift_report_is_unavailable_without_multiple_estimates():
+    report = build_calibration_drift_report([_camera(1, [1000, 1000, 1000, 500])])
+
+    assert report["available"] is False
+    assert report["status"] == "unavailable"
+    assert "two COLMAP camera estimates" in report["reason"]
 
 
 def test_match_camera_profile_by_make_model_and_lens():
