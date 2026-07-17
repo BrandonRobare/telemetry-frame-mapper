@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
 import { del, get, post } from '../../shared/api/client'
-import type { StorageStats, StorageFileItem, StorageFileList, PolicyResult } from '../../types/api'
+import type { BackupScheduleStatus, StorageStats, StorageFileItem, StorageFileList, PolicyResult } from '../../types/api'
 import { formatBytes } from './formatBytes'
 import TabHeader from '../../shared/components/TabHeader'
 import { Button } from '../../shared/components/Button'
@@ -14,6 +14,14 @@ function useStorageSummary() {
     queryFn: () => get<StorageStats>('/storage/summary'),
     refetchInterval: 60_000,
     staleTime: 30_000,
+  })
+}
+
+function useBackupSchedule() {
+  return useQuery<BackupScheduleStatus>({
+    queryKey: ['backup-schedule'],
+    queryFn: () => get<BackupScheduleStatus>('/storage/backup-schedule'),
+    refetchInterval: 60_000,
   })
 }
 
@@ -281,6 +289,50 @@ function LifecyclePolicy() {
           policyMutation.mutate(true)
         }}
       />
+    </section>
+  )
+}
+
+function BackupSchedule() {
+  const { data } = useBackupSchedule()
+  if (!data) return null
+
+  const result = data.result?.status
+  const resultCopy = result === 'success'
+    ? `Last backup succeeded${data.result?.snapshot_id ? ` (${data.result.snapshot_id})` : ''}.`
+    : result === 'failed'
+      ? 'Last backup failed. Check the server log and backup configuration.'
+      : result === 'configuration_error'
+        ? 'Scheduled backup configuration needs attention.'
+        : 'No backup has run since this server started.'
+
+  return (
+    <section
+      className="p-5 flex flex-col gap-2"
+      style={{ background: 'var(--surface)', border: '1px solid var(--border)', marginTop: 20 }}
+    >
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+        <div>
+          <h2 className="text-base font-semibold" style={{ color: 'var(--text)', margin: 0 }}>Scheduled Backup</h2>
+          <p className="text-xs mt-1" style={{ color: 'var(--text-muted)', margin: '4px 0 0' }}>
+            {data.enabled ? `Daily at ${data.daily_at} (server local time).` : 'Disabled in config.yaml.'}
+          </p>
+        </div>
+        {data.running && <span className="text-xs" style={{ color: 'var(--warning-accent)' }}>Running…</span>}
+      </div>
+      {data.enabled && (
+        <>
+          <div className="text-xs" style={{ color: 'var(--text-muted)' }}>
+            Last run: {data.last_run ?? 'Never'}
+          </div>
+          <div className="text-xs" style={{ color: 'var(--text-muted)' }}>
+            Next run: {data.next_run ?? 'Not scheduled'}
+          </div>
+          <div className="text-xs" style={{ color: result === 'failed' ? 'var(--danger)' : 'var(--text-muted)' }}>
+            {resultCopy}
+          </div>
+        </>
+      )}
     </section>
   )
 }
@@ -566,6 +618,8 @@ export default function StorageTab() {
               </table>
             </section>
           )}
+
+          <BackupSchedule />
 
           <LifecyclePolicy />
 

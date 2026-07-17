@@ -4,7 +4,7 @@ import time
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from ..core.config import get_backup_config, get_config
@@ -233,3 +233,20 @@ def create_artifact_backup(body: BackupRequest):
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except BackupError as exc:
         raise HTTPException(status_code=502, detail="Backup could not be completed") from exc
+
+
+@router.get("/backup-schedule")
+def get_backup_schedule_status(request: Request):
+    """Return the safe operational state of the configured daily backup."""
+    scheduler = getattr(request.app.state, "backup_scheduler", None)
+    if scheduler is None:
+        return {
+            "enabled": False,
+            "target": None,
+            "daily_at": None,
+            "running": False,
+            "last_run": None,
+            "next_run": None,
+            "result": None,
+        }
+    return scheduler.status()

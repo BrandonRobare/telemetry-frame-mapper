@@ -284,6 +284,16 @@ export interface StorageStats {
   by_session: StorageSessionBreakdown[];
 }
 
+export interface BackupScheduleStatus {
+  enabled: boolean
+  target: string | null
+  daily_at: string | null
+  running: boolean
+  last_run: string | null
+  next_run: string | null
+  result: { status: 'success' | 'failed' | 'configuration_error'; snapshot_id?: string } | null
+}
+
 export interface SystemResources {
   cpu_pct: number
   ram_used_gb: number

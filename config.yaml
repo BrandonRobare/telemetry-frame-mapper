@@ -98,3 +98,9 @@ upload_limits:
 backup:
   local_destinations: []
   rclone_remote: ""
+  # A named target keeps the scheduler from accepting arbitrary destinations.
+  targets: {}
+  schedule:
+    enabled: false
+    target: ""
+    daily_at: "02:00"  # server-local time, HH:MM
