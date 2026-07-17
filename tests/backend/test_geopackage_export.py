@@ -257,6 +257,9 @@ def test_gis_project_files_reference_current_geopackage_and_sidecars(client, mon
     }
     first_qgis = qgis_path.read_bytes()
     first_arcgis = (output_dir / "mapped_products.lyrx").read_bytes()
+    download = client.get(f"/export/reconstructions/{reconstruction.id}/geopackage")
+    assert download.status_code == 200
+    assert not list(output_dir.glob(".mapped_products.download-*.gpkg"))
     repeat = client.post(f"/export/reconstructions/{reconstruction.id}/gis-project-files")
     assert repeat.status_code == 200
     assert qgis_path.read_bytes() == first_qgis
