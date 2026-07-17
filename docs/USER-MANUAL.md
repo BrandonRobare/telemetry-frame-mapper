@@ -63,6 +63,14 @@ across 19 routers.
   carry real-world coordinates.
 - **Exports:** WebODM georeferencing CSV-only zip, GeoJSON, LAS 1.4 point cloud, optional SuGaR mesh
   (GLB/OBJ/MTL), and flythrough video.
+- **Cesium 3D Tiles share bundle:** `POST /export/reconstructions/{id}/share-bundle` writes a real,
+  geo-referenced 3D Tiles 1.1 `tileset.json` (loadable directly in CesiumJS) alongside the manifest
+  and viewer page. The root tile's `boundingVolume.region` and ECEF `transform` are computed from
+  the reconstruction's image GPS bounds/centroid; when a mesh GLB is available it's bundled and
+  referenced as tile content, otherwise the tileset still carries a correct region/transform with
+  no content. The mesh is assumed to sit in a local East-North-Up frame centered on that GPS
+  centroid — good enough to place it on the globe, not a substitute for a full similarity-transform
+  fit against ground control.
 - **Session archive/restore:** `POST /sessions/{id}/archive` bundles a session's
   full DB state (images, flight logs, reconstructions with lineage,
   measurements, annotations, defects, etc.) plus its artifact files into one
