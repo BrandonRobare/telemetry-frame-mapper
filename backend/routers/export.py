@@ -93,9 +93,12 @@ def export_reconstruction_share_bundle(reconstruction_id: int, db: DBSession = D
     rec = db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).first()
     if not rec:
         raise HTTPException(status_code=404, detail="Reconstruction not found")
-    return build_share_bundle(
-        Path(get_config().exports_dir) / f"reconstruction_{reconstruction_id}_share.zip", rec
-    )
+    try:
+        return build_share_bundle(
+            Path(get_config().exports_dir) / f"reconstruction_{reconstruction_id}_share.zip", rec
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.post("/reconstructions/{reconstruction_id}/orthomosaic", status_code=202)
