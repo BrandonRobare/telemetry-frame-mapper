@@ -412,6 +412,29 @@ def export_elevation(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
+@router.get("/reconstructions/{reconstruction_id}/slope")
+def get_slope_overlay(reconstruction_id: int, db: DBSession = Depends(get_db)):
+    """Return a cached transparent PNG slope overlay for an existing DSM export."""
+    from ..services.reconstruction import _safe_export_path
+    from ..services.slope_overlay import build_slope_overlay
+
+    rec = db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Reconstruction not found")
+
+    exports_dir = Path(get_config().exports_dir)
+    try:
+        export_dir = _safe_export_path(exports_dir / str(rec.id), exports_dir)
+        result = build_slope_overlay(export_dir / "dsm.tif", export_dir / "slope.png")
+    except (ValueError, ImportError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return FileResponse(
+        result["path"],
+        media_type="image/png",
+        headers={"X-Slope-Bounds": json.dumps(result["bounds"], separators=(",", ":"))},
+    )
+
+
 # ponytail: flat {name: keep_ratio} dict, not a preset framework — add
 # structure only when a preset needs more than an opacity keep-ratio knob.
 _SPLAT_EXPORT_PRESETS = {

@@ -1,0 +1,62 @@
+import { useEffect } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import type { Job } from '../../../types/api'
+import { API_BASE_URL, get } from '../../../shared/api/client'
+
+export type SlopeBounds = [[number, number], [number, number]]
+
+export function parseSlopeBounds(value: string | null): SlopeBounds {
+  if (!value) throw new Error('Slope overlay did not include geographic bounds')
+  const bounds: unknown = JSON.parse(value)
+  if (!Array.isArray(bounds) || bounds.length !== 2 || !bounds.every((point) =>
+    Array.isArray(point) && point.length === 2 && point.every(Number.isFinite)
+  )) {
+    throw new Error('Slope overlay returned invalid geographic bounds')
+  }
+  const [[south, west], [north, east]] = bounds as SlopeBounds
+  if (south >= north || west >= east) throw new Error('Slope overlay returned invalid geographic bounds')
+  return [[south, west], [north, east]]
+}
+
+export function latestCompletedReconstructionId(jobs: Job[], sessionId: number | null) {
+  return jobs.find((job) => job.session_id === sessionId && job.status === 'complete')?.id ?? null
+}
+
+async function fetchSlopeOverlay(reconstructionId: number) {
+  const response = await fetch(`${API_BASE_URL}/export/reconstructions/${reconstructionId}/slope`)
+  if (!response.ok) {
+    const body = await response.json().catch(() => null) as { detail?: unknown } | null
+    throw new Error(typeof body?.detail === 'string' ? body.detail : `API error ${response.status}`)
+  }
+  return {
+    imageUrl: URL.createObjectURL(await response.blob()),
+    bounds: parseSlopeBounds(response.headers.get('X-Slope-Bounds')),
+  }
+}
+
+export function useSlopeOverlay(sessionId: number | null, enabled: boolean) {
+  const jobs = useQuery<Job[]>({
+    queryKey: ['jobs', 'map-slope', sessionId],
+    queryFn: () => get<Job[]>('/jobs/?status=complete&limit=200'),
+    enabled: enabled && sessionId !== null,
+    staleTime: 30_000,
+  })
+  const reconstructionId = latestCompletedReconstructionId(jobs.data ?? [], sessionId)
+  const overlay = useQuery({
+    queryKey: ['slope-overlay', reconstructionId],
+    queryFn: () => fetchSlopeOverlay(reconstructionId as number),
+    enabled: enabled && reconstructionId !== null,
+    staleTime: Infinity,
+  })
+  const imageUrl = overlay.data?.imageUrl
+  useEffect(() => () => {
+    if (imageUrl) URL.revokeObjectURL(imageUrl)
+  }, [imageUrl])
+
+  const noReconstruction = enabled && jobs.data !== undefined && reconstructionId === null
+  return {
+    ...overlay,
+    data: overlay.data,
+    error: noReconstruction ? new Error('No completed reconstruction is available for this session.') : overlay.error,
+  }
+}

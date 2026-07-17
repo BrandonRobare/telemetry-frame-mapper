@@ -6,11 +6,16 @@ const LAYERS = [
   { key: 'footprints' as const, label: 'Footprints', color: 'var(--accent)' },
   { key: 'coverage' as const, label: 'Coverage', color: 'var(--sage)' },
   { key: 'heatmap' as const, label: 'Heatmap', color: 'var(--warning-accent)' },
+  { key: 'slope' as const, label: 'Slope', color: 'var(--danger-accent)' },
   { key: 'targetArea' as const, label: 'Target Area', color: 'var(--tan)' },
 ]
 
-export default function LayerControls() {
-  const { activeLayers, toggleLayer } = useMapStore()
+interface Props {
+  slopeError?: string
+}
+
+export default function LayerControls({ slopeError }: Props) {
+  const { activeLayers, slopeOpacity, setSlopeOpacity, toggleLayer } = useMapStore()
 
   return (
     <div
@@ -46,6 +51,24 @@ export default function LayerControls() {
           {label}
         </label>
       ))}
+      {activeLayers.slope && (
+        <>
+          <label className="flex items-center gap-2 text-xs mt-2" style={{ color: 'var(--text)' }}>
+            Opacity
+            <input
+              aria-label="Slope overlay opacity"
+              type="range"
+              min="0"
+              max="1"
+              step="0.05"
+              value={slopeOpacity}
+              onChange={(event) => setSlopeOpacity(Number(event.target.value))}
+              className="flex-1"
+            />
+          </label>
+          {slopeError && <p className="text-xs mt-2" style={{ color: 'var(--danger)', marginBottom: 0 }}>{slopeError}</p>}
+        </>
+      )}
     </div>
   )
 }
