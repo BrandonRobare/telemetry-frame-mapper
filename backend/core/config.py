@@ -290,3 +290,16 @@ def get_browser_upload_config(path: str = "config.yaml") -> dict:
     }
     browser_uploads = data.get("browser_uploads", {})
     return {**defaults, **browser_uploads}
+
+
+def get_backup_config(path: str = "config.yaml") -> dict:
+    """Return the secret-free destinations allowed for artifact backups."""
+    try:
+        with open(path) as f:
+            data = yaml.safe_load(f) or {}
+    except FileNotFoundError:
+        data = {}
+
+    defaults = {"local_destinations": [], "rclone_remote": ""}
+    backup = data.get("backup", {})
+    return {**defaults, **backup}
