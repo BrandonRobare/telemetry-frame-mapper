@@ -263,6 +263,7 @@ def _run_colmap(
     cfg = get_reconstruction_config()
 
     camera_model = cfg.get("camera_model", "PINHOLE")
+    single_camera = "1" if cfg.get("single_camera", True) else "0"
     matcher_key = cfg.get("matcher", "exhaustive")
     mapper_key = cfg.get("mapper", "incremental")
     spatial_min = int(cfg.get("spatial_matcher_min_images", 150))
@@ -316,7 +317,7 @@ def _run_colmap(
              "--image_path", image_path,
              f"--SiftExtraction.max_num_features={cfg['sift_max_features']}",
              "--ImageReader.camera_model", camera_model,
-             "--ImageReader.single_camera", "1"],
+             "--ImageReader.single_camera", single_camera],
             "feature extraction",
             8.0,
         ),
