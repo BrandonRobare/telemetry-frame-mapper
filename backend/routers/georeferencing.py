@@ -11,8 +11,11 @@ from ..db.database import get_db
 from ..db.models import Image, Reconstruction
 from ..db.models import Session as SessionModel
 from ..services.georeferencing_workflows import (
+    ControlPoint,
     GcpPoint,
     detect_precision_workflow,
+    parse_control_point_csv,
+    render_control_point_csv,
     render_gcp_list,
 )
 from ..services.quality_report import (
@@ -32,6 +35,23 @@ class GcpPointIn(BaseModel):
     latitude: float = Field(ge=-90, le=90)
     altitude_m: float | None = None
     label: str | None = None
+
+
+class ControlPointIn(BaseModel):
+    label: str = Field(min_length=1)
+    latitude: float = Field(ge=-90, le=90)
+    longitude: float = Field(ge=-180, le=180)
+    altitude_m: float
+
+
+class ControlPointCsvIn(BaseModel):
+    format: str
+    contents: str
+
+
+class ControlPointExportIn(BaseModel):
+    format: str
+    points: list[ControlPointIn]
 
 
 # ---- Accuracy report models ----
@@ -80,6 +100,31 @@ def build_gcp_list(points: list[GcpPointIn]):
         "point_count": len(points),
         "contents": render_gcp_list(gcp_points),
     }
+
+
+@router.post("/control-points/import")
+def import_control_points(body: ControlPointCsvIn):
+    """Parse the documented no-header Pix4D or DroneDeploy WGS84 CSV format."""
+    try:
+        points = parse_control_point_csv(body.contents, body.format)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {
+        "format": body.format,
+        "point_count": len(points),
+        "points": [point.__dict__ for point in points],
+    }
+
+
+@router.post("/control-points/export")
+def export_control_points(body: ControlPointExportIn):
+    """Render a no-header Pix4D or DroneDeploy WGS84 control-point CSV."""
+    points = [ControlPoint(**point.model_dump()) for point in body.points]
+    try:
+        contents = render_control_point_csv(points, body.format)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"format": body.format, "point_count": len(points), "contents": contents}
 
 
 # ---- GCP accuracy report (issue #287) ----
