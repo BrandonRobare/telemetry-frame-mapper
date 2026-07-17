@@ -205,6 +205,51 @@ def prune_order(opacities: np.ndarray, keep_ratio: float) -> np.ndarray:
     return np.argsort(-opacities, kind="stable")[:keep]
 
 
+# Compact .splat (antimatter15 gsplat web viewer): 32 bytes/gaussian, packed
+# with no struct padding (align=False is numpy's default for explicit dtypes).
+_SPLAT_DTYPE = np.dtype(
+    [("position", "<f4", 3), ("scale", "<f4", 3), ("color", "u1", 4), ("rot", "u1", 4)]
+)
+_SH_C0 = 0.28209479177387814
+
+
+def write_splat(cloud: GaussianCloud, dst: Path) -> Path:
+    """Write *cloud* as a compact 32-byte-per-gaussian ``.splat`` (antimatter15 web format).
+
+    This is the dependency-free web/SH-quantization preset: higher-order SH
+    (``shN``) is dropped entirely and only the DC term survives, baked into a
+    flat RGBA byte per gaussian. There is no lossless roundtrip back to a full
+    3DGS PLY.
+
+    Gaussians are written sorted by opacity descending (reuses
+    :func:`prune_order` with ``keep_ratio=1.0``) — web viewers expect
+    front-to-back-ish ordering.
+
+    ponytail: rotation bytes are packed in GaussianCloud's native w,x,y,z
+    quaternion order. Some web viewers (e.g. antimatter15's original loader)
+    expect x,y,z,w instead — if a target viewer renders garbled orientation,
+    swap the ``quats[:, [1, 2, 3, 0]]`` reindex here.
+    """
+    n = _validate_cloud(cloud)
+    order = prune_order(cloud.opacities, keep_ratio=1.0)
+
+    rows = np.zeros(n, dtype=_SPLAT_DTYPE)
+    rows["position"] = cloud.means[order]
+    rows["scale"] = np.exp(cloud.scales[order])
+
+    rgb = np.clip(0.5 + _SH_C0 * cloud.sh0[order], 0.0, 1.0) * 255.0
+    alpha = np.clip(1.0 / (1.0 + np.exp(-cloud.opacities[order])), 0.0, 1.0) * 255.0
+    rows["color"] = np.concatenate([rgb, alpha[:, None]], axis=1).astype(np.uint8)
+
+    quats = cloud.quats[order]
+    quats = quats / np.linalg.norm(quats, axis=1, keepdims=True)
+    rows["rot"] = np.clip(np.round(quats * 128 + 128), 0, 255).astype(np.uint8)
+
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    dst.write_bytes(rows.tobytes())
+    return dst
+
+
 def prune_by_opacity(src: Path, dst: Path, keep_ratio: float) -> Path:
     """Write the top *keep_ratio* fraction of Gaussians (by opacity) to *dst*.
 
