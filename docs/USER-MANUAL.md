@@ -105,7 +105,7 @@ across 19 routers.
 | **Field Checklist** | Pre-flight and post-flight operator reminders — checkboxes for defaults (batteries charged, SD card formatted, propellers inspected, firmware/RTH height set, GPS lock, takeoff altitude recorded; video+SRT copied, frames extracted, battery state noted), plus custom items you add/remove and a reset-checks action. Saved to this browser's local storage — no session or backend involved |
 | **Reconstruct** | Start quick/full reconstruction jobs |
 | **Jobs** | Resource monitor (CPU/RAM/GPU) with live job logs; job completion/failure fires an in-app toast (and a desktop notification when the tab is hidden and permission is granted) |
-| **Storage** | Disk usage by category and a file browser |
+| **Storage** | Disk usage by category, a file browser, and configured artifact backups |
 | **Splat Viewer** | In-browser gaussian-splat rendering, PSNR/SSIM sparklines, coverage-gap heatmap, GPS-pinned annotations, distance/area measurement, ortho/3D split view, flythrough recording, presentation/narration mode |
 | **Compare** | Voxel change detection between two reconstructions of the same site |
 | **Settings** | App preferences, import/storage paths, mission parameters, reconstruction presets, rendering/export defaults |
