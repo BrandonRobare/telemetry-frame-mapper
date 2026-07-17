@@ -9,11 +9,14 @@ import json
 import secrets
 import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 SHARE_LINK_EXPIRY_S = 7 * 24 * 3600  # 7 days default
 SHARE_LINK_PREFIX = "tfm_share_"
+UNLOCK_COOKIE_NAME = "tfm_share_unlock"
+PASSWORD_SCRYPT_N = 2**14
 
 
 def _signing_key() -> bytes:
@@ -116,7 +119,43 @@ def parse_share_token(token: str) -> ShareToken:
     return token_obj
 
 
-def build_public_viewer_payload(rec: Any) -> dict:
+def now_utc() -> datetime:
+    """Return a SQLite-friendly UTC timestamp."""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def create_opaque_token() -> str:
+    """Create an unguessable URL-safe token for a persisted link or session."""
+    return secrets.token_urlsafe(32)
+
+
+def token_hash(token: str) -> str:
+    """Hash a bearer token before storing or comparing it."""
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def hash_password(password: str) -> str:
+    """Salt and hash a password using only stdlib scrypt."""
+    salt = secrets.token_bytes(16)
+    digest = hashlib.scrypt(
+        password.encode("utf-8"), salt=salt, n=PASSWORD_SCRYPT_N, r=8, p=1
+    )
+    return f"{salt.hex()}${digest.hex()}"
+
+
+def verify_password(password: str, encoded: str) -> bool:
+    """Constant-time verification of a value returned by :func:`hash_password`."""
+    try:
+        salt_hex, expected_hex = encoded.split("$", 1)
+        actual = hashlib.scrypt(
+            password.encode("utf-8"), salt=bytes.fromhex(salt_hex), n=PASSWORD_SCRYPT_N, r=8, p=1
+        )
+        return hmac.compare_digest(actual.hex(), expected_hex)
+    except (TypeError, ValueError):
+        return False
+
+
+def build_public_viewer_payload(rec: Any, *, legacy: bool = False) -> dict:
     """Return a read-only payload for the public viewer.
 
     The response NEVER includes filesystem paths — only curated metadata
@@ -142,5 +181,8 @@ def build_public_viewer_payload(rec: Any) -> dict:
                 f"/share/{rec.id}/mesh?format=obj" if rec.mesh_obj_path else None
             ),
         },
+        # The frontend only appends a query token for pre-#376 signed links.
+        # New artifact URLs rely on the scoped HttpOnly cookie instead.
+        "legacy_token_required": legacy,
         "generated_at": time.time(),
     }

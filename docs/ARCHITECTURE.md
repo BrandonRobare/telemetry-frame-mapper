@@ -55,6 +55,10 @@ FastAPI app (`backend.main:app`), SQLite via SQLAlchemy (PostgreSQL-swappable th
 - **Backups:** `artifact_backup.py` creates versioned SQLite/config/artifact snapshots. An opt-in
   stdlib thread schedules exactly one named backup target per day; it calls that same service,
   prevents overlap with a lock, and exposes safe run state at `GET /storage/backup-schedule`.
+- **Share links:** `ShareLink` stores only a SHA-256 digest of each random opaque link token, an
+  expiry, optional stdlib-scrypt password hash, and revocation time. Password unlocks and all new
+  artifact downloads use a server-persisted, HttpOnly `/share` cookie session; legacy signed links
+  retain their URL-token artifact access until they expire.
 
 ### Frontend — `frontend/`
 
