@@ -6,6 +6,25 @@ export interface Project {
   session_count: number;
 }
 
+export interface SiteTrendPoint {
+  session_id: number
+  session_name: string
+  imported_at: string | null
+  photo_count: number
+  usable_count: number
+  usable_pct: number | null
+  coverage_pct: number | null
+  reconstruction_id: number | null
+  frames_registered: number | null
+  psnr: number | null
+  ssim: number | null
+}
+
+export interface SiteTrend {
+  project_id: number
+  points: SiteTrendPoint[]
+}
+
 export interface Session {
   id: number;
   name: string;

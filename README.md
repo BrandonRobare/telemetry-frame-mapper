@@ -61,7 +61,9 @@ exports/          KML/GPX mission plan exports (gitignored)
 - **Export** — WebODM georeferencing CSV-only zip, GeoJSON, LAS point cloud, mesh GLB/OBJ/MTL.
 - **Session Log · Reconstruct · Jobs · Storage** — event history, preset-based job start, resource monitor with live logs, disk usage + file browser.
 - **Splat Viewer** — in-browser gaussian-splat rendering, PSNR/SSIM sparklines, coverage-gap heatmap, GPS-pinned annotations, distance/area measurement, ortho/3D split view, flythrough recording, presentation/narration mode.
-- **Compare** — voxel change detection between two reconstructions of the same site.
+- **Compare** — voxel change detection plus a project-scoped, read-only flight trend table. It
+  reuses stored usable-frame, coverage, and completed-reconstruction metrics; missing values stay
+  blank rather than triggering new analysis.
 - **Settings** — app preferences, import/storage paths, mission parameters, reconstruction presets, rendering/export defaults.
 - Dark/light theme with persistence.
 

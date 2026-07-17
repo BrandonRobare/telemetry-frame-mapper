@@ -111,7 +111,7 @@ across 19 routers.
 | **Jobs** | Resource monitor (CPU/RAM/GPU) with live job logs; job completion/failure fires an in-app toast (and a desktop notification when the tab is hidden and permission is granted) |
 | **Storage** | Disk usage by category, a file browser, and configured artifact backups |
 | **Splat Viewer** | In-browser gaussian-splat rendering, PSNR/SSIM sparklines, coverage-gap heatmap, GPS-pinned annotations, distance/area measurement, ortho/3D split view, flythrough recording, presentation/narration mode |
-| **Compare** | Voxel change detection between two reconstructions of the same site |
+| **Compare** | Voxel change detection between two reconstructions of the same site, plus a selected-project trend table of existing session quality, coverage, and completed-reconstruction metrics. It is read-only: `—` means a metric has not yet been recorded. |
 | **Settings** | App preferences, import/storage paths, mission parameters, reconstruction presets, rendering/export defaults |
 
 Light/dark theme with persistence.
