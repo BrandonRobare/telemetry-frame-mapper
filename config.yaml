@@ -25,6 +25,12 @@ reconstruction:
   sift_max_features: 8192
   matcher: exhaustive
   camera_model: PINHOLE
+  # An explicit dense rerun uses these deterministic post-COLMAP thresholds.
+  # It never starts by itself; request the reconstruction's dense-rerun endpoint.
+  dense_rerun:
+    min_weak_run_frames: 2
+    high_reprojection_error_px: 2.0
+    context_frames: 1
   camera_profiles:
     - name: "DJI Mini 3/4 Pro wide camera"
       make: "DJI"
