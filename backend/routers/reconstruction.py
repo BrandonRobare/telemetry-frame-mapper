@@ -16,6 +16,8 @@ from ..core.config import get_config, get_render_config
 from ..db.database import get_db
 from ..db.models import Reconstruction, ReconstructionFrame, SessionFrameSelection, TargetArea
 from ..services.artifact_cleanup import cleanup_reconstruction_artifacts
+from ..services.camera_calibration import build_calibration_drift_report
+from ..services.colmap_io import read_model
 from ..services.preflight_quality import build_preflight_quality_report
 from ..services.quality_report import (
     build_quality_scorecard,
@@ -1125,6 +1127,23 @@ def get_quality_scorecard(reconstruction_id: int, db: DBSession = Depends(get_db
     coverage_gaps = _load_coverage_gaps_from_disk(rec)
 
     return build_quality_scorecard(rec, frames, training_metrics, coverage_gaps)
+
+
+@router.get("/{reconstruction_id}/calibration-drift-report")
+def get_calibration_drift_report(reconstruction_id: int, db: DBSession = Depends(get_db)):
+    """Return a bounded consistency report from COLMAP's completed sparse model."""
+    rec = db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Reconstruction not found")
+    if rec.status != "complete":
+        raise HTTPException(status_code=202, detail="Reconstruction still in progress")
+
+    sparse_dir = Path(rec.colmap_dir or "") / "sparse" / "0"
+    try:
+        cameras = list(read_model(sparse_dir).cameras.values()) if rec.colmap_dir else []
+    except (OSError, RuntimeError, ValueError):
+        cameras = []
+    return build_calibration_drift_report(cameras)
 
 
 @router.post("/{reconstruction_id}/validate-checkpoints")
