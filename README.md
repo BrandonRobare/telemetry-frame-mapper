@@ -204,6 +204,29 @@ or `{ "destination": "rclone" }`, with an optional `artifacts` list (defaults to
 `rclone copy`, never `sync` or deletion flags; rclone credentials and command output are never
 persisted in the snapshot or returned by the API.
 
+To schedule one opt-in daily backup, define a named target from the same allowlist and select it
+by name. `daily_at` uses the server's local clock. `GET /storage/backup-schedule` returns only
+operational status (last run, next run, and success/failure result), never target credentials or
+command output.
+
+```yaml
+backup:
+  local_destinations:
+    - "E:/telemetry-backups"
+  targets:
+    nightly_local:
+      destination: local
+      local_destination: "E:/telemetry-backups"
+      artifacts: ["processed", "exports"]
+  schedule:
+    enabled: true
+    target: nightly_local
+    daily_at: "02:00"
+```
+
+The scheduler runs only one backup at a time, so a slow remote copy is not overlapped by the next
+scheduled run. Leave `enabled: false` (the default) to keep it off.
+
 ## CLI inputs
 
 | Flag | Description |
