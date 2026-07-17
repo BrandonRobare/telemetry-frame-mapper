@@ -303,3 +303,17 @@ def get_backup_config(path: str = "config.yaml") -> dict:
     defaults = {"local_destinations": [], "rclone_remote": ""}
     backup = data.get("backup", {})
     return {**defaults, **backup}
+
+
+def get_backup_schedule_config(path: str = "config.yaml") -> dict:
+    """Return the opt-in daily backup schedule without exposing target values."""
+    try:
+        with open(path) as f:
+            data = yaml.safe_load(f) or {}
+    except FileNotFoundError:
+        data = {}
+
+    backup = data.get("backup", {})
+    schedule = backup.get("schedule", {}) if isinstance(backup, dict) else {}
+    defaults = {"enabled": False, "target": "", "daily_at": "02:00"}
+    return {**defaults, **schedule} if isinstance(schedule, dict) else defaults
