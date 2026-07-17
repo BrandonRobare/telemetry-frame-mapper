@@ -58,8 +58,43 @@ def test_archive_session_not_found(client, tmp_path):
 
 
 def test_restore_missing_zip_not_found(client, tmp_path):
-    resp = _restore(client, _cfg(tmp_path), str(tmp_path / "missing.zip"))
+    # missing file, but under an allowed root (exports_dir) → 404, not the 400 confinement error
+    resp = _restore(client, _cfg(tmp_path), str(tmp_path / "exports" / "missing.zip"))
     assert resp.status_code == 404
+
+
+def test_restore_rejects_zip_path_outside_allowed_dirs(client, tmp_path):
+    # a path outside imports/exports/data must not be readable via restore (path injection)
+    resp = _restore(client, _cfg(tmp_path), str(tmp_path / "evil.zip"))
+    assert resp.status_code == 400
+
+
+def test_restore_artifact_rejects_zip_slip(tmp_path):
+    # a crafted archive_path that escapes restore_root must be rejected (zip-slip)
+    from backend.services.session_bundle import _restore_artifact
+
+    zip_file = tmp_path / "bundle.zip"
+    with zipfile.ZipFile(zip_file, "w") as zf:
+        zf.writestr("manifest.json", "{}")
+    restore_root = tmp_path / "restored" / "1"
+    manifest = {
+        "artifacts": [
+            {
+                "table": "images",
+                "row_id": 1,
+                "field": "filepath",
+                "archive_path": "artifacts/../../../escape.bin",
+            }
+        ]
+    }
+    with zipfile.ZipFile(zip_file) as zf:
+        try:
+            _restore_artifact(zf, manifest, "images", 1, "filepath", restore_root)
+            raised = False
+        except ValueError:
+            raised = True
+    assert raised, "zip-slip archive_path was not rejected"
+    assert not (tmp_path / "escape.bin").exists()
 
 
 def test_archive_creates_zip_with_manifest_and_bundled_artifact(client, tmp_path):
