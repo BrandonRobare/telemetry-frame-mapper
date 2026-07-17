@@ -5,16 +5,26 @@ import io
 import json
 import os
 import zipfile
+from datetime import timedelta
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse, JSONResponse, Response
+from pydantic import BaseModel, Field
 from shapely.geometry import LineString, Point, shape
 from sqlalchemy.orm import Session as DBSession
 
 from ..core.config import get_config
 from ..db.database import get_db
-from ..db.models import FlightLog, FlightLogPoint, Footprint, Image, Measurement, Reconstruction
+from ..db.models import (
+    FlightLog,
+    FlightLogPoint,
+    Footprint,
+    Image,
+    Measurement,
+    Reconstruction,
+    ShareLink,
+)
 from ..db.models import Session as SessionModel
 from ..services.geometry_exports import feature_collection, geometry_feature
 
@@ -531,11 +541,37 @@ def export_compact_splat(
     }
 
 
-@router.post("/reconstructions/{reconstruction_id}/share-link")
-def create_share_link(reconstruction_id: int, db: DBSession = Depends(get_db)):
-    """Create a signed, time-limited public share link for a completed reconstruction."""
-    from ..db.models import Reconstruction
-    from ..services.share_links import SHARE_LINK_PREFIX, create_share_token
+class CreateShareLinkRequest(BaseModel):
+    expires_in_s: int = Field(default=7 * 24 * 3600, ge=60, le=365 * 24 * 3600)
+    password: str | None = Field(default=None, max_length=1024)
+
+
+def _share_link_owner_payload(link: ShareLink) -> dict:
+    """Return owner-visible lifecycle state without bearer or password secrets."""
+    return {
+        "id": link.id,
+        "reconstruction_id": link.reconstruction_id,
+        "expires_at": link.expires_at.isoformat(),
+        "password_protected": bool(link.password_hash),
+        "revoked_at": link.revoked_at.isoformat() if link.revoked_at else None,
+        "created_at": link.created_at.isoformat(),
+    }
+
+
+@router.post("/reconstructions/{reconstruction_id}/share-link", status_code=201)
+def create_share_link(
+    reconstruction_id: int,
+    body: CreateShareLinkRequest = CreateShareLinkRequest(),
+    db: DBSession = Depends(get_db),
+):
+    """Create a persisted opaque share link; its bearer token is returned only once."""
+    from ..services.share_links import (
+        SHARE_LINK_PREFIX,
+        create_opaque_token,
+        hash_password,
+        now_utc,
+        token_hash,
+    )
 
     rec = db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).first()
     if not rec:
@@ -544,13 +580,60 @@ def create_share_link(reconstruction_id: int, db: DBSession = Depends(get_db)):
         raise HTTPException(
             status_code=422, detail="Only completed reconstructions can be shared"
         )
-    token = create_share_token(rec.id, rec.session_id)
-    # The full share link is <prefix><token> — the frontend builds the URL.
+    if body.password == "":
+        raise HTTPException(status_code=422, detail="Share link password cannot be empty")
+    raw_token = create_opaque_token()
+    link = ShareLink(
+        reconstruction_id=rec.id,
+        token_hash=token_hash(raw_token),
+        expires_at=now_utc() + timedelta(seconds=body.expires_in_s),
+        password_hash=hash_password(body.password) if body.password else None,
+    )
+    db.add(link)
+    db.commit()
+    db.refresh(link)
     return {
-        "share_token": SHARE_LINK_PREFIX + token,
+        "share_token": SHARE_LINK_PREFIX + raw_token,
+        "share_link_id": link.id,
         "reconstruction_id": rec.id,
         "session_id": rec.session_id,
+        "expires_at": link.expires_at.isoformat(),
+        "password_protected": bool(link.password_hash),
     }
+
+
+@router.get("/reconstructions/{reconstruction_id}/share-links")
+def list_share_links(reconstruction_id: int, db: DBSession = Depends(get_db)):
+    """List owner-visible share-link lifecycle state without secrets."""
+    rec = db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Reconstruction not found")
+    links = (
+        db.query(ShareLink)
+        .filter(ShareLink.reconstruction_id == reconstruction_id)
+        .order_by(ShareLink.created_at.desc())
+        .all()
+    )
+    return [_share_link_owner_payload(link) for link in links]
+
+
+@router.post("/reconstructions/{reconstruction_id}/share-links/{share_link_id}/revoke")
+def revoke_share_link(reconstruction_id: int, share_link_id: int, db: DBSession = Depends(get_db)):
+    """Revoke a persisted link and every unlock session attached to it."""
+    from ..services.share_links import now_utc
+
+    link = (
+        db.query(ShareLink)
+        .filter(ShareLink.id == share_link_id, ShareLink.reconstruction_id == reconstruction_id)
+        .first()
+    )
+    if not link:
+        raise HTTPException(status_code=404, detail="Share link not found")
+    if link.revoked_at is None:
+        link.revoked_at = now_utc()
+        db.commit()
+        db.refresh(link)
+    return _share_link_owner_payload(link)
 
 
 @router.post("/survey-report")
