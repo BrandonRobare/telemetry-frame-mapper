@@ -236,6 +236,18 @@ If `exports/{reconstruction_id}/dsm.tif` or `dem.tif` already exists, the packag
 the non-spatial `raster_references` table with its path. It does not create, copy, or
 embed raster data, so add that TIFF separately in QGIS when needed.
 
+### QGIS and ArcGIS Pro project files
+
+`POST /export/reconstructions/{reconstruction_id}/gis-project-files` first refreshes
+`mapped_products.gpkg`, then writes these deterministic sibling files in
+`exports/{reconstruction_id}/`: `mapped_products.qgz`, `mapped_products.lyrx`, and
+`mapped_products_gis_manifest.json`. The response and manifest list their fixed file
+names, the GeoPackage layers that were present, and optional `dsm.tif`/`dem.tif` sidecars.
+Both GIS files use relative sibling references, so move the complete directory together.
+Add `?comparison_id={id}` to include the same completed comparison layer as the
+GeoPackage export. QGIS gets a zipped XML project; ArcGIS Pro gets a CIM layer-document
+JSON file. Neither export creates, copies, or embeds raster data.
+
 ---
 
 ## 3. The gaussian-splat trainer
