@@ -11,7 +11,12 @@ from ..core.config import get_dji_api_key, get_upload_limits_config
 from ..db.database import get_db
 from ..db.models import FlightLog, FlightLogPoint, Image
 from ..db.models import Session as SessionModel
-from ..services.flight_log_sync import build_offset_preview, match_images_to_log, parse_dji_csv
+from ..services.flight_log_sync import (
+    FlightLogCSVError,
+    build_offset_preview,
+    match_images_to_log,
+    parse_flight_log_csv,
+)
 
 router = APIRouter(prefix="/flight-logs", tags=["flight-logs"])
 
@@ -118,19 +123,22 @@ async def upload_flight_log(
     if ext in _DJI_EXTENSIONS or (first_bytes and is_dji_binary_header(first_bytes)):
         return await _upload_dji_binary(session_id, file.filename or "", content, db)
 
-    # Fallback: existing CSV path
-    points = parse_dji_csv(content)
+    # CSV adapters use explicit vendor header contracts; do not infer coordinates.
+    try:
+        log_format, points = parse_flight_log_csv(content)
+    except FlightLogCSVError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     if not points:
         raise HTTPException(
             status_code=422,
-            detail="No valid data rows found in flight log CSV",
+            detail="No data rows found in flight log CSV",
         )
 
     log = FlightLog(
         session_id=session_id,
         filename=file.filename,
-        format="csv",
+        format=log_format,
         point_count=len(points),
     )
     db.add(log)

@@ -30,6 +30,12 @@ FastAPI app (`backend.main:app`), SQLite via SQLAlchemy (PostgreSQL-swappable th
 
 - **Routers** (20): sessions, images, footprints, coverage, flight_log, srt, plans, export, session_log, reconstruction, annotations, defects, comparisons, system, jobs, storage, target_areas, georeferencing, settings, uploads — self-documented at `/docs`.
 - **Key services:**
+  - `flight_log_sync.py` — uploads normalize DJI FlightRecord CSV plus three explicit
+    vendor CSV contracts into `FlightLog` / `FlightLogPoint`: Autel
+    `Time(ms),Latitude,Longitude,Altitude(m)`; Parrot fdr-lite
+    `time,latitude,longitude,altitude`; and MAVExplorer/ArduPilot POS
+    `timestamp,TimeUS,Lat,Lng,Alt`. The upload endpoint rejects missing or
+    unrecognized headers with HTTP 422 rather than inferring coordinates.
   - `POST /sessions/bulk` — applies one typed operation to up to 100 selected sessions: archive with the existing portable bundle service, assign a project, replace/add tags, or delete after the literal `confirm: "DELETE"` guard. It commits each session independently and returns an outcome for every requested ID, so stale IDs and local filesystem failures do not hide completed work.
   - `ingest.py` / `ingest_orchestrator.py` — EXIF GPS + DJI XMP extraction (relative altitude → AGL, yaw, gimbal pitch), quality scoring (OpenCV sharpness/brightness), thumbnails, footprint computation, case-insensitive file dedupe. Each image (and its footprint) is committed individually as it's processed, so footprints are queryable mid-import, not just after it finishes.
   - `geometry.py` — ground footprint math: UTM projection, FOV-based extent from AGL, yaw rotation (Shapely/pyproj).
