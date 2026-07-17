@@ -20,6 +20,10 @@ class InterpolatedLogPoint:
     nearest_delta_s: float
 
 
+class FlightLogCSVError(ValueError):
+    """Raised when a flight-log CSV does not meet a supported header contract."""
+
+
 def parse_dji_csv(content: bytes) -> list[dict]:
     """Parse DJI flight log CSV. Returns list of {timestamp_s, latitude, longitude, altitude_m}."""
     reader = csv.DictReader(io.StringIO(content.decode()))
@@ -36,6 +40,120 @@ def parse_dji_csv(content: bytes) -> list[dict]:
         except (KeyError, ValueError):
             continue
     return sorted(points, key=lambda p: p["timestamp_s"])
+
+
+def parse_autel_csv(content: bytes) -> list[dict]:
+    """Parse Autel CSV rows with Time(ms), Latitude, Longitude, Altitude(m)."""
+    reader = _csv_reader(content, "Autel")
+    _require_headers(reader, "Autel", ("Time(ms)", "Latitude", "Longitude", "Altitude(m)"))
+    return _parse_required_rows(
+        reader,
+        "Autel",
+        timestamp="Time(ms)",
+        timestamp_divisor=1000.0,
+        latitude="Latitude",
+        longitude="Longitude",
+        altitude="Altitude(m)",
+    )
+
+
+def parse_parrot_csv(content: bytes) -> list[dict]:
+    """Parse Parrot fdr-lite CSV rows with time, latitude, longitude, altitude."""
+    reader = _csv_reader(content, "Parrot")
+    _require_headers(reader, "Parrot", ("time", "latitude", "longitude", "altitude"))
+    return _parse_required_rows(
+        reader,
+        "Parrot",
+        timestamp="time",
+        timestamp_divisor=1.0,
+        latitude="latitude",
+        longitude="longitude",
+        altitude="altitude",
+    )
+
+
+def parse_ardupilot_csv(content: bytes) -> list[dict]:
+    """Parse MAVExplorer POS CSV rows with timestamp, TimeUS, Lat, Lng, Alt."""
+    reader = _csv_reader(content, "ArduPilot")
+    _require_headers(reader, "ArduPilot", ("timestamp", "TimeUS", "Lat", "Lng", "Alt"))
+    return _parse_required_rows(
+        reader,
+        "ArduPilot",
+        timestamp="timestamp",
+        timestamp_divisor=1.0,
+        latitude="Lat",
+        longitude="Lng",
+        altitude="Alt",
+    )
+
+
+def parse_flight_log_csv(content: bytes) -> tuple[str, list[dict]]:
+    """Detect one supported CSV header contract and return its storage format and points."""
+    headers = _csv_reader(content, "Flight log").fieldnames or []
+    header_set = set(headers)
+
+    if {"time(millisecond)", "OSD.latitude", "OSD.longitude"} <= header_set:
+        return "csv", parse_dji_csv(content)
+    if {"Time(ms)", "Latitude", "Longitude", "Altitude(m)"} <= header_set:
+        return "autel_csv", parse_autel_csv(content)
+    if {"time", "latitude", "longitude", "altitude"} <= header_set:
+        return "parrot_csv", parse_parrot_csv(content)
+    if {"timestamp", "TimeUS", "Lat", "Lng", "Alt"} <= header_set:
+        return "ardupilot_csv", parse_ardupilot_csv(content)
+
+    raise FlightLogCSVError(
+        "Unsupported flight log CSV headers. Expected DJI FlightRecord, Autel "
+        "Time(ms)/Latitude/Longitude/Altitude(m), Parrot "
+        "time/latitude/longitude/altitude, or ArduPilot "
+        "timestamp/TimeUS/Lat/Lng/Alt."
+    )
+
+
+def _csv_reader(content: bytes, vendor: str) -> csv.DictReader:
+    try:
+        return csv.DictReader(io.StringIO(content.decode("utf-8-sig")))
+    except UnicodeDecodeError as exc:
+        raise FlightLogCSVError(f"{vendor} flight log CSV must be UTF-8 encoded") from exc
+
+
+def _require_headers(reader: csv.DictReader, vendor: str, required: tuple[str, ...]) -> None:
+    headers = set(reader.fieldnames or [])
+    missing = [header for header in required if header not in headers]
+    if missing:
+        raise FlightLogCSVError(
+            f"{vendor} flight log CSV is missing required header(s): {', '.join(missing)}"
+        )
+
+
+def _parse_required_rows(
+    reader: csv.DictReader,
+    vendor: str,
+    *,
+    timestamp: str,
+    timestamp_divisor: float,
+    latitude: str,
+    longitude: str,
+    altitude: str,
+) -> list[dict]:
+    points = []
+    for row_number, row in enumerate(reader, start=2):
+        try:
+            point = {
+                "timestamp_s": float(row[timestamp]) / timestamp_divisor,
+                "latitude": float(row[latitude]),
+                "longitude": float(row[longitude]),
+                "altitude_m": float(row[altitude]),
+            }
+        except (KeyError, TypeError, ValueError) as exc:
+            raise FlightLogCSVError(
+                f"{vendor} flight log has invalid data in row {row_number}"
+            ) from exc
+        if not -90.0 <= point["latitude"] <= 90.0 or not -180.0 <= point["longitude"] <= 180.0:
+            raise FlightLogCSVError(
+                f"{vendor} flight log has out-of-range coordinates in row {row_number}"
+            )
+        points.append(point)
+    return sorted(points, key=lambda point: point["timestamp_s"])
 
 
 def _image_timestamp_s(timestamp: Any) -> float:
