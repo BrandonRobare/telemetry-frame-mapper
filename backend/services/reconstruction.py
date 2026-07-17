@@ -1828,6 +1828,7 @@ def start_reconstruction(
     *,
     target_area_geojson: str | None = None,
     source_session_ids: list[int] | None = None,
+    parent_reconstruction_id: int | None = None,
 ) -> Reconstruction:
     """Create Reconstruction record and enqueue a background job. Returns the record."""
     running = db.query(Reconstruction).filter(
@@ -1890,6 +1891,7 @@ def start_reconstruction(
         status="pending",
         frames_used=len(images),
         source_session_ids=json.dumps(source_session_ids) if source_session_ids else None,
+        parent_reconstruction_id=parent_reconstruction_id,
     )
     db.add(rec)
     db.commit()
