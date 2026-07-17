@@ -3,6 +3,7 @@ import { useSessions } from './useSessions'
 import { useMapStore } from '../../shared/stores/mapStore'
 import { Skeleton } from '../../shared/components/Skeleton'
 import { collectTags, filterSessionsByTag } from './sessionTags'
+import BulkSessionOperations from './BulkSessionOperations'
 import SessionSearch from './SessionSearch'
 
 interface SessionPickerProps {
@@ -103,6 +104,7 @@ export default function SessionPicker({ onImport, projectId }: SessionPickerProp
           ))}
         </select>
       )}
+      <BulkSessionOperations sessions={visibleSessions} />
     </span>
   )
 }

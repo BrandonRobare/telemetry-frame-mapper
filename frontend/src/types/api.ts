@@ -30,6 +30,20 @@ export interface SessionSearchResult extends Session {
   matches: SessionSearchMatch[]
 }
 
+export type BulkSessionOperation = 'archive' | 'assign_project' | 'replace_tags' | 'add_tags' | 'delete'
+
+export interface BulkSessionOutcome {
+  session_id: number
+  ok: boolean
+  error: string | null
+  bundle_path: string | null
+}
+
+export interface BulkSessionResponse {
+  operation: BulkSessionOperation
+  outcomes: BulkSessionOutcome[]
+}
+
 export interface Image {
   id: number;
   session_id: number;
