@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session as DBSession
 from ..core.config import get_browser_upload_config, get_config
 from ..db.database import SessionLocal, get_db
 from ..db.models import Session as SessionModel
+from ..services.duplicate_detection import find_duplicate_matches
 from ..services.ingest_orchestrator import start_import
 
 router = APIRouter(prefix="/uploads/imports", tags=["uploads"])
@@ -376,3 +377,30 @@ def cancel_browser_import_upload(upload_id: str):
 def get_browser_import_upload(upload_id: str):
     state = _state(upload_id)
     return _progress(state)
+
+
+# ---- pre-import duplicate check (issue #392) ----
+
+
+class DuplicateCheckRequest(BaseModel):
+    folder_path: str | None = None
+    filenames: list[str] = []
+
+
+class DuplicateMatch(BaseModel):
+    session_id: int
+    name: str
+    reason: str
+    overlap: float
+
+
+class DuplicateCheckResponse(BaseModel):
+    duplicate: bool
+    matches: list[DuplicateMatch]
+
+
+@router.post("/check-duplicate", response_model=DuplicateCheckResponse)
+def check_duplicate_import(req: DuplicateCheckRequest, db: DBSession = Depends(get_db)):
+    """Advisory-only: flags likely-duplicate sessions, never blocks the import."""
+    matches = find_duplicate_matches(db, req.folder_path, req.filenames)
+    return DuplicateCheckResponse(duplicate=bool(matches), matches=matches)
