@@ -290,7 +290,9 @@ export default function ExportTab() {
     reconstruction_id: number
     session_id: number
     share_token: string
+    share_link_id: number
   } | null>(null)
+  const [sharePassword, setSharePassword] = useState('')
 
   const webodmMutation = useMutation({
     mutationFn: () =>
@@ -312,10 +314,14 @@ export default function ExportTab() {
     const fn = async () => {
       const data = await post<{
         share_token: string
+        share_link_id: number
         reconstruction_id: number
         session_id: number
-      }>(`/export/reconstructions/${reconstructionId}/share-link`)
+      }>(`/export/reconstructions/${reconstructionId}/share-link`, {
+        password: sharePassword || undefined,
+      })
       setShareResult(data)
+      setSharePassword('')
       return data
     }
     fn().catch((err: Error) => {
@@ -467,7 +473,7 @@ export default function ExportTab() {
               className="text-sm mt-1"
               style={{ color: 'var(--text-muted)', margin: '4px 0 0' }}
             >
-              Generate a signed, time-limited share link for a completed reconstruction.
+              Generate a revocable, time-limited share link for a completed reconstruction.
               The public viewer is read-only — it shows geo-referenced splats and meshes
               without exposing operator controls.
             </p>
@@ -484,6 +490,17 @@ export default function ExportTab() {
               No completed reconstructions available to share.
             </p>
           )}
+
+          <label className="text-sm flex flex-col gap-1" style={{ color: 'var(--text-muted)', maxWidth: 320 }}>
+            Optional password
+            <input
+              type="password"
+              value={sharePassword}
+              onChange={(event) => setSharePassword(event.target.value)}
+              autoComplete="new-password"
+              placeholder="Protect new links"
+            />
+          </label>
 
           {(completedReconstructions ?? []).length > 0 && (
             <div style={{ borderTop: '1px solid var(--border)' }}>

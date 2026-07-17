@@ -201,6 +201,21 @@ uvicorn backend.main:app --reload
 
 Optional: copy `config.yaml.example` to `config.yaml` and adjust mission parameters (altitude, FOV, overlap, target CRS). Upload limits are configurable in `config.yaml` under `upload_limits` (`flight_log_max_bytes` and `srt_max_bytes`, both 10 MiB by default).
 
+### Reconstruction share links
+
+The Export tab creates a revocable, opaque link for a completed reconstruction. New links default
+to seven days and may be protected with an optional password. The bearer token is shown only in the
+creation response and lives only in the viewer URL; it is never stored as plaintext or appended to
+artifact URLs. Password verification issues a `HttpOnly`, `SameSite=Lax`, `/share`-scoped session
+cookie (marked `Secure` for HTTPS or a TLS proxy). Owners can inspect lifecycle state with
+`GET /export/reconstructions/{id}/share-links` and revoke one with
+`POST /export/reconstructions/{id}/share-links/{share_link_id}/revoke`.
+
+Public responses use `401` when password unlock is required, `403` for an incorrect password or
+token/reconstruction mismatch, and `410` after expiry or revocation. Existing signed links remain
+supported until their signed expiry; their legacy artifact query-token format is not emitted for new
+links.
+
 ### Artifact backup
 
 `POST /storage/backup` creates an additive, versioned snapshot of the live SQLite database,
