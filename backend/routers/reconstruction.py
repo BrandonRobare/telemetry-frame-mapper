@@ -104,6 +104,7 @@ class StartIn(BaseModel):
     session_ids: list[int] | None = None
     preset: str = "quick"
     target_area_id: int | None = None
+    parent_reconstruction_id: int | None = None
 
     @field_validator("preset")
     @classmethod
@@ -123,6 +124,7 @@ class StartIn(BaseModel):
 class ReconstructionOut(BaseModel):
     id: int
     session_id: int
+    parent_reconstruction_id: int | None = None
     source_session_ids: list[int] | None = None
     status: str
     preset: str
@@ -420,6 +422,7 @@ def start(body: StartIn, db: DBSession = Depends(get_db)):
                 db,
                 target_area_geojson=target_area_geojson,
                 source_session_ids=body.session_ids,
+                parent_reconstruction_id=body.parent_reconstruction_id,
             )
         except ValueError as exc:
             msg = str(exc)
@@ -447,6 +450,7 @@ def start(body: StartIn, db: DBSession = Depends(get_db)):
         rec = start_reconstruction(
             body.session_id, body.preset, db,
             target_area_geojson=target_area_geojson,
+            parent_reconstruction_id=body.parent_reconstruction_id,
         )
     except ValueError as exc:
         msg = str(exc)
@@ -470,6 +474,30 @@ def get_diagnostics(reconstruction_id: int, db: DBSession = Depends(get_db)):
     if not rec:
         raise HTTPException(status_code=404, detail="Reconstruction not found")
     return build_reconstruction_diagnostics(db, rec)
+
+
+def _ancestor_chain(rec: Reconstruction) -> list[int]:
+    chain: list[int] = []
+    seen = {rec.id}
+    current = rec.parent
+    while current is not None and current.id not in seen:
+        chain.append(current.id)
+        seen.add(current.id)
+        current = current.parent
+    return chain
+
+
+@router.get("/{reconstruction_id}/lineage")
+def get_lineage(reconstruction_id: int, db: DBSession = Depends(get_db)):
+    rec = db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Reconstruction not found")
+    return {
+        "id": rec.id,
+        "parent_reconstruction_id": rec.parent_reconstruction_id,
+        "ancestor_ids": _ancestor_chain(rec),
+        "child_ids": [c.id for c in rec.children],
+    }
 
 
 def _status_sse_payload(rec: Reconstruction) -> str:

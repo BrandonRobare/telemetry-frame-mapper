@@ -230,6 +230,7 @@ class Reconstruction(Base):
     __tablename__ = "reconstructions"
     id = Column(Integer, primary_key=True, index=True)
     session_id = Column(Integer, ForeignKey("sessions.id"), nullable=False)
+    parent_reconstruction_id = Column(Integer, ForeignKey("reconstructions.id"), nullable=True)
     status = Column(String, default="pending")
     preset = Column(String, default="quick")
     progress_pct = Column(Float, default=0.0)
@@ -269,6 +270,8 @@ class Reconstruction(Base):
     # JSON list of source session IDs for multi-session reconstructions
     source_session_ids = Column(Text)
     session = relationship("Session", back_populates="reconstructions")
+    parent = relationship("Reconstruction", remote_side=[id], back_populates="children")
+    children = relationship("Reconstruction", back_populates="parent")
     frames = relationship(
         "ReconstructionFrame", back_populates="reconstruction", cascade="all, delete-orphan"
     )
