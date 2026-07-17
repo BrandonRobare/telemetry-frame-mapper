@@ -66,6 +66,21 @@ When the import finishes, the modal shows a Quick QA card. Alongside completenes
 
 - **Map tab** — footprint polygons and the coverage overlay on ESRI satellite imagery. The sidebar shows session stats, coverage %, quality flags, and editable session tags and operator notes; "Run Coverage Analysis" recomputes coverage. The session picker in the top bar can filter by tag and its **Bulk** menu can archive, assign a project, add/replace tags, or delete selected visible sessions. Type `DELETE` to enable a bulk delete.
 - **Review tab** — thumbnail grid; cycle per-image flags (good / blurry / no_gps / dark / bright), and toggle which frames feed reconstruction. After a reconstruction has run, per-frame COLMAP reprojection-error badges appear here — sort by them to find weak frames.
+
+### Dense rerun for weak registration
+
+For a completed single-session reconstruction, `GET /reconstruction/{id}/dense-rerun-plan`
+uses the stored per-frame COLMAP reprojection errors to identify contiguous weak source-frame
+spans. A frame is weak when it did not register (null error) or its error is at least the
+configured `reconstruction.dense_rerun.high_reprojection_error_px`; only spans of at least
+`min_weak_run_frames` qualify. The plan adds usable session frames between and immediately
+around those spans (`context_frames`) while retaining every original source frame.
+
+Review that plan, then explicitly queue its child reconstruction with
+`POST /reconstruction/{id}/dense-rerun` and `{"confirm": true}`. This never changes the
+session's saved frame selection or overwrites the original reconstruction. It returns 422 when
+COLMAP did not produce per-frame error data, no span meets the threshold, or no denser viable
+selection exists; it returns 409 while an earlier dense child is still running.
 - **Plan tab** — draw a target-area polygon, set altitude/overlap, generate a lawnmower flight plan, export KML/GPX (written under `exports/`). The Shutter Interval panel converts the current altitude/overlap plus a flight speed and camera preset into the photo spacing (m) and timed-shot interval (s) to dial into the DJI controller, and warns when the interval drops below the ~2 s DJI minimum. The Weather Advisor panel fetches the current + next few hours' forecast for the drawn area from Open-Meteo (no API key needed) and shows a GO / CAUTION / NO-GO signal based on sustained wind, gusts, precipitation chance, and temperature — it lists the specific factor(s) driving the verdict, and reports "weather unavailable" instead of failing if the request can't complete (e.g. offline).
 - **GPS Sync tab** — optionally match a DJI FlightRecord CSV against the session to refine timestamps.
 

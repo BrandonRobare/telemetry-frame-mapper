@@ -35,6 +35,11 @@ def test_get_reconstruction_config_defaults():
     assert cfg["colmap_threads"] == 8
     assert cfg["sift_max_features"] == 8192
     assert cfg["single_camera"] is True
+    assert cfg["dense_rerun"] == {
+        "min_weak_run_frames": 2,
+        "high_reprojection_error_px": 2.0,
+        "context_frames": 1,
+    }
 
 
 def test_get_reconstruction_config_preset_values():
