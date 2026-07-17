@@ -1,15 +1,20 @@
 from __future__ import annotations
 
+import csv
+import io
+import json
 import zipfile
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import JSONResponse, Response
 from sqlalchemy.orm import Session as DBSession
 
 from ..core.config import get_config
 from ..db.database import get_db
-from ..db.models import Image
+from ..db.models import Image, Measurement, Reconstruction
 from ..db.models import Session as SessionModel
+from ..services.geometry_exports import feature_collection, geometry_feature
 
 router = APIRouter(prefix="/export", tags=["export"])
 
@@ -217,3 +222,79 @@ def export_webodm_package(
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+def _get_measurements(reconstruction_id: int, db: DBSession) -> list[Measurement]:
+    rec = db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Reconstruction not found")
+    return (
+        db.query(Measurement)
+        .filter(Measurement.reconstruction_id == reconstruction_id)
+        .order_by(Measurement.created_at)
+        .all()
+    )
+
+
+@router.get("/reconstructions/{reconstruction_id}/measurements.csv")
+def export_measurements_csv(reconstruction_id: int, db: DBSession = Depends(get_db)):
+    """Export a reconstruction's persisted measurements as a flat CSV, one row per measurement."""
+    measurements = _get_measurements(reconstruction_id, db)
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(["id", "kind", "label", "value", "unit", "created_at", "points"])
+    for m in measurements:
+        writer.writerow(
+            [
+                m.id, m.kind, m.label or "", m.value, m.unit or "",
+                m.created_at.isoformat(), m.points_json,
+            ]
+        )
+    filename = f"measurements_{reconstruction_id}.csv"
+    return Response(
+        content=buf.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+def _measurement_geometry(kind: str, points: list[dict]) -> dict | None:
+    coords = [
+        [p.get("lon"), p.get("lat"), p.get("alt") or 0]
+        for p in points
+        if p.get("lat") is not None and p.get("lon") is not None
+    ]
+    if len(coords) != len(points) or not coords:
+        return None  # any point missing GPS -> geometry can't be built
+    if kind == "point":
+        return {"type": "Point", "coordinates": coords[0]}
+    if kind == "area":
+        if len(coords) < 3:
+            return None
+        return {"type": "Polygon", "coordinates": [[*coords, coords[0]]]}
+    if len(coords) < 2:
+        return None
+    return {"type": "LineString", "coordinates": coords}  # "distance" and any other kind
+
+
+@router.get("/reconstructions/{reconstruction_id}/measurements.geojson")
+def export_measurements_geojson(reconstruction_id: int, db: DBSession = Depends(get_db)):
+    """Export a reconstruction's persisted measurements as a GeoJSON FeatureCollection."""
+    measurements = _get_measurements(reconstruction_id, db)
+    features = []
+    for m in measurements:
+        geometry = _measurement_geometry(m.kind, json.loads(m.points_json))
+        feature = geometry_feature(
+            geometry,
+            name=m.label or f"measurement-{m.id}",
+            properties={
+                "id": m.id,
+                "label": m.label,
+                "value": m.value,
+                "unit": m.unit,
+                "created_at": m.created_at.isoformat(),
+            },
+        )
+        if feature:
+            features.append(feature)
+    return JSONResponse(feature_collection(features))

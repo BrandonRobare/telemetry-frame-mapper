@@ -278,6 +278,9 @@ class Reconstruction(Base):
     annotations = relationship(
         "Annotation", back_populates="reconstruction", cascade="all, delete-orphan"
     )
+    measurements = relationship(
+        "Measurement", back_populates="reconstruction", cascade="all, delete-orphan"
+    )
 
 
 class ReconstructionFrame(Base):
@@ -300,6 +303,27 @@ class Annotation(Base):
     color = Column(String, default="#ff6b35")
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     reconstruction = relationship("Reconstruction", back_populates="annotations")
+
+
+class Measurement(Base):
+    """A viewer measurement (distance/area/point) persisted for a reconstruction.
+
+    ``points_json`` mirrors the shape used by the splat viewer's ephemeral
+    measurement state (frontend `measurementMath.ts` / `SplatViewerTab.tsx`
+    `MeasurePoint`): a JSON list of ``{x, y, z, lat, lon, alt}`` objects, world
+    coords plus optional GPS. ``value``/``unit`` hold the client-computed result
+    (e.g. 111.0 / "m" for a distance, or an area in "m2").
+    """
+    __tablename__ = "measurements"
+    id = Column(Integer, primary_key=True, index=True)
+    reconstruction_id = Column(Integer, ForeignKey("reconstructions.id"), nullable=False)
+    kind = Column(String, nullable=False)  # "distance" | "area" | "point"
+    points_json = Column(Text, nullable=False)
+    value = Column(Float)
+    unit = Column(String)
+    label = Column(String)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    reconstruction = relationship("Reconstruction", back_populates="measurements")
 
 
 class Defect(Base):
