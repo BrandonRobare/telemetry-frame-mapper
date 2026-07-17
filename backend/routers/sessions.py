@@ -8,13 +8,13 @@ from pathlib import Path, PurePosixPath
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy import text
 from sqlalchemy.orm import Session as DBSession
 
 from ..core.config import get_config
 from ..db.database import SessionLocal, get_db
-from ..db.models import Image, Reconstruction
+from ..db.models import Image, Project, Reconstruction
 from ..db.models import Session as SessionModel
 from ..db.session_search import install_session_search_schema
 from ..services.artifact_cleanup import cleanup_session_artifacts
@@ -65,18 +65,22 @@ class SessionPatch(BaseModel):
     @field_validator("tags")
     @classmethod
     def normalize_tags(cls, v: list[str] | None) -> list[str] | None:
-        if v is None:
-            return None
-        cleaned: list[str] = []
-        for tag in v:
-            stripped = tag.strip()
-            if not stripped:
-                continue
-            if len(stripped) > MAX_TAG_LENGTH:
-                raise ValueError(f"tag must be at most {MAX_TAG_LENGTH} characters: {stripped!r}")
-            if stripped not in cleaned:
-                cleaned.append(stripped)
-        return cleaned
+        return _normalize_tags(v)
+
+
+def _normalize_tags(tags: list[str] | None) -> list[str] | None:
+    if tags is None:
+        return None
+    cleaned: list[str] = []
+    for tag in tags:
+        stripped = tag.strip()
+        if not stripped:
+            continue
+        if len(stripped) > MAX_TAG_LENGTH:
+            raise ValueError(f"tag must be at most {MAX_TAG_LENGTH} characters: {stripped!r}")
+        if stripped not in cleaned:
+            cleaned.append(stripped)
+    return cleaned
 
 
 SearchSource = Literal["session", "log", "defect"]
@@ -93,6 +97,59 @@ class SessionSearchOut(SessionOut):
 
 class DeleteOut(BaseModel):
     ok: bool
+
+
+BulkOperation = Literal["archive", "assign_project", "replace_tags", "add_tags", "delete"]
+
+
+class BulkSessionRequest(BaseModel):
+    """Apply one small, explicit operation to several sessions.
+
+    Missing session rows are reported per ID so a stale picker selection cannot
+    hide work completed for the other selected sessions.
+    """
+
+    session_ids: list[int] = Field(min_length=1, max_length=100)
+    operation: BulkOperation
+    project_id: int | None = Field(default=None, gt=0)
+    tags: list[str] | None = None
+    confirm: str | None = None
+
+    @field_validator("session_ids")
+    @classmethod
+    def validate_session_ids(cls, session_ids: list[int]) -> list[int]:
+        if any(session_id <= 0 for session_id in session_ids):
+            raise ValueError("session_ids must contain positive integers")
+        if len(set(session_ids)) != len(session_ids):
+            raise ValueError("session_ids must not contain duplicates")
+        return session_ids
+
+    @field_validator("tags")
+    @classmethod
+    def normalize_bulk_tags(cls, tags: list[str] | None) -> list[str] | None:
+        return _normalize_tags(tags)
+
+    @model_validator(mode="after")
+    def validate_operation_fields(self) -> BulkSessionRequest:
+        if self.operation == "assign_project" and self.project_id is None:
+            raise ValueError("project_id is required when assigning a project")
+        if self.operation in ("replace_tags", "add_tags") and self.tags is None:
+            raise ValueError("tags are required for tag operations")
+        if self.operation == "delete" and self.confirm != "DELETE":
+            raise ValueError('delete requires confirm: "DELETE"')
+        return self
+
+
+class BulkSessionOutcome(BaseModel):
+    session_id: int
+    ok: bool
+    error: str | None = None
+    bundle_path: str | None = None
+
+
+class BulkSessionResponse(BaseModel):
+    operation: BulkOperation
+    outcomes: list[BulkSessionOutcome]
 
 
 @router.get("/", response_model=list[SessionOut])
@@ -196,20 +253,77 @@ def patch_session(session_id: int, body: SessionPatch, db: DBSession = Depends(g
     return s
 
 
+def _delete_session(s: SessionModel, db: DBSession) -> None:
+    """Delete one session using the same cleanup path as the single-session API."""
+    reconstructions = db.query(Reconstruction).filter(Reconstruction.session_id == s.id).all()
+    images = db.query(Image).filter(Image.session_id == s.id).all()
+    for rec in reconstructions:
+        cancel_reconstruction(rec.id)
+    cleanup_session_artifacts(s.id, images, reconstructions, get_config())
+    db.delete(s)
+    db.commit()
+
+
+@router.post("/bulk", response_model=BulkSessionResponse)
+def bulk_sessions(body: BulkSessionRequest, db: DBSession = Depends(get_db)):
+    """Apply a single organization/archive/delete operation per selected session.
+
+    Each session is committed independently. One stale ID or filesystem failure
+    therefore reports an outcome without rolling back successful peers.
+    """
+    if body.operation == "assign_project":
+        project = db.query(Project).filter(Project.id == body.project_id).first()
+        if project is None:
+            raise HTTPException(status_code=404, detail="Project not found")
+
+    outcomes: list[BulkSessionOutcome] = []
+    for session_id in body.session_ids:
+        s = db.query(SessionModel).filter(SessionModel.id == session_id).first()
+        if s is None:
+            outcomes.append(
+                BulkSessionOutcome(session_id=session_id, ok=False, error="Session not found")
+            )
+            continue
+        try:
+            if body.operation == "archive":
+                from ..services.session_bundle import build_session_archive
+
+                zip_path = Path(get_config().exports_dir) / f"session_{session_id}_archive.zip"
+                archive = build_session_archive(zip_path, s, db)
+                outcomes.append(
+                    BulkSessionOutcome(
+                        session_id=session_id, ok=True, bundle_path=archive["bundle_path"]
+                    )
+                )
+                continue
+            if body.operation == "assign_project":
+                s.project_id = body.project_id
+            elif body.operation == "replace_tags":
+                s.tags = json.dumps(body.tags) if body.tags else None
+            elif body.operation == "add_tags":
+                current_tags = SessionOut.model_validate(s).tags
+                merged_tags = current_tags + [
+                    tag for tag in body.tags or [] if tag not in current_tags
+                ]
+                s.tags = json.dumps(merged_tags) if merged_tags else None
+            elif body.operation == "delete":
+                _delete_session(s, db)
+                outcomes.append(BulkSessionOutcome(session_id=session_id, ok=True))
+                continue
+            db.commit()
+            outcomes.append(BulkSessionOutcome(session_id=session_id, ok=True))
+        except Exception as exc:
+            db.rollback()
+            outcomes.append(BulkSessionOutcome(session_id=session_id, ok=False, error=str(exc)))
+    return BulkSessionResponse(operation=body.operation, outcomes=outcomes)
+
+
 @router.delete("/{session_id}", response_model=DeleteOut)
 def delete_session(session_id: int, db: DBSession = Depends(get_db)):
     s = db.query(SessionModel).filter(SessionModel.id == session_id).first()
     if not s:
         raise HTTPException(status_code=404, detail="Session not found")
-    reconstructions = db.query(Reconstruction).filter(
-        Reconstruction.session_id == session_id
-    ).all()
-    images = db.query(Image).filter(Image.session_id == session_id).all()
-    for rec in reconstructions:
-        cancel_reconstruction(rec.id)
-    cleanup_session_artifacts(session_id, images, reconstructions, get_config())
-    db.delete(s)
-    db.commit()
+    _delete_session(s, db)
     return {"ok": True}
 
 
