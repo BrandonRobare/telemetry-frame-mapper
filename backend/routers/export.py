@@ -4,6 +4,8 @@ import csv
 import io
 import json
 import os
+import shutil
+import tempfile
 import zipfile
 from datetime import timedelta
 from pathlib import Path
@@ -13,6 +15,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
 from shapely.geometry import LineString, Point, shape
 from sqlalchemy.orm import Session as DBSession
+from starlette.background import BackgroundTask
 
 from ..core.config import get_config
 from ..db.database import get_db
@@ -56,10 +59,12 @@ def export_geopackage(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     filename = f"reconstruction_{reconstruction_id}_mapped_products.gpkg"
+    download_path = _download_snapshot(output_path)
     return FileResponse(
-        output_path,
+        download_path,
         media_type="application/geopackage+sqlite3",
         filename=filename,
+        background=BackgroundTask(download_path.unlink, missing_ok=True),
     )
 
 
@@ -105,6 +110,21 @@ def _write_mapped_products_geopackage(
     )
     os.replace(temporary_path, output_path)
     return output_path
+
+
+def _download_snapshot(output_path: Path) -> Path:
+    """Keep the durable export replaceable while an HTTP client reads its own copy."""
+    with tempfile.NamedTemporaryFile(
+        prefix=f".{output_path.stem}.download-", suffix=output_path.suffix, dir=output_path.parent,
+        delete=False,
+    ) as temporary_file:
+        download_path = Path(temporary_file.name)
+    try:
+        shutil.copyfile(output_path, download_path)
+    except OSError:
+        download_path.unlink(missing_ok=True)
+        raise
+    return download_path
 
 
 def _geopackage_layers(
