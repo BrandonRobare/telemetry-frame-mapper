@@ -134,6 +134,66 @@ def export_orthomosaic(reconstruction_id: int, db: DBSession = Depends(get_db)):
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
+# ponytail: flat {name: keep_ratio} dict, not a preset framework — add
+# structure only when a preset needs more than an opacity keep-ratio knob.
+_SPLAT_EXPORT_PRESETS = {
+    "web": 1.0,
+    "preview": 0.10,
+    "medium": 0.50,
+}
+
+
+@router.post("/reconstructions/{reconstruction_id}/splat")
+def export_compact_splat(
+    reconstruction_id: int, preset: str = "web", db: DBSession = Depends(get_db)
+):
+    """Export a dependency-free, web-optimized compact ``.splat`` (antimatter15 format).
+
+    SH quantization: higher-order SH is dropped and the DC term becomes a flat
+    RGBA byte per gaussian. See ``ply_io.write_splat`` for the exact layout.
+    """
+    from ..services import ply_io
+
+    rec = db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Reconstruction not found")
+    if not rec.splat_path:
+        raise HTTPException(status_code=422, detail="Reconstruction has no splat")
+    if preset not in _SPLAT_EXPORT_PRESETS:
+        raise HTTPException(status_code=422, detail=f"Unknown preset: {preset}")
+
+    cloud = ply_io.read_3dgs_ply(Path(rec.splat_path))
+    if cloud.means.shape[0] == 0:
+        raise HTTPException(status_code=422, detail="Splat has no Gaussians")
+
+    keep_ratio = _SPLAT_EXPORT_PRESETS[preset]
+    if keep_ratio < 1.0:
+        order = ply_io.prune_order(cloud.opacities, keep_ratio)
+        cloud = ply_io.GaussianCloud(
+            means=cloud.means[order],
+            sh0=cloud.sh0[order],
+            shN=cloud.shN[order],
+            opacities=cloud.opacities[order],
+            scales=cloud.scales[order],
+            quats=cloud.quats[order],
+        )
+
+    from ..services.reconstruction import _safe_export_path
+
+    exports_dir = Path(get_config().exports_dir)
+    # preset is user-supplied and lands in the filename; confine the resolved path to
+    # exports_dir (matches _safe_export_http_path / _safe_manifest_artifact_path elsewhere).
+    out_path = _safe_export_path(exports_dir / f"reconstruction_{reconstruction_id}_{preset}.splat",
+                                 exports_dir)
+    ply_io.write_splat(cloud, out_path)
+    return {
+        "splat_path": str(out_path),
+        "point_count": int(cloud.means.shape[0]),
+        "byte_size": out_path.stat().st_size,
+        "preset": preset,
+    }
+
+
 @router.post("/reconstructions/{reconstruction_id}/share-link")
 def create_share_link(reconstruction_id: int, db: DBSession = Depends(get_db)):
     """Create a signed, time-limited public share link for a completed reconstruction."""
