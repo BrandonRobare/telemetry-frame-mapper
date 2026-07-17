@@ -7,6 +7,7 @@ interface ActiveLayers {
   footprints: boolean
   coverage: boolean
   heatmap: boolean
+  slope: boolean
   targetArea: boolean
 }
 
@@ -24,7 +25,9 @@ interface MapStore {
   theme: Theme
   sidebarOpen: boolean
   basemapId: BasemapId
+  slopeOpacity: number
   setBasemapId: (id: BasemapId) => void
+  setSlopeOpacity: (opacity: number) => void
   setProject: (id: number | null) => void
   setSession: (id: number | null) => void
   toggleLayer: (key: keyof ActiveLayers) => void
@@ -92,7 +95,7 @@ function saveBasemap(id: BasemapId) {
 export const useMapStore = create<MapStore>((set) => ({
   selectedProjectId: null,
   selectedSessionId: null,
-  activeLayers: { footprints: true, coverage: true, heatmap: false, targetArea: true },
+  activeLayers: { footprints: true, coverage: true, heatmap: false, slope: false, targetArea: true },
   theme: savedTheme,
   sidebarOpen: true,
   basemapId: getSavedBasemap(),
@@ -100,6 +103,8 @@ export const useMapStore = create<MapStore>((set) => ({
     saveBasemap(id)
     return { basemapId: id }
   }),
+  slopeOpacity: 0.65,
+  setSlopeOpacity: (opacity) => set({ slopeOpacity: Math.min(1, Math.max(0, opacity)) }),
 
   setProject: (id) => set({ selectedProjectId: id }),
 
