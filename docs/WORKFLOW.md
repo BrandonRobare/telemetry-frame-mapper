@@ -104,6 +104,10 @@ When a job finishes (complete, failed, or cancelled) the app shows a toast from 
 - **WebODM georeferencing CSV** — zip containing only `odm_georeferencing.csv` for ODM processing,
 - **GeoJSON** — frame positions/footprints,
 - **Point cloud (LAS 1.4)** — from the COLMAP sparse model, colorized from the splat when present, UTM CRS embedded,
+- **DSM GeoTIFF** — `POST /export/reconstructions/{id}/elevation?product=dsm&resolution_m=0.25`
+  rasterizes the cached LAS point cloud at the requested metre grid resolution. Empty cells are `-9999` nodata.
+  `product=dem` is available only when that LAS has ASPRS ground (class 2) labels; otherwise the API returns 422
+  rather than treating non-ground surfaces as terrain,
 - **Mesh (GLB/OBJ/MTL)** — optional, requires a manual [SuGaR](https://github.com/Anttwo/SuGaR) install (not on PyPI); always writes `mesh_georef.json` so the mesh keeps its UTM transform.
 
 **Compare tab** — after a second flight of the same site, run voxel change detection between two reconstructions: green = new, red = removed, exportable as GeoJSON.
