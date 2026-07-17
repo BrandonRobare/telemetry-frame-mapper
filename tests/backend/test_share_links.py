@@ -1,6 +1,7 @@
 """Tests for the share links service and public viewer router."""
 
 import time
+from datetime import timedelta
 
 import pytest
 
@@ -295,6 +296,182 @@ class TestSecurityConstraints:
         with pytest.raises(HTTPException) as exc_info:
             _safe_artifact_access("/etc/passwd")
         assert exc_info.value.status_code == 403
+
+
+class TestPersistedShareLinks:
+    def _completed_reconstruction(self, client, *, pointcloud_path=None):
+        from backend.db.models import Reconstruction
+        from backend.db.models import Session as SessionModel
+
+        db = _db(client)
+        session = SessionModel(name="Persisted share", folder_path="/tmp")
+        db.add(session)
+        db.commit()
+        rec = Reconstruction(
+            session_id=session.id,
+            status="complete",
+            frames_used=2,
+            pointcloud_path=str(pointcloud_path) if pointcloud_path else None,
+        )
+        db.add(rec)
+        db.commit()
+        db.refresh(rec)
+        return rec
+
+    def _create(self, client, rec, **body):
+        response = client.post(f"/export/reconstructions/{rec.id}/share-link", json=body)
+        assert response.status_code == 201
+        return response.json()
+
+    def test_password_failure_success_and_scoped_cookie(self, client):
+        rec = self._completed_reconstruction(client)
+        created = self._create(client, rec, password="correct horse battery staple")
+        token = created["share_token"]
+
+        assert client.get(f"/share/token/{token}").status_code == 401
+        failed = client.post(f"/share/token/{token}/unlock", json={"password": "wrong"})
+        assert failed.status_code == 403
+        assert "set-cookie" not in failed.headers
+
+        unlocked = client.post(
+            f"/share/token/{token}/unlock", json={"password": "correct horse battery staple"}
+        )
+        assert unlocked.status_code == 204
+        cookie = unlocked.headers["set-cookie"].lower()
+        assert "httponly" in cookie
+        assert "path=/share" in cookie
+        assert "samesite=lax" in cookie
+        assert "secure" not in cookie  # TestClient uses local HTTP.
+        assert client.get(f"/share/token/{token}").status_code == 200
+
+    def test_https_proxy_marks_unlock_cookie_secure(self, client):
+        rec = self._completed_reconstruction(client)
+        created = self._create(client, rec, password="secret")
+        response = client.post(
+            f"/share/token/{created['share_token']}/unlock",
+            json={"password": "secret"},
+            headers={"X-Forwarded-Proto": "https"},
+        )
+        assert response.status_code == 204
+        assert "secure" in response.headers["set-cookie"].lower()
+
+    def test_expiry_and_revocation_return_gone(self, client):
+        from backend.db.models import ShareLink
+        from backend.services.share_links import now_utc
+
+        rec = self._completed_reconstruction(client)
+        created = self._create(client, rec)
+        db = _db(client)
+        link = db.query(ShareLink).filter(ShareLink.id == created["share_link_id"]).first()
+        link.expires_at = now_utc() - timedelta(seconds=1)
+        db.commit()
+        assert client.get(f"/share/token/{created['share_token']}").status_code == 410
+
+        fresh = self._create(client, rec)
+        revoked = client.post(
+            f"/export/reconstructions/{rec.id}/share-links/{fresh['share_link_id']}/revoke"
+        )
+        assert revoked.status_code == 200
+        assert revoked.json()["revoked_at"]
+        assert client.get(f"/share/token/{fresh['share_token']}").status_code == 410
+
+    def test_artifact_access_uses_cookie_not_token_url(self, client, tmp_path, monkeypatch):
+        import backend.routers.share_links as share_router
+
+        exports_dir = tmp_path / "exports"
+        exports_dir.mkdir()
+        pointcloud = exports_dir / "cloud.las"
+        pointcloud.write_bytes(b"LAS")
+        monkeypatch.setattr(
+            share_router,
+            "get_config",
+            lambda: type(
+                "Cfg",
+                (),
+                {"exports_dir": str(exports_dir), "processed_dir": str(tmp_path / "processed")},
+            )(),
+        )
+        rec = self._completed_reconstruction(client, pointcloud_path=pointcloud)
+        created = self._create(client, rec, password="secret")
+        assert client.get(f"/share/{rec.id}/pointcloud").status_code == 401
+        client.post(
+            f"/share/token/{created['share_token']}/unlock", json={"password": "secret"}
+        )
+        metadata = client.get(f"/share/token/{created['share_token']}")
+        assert metadata.status_code == 200
+        assert "token=" not in metadata.json()["artifacts"]["pointcloud"]
+        artifact = client.get(metadata.json()["artifacts"]["pointcloud"])
+        assert artifact.status_code == 200
+        assert artifact.content == b"LAS"
+
+    def test_cookie_cannot_access_another_reconstruction_artifact(
+        self, client, tmp_path, monkeypatch
+    ):
+        import backend.routers.share_links as share_router
+
+        exports_dir = tmp_path / "exports"
+        exports_dir.mkdir()
+        first = exports_dir / "first.las"
+        second = exports_dir / "second.las"
+        first.write_bytes(b"first")
+        second.write_bytes(b"second")
+        monkeypatch.setattr(
+            share_router,
+            "get_config",
+            lambda: type(
+                "Cfg",
+                (),
+                {"exports_dir": str(exports_dir), "processed_dir": str(tmp_path / "processed")},
+            )(),
+        )
+        rec_a = self._completed_reconstruction(client, pointcloud_path=first)
+        rec_b = self._completed_reconstruction(client, pointcloud_path=second)
+        created = self._create(client, rec_a, password="secret")
+        unlock = client.post(
+            f"/share/token/{created['share_token']}/unlock", json={"password": "secret"}
+        )
+        assert unlock.status_code == 204
+        assert client.get(f"/share/{rec_b.id}/pointcloud").status_code == 403
+
+    def test_owner_list_never_returns_bearer_or_password_hash(self, client):
+        from backend.db.models import ShareLink
+
+        rec = self._completed_reconstruction(client)
+        created = self._create(client, rec, password="secret")
+        db = _db(client)
+        stored = db.query(ShareLink).filter(ShareLink.id == created["share_link_id"]).first()
+        assert created["share_token"] not in stored.token_hash
+        links = client.get(f"/export/reconstructions/{rec.id}/share-links")
+        assert links.status_code == 200
+        assert "share_token" not in links.text
+        assert "password_hash" not in links.text
+        assert created["share_token"] not in links.text
+
+    def test_legacy_signed_link_still_uses_token_query_for_artifacts(
+        self, client, tmp_path, monkeypatch
+    ):
+        import backend.routers.share_links as share_router
+
+        exports_dir = tmp_path / "exports"
+        exports_dir.mkdir()
+        pointcloud = exports_dir / "legacy.las"
+        pointcloud.write_bytes(b"legacy")
+        monkeypatch.setattr(
+            share_router,
+            "get_config",
+            lambda: type(
+                "Cfg",
+                (),
+                {"exports_dir": str(exports_dir), "processed_dir": str(tmp_path / "processed")},
+            )(),
+        )
+        rec = self._completed_reconstruction(client, pointcloud_path=pointcloud)
+        legacy = create_share_token(rec.id, rec.session_id)
+        metadata = client.get(f"/share/token/{SHARE_LINK_PREFIX}{legacy}")
+        assert metadata.status_code == 200
+        assert metadata.json()["legacy_token_required"] is True
+        artifact = client.get(f"/share/{rec.id}/pointcloud?token={SHARE_LINK_PREFIX}{legacy}")
+        assert artifact.status_code == 200
 
 
 def _db(client):
