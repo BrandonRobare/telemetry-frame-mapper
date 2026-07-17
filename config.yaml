@@ -79,6 +79,16 @@ reconstruction:
       sh_degree: 2
       downscale_factor: 2
 
+# Optional network worker. Keep disabled unless the worker and this API share
+# the configured storage paths. Put the bearer token only in the named env var.
+remote_worker:
+  enabled: false
+  url: ""
+  auth_token_env: "REMOTE_WORKER_TOKEN"
+  timeout_seconds: 10
+  poll_interval_seconds: 2
+  allow_insecure_http: false
+
 ingest:
   thumbnail_size_px: 200
   thumbnail_jpeg_quality: 75
