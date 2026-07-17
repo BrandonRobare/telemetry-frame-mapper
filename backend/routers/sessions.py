@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime
 import json
+import zipfile
 from pathlib import Path, PurePosixPath
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -214,3 +215,52 @@ def get_quick_report(session_id: int, db: DBSession = Depends(get_db)):
         match_density_weak_ratio=weak_ratio,
         match_density_avg_matches=avg_matches,
     )
+
+
+# ---- archive / restore bundle for machine moves (issue #370) ----
+
+
+@router.post("/{session_id}/archive")
+def archive_session(session_id: int, db: DBSession = Depends(get_db)):
+    """Export a session as a portable .zip: its row, every cascaded child row, and
+    any artifact files that exist on disk. Restore it elsewhere with POST /sessions/restore.
+    """
+    from ..services.session_bundle import build_session_archive
+
+    s = db.query(SessionModel).filter(SessionModel.id == session_id).first()
+    if not s:
+        raise HTTPException(status_code=404, detail="Session not found")
+    zip_path = Path(get_config().exports_dir) / f"session_{session_id}_archive.zip"
+    return build_session_archive(zip_path, s, db)
+
+
+class RestoreRequest(BaseModel):
+    zip_path: str
+
+
+@router.post("/restore")
+def restore_session(req: RestoreRequest, db: DBSession = Depends(get_db)):
+    """Restore a session archive (from POST /sessions/{id}/archive) as a brand-new
+    session with fresh IDs. Never modifies or clobbers an existing session.
+    """
+    from ..services.reconstruction import _safe_export_path
+    from ..services.session_bundle import restore_session_archive
+
+    # zip_path is user-supplied; confine it to the app's own data roots so it can't be
+    # used to read arbitrary files off the server filesystem.
+    cfg = get_config()
+    zip_path = None
+    for root in (cfg.imports_dir, cfg.exports_dir, cfg.data_dir):
+        try:
+            zip_path = _safe_export_path(Path(req.zip_path), Path(root))
+            break
+        except ValueError:
+            continue
+    if zip_path is None:
+        raise HTTPException(status_code=400, detail="Archive path is outside allowed directories")
+    if not zip_path.is_file():
+        raise HTTPException(status_code=404, detail="Archive zip not found")
+    try:
+        return restore_session_archive(zip_path, db)
+    except (KeyError, ValueError, zipfile.BadZipFile, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=422, detail=f"Invalid archive: {exc}") from exc
