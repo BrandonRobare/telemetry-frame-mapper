@@ -94,6 +94,13 @@ upload_limits:
   flight_log_max_bytes: 10485760
   srt_max_bytes: 10485760
 
+# Opt-in: only these folders are watched. Restart the backend after changing this.
+auto_import:
+  enabled: false
+  roots: []
+  poll_interval_seconds: 10
+  stable_seconds: 30
+
 # Backup destinations are an allowlist. Keep rclone credentials in rclone's own config.
 backup:
   local_destinations: []
