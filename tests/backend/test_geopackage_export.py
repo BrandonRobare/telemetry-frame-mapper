@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import zipfile
 from datetime import datetime
+from xml.etree.ElementTree import fromstring
 
 import pytest
 
@@ -185,3 +187,77 @@ def test_geopackage_export_skips_unavailable_layers(client, monkeypatch, tmp_pat
     with sqlite3.connect(package_path) as connection:
         layers = [row[0] for row in connection.execute("SELECT table_name FROM gpkg_contents")]
     assert layers == ["image_locations"]
+
+
+def test_gis_project_files_reference_current_geopackage_and_sidecars(client, monkeypatch, tmp_path):
+    import backend.routers.export as export_router
+
+    exports_dir = tmp_path / "exports"
+    monkeypatch.setattr(
+        export_router,
+        "get_config",
+        lambda: type("Config", (), {"exports_dir": str(exports_dir), "target_crs": "EPSG:32617"})(),
+    )
+    db = _db(client)
+    session = SessionModel(name="GIS projects", folder_path=str(tmp_path))
+    db.add(session)
+    db.commit()
+    reconstruction = Reconstruction(session_id=session.id, status="complete")
+    db.add(reconstruction)
+    db.add(Image(
+        session_id=session.id,
+        filename="image.jpg",
+        filepath=str(tmp_path / "image.jpg"),
+        latitude=35.0,
+        longitude=-80.0,
+    ))
+    db.commit()
+    db.refresh(reconstruction)
+    output_dir = exports_dir / str(reconstruction.id)
+    output_dir.mkdir(parents=True)
+    (output_dir / "dsm.tif").write_bytes(b"sidecar")
+
+    response = client.post(f"/export/reconstructions/{reconstruction.id}/gis-project-files")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "reconstruction_id": reconstruction.id,
+        "files": [
+            "mapped_products.gpkg",
+            "mapped_products.qgz",
+            "mapped_products.lyrx",
+            "mapped_products_gis_manifest.json",
+        ],
+        "layers": ["image_locations"],
+        "rasters": ["dsm.tif"],
+    }
+    qgis_path = output_dir / "mapped_products.qgz"
+    with zipfile.ZipFile(qgis_path) as archive:
+        assert archive.namelist() == ["mapped_products.qgs"]
+        project = fromstring(archive.read("mapped_products.qgs"))
+    sources = [node.text for node in project.findall("./maplayers/maplayer/datasource")]
+    assert sources == ["./mapped_products.gpkg|layername=image_locations", "./dsm.tif"]
+    layer_names = [node.text for node in project.findall("./maplayers/maplayer/layername")]
+    assert layer_names == ["image_locations", "dsm"]
+
+    layer_document = json.loads((output_dir / "mapped_products.lyrx").read_text())
+    assert layer_document["type"] == "CIMLayerDocument"
+    assert [layer["type"] for layer in layer_document["layerDefinitions"]] == [
+        "CIMFeatureLayer", "CIMRasterLayer"
+    ]
+    feature_connection = layer_document["layerDefinitions"][0]["featureTable"]["dataConnection"]
+    assert feature_connection["workspaceConnectionString"] == "DATABASE=./mapped_products.gpkg"
+    assert feature_connection["dataset"] == "image_locations"
+    raster_connection = layer_document["layerDefinitions"][1]["dataConnection"]
+    assert raster_connection["workspaceConnectionString"] == "DATABASE=./dsm.tif"
+    assert json.loads((output_dir / "mapped_products_gis_manifest.json").read_text()) == {
+        "files": response.json()["files"],
+        "layers": response.json()["layers"],
+        "rasters": response.json()["rasters"],
+    }
+    first_qgis = qgis_path.read_bytes()
+    first_arcgis = (output_dir / "mapped_products.lyrx").read_bytes()
+    repeat = client.post(f"/export/reconstructions/{reconstruction.id}/gis-project-files")
+    assert repeat.status_code == 200
+    assert qgis_path.read_bytes() == first_qgis
+    assert (output_dir / "mapped_products.lyrx").read_bytes() == first_arcgis

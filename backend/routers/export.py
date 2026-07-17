@@ -39,15 +39,7 @@ def export_geopackage(
         raise HTTPException(status_code=404, detail="Reconstruction not found")
 
     try:
-        from ..services.geopackage_export import write_geopackage
-
-        layers = _geopackage_layers(reconstruction, comparison_id, db)
-        rasters = _elevation_sidecars(reconstruction)
-        output_dir = Path(get_config().exports_dir) / str(reconstruction_id)
-        output_path = output_dir / "mapped_products.gpkg"
-        temporary_path = output_path.with_name(f"{output_path.stem}.tmp{output_path.suffix}")
-        write_geopackage(temporary_path, layers, get_config().target_crs, rasters)
-        os.replace(temporary_path, output_path)
+        output_path = _write_mapped_products_geopackage(reconstruction, comparison_id, db)
     except RuntimeError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except ValueError as exc:
@@ -59,6 +51,50 @@ def export_geopackage(
         media_type="application/geopackage+sqlite3",
         filename=filename,
     )
+
+
+@router.post("/reconstructions/{reconstruction_id}/gis-project-files")
+def export_gis_project_files(
+    reconstruction_id: int,
+    comparison_id: int | None = None,
+    db: DBSession = Depends(get_db),
+):
+    """Create QGIS and ArcGIS Pro references for the current mapped-products GeoPackage."""
+    reconstruction = (
+        db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).first()
+    )
+    if not reconstruction:
+        raise HTTPException(status_code=404, detail="Reconstruction not found")
+    try:
+        geopackage = _write_mapped_products_geopackage(reconstruction, comparison_id, db)
+        from ..services.gis_project_files import write_gis_project_files
+
+        manifest = write_gis_project_files(geopackage.parent)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"reconstruction_id": reconstruction_id, **manifest}
+
+
+def _write_mapped_products_geopackage(
+    reconstruction: Reconstruction, comparison_id: int | None, db: DBSession
+) -> Path:
+    from ..services.geopackage_export import write_geopackage
+    from ..services.reconstruction import _safe_export_path
+
+    exports_dir = Path(get_config().exports_dir)
+    output_dir = _safe_export_path(exports_dir / str(reconstruction.id), exports_dir)
+    output_path = output_dir / "mapped_products.gpkg"
+    temporary_path = output_path.with_name(f"{output_path.stem}.tmp{output_path.suffix}")
+    write_geopackage(
+        temporary_path,
+        _geopackage_layers(reconstruction, comparison_id, db),
+        get_config().target_crs,
+        _elevation_sidecars(reconstruction),
+    )
+    os.replace(temporary_path, output_path)
+    return output_path
 
 
 def _geopackage_layers(
