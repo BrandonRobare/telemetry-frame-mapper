@@ -45,3 +45,18 @@ def test_get_reconstruction_config_preset_values():
     full = cfg["presets"]["full"]
     assert full["max_frames"] is None
     assert full["exhaustive_matching"] is True
+
+
+def test_get_backup_config_reads_only_configured_destinations(tmp_path):
+    from backend.core.config import get_backup_config
+
+    path = tmp_path / "config.yaml"
+    path.write_text(
+        "backup:\n  local_destinations:\n    - E:/telemetry-backups\n"
+        "  rclone_remote: archive:telemetry\n"
+    )
+
+    assert get_backup_config(str(path)) == {
+        "local_destinations": ["E:/telemetry-backups"],
+        "rclone_remote": "archive:telemetry",
+    }

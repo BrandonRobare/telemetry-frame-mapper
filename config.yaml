@@ -93,3 +93,8 @@ render:
 upload_limits:
   flight_log_max_bytes: 10485760
   srt_max_bytes: 10485760
+
+# Backup destinations are an allowlist. Keep rclone credentials in rclone's own config.
+backup:
+  local_destinations: []
+  rclone_remote: ""

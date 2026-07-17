@@ -184,6 +184,26 @@ uvicorn backend.main:app --reload
 
 Optional: copy `config.yaml.example` to `config.yaml` and adjust mission parameters (altitude, FOV, overlap, target CRS). Upload limits are configurable in `config.yaml` under `upload_limits` (`flight_log_max_bytes` and `srt_max_bytes`, both 10 MiB by default).
 
+### Artifact backup
+
+`POST /storage/backup` creates an additive, versioned snapshot of the live SQLite database,
+sanitized `config.yaml`, and the selected `imports`, `processed`, and/or `exports` directories.
+Every copied file is SHA-256 recorded in `manifest.json`; the SQLite file is created with SQLite's
+backup API, so WAL/SHM sidecars are not copied. Configure the allowed destination first:
+
+```yaml
+backup:
+  local_destinations:
+    - "E:/telemetry-backups"
+  rclone_remote: "archive:telemetry-backups"  # credentials stay in rclone config
+```
+
+Then submit either `{ "destination": "local", "local_destination": "E:/telemetry-backups" }`
+or `{ "destination": "rclone" }`, with an optional `artifacts` list (defaults to
+`["processed", "exports"]`). Local paths must exactly match the allowlist. Remote backups use
+`rclone copy`, never `sync` or deletion flags; rclone credentials and command output are never
+persisted in the snapshot or returned by the API.
+
 ## CLI inputs
 
 | Flag | Description |
