@@ -243,12 +243,24 @@ def restore_session(req: RestoreRequest, db: DBSession = Depends(get_db)):
     """Restore a session archive (from POST /sessions/{id}/archive) as a brand-new
     session with fresh IDs. Never modifies or clobbers an existing session.
     """
+    from ..services.reconstruction import _safe_export_path
     from ..services.session_bundle import restore_session_archive
 
-    zip_path = Path(req.zip_path)
+    # zip_path is user-supplied; confine it to the app's own data roots so it can't be
+    # used to read arbitrary files off the server filesystem.
+    cfg = get_config()
+    zip_path = None
+    for root in (cfg.imports_dir, cfg.exports_dir, cfg.data_dir):
+        try:
+            zip_path = _safe_export_path(Path(req.zip_path), Path(root))
+            break
+        except ValueError:
+            continue
+    if zip_path is None:
+        raise HTTPException(status_code=400, detail="Archive path is outside allowed directories")
     if not zip_path.is_file():
         raise HTTPException(status_code=404, detail="Archive zip not found")
     try:
         return restore_session_archive(zip_path, db)
-    except (KeyError, zipfile.BadZipFile, json.JSONDecodeError) as exc:
+    except (KeyError, ValueError, zipfile.BadZipFile, json.JSONDecodeError) as exc:
         raise HTTPException(status_code=422, detail=f"Invalid archive: {exc}") from exc

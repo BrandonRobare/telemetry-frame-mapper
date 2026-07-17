@@ -183,8 +183,16 @@ def _restore_artifact(
     )
     if entry is None:
         return None
+    from backend.services.reconstruction import _safe_export_path
+
     archive_path = entry["archive_path"]
     dest = restore_root / Path(archive_path).relative_to("artifacts")
+    # A crafted bundle can carry an archive_path like "artifacts/../../etc/foo" that
+    # escapes restore_root (zip-slip). Reject anything that resolves outside it.
+    try:
+        dest = _safe_export_path(dest, restore_root)
+    except ValueError as exc:
+        raise ValueError(f"Archive entry escapes restore directory: {archive_path}") from exc
     dest.parent.mkdir(parents=True, exist_ok=True)
     with zf.open(archive_path) as src, open(dest, "wb") as out:
         shutil.copyfileobj(src, out)
