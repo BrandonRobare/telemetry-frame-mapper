@@ -63,6 +63,14 @@ across 19 routers.
   carry real-world coordinates.
 - **Exports:** WebODM georeferencing CSV-only zip, GeoJSON, LAS 1.4 point cloud, optional SuGaR mesh
   (GLB/OBJ/MTL), and flythrough video.
+- **Session archive/restore:** `POST /sessions/{id}/archive` bundles a session's
+  full DB state (images, flight logs, reconstructions with lineage,
+  measurements, annotations, defects, etc.) plus its artifact files into one
+  `.zip`, for moving a session to another machine without manual filesystem
+  surgery. `POST /sessions/restore` (given the zip's path) recreates it as a
+  brand-new session with fresh IDs — it never overwrites an existing session,
+  and any reconstruction lineage (`parent_reconstruction_id`) is remapped to
+  the new IDs or dropped if the parent isn't in the bundle.
 - **System reporting:** CPU/RAM/GPU/VRAM resource readout and
   `colmap_available` / `gsplat_available` tool-presence flags.
 
