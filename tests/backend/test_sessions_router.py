@@ -1,9 +1,13 @@
 from __future__ import annotations
 
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
-from backend.db.models import Image, Reconstruction
+import pytest
+from fastapi import HTTPException
+
+from backend.db.models import Defect, Image, Reconstruction, SessionLogEntry
 from backend.db.models import Session as SessionModel
+from backend.routers.sessions import _ensure_session_search_schema
 
 
 def _make_session(client, name="Test Session"):
@@ -185,6 +189,62 @@ def test_patch_session_clear_tags_and_notes(client):
 def test_patch_session_not_found(client):
     resp = client.patch("/sessions/999999", json={"tags": ["roof"]})
     assert resp.status_code == 404
+
+
+# ---- cross-session search (issue #390) ----
+
+
+def test_search_rejects_non_sqlite_dialect_before_running_fts_sql():
+    db = Mock()
+    db.get_bind.return_value.dialect.name = "postgresql"
+
+    with pytest.raises(HTTPException) as exc:
+        _ensure_session_search_schema(db)
+
+    assert exc.value.status_code == 501
+    assert "SQLite FTS5" in exc.value.detail
+    db.execute.assert_not_called()
+
+
+def test_search_sessions_indexes_metadata_logs_and_defects(client):
+    s = _make_session(client, name="Riverside roof survey")
+    client.patch(f"/sessions/{s.id}", json={"tags": ["solar"], "notes": "Windy west elevation"})
+
+    assert client.get("/sessions/search", params={"q": "riverside"}).json()[0]["id"] == s.id
+    tag_hit = client.get("/sessions/search", params={"q": "solar"}).json()[0]
+    assert tag_hit["matches"][0]["source"] == "session"
+    assert "solar" in tag_hit["matches"][0]["snippet"].lower()
+    assert client.get("/sessions/search", params={"q": "windy"}).json()[0]["id"] == s.id
+
+    from backend.db.database import get_db
+    from backend.main import app
+
+    db = next(app.dependency_overrides[get_db]())
+    db.add(
+        SessionLogEntry(session_id=s.id, event_type="import_complete", message="Tree obstruction")
+    )
+    db.add(Defect(session_id=s.id, category="crack", severity="high", note="North parapet crack"))
+    db.commit()
+
+    log_hit = client.get("/sessions/search", params={"q": "obstruction"}).json()[0]
+    assert log_hit["id"] == s.id
+    assert log_hit["matches"][0]["source"] == "log"
+    defect_hit = client.get(
+        "/sessions/search", params={"q": "parapet", "source": "defect"}
+    ).json()[0]
+    assert defect_hit["matches"][0]["source"] == "defect"
+
+
+def test_search_sessions_groups_results_and_rejects_punctuation_only_query(client):
+    first = _make_session(client, name="North roof")
+    second = _make_session(client, name="South roof")
+
+    response = client.get("/sessions/search", params={"q": "roof"})
+    assert response.status_code == 200
+    assert [row["id"] for row in response.json()] == [first.id, second.id]
+
+    invalid = client.get("/sessions/search", params={"q": "---"})
+    assert invalid.status_code == 422
 
 
 def test_project_sessions_include_tags_and_notes(client):

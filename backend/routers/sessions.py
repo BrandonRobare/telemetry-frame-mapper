@@ -2,17 +2,21 @@ from __future__ import annotations
 
 import datetime
 import json
+import re
 import zipfile
 from pathlib import Path, PurePosixPath
+from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, field_validator
+from sqlalchemy import text
 from sqlalchemy.orm import Session as DBSession
 
 from ..core.config import get_config
 from ..db.database import SessionLocal, get_db
 from ..db.models import Image, Reconstruction
 from ..db.models import Session as SessionModel
+from ..db.session_search import install_session_search_schema
 from ..services.artifact_cleanup import cleanup_session_artifacts
 from ..services.ingest_orchestrator import get_progress, start_import
 from ..services.preflight_quality import build_quick_report
@@ -75,6 +79,18 @@ class SessionPatch(BaseModel):
         return cleaned
 
 
+SearchSource = Literal["session", "log", "defect"]
+
+
+class SessionSearchMatchOut(BaseModel):
+    source: SearchSource
+    snippet: str
+
+
+class SessionSearchOut(SessionOut):
+    matches: list[SessionSearchMatchOut]
+
+
 class DeleteOut(BaseModel):
     ok: bool
 
@@ -82,6 +98,79 @@ class DeleteOut(BaseModel):
 @router.get("/", response_model=list[SessionOut])
 def list_sessions(db: DBSession = Depends(get_db)):
     return db.query(SessionModel).order_by(SessionModel.imported_at.desc()).all()
+
+
+def _ensure_session_search_schema(db: DBSession) -> None:
+    """Cover fresh metadata-only SQLite databases used by local development and tests."""
+    if db.get_bind().dialect.name != "sqlite":
+        raise HTTPException(
+            status_code=501,
+            detail=(
+                "Cross-session search requires SQLite FTS5; PostgreSQL search is not implemented."
+            ),
+        )
+    present = db.execute(text("""
+        SELECT count(*) FROM sqlite_master
+        WHERE type IN ('table', 'trigger')
+          AND name IN ('session_search', 'session_search_sessions_ai')
+    """)).scalar_one()
+    if present == 2:
+        return
+    install_session_search_schema(db.connection())
+    db.commit()
+
+
+def _fts_query(query: str) -> str:
+    terms = re.findall(r"\w+", query, flags=re.UNICODE)
+    if not terms:
+        raise HTTPException(status_code=422, detail="Search query must include letters or numbers")
+    return " AND ".join(f'"{term}"' for term in terms)
+
+
+@router.get(
+    "/search",
+    response_model=list[SessionSearchOut],
+    responses={501: {"description": "Available only for SQLite databases with FTS5."}},
+)
+def search_sessions(
+    q: str = Query(min_length=1, max_length=100),
+    source: SearchSource | None = None,
+    limit: int = Query(default=20, ge=1, le=100),
+    db: DBSession = Depends(get_db),
+):
+    """Search session metadata, timeline messages, and defects with SQLite FTS5."""
+    _ensure_session_search_schema(db)
+    rows = db.execute(
+        text("""
+            SELECT session_id, source, snippet(session_search, 3, '', '', '…', 14) AS snippet
+            FROM session_search
+            WHERE session_search MATCH :query
+              AND (:source IS NULL OR source = :source)
+            ORDER BY bm25(session_search, 2.0, 0.0, 0.0, 1.0)
+            LIMIT :row_limit
+        """),
+        {"query": _fts_query(q), "source": source, "row_limit": limit * 4},
+    ).mappings().all()
+    matches_by_session: dict[int, list[SessionSearchMatchOut]] = {}
+    for row in rows:
+        session_id = int(row["session_id"])
+        matches = matches_by_session.setdefault(session_id, [])
+        if len(matches) < 2:
+            matches.append(SessionSearchMatchOut(source=row["source"], snippet=row["snippet"]))
+
+    session_ids = list(matches_by_session)[:limit]
+    if not session_ids:
+        return []
+    sessions = db.query(SessionModel).filter(SessionModel.id.in_(session_ids)).all()
+    by_id = {session.id: session for session in sessions}
+    return [
+        SessionSearchOut(
+            **SessionOut.model_validate(by_id[session_id]).model_dump(),
+            matches=matches_by_session[session_id],
+        )
+        for session_id in session_ids
+        if session_id in by_id
+    ]
 
 
 @router.get("/{session_id}", response_model=SessionOut)
