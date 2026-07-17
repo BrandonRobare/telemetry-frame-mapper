@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
+from backend.db.models import CoverageRun, Project, Reconstruction, TargetArea
+from backend.db.models import Session as SessionModel
+
 
 def test_list_projects_empty(client):
     resp = client.get("/projects/")
@@ -80,3 +85,130 @@ def test_list_project_sessions_empty(client):
     resp = client.get(f"/projects/{pid}/sessions")
     assert resp.status_code == 200
     assert resp.json() == []
+
+
+def test_project_trends_are_time_ordered_and_project_scoped(client):
+    from backend.db.database import get_db
+    from backend.main import app
+
+    db = next(app.dependency_overrides[get_db]())
+    project = Project(name="Trend site")
+    other_project = Project(name="Other site")
+    target = TargetArea(name="Trend target")
+    db.add_all([project, other_project, target])
+    db.commit()
+
+    later = SessionModel(
+        name="Later flight",
+        folder_path="/tmp/later",
+        project_id=project.id,
+        imported_at=datetime(2026, 7, 2, tzinfo=timezone.utc),
+        photo_count=10,
+        usable_count=9,
+    )
+    earlier = SessionModel(
+        name="Earlier flight",
+        folder_path="/tmp/earlier",
+        project_id=project.id,
+        imported_at=datetime(2026, 7, 1, tzinfo=timezone.utc),
+        photo_count=0,
+        usable_count=0,
+    )
+    same_day = SessionModel(
+        name="Same-day flight",
+        folder_path="/tmp/same-day",
+        project_id=project.id,
+        imported_at=datetime(2026, 7, 1, tzinfo=timezone.utc),
+        photo_count=4,
+        usable_count=4,
+    )
+    foreign = SessionModel(
+        name="Foreign flight",
+        folder_path="/tmp/foreign",
+        project_id=other_project.id,
+        imported_at=datetime(2026, 6, 1, tzinfo=timezone.utc),
+        photo_count=50,
+        usable_count=50,
+    )
+    db.add_all([later, earlier, same_day, foreign])
+    db.commit()
+
+    db.add_all([
+        Reconstruction(
+            session_id=later.id,
+            status="complete",
+            preset="quick",
+            frames_used=10,
+            frames_registered=8,
+            psnr=29.0,
+            ssim=0.89,
+            completed_at=datetime(2026, 7, 2, 12, tzinfo=timezone.utc),
+        ),
+        Reconstruction(
+            session_id=later.id,
+            status="complete",
+            preset="full",
+            frames_used=10,
+            frames_registered=9,
+            psnr=31.5,
+            ssim=0.93,
+            completed_at=datetime(2026, 7, 3, 12, tzinfo=timezone.utc),
+        ),
+        Reconstruction(
+            session_id=foreign.id,
+            status="complete",
+            preset="full",
+            frames_used=50,
+            frames_registered=50,
+            psnr=99.0,
+            ssim=0.99,
+            completed_at=datetime(2026, 7, 4, tzinfo=timezone.utc),
+        ),
+        CoverageRun(
+            target_area_id=target.id,
+            session_ids=str(later.id),
+            coverage_pct=71.0,
+            run_at=datetime(2026, 7, 2, tzinfo=timezone.utc),
+        ),
+        CoverageRun(
+            target_area_id=target.id,
+            session_ids=str(later.id),
+            coverage_pct=84.5,
+            run_at=datetime(2026, 7, 3, tzinfo=timezone.utc),
+        ),
+        CoverageRun(
+            target_area_id=target.id,
+            session_ids=str(foreign.id),
+            coverage_pct=100.0,
+            run_at=datetime(2026, 7, 4, tzinfo=timezone.utc),
+        ),
+    ])
+    db.commit()
+
+    response = client.get(f"/projects/{project.id}/trends")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["project_id"] == project.id
+    assert [point["session_id"] for point in body["points"]] == [
+        earlier.id,
+        same_day.id,
+        later.id,
+    ]
+    assert body["points"][0]["usable_pct"] is None
+    assert body["points"][0]["coverage_pct"] is None
+    assert body["points"][0]["psnr"] is None
+    latest = body["points"][2]
+    assert latest["session_name"] == "Later flight"
+    assert latest["usable_pct"] == 90.0
+    assert latest["coverage_pct"] == 84.5
+    assert latest["reconstruction_id"] is not None
+    assert latest["frames_registered"] == 9
+    assert latest["psnr"] == 31.5
+    assert latest["ssim"] == 0.93
+
+
+def test_project_trends_rejects_unknown_project(client):
+    response = client.get("/projects/99999/trends")
+
+    assert response.status_code == 404
