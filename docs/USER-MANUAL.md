@@ -79,6 +79,15 @@ across 19 routers.
   brand-new session with fresh IDs — it never overwrites an existing session,
   and any reconstruction lineage (`parent_reconstruction_id`) is remapped to
   the new IDs or dropped if the parent isn't in the bundle.
+- **Compact web `.splat` export:** `POST /export/reconstructions/{id}/splat?preset=web|preview|medium`
+  writes a dependency-free, 32-bytes-per-gaussian `.splat` (the antimatter15
+  gsplat web-viewer format) — no Node/`splat-transform` binary required.
+  Higher-order SH is dropped and the DC term is baked into a flat RGBA byte
+  per gaussian (that *is* the web/SH-quantization compaction); opacity is
+  sigmoid-activated to alpha, log-space scale is exponentiated, and gaussians
+  are written sorted by opacity descending. `preview`/`medium` additionally
+  prune by opacity keep-ratio (10%/50%) before writing. For heavier SPZ/SOG
+  compression via the external Node tool, see `splat_transform.py` instead.
 - **System reporting:** CPU/RAM/GPU/VRAM resource readout and
   `colmap_available` / `gsplat_available` tool-presence flags.
 

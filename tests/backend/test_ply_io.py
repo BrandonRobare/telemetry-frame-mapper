@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import struct
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -12,6 +13,7 @@ from backend.services.ply_io import (
     prune_by_opacity,
     read_3dgs_ply,
     write_3dgs_ply,
+    write_splat,
 )
 
 _SH_C0 = 0.28209479177387814
@@ -158,3 +160,76 @@ def test_written_ply_readable_by_existing_loader(tmp_path, monkeypatch):
     assert output_path == tmp_path.resolve() / "coverage_gaps_7.json"
     assert output_path.exists()
     assert json.loads(output_path.read_text()) == cells
+
+
+# ---------------------------------------------------------------------------
+# write_splat — compact 32-byte-per-gaussian antimatter15 .splat format
+# ---------------------------------------------------------------------------
+
+def _known_cloud(n: int = 2, num_rest_coeffs: int = 3) -> GaussianCloud:
+    """A cloud with known, hand-picked values for exact-mapping assertions."""
+    return GaussianCloud(
+        means=np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]][:n], dtype=np.float32),
+        sh0=np.zeros((n, 3), dtype=np.float32),
+        shN=np.ones((n, num_rest_coeffs, 3), dtype=np.float32) * 99.0,  # must be dropped
+        opacities=np.array([0.0, 5.0][:n], dtype=np.float32),
+        scales=np.zeros((n, 3), dtype=np.float32),  # log(1) = 0 -> exp -> 1.0
+        quats=np.tile(np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32), (n, 1)),  # identity
+    )
+
+
+def test_write_splat_output_size_is_32_bytes_per_gaussian(tmp_path):
+    cloud = _known_cloud(n=2)
+    path = write_splat(cloud, tmp_path / "out.splat")
+    assert path == tmp_path / "out.splat"
+    assert path.stat().st_size == 32 * 2
+
+
+def test_write_splat_dc_to_rgb_and_sigmoid_to_alpha_for_known_input(tmp_path):
+    # sh0=0 -> rgb = clamp(0.5, 0, 1) * 255 = 127.5 -> truncates to 127.
+    # opacity=0 -> sigmoid(0) = 0.5 -> alpha = 127.5 -> truncates to 127.
+    cloud = _known_cloud(n=1)
+    path = write_splat(cloud, tmp_path / "out.splat")
+    raw = path.read_bytes()
+    color = raw[24:28]
+    assert list(color) == [127, 127, 127, 127]
+
+
+def test_write_splat_scales_are_exponentiated(tmp_path):
+    # log-space scale 0 -> exp(0) = 1.0 -> packed float32 bytes for 1.0.
+    cloud = _known_cloud(n=1)
+    path = write_splat(cloud, tmp_path / "out.splat")
+    raw = path.read_bytes()
+    scale_bytes = raw[12:24]
+    scales = struct.unpack("<3f", scale_bytes)
+    assert scales == pytest.approx((1.0, 1.0, 1.0))
+
+
+def test_write_splat_drops_higher_order_sh(tmp_path):
+    # Two clouds identical except shN (which must be ignored) produce identical bytes.
+    cloud_a = _known_cloud(n=2, num_rest_coeffs=3)
+    cloud_b = _known_cloud(n=2, num_rest_coeffs=3)
+    cloud_b.shN = cloud_b.shN * -1.0  # wildly different higher-order SH
+    bytes_a = write_splat(cloud_a, tmp_path / "a.splat").read_bytes()
+    bytes_b = write_splat(cloud_b, tmp_path / "b.splat").read_bytes()
+    assert bytes_a == bytes_b
+    # Also true for a different K (shN shape is not part of the output at all).
+    cloud_c = _known_cloud(n=2, num_rest_coeffs=8)
+    bytes_c = write_splat(cloud_c, tmp_path / "c.splat").read_bytes()
+    assert bytes_c == bytes_a
+
+
+def test_write_splat_sorts_by_opacity_descending(tmp_path):
+    cloud = GaussianCloud(
+        means=np.array([[0.0, 0, 0], [1.0, 0, 0], [2.0, 0, 0]], dtype=np.float32),
+        sh0=np.zeros((3, 3), dtype=np.float32),
+        shN=np.zeros((3, 0, 3), dtype=np.float32),
+        opacities=np.array([-1.0, 5.0, 2.0], dtype=np.float32),  # unsorted logits
+        scales=np.zeros((3, 3), dtype=np.float32),
+        quats=np.tile(np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32), (3, 1)),
+    )
+    path = write_splat(cloud, tmp_path / "sorted.splat")
+    raw = path.read_bytes()
+    xs = [struct.unpack("<f", raw[i * 32 : i * 32 + 4])[0] for i in range(3)]
+    # Opacity order 5.0, 2.0, -1.0 -> means x order 1.0, 2.0, 0.0.
+    assert xs == pytest.approx([1.0, 2.0, 0.0])
