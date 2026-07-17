@@ -18,6 +18,7 @@ from backend.core.config import get_config
 from backend.db.database import init_db
 
 from .routers import annotations as annotations_router
+from .routers import auto_import as auto_import_router
 from .routers import comparisons as comparisons_router
 from .routers import coverage as coverage_router
 from .routers import defects as defects_router
@@ -47,8 +48,12 @@ from .routers import uploads as uploads_router
 async def lifespan(app: FastAPI):
     init_db()
     from backend.services.artifact_backup_schedule import scheduled_backup_from_config
+    from backend.services.auto_import import AutoImportWatcher
     from backend.services.job_queue import claim_stale_jobs, shutdown_worker, start_worker
 
+    watcher = AutoImportWatcher()
+    app.state.auto_import_watcher = watcher
+    watcher.start()
     claimed = claim_stale_jobs()
     if claimed:
         logging.getLogger("backend").info(
@@ -67,6 +72,7 @@ async def lifespan(app: FastAPI):
         yield
     finally:
         backup_scheduler.stop()
+        watcher.stop()
         shutdown_worker(timeout=10.0)
 
 
@@ -86,6 +92,7 @@ app.include_router(session_log_router.router)
 app.include_router(footprints_router.router)
 app.include_router(reconstruction_router.router)
 app.include_router(annotations_router.router)
+app.include_router(auto_import_router.router)
 app.include_router(measurements_router.router)
 app.include_router(defects_router.router)
 app.include_router(comparisons_router.router)

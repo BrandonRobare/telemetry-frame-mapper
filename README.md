@@ -176,6 +176,21 @@ drone-video-geotagger \
 
 The Import dialog defaults to **Browser upload**: choose or drag a folder of frames in the browser, and the app streams files to the backend in chunks before starting the same import pipeline used by server-side paths. This is the easiest path when the image folder is on your workstation but not already under `imports/`. The legacy **Server path** mode remains available for folders that already live under the backend's `imports/` directory.
 
+### SD-card / watch-folder auto-import
+
+Set `auto_import.enabled` and explicitly list each mounted card or staging folder in `config.yaml`, then restart the backend. The watcher uses polling, waits until a media directory is unchanged for `stable_seconds`, and starts the existing image-import pipeline. It never discovers drives or imports paths outside `roots`; `GET /auto-import/status` reports missing, unsupported, and watched roots. A persisted media-manifest fingerprint prevents a completed claim from being imported again after a restart.
+
+```yaml
+auto_import:
+  enabled: true
+  roots:
+    - "E:/DCIM"
+  poll_interval_seconds: 10
+  stable_seconds: 30
+```
+
+The watcher imports directories containing configured image extensions (JPEG by default). It does not copy card contents, watch video-only folders, or retry a folder once its fingerprint has been claimed; move/copy edited media to a new folder if a new import is intended.
+
 ### Backend
 
 ```bash

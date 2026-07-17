@@ -200,6 +200,45 @@ def get_ingest_config(path: str = "config.yaml") -> dict:
     return _ingest_config_from_data(data)
 
 
+def get_auto_import_config(path: str = "config.yaml") -> dict:
+    """Return the opt-in SD-card/watch-folder import configuration.
+
+    This deliberately lives outside the normal import paths: watched folders are
+    an explicit allowlist and are never inferred from a mounted drive.
+    """
+    try:
+        with open(path) as f:
+            data = yaml.safe_load(f) or {}
+    except FileNotFoundError:
+        data = {}
+
+    defaults = {
+        "enabled": False,
+        "roots": [],
+        "poll_interval_seconds": 10,
+        "stable_seconds": 30,
+    }
+    configured = data.get("auto_import", {})
+    if not isinstance(configured, dict):
+        return defaults
+    result = {**defaults, **configured}
+    result["enabled"] = bool(result["enabled"])
+    roots = result["roots"]
+    if isinstance(roots, list):
+        result["roots"] = [str(root) for root in roots if isinstance(root, str)]
+    else:
+        result["roots"] = []
+    try:
+        result["poll_interval_seconds"] = max(1, int(result["poll_interval_seconds"]))
+    except (TypeError, ValueError):
+        result["poll_interval_seconds"] = defaults["poll_interval_seconds"]
+    try:
+        result["stable_seconds"] = max(0, int(result["stable_seconds"]))
+    except (TypeError, ValueError):
+        result["stable_seconds"] = defaults["stable_seconds"]
+    return result
+
+
 def default_render_config() -> dict:
     """Return render defaults without reading config.yaml."""
     return _render_config_from_data({})
