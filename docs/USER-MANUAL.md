@@ -42,7 +42,11 @@ across 19 routers.
   scoring (OpenCV); DJI XMP parsing for relative altitude, yaw, and gimbal pitch.
 - **Session organization:** tags (short labels, max 40 chars) and free-text
   operator notes per session via `PATCH /sessions/{id}`; edit them in the Map
-  tab's session sidebar and filter the session picker by tag.
+  tab's session sidebar and filter the session picker by tag. The top-bar
+  **Bulk** picker can select visible sessions to assign a project, add or
+  replace tags, or archive each with the normal portable bundle. It reports an
+  outcome for every selected session; deletion requires typing the exact value
+  `DELETE` and uses the same cleanup path as a single-session delete.
 - **Geometry & coverage:** ground-footprint computation (Shapely/UTM from
   altitude + heading); coverage analysis against drawn target areas with gap and
   overlap detection.

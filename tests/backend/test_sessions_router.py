@@ -191,6 +191,114 @@ def test_patch_session_not_found(client):
     assert resp.status_code == 404
 
 
+# ---- bulk operations (issue #391) ----
+
+
+def test_bulk_assign_project_and_update_tags(client):
+    project = client.post("/projects/", json={"name": "Bulk Site"}).json()
+    first = _make_session(client, name="First")
+    second = _make_session(client, name="Second")
+    client.patch(f"/sessions/{first.id}", json={"tags": ["roof"]})
+
+    assigned = client.post(
+        "/sessions/bulk",
+        json={
+            "session_ids": [first.id, second.id],
+            "operation": "assign_project",
+            "project_id": project["id"],
+        },
+    )
+    assert assigned.status_code == 200
+    assert [outcome["ok"] for outcome in assigned.json()["outcomes"]] == [True, True]
+
+    added = client.post(
+        "/sessions/bulk",
+        json={
+            "session_ids": [first.id, second.id],
+            "operation": "add_tags",
+            "tags": [" solar ", "roof"],
+        },
+    )
+    assert added.status_code == 200
+    assert client.get(f"/sessions/{first.id}").json()["tags"] == ["roof", "solar"]
+    assert client.get(f"/sessions/{second.id}").json()["tags"] == ["solar", "roof"]
+
+    replaced = client.post(
+        "/sessions/bulk",
+        json={"session_ids": [first.id, second.id], "operation": "replace_tags", "tags": ["north"]},
+    )
+    assert replaced.status_code == 200
+    assert client.get(f"/sessions/{first.id}").json()["tags"] == ["north"]
+    assert client.get(f"/sessions/{second.id}").json()["project_id"] == project["id"]
+
+
+def test_bulk_reports_missing_and_failed_archives_without_hiding_successes(client, tmp_path):
+    first = _make_session(client, name="Archive first")
+    second = _make_session(client, name="Archive second")
+
+    def build_archive(zip_path, session, _db):
+        if session.id == second.id:
+            raise OSError("disk full")
+        return {"bundle_path": str(zip_path)}
+
+    cfg = type("Cfg", (), {"exports_dir": str(tmp_path / "exports")})()
+    with (
+        patch("backend.routers.sessions.get_config", return_value=cfg),
+        patch("backend.services.session_bundle.build_session_archive", side_effect=build_archive),
+    ):
+        response = client.post(
+            "/sessions/bulk",
+            json={"session_ids": [first.id, 999999, second.id], "operation": "archive"},
+        )
+
+    assert response.status_code == 200
+    outcomes = response.json()["outcomes"]
+    assert outcomes == [
+        {
+            "session_id": first.id,
+            "ok": True,
+            "error": None,
+            "bundle_path": str(tmp_path / "exports" / f"session_{first.id}_archive.zip"),
+        },
+        {"session_id": 999999, "ok": False, "error": "Session not found", "bundle_path": None},
+        {"session_id": second.id, "ok": False, "error": "disk full", "bundle_path": None},
+    ]
+
+
+def test_bulk_delete_requires_confirmation_and_deletes_each_selected_session(client):
+    first = _make_session(client, name="Delete first")
+    second = _make_session(client, name="Delete second")
+
+    rejected = client.post(
+        "/sessions/bulk",
+        json={"session_ids": [first.id], "operation": "delete", "confirm": "yes"},
+    )
+    assert rejected.status_code == 422
+    assert client.get(f"/sessions/{first.id}").status_code == 200
+
+    deleted = client.post(
+        "/sessions/bulk",
+        json={"session_ids": [first.id, second.id], "operation": "delete", "confirm": "DELETE"},
+    )
+    assert deleted.status_code == 200
+    assert [outcome["ok"] for outcome in deleted.json()["outcomes"]] == [True, True]
+    assert client.get(f"/sessions/{first.id}").status_code == 404
+    assert client.get(f"/sessions/{second.id}").status_code == 404
+
+
+def test_bulk_validates_ids_and_project(client):
+    invalid_ids = client.post(
+        "/sessions/bulk", json={"session_ids": [0, 0], "operation": "archive"}
+    )
+    assert invalid_ids.status_code == 422
+
+    missing_project = client.post(
+        "/sessions/bulk",
+        json={"session_ids": [1], "operation": "assign_project", "project_id": 999999},
+    )
+    assert missing_project.status_code == 404
+
+
 # ---- cross-session search (issue #390) ----
 
 
