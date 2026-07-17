@@ -178,7 +178,13 @@ def export_compact_splat(
             quats=cloud.quats[order],
         )
 
-    out_path = Path(get_config().exports_dir) / f"reconstruction_{reconstruction_id}_{preset}.splat"
+    from ..services.reconstruction import _safe_export_path
+
+    exports_dir = Path(get_config().exports_dir)
+    # preset is user-supplied and lands in the filename; confine the resolved path to
+    # exports_dir (matches _safe_export_http_path / _safe_manifest_artifact_path elsewhere).
+    out_path = _safe_export_path(exports_dir / f"reconstruction_{reconstruction_id}_{preset}.splat",
+                                 exports_dir)
     ply_io.write_splat(cloud, out_path)
     return {
         "splat_path": str(out_path),
