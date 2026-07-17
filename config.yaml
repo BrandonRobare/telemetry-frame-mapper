@@ -19,6 +19,15 @@ processed_dir: "./processed"
 exports_dir: "./exports"
 data_dir: "./data"
 
+# Local JSONL application log. Rotation retains up to five 10 MiB backups.
+logging:
+  enabled: true
+  level: INFO
+  directory: "./logs"
+  filename: "backend.jsonl"
+  max_bytes: 10485760
+  backup_count: 5
+
 reconstruction:
   default_preset: quick
   colmap_threads: 8

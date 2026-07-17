@@ -8,6 +8,7 @@ from pathlib import Path
 
 import yaml
 
+from backend.core.application_logging import logging_config
 from backend.services.camera_calibration import default_camera_profiles, normalize_profiles
 
 
@@ -356,3 +357,13 @@ def get_backup_schedule_config(path: str = "config.yaml") -> dict:
     schedule = backup.get("schedule", {}) if isinstance(backup, dict) else {}
     defaults = {"enabled": False, "target": "", "daily_at": "02:00"}
     return {**defaults, **schedule} if isinstance(schedule, dict) else defaults
+
+
+def get_logging_config(path: str = "config.yaml") -> dict:
+    """Return validated local application logging settings from config.yaml."""
+    try:
+        with open(path) as f:
+            data = yaml.safe_load(f) or {}
+    except FileNotFoundError:
+        data = {}
+    return logging_config(data, path)

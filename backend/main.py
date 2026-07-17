@@ -14,7 +14,8 @@ from starlette.responses import Response
 from starlette.routing import Match, Mount
 from starlette.types import Scope
 
-from backend.core.config import get_config
+from backend.core.application_logging import configure_application_logging
+from backend.core.config import get_config, get_logging_config
 from backend.db.database import init_db
 
 from .routers import annotations as annotations_router
@@ -46,6 +47,7 @@ from .routers import uploads as uploads_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    configure_application_logging(get_logging_config())
     init_db()
     from backend.services.artifact_backup_schedule import scheduled_backup_from_config
     from backend.services.auto_import import AutoImportWatcher
