@@ -105,6 +105,10 @@ When a job finishes (complete, failed, or cancelled) the app shows a toast from 
 - **GeoJSON** — frame positions/footprints,
 - **Point cloud (LAS 1.4)** — from the COLMAP sparse model, colorized from the splat when present, UTM CRS embedded,
 - **DSM GeoTIFF** — `POST /export/reconstructions/{id}/elevation?product=dsm&resolution_m=0.25`
+- **Slope heatmap** — after exporting that DSM, enable **Slope** in the Map tab's Layers
+  control. The map requests `GET /export/reconstructions/{id}/slope`, which caches a transparent
+  PNG at `exports/{id}/slope.png`; its `X-Slope-Bounds` header provides Leaflet bounds. Pixels without
+  neighbouring DSM elevations remain transparent, and a missing DSM returns 422 rather than a fake slope.
   rasterizes the cached LAS point cloud at the requested metre grid resolution. Empty cells are `-9999` nodata.
   `product=dem` is available only when that LAS has ASPRS ground (class 2) labels; otherwise the API returns 422
   rather than treating non-ground surfaces as terrain,
