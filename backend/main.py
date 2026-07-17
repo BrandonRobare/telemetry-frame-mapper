@@ -43,6 +43,7 @@ from .routers import storage as storage_router
 from .routers import system as system_router
 from .routers import target_areas as target_areas_router
 from .routers import uploads as uploads_router
+from .routers import webodm as webodm_router
 
 
 @asynccontextmanager
@@ -104,6 +105,7 @@ app.include_router(storage_router.router)
 app.include_router(settings_router.router)
 app.include_router(uploads_router.router)
 app.include_router(share_links_router.router)
+app.include_router(webodm_router.router)
 
 app.add_middleware(
     CORSMiddleware,

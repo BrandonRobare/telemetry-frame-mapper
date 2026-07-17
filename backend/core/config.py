@@ -209,6 +209,40 @@ def get_remote_worker_config(path: str = "config.yaml") -> dict:
     return result
 
 
+def get_webodm_config(path: str = "config.yaml") -> dict:
+    """Return the explicitly opt-in WebODM connection settings.
+
+    ``jwt_env`` names an environment variable; the JWT itself is deliberately
+    never read from or written to YAML.
+    """
+    try:
+        with open(path) as f:
+            data = yaml.safe_load(f) or {}
+    except FileNotFoundError:
+        data = {}
+
+    defaults = {
+        "enabled": False,
+        "url": "",
+        "jwt_env": "WEBODM_JWT",
+        "timeout_seconds": 30,
+        "allow_insecure_http": False,
+    }
+    configured = data.get("webodm", {})
+    if not isinstance(configured, dict):
+        return defaults
+    result = {**defaults, **configured}
+    result["enabled"] = bool(result["enabled"])
+    result["url"] = str(result["url"]).rstrip("/")
+    result["jwt_env"] = str(result["jwt_env"])
+    result["allow_insecure_http"] = bool(result["allow_insecure_http"])
+    try:
+        result["timeout_seconds"] = max(1, int(result["timeout_seconds"]))
+    except (TypeError, ValueError):
+        result["timeout_seconds"] = defaults["timeout_seconds"]
+    return result
+
+
 def default_ingest_config() -> dict:
     """Return ingest defaults without reading config.yaml."""
     return _ingest_config_from_data({})
