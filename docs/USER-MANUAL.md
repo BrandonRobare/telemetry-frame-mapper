@@ -52,7 +52,14 @@ across 19 routers.
   overlap detection.
 - **Mission planning:** lawnmower flight-plan generation with KML/GPX export and
   battery-count estimates.
-- **Flight-log sync:** match DJI FlightRecord CSV timestamps to frames.
+- **Flight-log sync:** upload a supported telemetry CSV, preview timing deltas, then
+  match positions to frames. Supported header contracts are DJI FlightRecord
+  (`time(millisecond)`, `OSD.latitude`, `OSD.longitude`, optional
+  `OSD.altitude[m]`), Autel (`Time(ms)`, `Latitude`, `Longitude`, `Altitude(m)`),
+  Parrot fdr-lite (`time`, `latitude`, `longitude`, `altitude`), and ArduPilot
+  MAVExplorer POS (`timestamp`, `TimeUS`, `Lat`, `Lng`, `Alt`). CSV uploads with
+  missing or unrecognized coordinate headers are rejected; this app does not
+  fabricate a position.
 - **Battery/flight records:** per-session operator field records
   (`/sessions/{id}/flight-entries`) — battery ID, start/end charge %, flight
   duration (derived from flight-log telemetry when omitted), and notes.
