@@ -41,6 +41,8 @@ FastAPI app (`backend.main:app`), SQLite via SQLAlchemy (PostgreSQL-swappable th
   - `geopackage_export.py` — writes the populated mapped-product layers in the configured
     target CRS. It reuses persisted geometry only; DSM/DEM sidecars are attribute-table
     references rather than embedded raster data.
+  - `gis_project_files.py` — writes deterministic QGIS `.qgz` and ArcGIS Pro `.lyrx`
+    references beside the current mapped-products GeoPackage, without a GIS SDK.
   - `reconstruction.py` — the heavy pipeline (below).
   - `colmap_io.py` / `ply_io.py` / `splat_trainer.py` — COLMAP sparse-model loader (numpy), INRIA-layout 3DGS PLY I/O + opacity-prune LODs (numpy), and the gsplat training loop (torch/gsplat, lazily imported so the backend never requires them).
 - **Config:** `config.yaml` at repo root → `AppConfig` dataclass; relative directory settings resolve against the config file's location. Reconstruction presets (`quick`/`full`) live under the `reconstruction:` key.
