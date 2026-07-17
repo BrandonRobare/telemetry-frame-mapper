@@ -3,20 +3,255 @@ from __future__ import annotations
 import csv
 import io
 import json
+import os
 import zipfile
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response
+from shapely.geometry import LineString, Point, shape
 from sqlalchemy.orm import Session as DBSession
 
 from ..core.config import get_config
 from ..db.database import get_db
-from ..db.models import Image, Measurement, Reconstruction
+from ..db.models import FlightLog, FlightLogPoint, Footprint, Image, Measurement, Reconstruction
 from ..db.models import Session as SessionModel
 from ..services.geometry_exports import feature_collection, geometry_feature
 
 router = APIRouter(prefix="/export", tags=["export"])
+
+
+@router.get("/reconstructions/{reconstruction_id}/geopackage")
+def export_geopackage(
+    reconstruction_id: int,
+    comparison_id: int | None = None,
+    db: DBSession = Depends(get_db),
+):
+    """Download mapped session products as a target-CRS, multi-layer GeoPackage.
+
+    A layer is written only when its persisted source geometry is available. DSM
+    and DEM files are recorded as external references, never embedded or created.
+    """
+    reconstruction = (
+        db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).first()
+    )
+    if not reconstruction:
+        raise HTTPException(status_code=404, detail="Reconstruction not found")
+
+    try:
+        from ..services.geopackage_export import write_geopackage
+
+        layers = _geopackage_layers(reconstruction, comparison_id, db)
+        rasters = _elevation_sidecars(reconstruction)
+        output_dir = Path(get_config().exports_dir) / str(reconstruction_id)
+        output_path = output_dir / "mapped_products.gpkg"
+        temporary_path = output_path.with_name(f"{output_path.stem}.tmp{output_path.suffix}")
+        write_geopackage(temporary_path, layers, get_config().target_crs, rasters)
+        os.replace(temporary_path, output_path)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    filename = f"reconstruction_{reconstruction_id}_mapped_products.gpkg"
+    return FileResponse(
+        output_path,
+        media_type="application/geopackage+sqlite3",
+        filename=filename,
+    )
+
+
+def _geopackage_layers(
+    reconstruction: Reconstruction, comparison_id: int | None, db: DBSession
+) -> list[tuple[str, list[dict], str]]:
+    session_id = reconstruction.session_id
+    layers: list[tuple[str, list[dict], str]] = []
+    image_records = []
+    for image in db.query(Image).filter(Image.session_id == session_id).order_by(Image.id):
+        if image.latitude is None or image.longitude is None:
+            continue
+        image_records.append({
+            "image_id": image.id,
+            "filename": image.filename,
+            "timestamp": image.timestamp.isoformat() if image.timestamp else None,
+            "altitude_m": image.altitude_m,
+            "gps_source": image.gps_source,
+            "usable": image.usable,
+            "geometry": Point(image.longitude, image.latitude),
+        })
+    layers.append(("image_locations", image_records, "EPSG:4326"))
+
+    footprint_records = []
+    footprint_rows = (
+        db.query(Footprint, Image)
+        .join(Image, Image.id == Footprint.image_id)
+        .filter(Image.session_id == session_id)
+        .order_by(Image.id)
+        .all()
+    )
+    for footprint, image in footprint_rows:
+        geometry = _shape_geometry(footprint.geom_geojson)
+        if geometry is None:
+            continue
+        footprint_records.append({
+            "footprint_id": footprint.id,
+            "image_id": image.id,
+            "filename": image.filename,
+            "ground_width_m": footprint.ground_width_m,
+            "ground_height_m": footprint.ground_height_m,
+            "heading_estimated": footprint.heading_estimated,
+            "pitch_oblique": footprint.pitch_oblique,
+            "geometry": geometry,
+        })
+    layers.append(("footprints", footprint_records, "EPSG:4326"))
+
+    flight_records = []
+    flight_logs = (
+        db.query(FlightLog).filter(FlightLog.session_id == session_id).order_by(FlightLog.id)
+    )
+    for flight_log in flight_logs:
+        points = (
+            db.query(FlightLogPoint)
+            .filter(FlightLogPoint.flight_log_id == flight_log.id)
+            .filter(FlightLogPoint.latitude.is_not(None), FlightLogPoint.longitude.is_not(None))
+            .order_by(FlightLogPoint.timestamp, FlightLogPoint.id)
+            .all()
+        )
+        if len(points) < 2:
+            continue
+        flight_records.append({
+            "flight_log_id": flight_log.id,
+            "filename": flight_log.filename,
+            "point_count": len(points),
+            "geometry": LineString([(point.longitude, point.latitude) for point in points]),
+        })
+    layers.append(("flight_paths", flight_records, "EPSG:4326"))
+
+    coverage_records, coverage_crs = _coverage_gap_records(reconstruction)
+    layers.append(("coverage_gaps", coverage_records, coverage_crs))
+
+    measurement_records = []
+    measurements = (
+        db.query(Measurement)
+        .filter(Measurement.reconstruction_id == reconstruction.id)
+        .order_by(Measurement.created_at, Measurement.id)
+    )
+    for measurement in measurements:
+        try:
+            geometry = _measurement_geometry(measurement.kind, json.loads(measurement.points_json))
+        except (json.JSONDecodeError, TypeError):
+            geometry = None
+        if not geometry:
+            continue
+        measurement_records.append({
+            "measurement_id": measurement.id,
+            "kind": measurement.kind,
+            "label": measurement.label,
+            "value": measurement.value,
+            "unit": measurement.unit,
+            "created_at": measurement.created_at.isoformat(),
+            "geometry": shape(geometry),
+        })
+    layers.append(("measurements", measurement_records, "EPSG:4326"))
+
+    comparison_records, comparison_crs = _comparison_records(reconstruction, comparison_id, db)
+    layers.append(("comparison_change_cells", comparison_records, comparison_crs))
+    return layers
+
+
+def _shape_geometry(raw_geometry: str | None):
+    if not raw_geometry:
+        return None
+    try:
+        return shape(json.loads(raw_geometry))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return None
+
+
+def _coverage_gap_records(reconstruction: Reconstruction) -> tuple[list[dict], str]:
+    if not reconstruction.coverage_gaps_path:
+        return [], "EPSG:4326"
+    try:
+        import numpy as np
+
+        cells = json.loads(Path(reconstruction.coverage_gaps_path).read_text(encoding="utf-8"))
+        from ..services.reconstruction import (
+            _load_geo_transform_for_reconstruction,
+            _utm_epsg,
+            _world_points_to_utm,
+        )
+
+        geo_transform = _load_geo_transform_for_reconstruction(reconstruction)
+        epsg = _utm_epsg(str(geo_transform.get("utm_zone", "")))
+        if epsg is None:
+            return [], "EPSG:4326"
+        valid_cells = [
+            cell for cell in cells
+            if all(isinstance(cell.get(key), (int, float)) for key in ("x", "y", "z", "size"))
+        ]
+        if not valid_cells:
+            return [], f"EPSG:{epsg}"
+        world_points = np.asarray([[cell["x"], cell["y"], cell["z"]] for cell in valid_cells])
+        utm_points = _world_points_to_utm(world_points, geo_transform)
+    except (OSError, TypeError, ValueError, json.JSONDecodeError):
+        return [], "EPSG:4326"
+
+    records = [
+        {
+            "reconstruction_id": reconstruction.id,
+            "level": cell.get("level"),
+            "size_m": cell["size"],
+            "geometry": Point(x, y, z),
+        }
+        for cell, (x, y, z) in zip(valid_cells, utm_points, strict=True)
+    ]
+    return records, f"EPSG:{epsg}"
+
+
+def _comparison_records(
+    reconstruction: Reconstruction, comparison_id: int | None, db: DBSession
+) -> tuple[list[dict], str]:
+    if comparison_id is None:
+        return [], "EPSG:4326"
+    from ..db.models import SessionComparison
+    from ..services.reconstruction import _utm_epsg
+
+    comparison = db.query(SessionComparison).filter(SessionComparison.id == comparison_id).first()
+    if comparison is None:
+        raise ValueError("Comparison not found")
+    if reconstruction.id not in {comparison.reconstruction_a_id, comparison.reconstruction_b_id}:
+        raise ValueError("Comparison does not include this reconstruction")
+    if comparison.status != "complete" or not comparison.diff_path:
+        return [], "EPSG:4326"
+    try:
+        diff = json.loads(Path(comparison.diff_path).read_text(encoding="utf-8"))
+        epsg = _utm_epsg(str(diff.get("utm_zone") or ""))
+        if epsg is None:
+            return [], "EPSG:4326"
+    except (OSError, TypeError, ValueError, json.JSONDecodeError):
+        return [], "EPSG:4326"
+
+    records = []
+    for change_type in ("new", "removed"):
+        for cell in diff.get(change_type, []):
+            if not all(isinstance(cell.get(key), (int, float)) for key in ("x", "y", "z", "size")):
+                continue
+            records.append({
+                "comparison_id": comparison.id,
+                "change_type": change_type,
+                "size_m": cell["size"],
+                "geometry": Point(cell["x"], cell["y"], cell["z"]),
+            })
+    return records, f"EPSG:{epsg}"
+
+
+def _elevation_sidecars(reconstruction: Reconstruction) -> list[dict]:
+    root = Path(get_config().exports_dir) / str(reconstruction.id)
+    return [
+        {"product": product, "path": str(path)}
+        for product in ("dsm", "dem")
+        if (path := root / f"{product}.tif").is_file()
+    ]
 
 
 @router.post("/webodm-georeferencing-csv")
