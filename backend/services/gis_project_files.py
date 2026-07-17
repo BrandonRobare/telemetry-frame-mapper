@@ -38,13 +38,16 @@ def write_gis_project_files(output_dir: Path) -> dict[str, list[str] | str]:
 
 
 def _geopackage_layers(geopackage: Path) -> list[str]:
-    with sqlite3.connect(geopackage) as connection:
+    connection = sqlite3.connect(geopackage)
+    try:
         return [
             row[0]
             for row in connection.execute(
                 "SELECT table_name FROM gpkg_contents WHERE data_type = 'features' ORDER BY rowid"
             )
         ]
+    finally:
+        connection.close()
 
 
 def _write_qgis_project(path: Path, layers: list[str], rasters: list[str]) -> None:
