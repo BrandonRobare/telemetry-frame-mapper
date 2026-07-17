@@ -134,6 +134,49 @@ def export_orthomosaic(reconstruction_id: int, db: DBSession = Depends(get_db)):
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
+@router.post("/reconstructions/{reconstruction_id}/elevation")
+def export_elevation(
+    reconstruction_id: int,
+    product: str,
+    resolution_m: float,
+    db: DBSession = Depends(get_db),
+):
+    """Create a DSM or ground-classified DEM GeoTIFF from a cached LAS point cloud."""
+    from ..services.elevation_export import export_elevation_geotiff
+    from ..services.reconstruction import _safe_export_path
+
+    rec = db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Reconstruction not found")
+    if rec.status != "complete":
+        raise HTTPException(
+            status_code=422, detail="Reconstruction must be complete before elevation export"
+        )
+    if product not in {"dsm", "dem"}:
+        raise HTTPException(status_code=422, detail="product must be dsm or dem")
+    if resolution_m <= 0:
+        raise HTTPException(status_code=422, detail="resolution_m must be greater than zero")
+    if not rec.pointcloud_path:
+        raise HTTPException(
+            status_code=422,
+            detail="LAS point cloud is unavailable; export the reconstruction point cloud first",
+        )
+
+    exports_dir = Path(get_config().exports_dir)
+    try:
+        pointcloud_path = _safe_export_path(Path(rec.pointcloud_path), exports_dir)
+        output_path = _safe_export_path(
+            exports_dir / str(rec.id) / f"{product}.tif", exports_dir
+        )
+        if not pointcloud_path.exists():
+            raise ValueError("LAS point cloud file not found on disk")
+        return export_elevation_geotiff(
+            pointcloud_path, output_path, product=product, resolution_m=resolution_m
+        )
+    except (ValueError, ImportError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
 # ponytail: flat {name: keep_ratio} dict, not a preset framework — add
 # structure only when a preset needs more than an opacity keep-ratio knob.
 _SPLAT_EXPORT_PRESETS = {
