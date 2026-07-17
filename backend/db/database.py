@@ -61,6 +61,11 @@ def init_db():
         # it as already up to date so a later `alembic upgrade head` doesn't
         # try to replay the baseline against tables that already exist.
         Base.metadata.create_all(bind=engine)
+        if engine.dialect.name == "sqlite":
+            from backend.db.session_search import install_session_search_schema
+
+            with engine.begin() as connection:
+                install_session_search_schema(connection)
         command.stamp(cfg, "head")
     else:
         # Pre-existing database (legacy create_all/_ensure_sqlite_schema DB,
