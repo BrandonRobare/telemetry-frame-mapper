@@ -19,6 +19,17 @@ export interface Session {
   project_id: number | null;
 }
 
+export type SessionSearchSource = 'session' | 'log' | 'defect'
+
+export interface SessionSearchMatch {
+  source: SessionSearchSource
+  snippet: string
+}
+
+export interface SessionSearchResult extends Session {
+  matches: SessionSearchMatch[]
+}
+
 export interface Image {
   id: number;
   session_id: number;
