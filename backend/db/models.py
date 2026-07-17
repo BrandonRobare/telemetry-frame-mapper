@@ -395,3 +395,14 @@ class JobQueueEntry(Base):
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     started_at = Column(DateTime)
     completed_at = Column(DateTime)
+
+
+class AutoImportRecord(Base):
+    """A claimed watch-folder import.  The unique manifest fingerprint survives restarts."""
+
+    __tablename__ = "auto_import_records"
+    id = Column(Integer, primary_key=True, index=True)
+    fingerprint = Column(String, nullable=False, unique=True, index=True)
+    source_path = Column(String, nullable=False)
+    session_id = Column(Integer, ForeignKey("sessions.id"), nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
