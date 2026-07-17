@@ -212,6 +212,19 @@ data, just no splat.
 SuGaR mesh, a server-rendered or browser-recorded flythrough MP4, GeoJSON, and a
 WebODM/OpenDroneMap georeferencing CSV-only zip.
 
+### GeoPackage mapped-product export
+
+`GET /export/reconstructions/{reconstruction_id}/geopackage` downloads a QGIS-ready
+GeoPackage in the configured project target CRS. Add `?comparison_id={id}` to include
+the completed comparison's changed voxel cells. The exporter writes only available
+layers, in this stable order: `image_locations`, `footprints`, `flight_paths`,
+`coverage_gaps`, `measurements`, and `comparison_change_cells`. Invalid or unavailable
+source geometry is skipped; the request remains useful for the layers that exist.
+
+If `exports/{reconstruction_id}/dsm.tif` or `dem.tif` already exists, the package adds
+the non-spatial `raster_references` table with its path. It does not create, copy, or
+embed raster data, so add that TIFF separately in QGIS when needed.
+
 ---
 
 ## 3. The gaussian-splat trainer
