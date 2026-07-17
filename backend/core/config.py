@@ -124,6 +124,7 @@ def _reconstruction_config_from_data(data: dict) -> dict:
         "mapper": "incremental",
         "spatial_matcher_min_images": 150,
         "camera_model": "PINHOLE",
+        "single_camera": True,
         "camera_profiles": default_camera_profiles(),
         "presets": {
             "quick": {

@@ -436,6 +436,34 @@ def test_run_colmap_supports_guided_matcher(tmp_path):
     matcher_cmd = run.call_args_list[1].args[0]
     assert matcher_cmd[1] == "exhaustive_matcher"
     assert "--SiftMatching.guided_matching=1" in matcher_cmd
+    feature_cmd = run.call_args_list[0].args[0]
+    assert feature_cmd[feature_cmd.index("--ImageReader.single_camera") + 1] == "1"
+
+
+def test_run_colmap_can_opt_into_per_camera_estimates(tmp_path):
+    """Disabling shared intrinsics lets COLMAP emit multiple camera estimates."""
+    import threading
+    from unittest.mock import MagicMock, patch
+
+    from backend.services.reconstruction import _run_colmap
+
+    colmap_dir = tmp_path / "colmap"
+    colmap_dir.mkdir()
+    _write_fake_images_txt(colmap_dir, 1)
+    cfg = {
+        "camera_model": "PINHOLE",
+        "single_camera": False,
+        "matcher": "exhaustive",
+        "sift_max_features": 8192,
+        "colmap_threads": 8,
+    }
+    success = MagicMock(returncode=0, stderr="")
+    with patch("backend.services.reconstruction.get_reconstruction_config", return_value=cfg), \
+         patch("backend.services.reconstruction.subprocess.run", return_value=success) as run:
+        _run_colmap(colmap_dir, lambda *_args: None, threading.Event())
+
+    feature_cmd = run.call_args_list[0].args[0]
+    assert feature_cmd[feature_cmd.index("--ImageReader.single_camera") + 1] == "0"
 
 
 def test_run_colmap_progress_callback_sequence_rebalanced(tmp_path):
