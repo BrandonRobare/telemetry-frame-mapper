@@ -15,6 +15,16 @@ class WebODMError(RuntimeError):
     """WebODM is unavailable, misconfigured, or returned an invalid response."""
 
 
+def validate_connection_config(config: dict) -> None:
+    """Fail fast when the operator has not enabled a usable WebODM connection.
+
+    This deliberately performs no network I/O.  Call it before queueing or
+    presenting WebODM as an available reconstruction backend.
+    """
+    _base_url(config)
+    _headers(config)
+
+
 def _base_url(config: dict) -> str:
     if not config.get("enabled"):
         raise WebODMError("WebODM integration is disabled in config.yaml")
