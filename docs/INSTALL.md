@@ -103,6 +103,30 @@ default). Check only the non-secret state at `GET /pin-lock/status`. Restarting 
 all unlock sessions. If the configured hash environment variable is absent, the backend refuses to
 start rather than silently running unlocked.
 
+### Optional automation API key
+
+For scripts that cannot retain the PIN unlock cookie, enable `api_key.enabled: true` alongside
+`pin_lock.enabled: true`. The key is an alternative credential for the same protected routes; it
+does not create a separate authentication system or make an otherwise-unlocked app private. Store
+only its scrypt hash in the named environment variable:
+
+```powershell
+$env:DRONE_MAPPING_API_KEY_HASH = python -c "from getpass import getpass; from backend.services.share_links import hash_password; print(hash_password(getpass('API key: ')))"
+```
+
+The prompt does not echo or store the key in shell history. After restarting the backend, send the
+plain key only in the `X-Drone-Mapping-Key` request header, for example:
+
+```powershell
+curl.exe -H "X-Drone-Mapping-Key: your-key" http://127.0.0.1:8000/sessions
+```
+
+Never put the plain key in `config.yaml`, a URL, or a script committed to source control. To revoke
+it, replace the environment variable with a newly generated hash and restart the backend; every
+previous key immediately stops working. An enabled API-key block without an enabled, valid PIN lock
+is rejected at startup. `/metrics` intentionally remains unauthenticated for local Prometheus
+scraping, exactly as documented below.
+
 ### Prometheus metrics
 
 `GET /metrics` remains reachable without an unlock cookie, including while the optional PIN lock

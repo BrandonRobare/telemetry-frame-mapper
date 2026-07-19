@@ -13,6 +13,11 @@ def valid_pin(pin: str, pin_hash: str) -> bool:
     return verify_password(pin, pin_hash)
 
 
+def valid_api_key(api_key: str, key_hash: str) -> bool:
+    """Verify an automation key using the same constant-time scrypt check as a PIN."""
+    return verify_password(api_key, key_hash)
+
+
 def create_session(sessions: MutableMapping[str, float], ttl: int) -> str:
     """Store only a digest of a random cookie token; restarting drops sessions."""
     token = create_opaque_token()
