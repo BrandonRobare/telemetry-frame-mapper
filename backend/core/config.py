@@ -515,3 +515,42 @@ def get_deployment_config(path: str = "config.yaml") -> dict:
             raise ValueError("deployment.cors_origins must contain HTTP(S) origins without paths")
     result["cors_origins"] = [origin.rstrip("/") for origin in origins]
     return result
+
+
+def get_pin_lock_config(path: str = "config.yaml") -> dict:
+    """Return the opt-in, single-user local PIN lock configuration.
+
+    The PIN hash stays in the named environment variable, never in YAML.
+    Enabled-but-unusable configuration is rejected at startup rather than
+    accidentally exposing the app without a lock.
+    """
+    try:
+        with open(path) as f:
+            data = yaml.safe_load(f) or {}
+    except FileNotFoundError:
+        data = {}
+
+    defaults = {"enabled": False, "pin_hash_env": "DRONE_MAPPING_PIN_HASH", "session_ttl": 28800}
+    configured = data.get("pin_lock", {})
+    if not isinstance(configured, dict):
+        raise ValueError("pin_lock must be a mapping")
+    result = {**defaults, **configured}
+    if not isinstance(result["enabled"], bool):
+        raise ValueError("pin_lock.enabled must be true or false")
+    if not isinstance(result["pin_hash_env"], str) or not result["pin_hash_env"].strip():
+        raise ValueError("pin_lock.pin_hash_env must name an environment variable")
+    try:
+        result["session_ttl"] = max(60, int(result["session_ttl"]))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("pin_lock.session_ttl must be a positive number of seconds") from exc
+    if result["enabled"]:
+        pin_hash = os.environ.get(result["pin_hash_env"])
+        try:
+            salt, digest = pin_hash.split("$", 1) if pin_hash else ("", "")
+            if len(bytes.fromhex(salt)) != 16 or len(bytes.fromhex(digest)) != 64:
+                raise ValueError
+        except ValueError as exc:
+            raise ValueError(
+                f"pin_lock requires {result['pin_hash_env']} to contain a valid scrypt hash"
+            ) from exc
+    return result
