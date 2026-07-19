@@ -37,6 +37,7 @@ from .routers import georeferencing as georeferencing_router
 from .routers import images as images_router
 from .routers import jobs as jobs_router
 from .routers import measurements as measurements_router
+from .routers import metrics as metrics_router
 from .routers import plans as plans_router
 from .routers import projects as projects_router
 from .routers import reconstruction as reconstruction_router
@@ -103,6 +104,7 @@ app.include_router(reconstruction_router.router)
 app.include_router(annotations_router.router)
 app.include_router(auto_import_router.router)
 app.include_router(measurements_router.router)
+app.include_router(metrics_router.router)
 app.include_router(defects_router.router)
 app.include_router(comparisons_router.router)
 app.include_router(system_router.router)
@@ -137,6 +139,7 @@ def health():
 PIN_LOCK_COOKIE_NAME = "tfm_pin_unlock"
 PIN_LOCK_OPEN_PATHS = {
     "/health",
+    "/metrics",
     "/docs",
     "/openapi.json",
     "/redoc",
