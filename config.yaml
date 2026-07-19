@@ -89,6 +89,15 @@ remote_worker:
   poll_interval_seconds: 2
   allow_insecure_http: false
 
+# Optional WebODM API integration. Keep disabled by default and put the JWT
+# only in the named environment variable, never in this file.
+webodm:
+  enabled: false
+  url: ""
+  jwt_env: "WEBODM_JWT"
+  timeout_seconds: 30
+  allow_insecure_http: false
+
 ingest:
   thumbnail_size_px: 200
   thumbnail_jpeg_quality: 75
