@@ -15,7 +15,7 @@ interface SyncedViewport {
   lat: number
   lon: number
   zoom: number
-  source: 'leaflet' | '3d'
+  source: 'leaflet' | '3d' | `comparison:${number}`
 }
 
 interface MapStore {
