@@ -223,6 +223,35 @@ data, just no splat.
 SuGaR mesh, a server-rendered or browser-recorded flythrough MP4, GeoJSON, and a
 WebODM/OpenDroneMap georeferencing CSV-only zip.
 
+### Pix4D and DroneDeploy control-point CSVs
+
+The API can translate surveyed WGS84 control points for either **Pix4D** or
+**DroneDeploy** without storing them in the project database:
+
+- `POST /georeferencing/control-points/import` accepts `{"format":"pix4d"|"dronedeploy","contents":"..."}`.
+- `POST /georeferencing/control-points/export` accepts `{"format":"pix4d"|"dronedeploy","points":[...]}` and returns CSV text.
+
+Both supported mappings are deliberately limited to the shared geographic
+contract: no header row, one row per point as
+`label,latitude,longitude,elevation_m` in WGS84/EPSG:4326. Latitude is column
+2 and longitude is column 3. The importer rejects headers, empty labels,
+duplicate labels, non-numeric elevations, malformed rows, and coordinates
+outside WGS84 ranges. Pix4D projected-coordinate/accuracy variants are not
+converted by this WGS84 endpoint; choose the coordinate system in Pix4D when
+importing a projected survey file.
+
+Example export request:
+
+```json
+{
+  "format": "dronedeploy",
+  "points": [{"label": "north-pad", "latitude": 41.2, "longitude": -81.5, "altitude_m": 300.25}]
+}
+```
+
+The returned `contents` is `north-pad,41.20000000,-81.50000000,300.250` plus a
+newline, ready to save as a `.csv` for either supported WGS84 workflow.
+
 ### GeoPackage mapped-product export
 
 `GET /export/reconstructions/{reconstruction_id}/geopackage` downloads a QGIS-ready
