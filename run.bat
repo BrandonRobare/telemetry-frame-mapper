@@ -32,8 +32,8 @@ if defined _VSPATH if exist "%_VSPATH%\VC\Auxiliary\Build\vcvars64.bat" (
     echo Visual Studio C++ tools not found - splat training will be skipped (colmap_only). See docs\SETUP.md.
 )
 
-echo Starting backend on http://localhost:8000 ...
-start "Backend" cmd /k "uvicorn backend.main:app --port 8000"
+echo Starting backend with config.yaml deployment settings ...
+start "Backend" cmd /k "python -m backend"
 
 where npm >nul 2>nul
 if not errorlevel 1 if exist "frontend\" (

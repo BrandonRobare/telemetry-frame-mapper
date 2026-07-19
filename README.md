@@ -201,12 +201,22 @@ The watcher imports directories containing configured image extensions (JPEG by 
 ### Backend
 
 ```bash
-uvicorn backend.main:app --reload
+python -m backend
 # API at http://localhost:8000
 # Interactive docs at http://localhost:8000/docs
 ```
 
-Optional: copy `config.yaml.example` to `config.yaml` and adjust mission parameters (altitude, FOV, overlap, target CRS). Upload limits are configurable in `config.yaml` under `upload_limits` (`flight_log_max_bytes` and `srt_max_bytes`, both 10 MiB by default).
+`python -m backend` reads the `deployment` section of `config.yaml`. It stays loopback-only by default. To serve a trusted LAN frontend, explicitly set the bind address and each allowed browser origin; do not use wildcard origins.
+
+```yaml
+deployment:
+  host: "192.168.1.50"
+  port: 8000
+  cors_origins:
+    - "http://192.168.1.50:5173"
+```
+
+For development reloads, pass host and port directly to `uvicorn backend.main:app --reload`; its command-line values take precedence. Upload limits are configurable in `config.yaml` under `upload_limits` (`flight_log_max_bytes` and `srt_max_bytes`, both 10 MiB by default).
 
 ### Reconstruction share links
 
