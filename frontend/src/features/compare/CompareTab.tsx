@@ -15,6 +15,7 @@ import type {
 import { formatComparisonSummary, normalizeCellsForOverlay, visibleComparisonCells } from './formatDiff'
 import { formatTrendDate, formatTrendPercent, formatTrendValue } from './formatTrends'
 import { comparisonGridJobs } from './comparisonGrid'
+import CompareMapPane from './CompareMapPane'
 import TabHeader from '../../shared/components/TabHeader'
 
 const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
@@ -303,7 +304,7 @@ export default function CompareTab() {
             </div>
             <div>
               <p className="text-xs" style={{ color: 'var(--text-muted)', margin: '0 0 8px' }}>
-                Add up to two completed reconstructions for a 3–4-up review. The first two remain the backend diff pair.
+                Add up to two completed reconstructions for a 3–4-up synchronized map-context review. The first two remain the backend diff pair.
               </p>
               <div className="grid gap-4" style={{ gridTemplateColumns: '1fr 1fr' }}>
                 <label className="flex flex-col gap-1 text-xs" style={{ color: 'var(--text-muted)' }}>
@@ -331,6 +332,7 @@ export default function CompareTab() {
                       <p className="text-xs" style={{ color: 'var(--text-muted)', margin: '2px 0 0' }}>Reconstruction #{job.id} · {job.preset}</p>
                     </div>
                     <p className="text-xs" style={{ color: 'var(--text-muted)', margin: 0 }}>{job.frames_used} frames · {job.status}</p>
+                    <CompareMapPane reconstructionId={job.id} />
                     <Button variant="ghost" size="sm" onClick={() => openInViewer(job)}>Open synced 3D view</Button>
                   </article>
                 ))}
