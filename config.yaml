@@ -35,6 +35,12 @@ pin_lock:
   pin_hash_env: "DRONE_MAPPING_PIN_HASH"
   session_ttl: 28800
 
+# Optional scripted access for a PIN-locked deployment. Store only the scrypt
+# hash in this named environment variable; clients send X-Drone-Mapping-Key.
+api_key:
+  enabled: false
+  key_hash_env: "DRONE_MAPPING_API_KEY_HASH"
+
 # Local JSONL application log. Rotation retains up to five 10 MiB backups.
 logging:
   enabled: true

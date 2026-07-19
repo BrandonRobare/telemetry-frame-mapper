@@ -558,3 +558,35 @@ def get_pin_lock_config(path: str = "config.yaml") -> dict:
                 f"pin_lock requires {result['pin_hash_env']} to contain a valid scrypt hash"
             ) from exc
     return result
+
+
+def get_api_key_config(path: str = "config.yaml") -> dict:
+    """Return the optional automation key configuration for a PIN-locked app."""
+    try:
+        with open(path) as f:
+            data = yaml.safe_load(f) or {}
+    except FileNotFoundError:
+        data = {}
+
+    defaults = {"enabled": False, "key_hash_env": "DRONE_MAPPING_API_KEY_HASH"}
+    configured = data.get("api_key", {})
+    if not isinstance(configured, dict):
+        raise ValueError("api_key must be a mapping")
+    result = {**defaults, **configured}
+    if not isinstance(result["enabled"], bool):
+        raise ValueError("api_key.enabled must be true or false")
+    if not isinstance(result["key_hash_env"], str) or not result["key_hash_env"].strip():
+        raise ValueError("api_key.key_hash_env must name an environment variable")
+    if result["enabled"]:
+        if not get_pin_lock_config(path)["enabled"]:
+            raise ValueError("api_key.enabled requires pin_lock.enabled")
+        key_hash = os.environ.get(result["key_hash_env"])
+        try:
+            salt, digest = key_hash.split("$", 1) if key_hash else ("", "")
+            if len(bytes.fromhex(salt)) != 16 or len(bytes.fromhex(digest)) != 64:
+                raise ValueError
+        except ValueError as exc:
+            raise ValueError(
+                f"api_key requires {result['key_hash_env']} to contain a valid scrypt hash"
+            ) from exc
+    return result
