@@ -17,7 +17,7 @@ from shapely.geometry import LineString, Point, shape
 from sqlalchemy.orm import Session as DBSession
 from starlette.background import BackgroundTask
 
-from ..core.config import get_config
+from ..core.config import get_cesium_ion_config, get_config
 from ..db.database import get_db
 from ..db.models import (
     FlightLog,
@@ -399,6 +399,24 @@ def export_reconstruction_share_bundle(reconstruction_id: int, db: DBSession = D
             Path(get_config().exports_dir) / f"reconstruction_{reconstruction_id}_share.zip", rec
         )
     except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post("/reconstructions/{reconstruction_id}/cesium-ion")
+def upload_reconstruction_to_cesium_ion(reconstruction_id: int, db: DBSession = Depends(get_db)):
+    """Publish the existing Cesium-ready 3D Tiles share bundle to Cesium ion."""
+    from ..services.cesium_ion import CesiumIonError, upload_tileset
+    from ..services.share_bundle import build_share_bundle
+
+    rec = db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Reconstruction not found")
+    bundle = Path(get_config().exports_dir) / f"reconstruction_{reconstruction_id}_share.zip"
+    try:
+        build_share_bundle(bundle, rec)
+        name = f"Reconstruction {reconstruction_id}"
+        return upload_tileset(get_cesium_ion_config(), bundle, name)
+    except (CesiumIonError, ValueError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
