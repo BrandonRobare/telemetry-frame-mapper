@@ -282,6 +282,16 @@ JSON file. Neither export creates, copies, or embeds raster data.
 
 ---
 
+### Orthomosaic tiles (WMS / WMTS-style)
+
+After an orthomosaic export finishes, discover its layer with
+`GET /tiles/{reconstruction_id}/wms?SERVICE=WMS&REQUEST=GetCapabilities`.
+The layer name is `reconstruction-{reconstruction_id}`. Request a WMS PNG in Web
+Mercator with `REQUEST=GetMap`, `LAYERS`, `CRS=EPSG:3857`, `BBOX=west,south,east,north`,
+`WIDTH`, and `HEIGHT`; only `image/png` is supported. Slippy-map clients can instead use
+`GET /tiles/{reconstruction_id}/wmts/{z}/{x}/{y}.png` (XYZ/Web Mercator, zoom 0-22).
+These endpoints reproject the exported GeoTIFF on demand; they neither create imagery nor cache tiles.
+
 ## 3. The gaussian-splat trainer
 
 ![Data flow of the gaussian-splat trainer: COLMAP produces poses and points; our custom code seeds Gaussians and runs a training loop that calls gsplat and torch, applies a VRAM cap, and exports a splat PLY. Purple boxes are our code; orange boxes are external dependencies.](images/splat-trainer.svg)
