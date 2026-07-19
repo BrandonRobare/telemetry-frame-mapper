@@ -26,6 +26,9 @@ pip install -e ".[dev]"
 
 Verify: `drone-video-geotagger --help` and `pytest` (all tests should pass without any external binaries installed).
 
+For a packaged Windows application instead of a developer checkout, see the
+[Windows installer workflow](WINDOWS-INSTALLER.md).
+
 ## 2. External binaries
 
 The CLI shells out to `ffmpeg` and `exiftool`; reconstruction shells out to `colmap`. Each must be on `PATH` (the CLI also accepts `--ffmpeg` / `--exiftool` paths explicitly).
