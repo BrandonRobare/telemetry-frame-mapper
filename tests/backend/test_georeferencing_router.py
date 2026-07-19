@@ -1,3 +1,5 @@
+import pytest
+
 from backend.db.models import Image
 from backend.db.models import Session as SessionModel
 
@@ -53,3 +55,50 @@ def test_build_gcp_list_returns_webodm_text(client):
     assert resp.status_code == 200
     assert "# EPSG:4326" in resp.json()["contents"]
     assert "frame_001.jpg north-pad" in resp.json()["contents"]
+
+
+@pytest.mark.parametrize("format", ["pix4d", "dronedeploy"])
+def test_control_point_csv_import_and_export_use_supported_wgs84_mapping(client, format):
+    contents = "north-pad,41.20000000,-81.50000000,300.250\n"
+
+    imported = client.post(
+        "/georeferencing/control-points/import",
+        json={"format": format, "contents": contents},
+    )
+
+    assert imported.status_code == 200
+    assert imported.json()["points"] == [
+        {"label": "north-pad", "latitude": 41.2, "longitude": -81.5, "altitude_m": 300.25}
+    ]
+    exported = client.post(
+        "/georeferencing/control-points/export",
+        json={"format": format, "points": imported.json()["points"]},
+    )
+    assert exported.status_code == 200
+    assert exported.json()["contents"] == contents
+
+
+def test_control_point_csv_rejects_headers_invalid_coordinates_and_unknown_format(client):
+    header = client.post(
+        "/georeferencing/control-points/import",
+        json={"format": "dronedeploy", "contents": "label,latitude,longitude,elevation\n"},
+    )
+    assert header.status_code == 422
+    assert "must be numbers" in header.json()["detail"]
+
+    invalid_coordinates = client.post(
+        "/georeferencing/control-points/import",
+        json={"format": "pix4d", "contents": "gcp-1,91,-81.5,300\n"},
+    )
+    assert invalid_coordinates.status_code == 422
+    assert "latitude must be between -90 and 90" in invalid_coordinates.json()["detail"]
+
+    unknown_format = client.post(
+        "/georeferencing/control-points/export",
+        json={
+            "format": "other",
+            "points": [{"label": "gcp-1", "latitude": 1, "longitude": 2, "altitude_m": 3}],
+        },
+    )
+    assert unknown_format.status_code == 422
+    assert "format must be one of" in unknown_format.json()["detail"]
