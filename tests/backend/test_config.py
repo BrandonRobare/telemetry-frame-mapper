@@ -105,6 +105,8 @@ def test_deployment_config_accepts_explicit_lan_bind_and_origins(tmp_path):
         "port: 0",
         "cors_origins: ['*']",
         "cors_origins: ['http://example.test/path']",
+        "cors_origins: ['http://user@example.test']",
+        "cors_origins: ['http://example.test:99999']",
     ],
 )
 def test_deployment_config_rejects_invalid_values(tmp_path, deployment):
