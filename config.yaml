@@ -19,6 +19,15 @@ processed_dir: "./processed"
 exports_dir: "./exports"
 data_dir: "./data"
 
+# `python -m backend` uses this profile. Keep concrete origins only; a LAN bind
+# does not grant browser access to arbitrary websites.
+deployment:
+  host: "127.0.0.1"
+  port: 8000
+  cors_origins:
+    - "http://localhost:5173"
+    - "http://localhost:3000"
+
 # Local JSONL application log. Rotation retains up to five 10 MiB backups.
 logging:
   enabled: true

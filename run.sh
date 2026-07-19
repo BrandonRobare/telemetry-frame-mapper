@@ -17,8 +17,8 @@ else
   exit 1
 fi
 
-echo "Starting backend on http://localhost:8000 ..."
-uvicorn backend.main:app --port 8000 &
+echo "Starting backend with config.yaml deployment settings ..."
+python -m backend &
 BACKEND_PID=$!
 
 URL="http://localhost:8000/docs"

@@ -15,7 +15,7 @@ from starlette.routing import Match, Mount
 from starlette.types import Scope
 
 from backend.core.application_logging import configure_application_logging
-from backend.core.config import get_config, get_logging_config
+from backend.core.config import get_config, get_deployment_config, get_logging_config
 from backend.db.database import init_db
 
 from .routers import annotations as annotations_router
@@ -107,9 +107,10 @@ app.include_router(uploads_router.router)
 app.include_router(share_links_router.router)
 app.include_router(webodm_router.router)
 
+deployment_config = get_deployment_config()
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000"],
+    allow_origins=deployment_config["cors_origins"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
