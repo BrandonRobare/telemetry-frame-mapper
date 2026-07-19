@@ -383,6 +383,8 @@ class QuickReportOut(BaseModel):
     estimated_overlap_pct: float | None
     match_density_weak_ratio: float | None = None
     match_density_avg_matches: float | None = None
+    lighting_inconsistent: bool = False
+    lighting_p10_p90_spread: float | None = None
 
 
 @router.get("/{session_id}/quick-report", response_model=QuickReportOut)
@@ -417,6 +419,8 @@ def get_quick_report(session_id: int, db: DBSession = Depends(get_db)):
         estimated_overlap_pct=report["coverage"]["estimated_overlap_pct"],
         match_density_weak_ratio=weak_ratio,
         match_density_avg_matches=avg_matches,
+        lighting_inconsistent=report["quality"]["lighting"]["inconsistent"],
+        lighting_p10_p90_spread=report["quality"]["lighting"]["p10_p90_spread"],
     )
 
 

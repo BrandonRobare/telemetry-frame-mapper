@@ -240,6 +240,12 @@ export interface PreflightQualityReport {
     flag_counts: Record<string, number>;
     sharpness_histogram: HistogramBin[];
     brightness_histogram: HistogramBin[];
+    lighting: {
+      sample_count: number;
+      p10_p90_spread: number | null;
+      threshold: number;
+      inconsistent: boolean;
+    };
   };
   coverage: {
     footprint_count: number;
@@ -270,6 +276,8 @@ export interface QuickReport {
   estimated_overlap_pct: number | null;
   match_density_weak_ratio: number | null;
   match_density_avg_matches: number | null;
+  lighting_inconsistent: boolean;
+  lighting_p10_p90_spread: number | null;
 }
 
 export interface Job {
