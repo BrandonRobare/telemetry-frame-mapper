@@ -188,6 +188,19 @@ drone-video-geotagger \
 
 The Import dialog defaults to **Browser upload**: choose or drag a folder of frames in the browser, and the app streams files to the backend in chunks before starting the same import pipeline used by server-side paths. This is the easiest path when the image folder is on your workstation but not already under `imports/`. The legacy **Server path** mode remains available for folders that already live under the backend's `imports/` directory.
 
+### Cloud-drive import
+
+Use **Upload / cloud drive** in the Import dialog to select a JPEG folder that a desktop client has
+already synced from OneDrive, Google Drive, Dropbox, or another provider. The provider client and
+operating system authorize access; the browser submits only the files you explicitly select through
+the same chunked upload flow as a local folder.
+
+The backend deliberately has no "import from URL" endpoint and does not store cloud-provider OAuth
+tokens or credentials. A direct provider integration needs an explicit provider choice, registered
+OAuth client and redirect URI, least-privilege scope, encrypted token lifecycle, and redirect/DNS
+policy before it can be added safely. Until then, use the provider's desktop sync or download flow
+and select the resulting folder in the browser.
+
 ### SD-card / watch-folder auto-import
 
 Set `auto_import.enabled` and explicitly list each mounted card or staging folder in `config.yaml`, then restart the backend. The watcher uses polling, waits until a media directory is unchanged for `stable_seconds`, and starts the existing image-import pipeline. It never discovers drives or imports paths outside `roots`; `GET /auto-import/status` reports missing, unsupported, and watched roots. A persisted media-manifest fingerprint prevents a completed claim from being imported again after a restart.
