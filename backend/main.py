@@ -6,7 +6,7 @@ import shutil
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -15,8 +15,14 @@ from starlette.routing import Match, Mount
 from starlette.types import Scope
 
 from backend.core.application_logging import configure_application_logging
-from backend.core.config import get_config, get_deployment_config, get_logging_config
+from backend.core.config import (
+    get_config,
+    get_deployment_config,
+    get_logging_config,
+    get_pin_lock_config,
+)
 from backend.db.database import init_db
+from backend.services.pin_lock import create_session, session_is_valid, valid_pin
 
 from .routers import annotations as annotations_router
 from .routers import auto_import as auto_import_router
@@ -108,6 +114,8 @@ app.include_router(share_links_router.router)
 app.include_router(webodm_router.router)
 
 deployment_config = get_deployment_config()
+pin_lock_config = get_pin_lock_config()
+app.state.pin_lock_sessions = {}
 app.add_middleware(
     CORSMiddleware,
     allow_origins=deployment_config["cors_origins"],
@@ -124,6 +132,68 @@ app.mount("/processed", StaticFiles(directory=processed_dir), name="processed")
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+PIN_LOCK_COOKIE_NAME = "tfm_pin_unlock"
+PIN_LOCK_OPEN_PATHS = {
+    "/health",
+    "/docs",
+    "/openapi.json",
+    "/redoc",
+    "/pin-lock/status",
+    "/pin-lock/unlock",
+}
+
+
+def _pin_lock_open_path(path: str) -> bool:
+    return path in PIN_LOCK_OPEN_PATHS or path.startswith("/docs/") or path.startswith("/redoc/")
+
+
+def _cookie_secure(request: Request) -> bool:
+    forwarded = request.headers.get("x-forwarded-proto", "").split(",", 1)[0].strip()
+    return request.url.scheme == "https" or forwarded.lower() == "https"
+
+
+@app.middleware("http")
+async def require_pin_unlock(request: Request, call_next):
+    if (
+        not pin_lock_config["enabled"]
+        or _pin_lock_open_path(request.url.path)
+        or session_is_valid(app.state.pin_lock_sessions, request.cookies.get(PIN_LOCK_COOKIE_NAME))
+    ):
+        return await call_next(request)
+    return Response(
+        status_code=401,
+        content='{"detail":"PIN unlock required"}',
+        media_type="application/json",
+    )
+
+
+@app.get("/pin-lock/status")
+def pin_lock_status():
+    """Expose only whether the local lock is enabled, never its configuration or hash."""
+    return {"enabled": pin_lock_config["enabled"]}
+
+
+@app.post("/pin-lock/unlock", status_code=204)
+def unlock_pin_lock(body: dict[str, str], request: Request, response: Response):
+    """Verify the configured scrypt PIN and issue a short-lived HttpOnly cookie."""
+    if not pin_lock_config["enabled"]:
+        raise HTTPException(status_code=404, detail="PIN lock is not enabled")
+    pin = body.get("pin")
+    pin_hash = os.environ[pin_lock_config["pin_hash_env"]]
+    if not isinstance(pin, str) or not valid_pin(pin, pin_hash):
+        raise HTTPException(status_code=403, detail="Incorrect PIN")
+    token = create_session(app.state.pin_lock_sessions, pin_lock_config["session_ttl"])
+    response.set_cookie(
+        PIN_LOCK_COOKIE_NAME,
+        token,
+        max_age=pin_lock_config["session_ttl"],
+        path="/",
+        httponly=True,
+        samesite="lax",
+        secure=_cookie_secure(request),
+    )
 
 
 class SPAStaticFiles(StaticFiles):
