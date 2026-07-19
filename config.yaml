@@ -126,6 +126,15 @@ webodm:
   timeout_seconds: 30
   allow_insecure_http: false
 
+# Optional Cesium ion publishing. Keep disabled unless explicitly needed; the
+# assets:write token belongs only in the named environment variable.
+cesium_ion:
+  enabled: false
+  api_url: "https://api.cesium.com/v1"
+  token_env: "CESIUM_ION_TOKEN"
+  timeout_seconds: 60
+  allow_insecure_http: false
+
 ingest:
   thumbnail_size_px: 200
   thumbnail_jpeg_quality: 75

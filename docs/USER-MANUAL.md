@@ -82,6 +82,9 @@ across 19 routers.
   no content. The mesh is assumed to sit in a local East-North-Up frame centered on that GPS
   centroid — good enough to place it on the globe, not a substitute for a full similarity-transform
   fit against ground control.
+- **Cesium ion publishing:** with an explicitly enabled `cesium_ion` configuration and a token held
+  only in its named environment variable, `POST /export/reconstructions/{id}/cesium-ion` uploads
+  that existing share bundle and returns the ion asset ID. See [CESIUM-ION.md](CESIUM-ION.md).
 - **Session archive/restore:** `POST /sessions/{id}/archive` bundles a session's
   full DB state (images, flight logs, reconstructions with lineage,
   measurements, annotations, defects, etc.) plus its artifact files into one
