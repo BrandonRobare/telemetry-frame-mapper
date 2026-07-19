@@ -83,6 +83,26 @@ uvicorn backend.main:app --reload    # API: http://localhost:8000, docs: /docs
 
 First run creates `data/drone_mapping.db` (SQLite — set `DATABASE_URL` to use PostgreSQL instead). Optional mission parameters (camera FOV, overlap targets, CRS, directories) live in [config.yaml](../config.yaml).
 
+### Optional local PIN lock
+
+For a single-user deployment on a trusted local network, set `pin_lock.enabled: true` in
+`config.yaml`. The PIN itself never goes in YAML. Generate an scrypt hash without putting the
+PIN in shell history, then set the named environment variable before starting the backend:
+
+```powershell
+$env:DRONE_MAPPING_PIN_HASH = python -c "import os; from backend.services.share_links import hash_password; print(hash_password(os.environ['DRONE_MAPPING_PIN']))"
+```
+
+Set `DRONE_MAPPING_PIN` only in the process environment used for this command, then remove it after
+generating the hash. Use a persistent secret manager or service environment for production; the
+PowerShell assignment above lasts only for that shell. While enabled, every API endpoint, the browser app and its static
+assets, `/processed` files, and share routes require an unlock cookie. `/health` and FastAPI docs
+remain available for operations. Unlock with `POST /pin-lock/unlock` JSON `{"pin":"..."}`; a
+successful `204` sets an HttpOnly, SameSite=Lax cookie valid for `session_ttl` seconds (8 hours by
+default). Check only the non-secret state at `GET /pin-lock/status`. Restarting the backend clears
+all unlock sessions. If the configured hash environment variable is absent, the backend refuses to
+start rather than silently running unlocked.
+
 ## 5. GPU splat training (optional)
 
 Torch and gsplat are **deliberately not** in the pip extras — CUDA-enabled torch is not on the default PyPI index, and gsplat must compile against your torch/CUDA combination. Follow the step-by-step in [SETUP.md](SETUP.md). Without them, everything still works except splat training itself: reconstructions complete in `colmap_only` mode.

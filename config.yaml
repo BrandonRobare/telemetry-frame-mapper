@@ -28,6 +28,13 @@ deployment:
     - "http://localhost:5173"
     - "http://localhost:3000"
 
+# Optional single-user local lock. Store only the scrypt hash in the named
+# environment variable; restart the backend after enabling it.
+pin_lock:
+  enabled: false
+  pin_hash_env: "DRONE_MAPPING_PIN_HASH"
+  session_ttl: 28800
+
 # Local JSONL application log. Rotation retains up to five 10 MiB backups.
 logging:
   enabled: true
