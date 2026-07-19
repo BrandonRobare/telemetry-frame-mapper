@@ -14,6 +14,7 @@ import type {
 } from '../../types/api'
 import { formatComparisonSummary, normalizeCellsForOverlay, visibleComparisonCells } from './formatDiff'
 import { formatTrendDate, formatTrendPercent, formatTrendValue } from './formatTrends'
+import { comparisonGridJobs } from './comparisonGrid'
 import TabHeader from '../../shared/components/TabHeader'
 
 const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
@@ -106,13 +107,15 @@ function optionLabel(job: Job, sessionsById: Map<number, string>) {
 }
 
 export default function CompareTab() {
-  const { selectedProjectId, selectedSessionId } = useMapStore()
+  const { selectedProjectId, selectedSessionId, setSession, setTargetReconstructionId, setRequestedTab } = useMapStore()
   const { addToast } = useToast()
   const qc = useQueryClient()
   const { data: sessions = [] } = useSessions()
   const { data: jobs = [], isLoading } = useJobs()
   const [reconstructionAId, setReconstructionAId] = useState<number | null>(null)
   const [reconstructionBId, setReconstructionBId] = useState<number | null>(null)
+  const [reconstructionCId, setReconstructionCId] = useState<number | null>(null)
+  const [reconstructionDId, setReconstructionDId] = useState<number | null>(null)
   const [comparisonId, setComparisonId] = useState<number | null>(null)
   const [showNew, setShowNew] = useState(true)
   const [showRemoved, setShowRemoved] = useState(true)
@@ -127,6 +130,7 @@ export default function CompareTab() {
   )
   const recA = completedJobs.find((job) => job.id === reconstructionAId) ?? null
   const recB = completedJobs.find((job) => job.id === reconstructionBId) ?? null
+  const gridJobs = comparisonGridJobs(completedJobs, [reconstructionAId, reconstructionBId, reconstructionCId, reconstructionDId])
   const { data: comparison } = useComparison(comparisonId)
   const { data: diff } = useComparisonDiff(comparisonId, comparison?.status === 'complete')
   const { data: trends, isLoading: trendsLoading } = useProjectTrends(selectedProjectId)
@@ -165,6 +169,12 @@ export default function CompareTab() {
 
   const visibleCells = visibleComparisonCells(diff, showNew, showRemoved)
   const canCompare = !!recA && !!recB && recA.id !== recB.id
+
+  function openInViewer(job: Job) {
+    setSession(job.session_id)
+    setTargetReconstructionId(job.id)
+    setRequestedTab('splat')
+  }
 
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
@@ -254,6 +264,7 @@ export default function CompareTab() {
           )}
 
           {completedJobs.length >= 2 && (
+            <>
             <div className="grid gap-4" style={{ gridTemplateColumns: '1fr 1fr auto' }}>
               <label className="flex flex-col gap-1 text-xs" style={{ color: 'var(--text-muted)' }}>
                 Baseline
@@ -290,6 +301,42 @@ export default function CompareTab() {
                 {compareMutation.isPending ? 'Starting…' : 'Compare'}
               </Button>
             </div>
+            <div>
+              <p className="text-xs" style={{ color: 'var(--text-muted)', margin: '0 0 8px' }}>
+                Add up to two completed reconstructions for a 3–4-up review. The first two remain the backend diff pair.
+              </p>
+              <div className="grid gap-4" style={{ gridTemplateColumns: '1fr 1fr' }}>
+                <label className="flex flex-col gap-1 text-xs" style={{ color: 'var(--text-muted)' }}>
+                  Third view (optional)
+                  <select value={reconstructionCId ?? ''} onChange={(event) => setReconstructionCId(event.target.value ? Number(event.target.value) : null)} style={selectStyle}>
+                    <option value="">None</option>
+                    {completedJobs.map((job) => <option key={job.id} value={job.id}>{optionLabel(job, sessionsById)}</option>)}
+                  </select>
+                </label>
+                <label className="flex flex-col gap-1 text-xs" style={{ color: 'var(--text-muted)' }}>
+                  Fourth view (optional)
+                  <select value={reconstructionDId ?? ''} onChange={(event) => setReconstructionDId(event.target.value ? Number(event.target.value) : null)} style={selectStyle}>
+                    <option value="">None</option>
+                    {completedJobs.map((job) => <option key={job.id} value={job.id}>{optionLabel(job, sessionsById)}</option>)}
+                  </select>
+                </label>
+              </div>
+            </div>
+            {gridJobs.length >= 2 && (
+              <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(${gridJobs.length}, minmax(0, 1fr))` }}>
+                {gridJobs.map((job) => (
+                  <article key={job.id} className="p-3 flex flex-col gap-2" style={{ border: '1px solid var(--border)', background: 'var(--surface-2)' }}>
+                    <div>
+                      <p className="text-xs font-medium" style={{ color: 'var(--text)', margin: 0 }}>{sessionsById.get(job.session_id) ?? `Session ${job.session_id}`}</p>
+                      <p className="text-xs" style={{ color: 'var(--text-muted)', margin: '2px 0 0' }}>Reconstruction #{job.id} · {job.preset}</p>
+                    </div>
+                    <p className="text-xs" style={{ color: 'var(--text-muted)', margin: 0 }}>{job.frames_used} frames · {job.status}</p>
+                    <Button variant="ghost" size="sm" onClick={() => openInViewer(job)}>Open synced 3D view</Button>
+                  </article>
+                ))}
+              </div>
+            )}
+            </>
           )}
         </section>
 

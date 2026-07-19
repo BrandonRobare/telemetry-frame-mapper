@@ -1724,7 +1724,10 @@ function AnnotationsList({ reconstructionId, annotations }: AnnotationsListProps
 // ---------------------------------------------------------------------------
 
 export default function SplatViewerTab() {
-  const { selectedSessionId, targetSessionId, setTargetSessionId, splitPaneActive, toggleSplitPane, setRequestedTab } = useMapStore()
+  const {
+    selectedSessionId, targetSessionId, setTargetSessionId, targetReconstructionId,
+    setTargetReconstructionId, splitPaneActive, toggleSplitPane, setRequestedTab,
+  } = useMapStore()
   const { data: allJobs, isLoading } = useAllJobsForSession(selectedSessionId)
   const [selectedJobId, setSelectedJobId] = useState<number | null>(null)
   const [showCoverageGaps, setShowCoverageGaps] = useState(false)
@@ -1766,6 +1769,17 @@ export default function SplatViewerTab() {
   })
 
   const geoAvailable = !!geoTransform && geoTransform.utm_zone !== 'unknown'
+
+  useEffect(() => {
+    if (targetReconstructionId == null) return
+    const match = (allJobs ?? []).find((job) => job.id === targetReconstructionId)
+    if (match) {
+      queueMicrotask(() => {
+        setSelectedJobId(match.id)
+        setTargetReconstructionId(null)
+      })
+    }
+  }, [targetReconstructionId, allJobs, setTargetReconstructionId])
 
   useEffect(() => {
     if (targetSessionId == null) return
