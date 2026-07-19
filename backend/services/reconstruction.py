@@ -562,6 +562,91 @@ def build_reconstruction_diagnostics(db: DBSession, rec: Reconstruction) -> dict
     }
 
 
+def plan_dense_rerun(db: DBSession, rec: Reconstruction) -> dict:
+    """Find weak source-frame spans and a denser, viable child selection.
+
+    COLMAP's per-frame error is the only registration evidence used here.  A
+    null error means the frame was not registered *only when at least one
+    source frame has a parsed error*, avoiding guesses from incomplete output.
+    """
+    if rec.source_session_ids:
+        raise ValueError("Dense rerun currently supports single-session reconstructions only")
+    if rec.status != "complete":
+        raise ValueError("Reconstruction must be complete before planning a dense rerun")
+
+    cfg = get_reconstruction_config().get("dense_rerun", {})
+    min_run = max(1, int(cfg.get("min_weak_run_frames", 2)))
+    error_threshold = float(cfg.get("high_reprojection_error_px", 2.0))
+    context = max(0, int(cfg.get("context_frames", 1)))
+
+    source_frames = db.query(ReconstructionFrame).filter(
+        ReconstructionFrame.reconstruction_id == rec.id
+    ).all()
+    source_ids = {frame.image_id for frame in source_frames}
+    if not source_ids:
+        raise ValueError("Reconstruction has no recorded source frames")
+    frame_by_id = {frame.image_id: frame for frame in source_frames}
+    if not any(frame.colmap_error_px is not None for frame in source_frames):
+        raise ValueError("Per-frame reprojection data is unavailable; cannot identify weak areas")
+
+    images = db.query(Image).filter(
+        Image.session_id == rec.session_id
+    ).order_by(Image.timestamp, Image.id).all()
+    source_images = [image for image in images if image.id in source_ids]
+    if len(source_images) != len(source_ids):
+        raise ValueError("Some source frames are no longer available in the session")
+
+    weak_runs: list[list[Image]] = []
+    current: list[Image] = []
+    for image in source_images:
+        error = frame_by_id[image.id].colmap_error_px
+        weak = error is None or error >= error_threshold
+        if weak:
+            current.append(image)
+        elif current:
+            if len(current) >= min_run:
+                weak_runs.append(current)
+            current = []
+    if len(current) >= min_run:
+        weak_runs.append(current)
+    if not weak_runs:
+        raise ValueError("No weak registration span meets the configured rerun threshold")
+
+    index_by_id = {image.id: index for index, image in enumerate(images)}
+    rerun_ids = set(source_ids)
+    spans = []
+    for run in weak_runs:
+        start = max(0, index_by_id[run[0].id] - context)
+        end = min(len(images), index_by_id[run[-1].id] + context + 1)
+        added = [
+            image.id for image in images[start:end] if image.usable and image.id not in source_ids
+        ]
+        rerun_ids.update(added)
+        spans.append({
+            "source_image_ids": [image.id for image in run],
+            "candidate_image_ids": [image.id for image in images[start:end] if image.usable],
+            "added_image_ids": added,
+            "start_image_id": run[0].id,
+            "end_image_id": run[-1].id,
+        })
+    if len(rerun_ids) == len(source_ids):
+        raise ValueError("Weak areas have no additional usable frames for a denser rerun")
+
+    return {
+        "reconstruction_id": rec.id,
+        "preset": rec.preset,
+        "thresholds": {
+            "min_weak_run_frames": min_run,
+            "high_reprojection_error_px": error_threshold,
+            "context_frames": context,
+        },
+        "source_image_ids": [image.id for image in source_images],
+        "rerun_image_ids": [image.id for image in images if image.id in rerun_ids],
+        "added_image_ids": [image.id for image in images if image.id in rerun_ids - source_ids],
+        "weak_spans": spans,
+    }
+
+
 def _store_reprojection_errors(db: DBSession, reconstruction_id: int, colmap_dir: Path) -> None:
     """Read COLMAP TXT output and write per-frame mean reprojection error to DB."""
     best = _pick_best_submodel(colmap_dir / "sparse")
@@ -1843,6 +1928,7 @@ def start_reconstruction(
     target_area_geojson: str | None = None,
     source_session_ids: list[int] | None = None,
     parent_reconstruction_id: int | None = None,
+    selected_image_ids: list[int] | None = None,
 ) -> Reconstruction:
     """Create Reconstruction record and enqueue a background job. Returns the record."""
     running = db.query(Reconstruction).filter(
@@ -1883,13 +1969,21 @@ def start_reconstruction(
             Image.usable == True,  # noqa: E712
         ).all()
 
-        # Manual frame selection overrides the usable pool
-        selected_rows = db.query(SessionFrameSelection).filter(
-            SessionFrameSelection.session_id == session_id
-        ).all()
-        if selected_rows:
-            selected_ids = {row.image_id for row in selected_rows}
+        if selected_image_ids is None:
+            # Manual frame selection overrides the usable pool for ordinary runs.
+            selected_rows = db.query(SessionFrameSelection).filter(
+                SessionFrameSelection.session_id == session_id
+            ).all()
+            if selected_rows:
+                selected_ids = {row.image_id for row in selected_rows}
+                images = [img for img in images if img.id in selected_ids]
+        else:
+            # A lineage-aware rerun supplies an immutable selection.  Do not
+            # read or alter the user's session-level selection preference.
+            selected_ids = set(selected_image_ids)
             images = [img for img in images if img.id in selected_ids]
+            if len(images) != len(selected_ids):
+                raise ValueError("Dense rerun selection includes unavailable or unusable images")
 
         # Target area crop filters the pool
         if target_area_geojson:

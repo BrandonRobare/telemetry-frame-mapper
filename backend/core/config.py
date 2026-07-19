@@ -126,6 +126,11 @@ def _reconstruction_config_from_data(data: dict) -> dict:
         "spatial_matcher_min_images": 150,
         "camera_model": "PINHOLE",
         "single_camera": True,
+        "dense_rerun": {
+            "min_weak_run_frames": 2,
+            "high_reprojection_error_px": 2.0,
+            "context_frames": 1,
+        },
         "camera_profiles": default_camera_profiles(),
         "presets": {
             "quick": {

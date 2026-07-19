@@ -34,6 +34,7 @@ from ..services.reconstruction import (
     compute_coverage_gaps,
     current_reconstruction_status_version,
     get_rec_log,
+    plan_dense_rerun,
     semantic_overlay_bytes,
     start_flythrough_render,
     start_mesh_export,
@@ -121,6 +122,12 @@ class StartIn(BaseModel):
         if v is not None and len(v) < 2:
             raise ValueError("session_ids must contain at least two session IDs")
         return v
+
+
+class DenseRerunIn(BaseModel):
+    """Explicit acknowledgement before a weak-area rerun is queued."""
+
+    confirm: bool = False
 
 
 class ReconstructionOut(BaseModel):
@@ -476,6 +483,54 @@ def get_diagnostics(reconstruction_id: int, db: DBSession = Depends(get_db)):
     if not rec:
         raise HTTPException(status_code=404, detail="Reconstruction not found")
     return build_reconstruction_diagnostics(db, rec)
+
+
+def _dense_rerun_plan_or_http_error(rec: Reconstruction, db: DBSession) -> dict:
+    try:
+        return plan_dense_rerun(db, rec)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/{reconstruction_id}/dense-rerun-plan")
+def get_dense_rerun_plan(reconstruction_id: int, db: DBSession = Depends(get_db)):
+    """Preview the explicit child rerun; this endpoint never starts work."""
+    rec = db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Reconstruction not found")
+    return _dense_rerun_plan_or_http_error(rec, db)
+
+
+@router.post("/{reconstruction_id}/dense-rerun", response_model=ReconstructionOut, status_code=201)
+def start_dense_rerun(
+    reconstruction_id: int, body: DenseRerunIn, db: DBSession = Depends(get_db)
+):
+    """Queue a denser child reconstruction only after an explicit confirmation."""
+    if not body.confirm:
+        raise HTTPException(status_code=422, detail="Set confirm=true to queue the dense rerun")
+    rec = db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Reconstruction not found")
+    active_child = db.query(Reconstruction).filter(
+        Reconstruction.parent_reconstruction_id == rec.id,
+        Reconstruction.status.in_(["pending", "running_colmap", "running_gsplat"]),
+    ).first()
+    if active_child:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Dense rerun {active_child.id} is already in progress",
+        )
+    plan = _dense_rerun_plan_or_http_error(rec, db)
+    try:
+        return start_reconstruction(
+            rec.session_id,
+            plan["preset"],
+            db,
+            parent_reconstruction_id=rec.id,
+            selected_image_ids=plan["rerun_image_ids"],
+        )
+    except ValueError as exc:
+        _raise_start_error(exc)
 
 
 def _ancestor_chain(rec: Reconstruction) -> list[int]:
