@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import os
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import quote, urlparse
 
@@ -109,7 +109,7 @@ def _upload_bundle(config: dict, upload: dict, bundle: Path) -> None:
     canonical_uri = f"{parsed.path.rstrip('/')}/{quote(key, safe='/~')}".replace("//", "/")
     url = f"{parsed.scheme}://{parsed.netloc}{canonical_uri}"
     body = bundle.read_bytes()
-    now = datetime.now(UTC)
+    now = datetime.now(timezone.utc)
     timestamp, date = now.strftime("%Y%m%dT%H%M%SZ"), now.strftime("%Y%m%d")
     region = str(upload.get("region") or "us-east-1")
     payload_hash = hashlib.sha256(body).hexdigest()
