@@ -231,6 +231,11 @@ WebODM/OpenDroneMap georeferencing CSV-only zip.
 The API can translate surveyed WGS84 control points for either **Pix4D** or
 **DroneDeploy** without storing them in the project database:
 
+This is not a DroneDeploy or Pix4D project/package importer. See
+[DroneDeploy and Pix4D project import](VENDOR-PROJECT-IMPORT.md) for the
+documented boundary, supported migration path, and requirements for a future
+safe importer.
+
 - `POST /georeferencing/control-points/import` accepts `{"format":"pix4d"|"dronedeploy","contents":"..."}`.
 - `POST /georeferencing/control-points/export` accepts `{"format":"pix4d"|"dronedeploy","points":[...]}` and returns CSV text.
 
