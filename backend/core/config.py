@@ -495,9 +495,18 @@ def get_deployment_config(path: str = "config.yaml") -> dict:
         if not isinstance(origin, str):
             raise ValueError("deployment.cors_origins must contain HTTP(S) origins without paths")
         parsed = urlparse(origin)
+        try:
+            port = parsed.port
+        except ValueError as exc:
+            raise ValueError(
+                "deployment.cors_origins must contain HTTP(S) origins without paths"
+            ) from exc
         if (
             parsed.scheme not in {"http", "https"}
             or not parsed.netloc
+            or parsed.username
+            or parsed.password
+            or port is not None and not 1 <= port <= 65535
             or parsed.path not in {"", "/"}
             or parsed.params
             or parsed.query
