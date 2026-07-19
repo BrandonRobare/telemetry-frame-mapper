@@ -37,6 +37,8 @@ interface MapStore {
   setRequestedTab: (tab: string | null) => void
   targetSessionId: number | null
   setTargetSessionId: (id: number | null) => void
+  targetReconstructionId: number | null
+  setTargetReconstructionId: (id: number | null) => void
   splitPaneActive: boolean
   toggleSplitPane: () => void
   syncedViewport: SyncedViewport | null
@@ -126,6 +128,8 @@ export const useMapStore = create<MapStore>((set) => ({
   setRequestedTab: (tab) => set({ requestedTab: tab }),
   targetSessionId: null,
   setTargetSessionId: (id) => set({ targetSessionId: id }),
+  targetReconstructionId: null,
+  setTargetReconstructionId: (id) => set({ targetReconstructionId: id }),
   splitPaneActive: false,
   toggleSplitPane: () => set((s) => ({ splitPaneActive: !s.splitPaneActive })),
   syncedViewport: null,
