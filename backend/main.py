@@ -16,13 +16,14 @@ from starlette.types import Scope
 
 from backend.core.application_logging import configure_application_logging
 from backend.core.config import (
+    get_api_key_config,
     get_config,
     get_deployment_config,
     get_logging_config,
     get_pin_lock_config,
 )
 from backend.db.database import init_db
-from backend.services.pin_lock import create_session, session_is_valid, valid_pin
+from backend.services.pin_lock import create_session, session_is_valid, valid_api_key, valid_pin
 
 from .routers import annotations as annotations_router
 from .routers import auto_import as auto_import_router
@@ -117,6 +118,7 @@ app.include_router(webodm_router.router)
 
 deployment_config = get_deployment_config()
 pin_lock_config = get_pin_lock_config()
+api_key_config = get_api_key_config()
 app.state.pin_lock_sessions = {}
 app.add_middleware(
     CORSMiddleware,
@@ -159,9 +161,16 @@ def _cookie_secure(request: Request) -> bool:
 
 @app.middleware("http")
 async def require_pin_unlock(request: Request, call_next):
+    api_key = request.headers.get("X-Drone-Mapping-Key")
+    api_key_is_valid = (
+        api_key_config["enabled"]
+        and isinstance(api_key, str)
+        and valid_api_key(api_key, os.environ[api_key_config["key_hash_env"]])
+    )
     if (
         not pin_lock_config["enabled"]
         or _pin_lock_open_path(request.url.path)
+        or api_key_is_valid
         or session_is_valid(app.state.pin_lock_sessions, request.cookies.get(PIN_LOCK_COOKIE_NAME))
     ):
         return await call_next(request)
