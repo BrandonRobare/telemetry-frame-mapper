@@ -108,6 +108,7 @@ Optional/manual reconstruction gates:
 | `colmap` | Reconstruct tab SfM workspace pipeline | Reconstruction job fails with `COLMAP executable not found` install guidance. |
 | `torch` + `gsplat` + CUDA-capable GPU | Gaussian splat training, thumbnails, optional server video renderer | Manual two-step install (see [docs/SETUP.md](docs/SETUP.md)) — intentionally not in the `[reconstruction]` extra; without it training is skipped and the job completes COLMAP-only; thumbnail generation degrades silently; server video rendering tells users to use browser recording or install optional reconstruction dependencies. |
 | SuGaR (`sugar_scene`/`sugar`) | Mesh export | Not installed by the Python extra; install from the upstream SuGaR project when mesh export is needed. Mesh export job fails with `SuGaR is not installed` optional dependency guidance. |
+| PotreeConverter | Potree export | Install the [PotreeConverter](https://github.com/potree/PotreeConverter) executable on `PATH`, or set `POTREE_CONVERTER` to its executable path. Download a reconstruction LAS first, then select **Generate Potree**; the API creates `exports/{id}/potree/metadata.json` and its accompanying hierarchy. |
 
 CI should use fakes/mocks for these tools. Real `ffmpeg`/`exiftool` CLI smoke is must-pass for v1.0; real COLMAP/gsplat/SuGaR/video-render smoke is optional/manual unless the release explicitly advertises reconstruction as production-ready.
 
