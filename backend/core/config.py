@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import ipaddress
 import math
 import os
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
+from urllib.parse import urlparse
 
 import yaml
 
@@ -444,3 +446,72 @@ def get_logging_config(path: str = "config.yaml") -> dict:
     except FileNotFoundError:
         data = {}
     return logging_config(data, path)
+
+
+def get_deployment_config(path: str = "config.yaml") -> dict:
+    """Return the validated bind and CORS settings for ``python -m backend``."""
+    try:
+        with open(path) as f:
+            data = yaml.safe_load(f) or {}
+    except FileNotFoundError:
+        data = {}
+
+    defaults = {
+        "host": "127.0.0.1",
+        "port": 8000,
+        "cors_origins": ["http://localhost:5173", "http://localhost:3000"],
+    }
+    deployment = data.get("deployment", {})
+    if not isinstance(deployment, dict):
+        return defaults
+    result = {**defaults, **deployment}
+    if not isinstance(result["host"], str):
+        raise ValueError("deployment.host must be an IP address or hostname")
+    host = result["host"].strip()
+    try:
+        ipaddress.ip_address(host)
+    except ValueError as exc:
+        allowed_hostname_chars = "-.abcdefghijklmnopqrstuvwxyz0123456789"
+        labels = host.split(".")
+        if (
+            not host
+            or any(char not in allowed_hostname_chars for char in host.lower())
+            or any(not label or label.startswith("-") or label.endswith("-") for label in labels)
+        ):
+            raise ValueError("deployment.host must be an IP address or hostname") from exc
+    result["host"] = host
+    if isinstance(result["port"], bool):
+        raise ValueError("deployment.port must be an integer from 1 to 65535")
+    try:
+        result["port"] = int(result["port"])
+    except (TypeError, ValueError) as exc:
+        raise ValueError("deployment.port must be an integer from 1 to 65535") from exc
+    if not 1 <= result["port"] <= 65535:
+        raise ValueError("deployment.port must be an integer from 1 to 65535")
+    origins = result["cors_origins"]
+    if not isinstance(origins, list) or not origins:
+        raise ValueError("deployment.cors_origins must be a non-empty list of HTTP origins")
+    for origin in origins:
+        if not isinstance(origin, str):
+            raise ValueError("deployment.cors_origins must contain HTTP(S) origins without paths")
+        parsed = urlparse(origin)
+        try:
+            port = parsed.port
+        except ValueError as exc:
+            raise ValueError(
+                "deployment.cors_origins must contain HTTP(S) origins without paths"
+            ) from exc
+        if (
+            parsed.scheme not in {"http", "https"}
+            or not parsed.netloc
+            or parsed.username
+            or parsed.password
+            or port is not None and not 1 <= port <= 65535
+            or parsed.path not in {"", "/"}
+            or parsed.params
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise ValueError("deployment.cors_origins must contain HTTP(S) origins without paths")
+    result["cors_origins"] = [origin.rstrip("/") for origin in origins]
+    return result
