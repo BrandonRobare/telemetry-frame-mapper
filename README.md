@@ -287,6 +287,9 @@ Frame index rule: the index is the **last** number in each filename — `frame_0
 
 Upload the geotagged folder to WebODM; it reads GPS EXIF tags on import.
 
+For an opt-in API upload, polling, cancellation, and result-download workflow, see
+[WebODM round trip](docs/WEBODM.md). Credentials stay in an environment variable.
+
 ## Tests
 
 ```bash
