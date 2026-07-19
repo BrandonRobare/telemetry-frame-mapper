@@ -172,6 +172,43 @@ def get_reconstruction_config(path: str = "config.yaml") -> dict:
     return _reconstruction_config_from_data(data)
 
 
+def get_remote_worker_config(path: str = "config.yaml") -> dict:
+    """Return the explicitly opt-in network reconstruction worker settings.
+
+    The token itself is never kept in YAML: ``auth_token_env`` names the
+    environment variable that holds it.  HTTPS is required unless an operator
+    deliberately opts into HTTP for an isolated development network.
+    """
+    try:
+        with open(path) as f:
+            data = yaml.safe_load(f) or {}
+    except FileNotFoundError:
+        data = {}
+
+    defaults = {
+        "enabled": False,
+        "url": "",
+        "auth_token_env": "REMOTE_WORKER_TOKEN",
+        "timeout_seconds": 10,
+        "poll_interval_seconds": 2,
+        "allow_insecure_http": False,
+    }
+    configured = data.get("remote_worker", {})
+    if not isinstance(configured, dict):
+        return defaults
+    result = {**defaults, **configured}
+    result["enabled"] = bool(result["enabled"])
+    result["url"] = str(result["url"]).rstrip("/")
+    result["auth_token_env"] = str(result["auth_token_env"])
+    result["allow_insecure_http"] = bool(result["allow_insecure_http"])
+    for key in ("timeout_seconds", "poll_interval_seconds"):
+        try:
+            result[key] = max(1, int(result[key]))
+        except (TypeError, ValueError):
+            result[key] = defaults[key]
+    return result
+
+
 def default_ingest_config() -> dict:
     """Return ingest defaults without reading config.yaml."""
     return _ingest_config_from_data({})

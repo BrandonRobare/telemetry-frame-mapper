@@ -549,7 +549,9 @@ def stream_status_events(reconstruction_id: int, db: DBSession = Depends(get_db)
     )
 
 
-LIVE_RECONSTRUCTION_STATUSES = {"pending", "running_colmap", "running_gsplat", "cancelling"}
+LIVE_RECONSTRUCTION_STATUSES = {
+    "pending", "running_colmap", "running_gsplat", "running_remote", "cancelling"
+}
 
 
 @router.post("/{reconstruction_id}/cancel", response_model=ReconstructionOut)
