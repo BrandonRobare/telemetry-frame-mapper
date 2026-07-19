@@ -83,10 +83,21 @@ pending ──> running_colmap (0–95%) ──> running_gsplat (95–100%) ─�
 
 **Stage detail:**
 1. *Workspace* — selected frames are linked/copied into `colmap_dir/images/`, single PINHOLE camera derived from configured FOV.
-2. *COLMAP* (subprocess): `feature_extractor → exhaustive_matcher → mapper → model_converter` — the sparse model lands in `sparse/0/` in both BIN and TXT form. Per-image reprojection errors are parsed from the TXT model and surfaced in the Review tab. A similarity geo-transform (COLMAP space ↔ UTM, seeded by the GPS EXIF) is stored as JSON on the record — this is what lets the viewer do GPS-accurate annotations and measurements.
+2. *COLMAP* (subprocess): `feature_extractor → exhaustive_matcher → mapper → model_converter` — the sparse model lands in `sparse/0/` in both BIN and TXT form. Per-image reprojection errors are parsed from the TXT model and surfaced in the Review tab. A similarity geo-transform (COLMAP space ↔ UTM, seeded by the GPS EXIF) is stored as JSON on the record — this is what lets the viewer do GPS-accurate annotations and measurements. `GET /reconstruction/{id}/calibration-drift-report` compares multiple completed COLMAP camera estimates when available; it returns `unavailable` for the normal single-camera result and never treats EXIF metadata as self-calibration output.
 3. *Splat training* (in-process, torch + `gsplat.rasterization` with default densification): initialized from the sparse points, capped gaussian count for small GPUs, periodic PSNR/SSIM eval feeding the viewer's sparklines; exports standard INRIA-layout `splat.ply` plus 10 %/50 % opacity-pruned LODs and a nadir thumbnail.
 4. *Lazy derivatives on first request:* LAS point cloud (laspy), DSM/ground-classified DEM GeoTIFF (laspy + rasterio), cached DSM slope PNG, coverage-gap voxelization, voxel diff for Compare — each cached to `exports/{id}/` with its path stored on the record. DEM output refuses point clouds without ASPRS ground labels instead of inventing bare-earth terrain. Slope uses local NumPy gradients and makes no-data/adjacent cells transparent instead of inventing terrain.
 5. *Optional:* SuGaR mesh export (manual upstream install), server-side MP4 flythrough (browser MediaRecorder is the primary path).
+
+### Calibration-drift workflow
+
+Reconstructions keep COLMAP's shared-camera mode by default (`reconstruction.single_camera: true`).
+For an investigation that needs the calibration-drift report to compare multiple COLMAP estimates,
+set `reconstruction.single_camera: false` in `config.yaml` (or PATCH `/settings` with
+`{"reconstruction":{"single_camera":false}}`) before starting a new reconstruction. This lets
+COLMAP create separate camera estimates instead of tying all frames to one shared estimate. It
+adds parameters to bundle adjustment and can make a sparse reconstruction less constrained, so use
+it only with adequate overlap and treat the report as a consistency signal, not calibration or GCP
+accuracy. The default shared-camera workflow remains the preferred production path.
 
 **Process isolation (or lack of it):** training runs in a background thread inside the API process, not a subprocess. A Python-level exception during training — OOM, missing deps, cancellation — is already caught in the pipeline thread and reported as a failed (or degraded `colmap_only`) job; it cannot bring down the API, since an uncaught exception in a thread just ends that thread. The one scenario that would still take the whole process down is a genuine native crash (a CUDA driver abort or a segfault inside libtorch/gsplat's C extension), because nothing short of OS-level process isolation stops that. This is a deliberately deferred hardening item: a real fix means moving training into a separate process with pipe-based progress/cancel IPC (today's `progress_cb` closure writes straight to a live DB session and `cancel` is a shared `threading.Event`, neither of which crosses a process boundary as-is) — a rewrite that isn't justified today for a single-user local app with no reported crash incidents.
 

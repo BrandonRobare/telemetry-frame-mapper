@@ -34,6 +34,7 @@ def test_get_reconstruction_config_defaults():
     assert cfg["presets"]["full"]["iterations"] == 30000
     assert cfg["colmap_threads"] == 8
     assert cfg["sift_max_features"] == 8192
+    assert cfg["single_camera"] is True
 
 
 def test_get_reconstruction_config_preset_values():

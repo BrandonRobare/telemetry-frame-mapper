@@ -6,6 +6,8 @@ from typing import Any
 
 _DISTORTION_CAMERA_MODELS = {"SIMPLE_RADIAL", "RADIAL", "OPENCV", "FULL_OPENCV"}
 _DISTORTION_LENS_HINTS = ("wide", "fisheye", "equiv", "efl", "zoom")
+_FOCAL_DRIFT_THRESHOLD_PCT = 1.0
+_PRINCIPAL_POINT_DRIFT_THRESHOLD_PCT = 0.1
 
 
 @dataclass(frozen=True)
@@ -269,6 +271,113 @@ def dimension_fov_warnings(
                 f"differs from profile {v_fov:.1f}°"
             )
     return warnings
+
+
+def build_calibration_drift_report(cameras: list[Any]) -> dict[str, Any]:
+    """Compare multiple COLMAP camera estimates without persisting new calibration data.
+
+    ``cameras`` are the camera records from a completed COLMAP sparse model.  This is a
+    consistency signal across estimates, not a physical camera calibration or accuracy
+    measurement.  A reconstruction with one camera record cannot establish drift.
+    """
+
+    estimates = [_camera_estimate(camera) for camera in cameras]
+    estimates = [estimate for estimate in estimates if estimate is not None]
+    if len(estimates) < 2:
+        return _unavailable_drift_report(
+            "At least two COLMAP camera estimates are required to assess calibration drift.",
+            len(estimates),
+        )
+
+    focal_values = [estimate["focal_length_normalized"] for estimate in estimates]
+    focal_mean = sum(focal_values) / len(focal_values)
+    focal_range_pct = (max(focal_values) - min(focal_values)) / focal_mean * 100
+
+    principal_points = [estimate["principal_point_normalized"] for estimate in estimates]
+    principal_range_pct = max(
+        math.hypot(x0 - x1, y0 - y1) * 100
+        for x0, y0 in principal_points
+        for x1, y1 in principal_points
+    )
+    stable = (
+        focal_range_pct <= _FOCAL_DRIFT_THRESHOLD_PCT
+        and principal_range_pct <= _PRINCIPAL_POINT_DRIFT_THRESHOLD_PCT
+    )
+    return {
+        "available": True,
+        "status": "stable" if stable else "unstable",
+        "source": "colmap_sparse_model",
+        "camera_count": len(estimates),
+        "thresholds": {
+            "focal_length_relative_range_pct": _FOCAL_DRIFT_THRESHOLD_PCT,
+            "principal_point_relative_range_pct": _PRINCIPAL_POINT_DRIFT_THRESHOLD_PCT,
+        },
+        "metrics": {
+            "focal_length_relative_range_pct": round(focal_range_pct, 3),
+            "principal_point_relative_range_pct": round(principal_range_pct, 3),
+        },
+        "camera_estimates": estimates,
+        "caveats": _drift_caveats(),
+    }
+
+
+def _camera_estimate(camera: Any) -> dict[str, Any] | None:
+    """Normalize supported COLMAP camera parameters for a cross-camera comparison."""
+
+    model = str(getattr(camera, "model", ""))
+    params = [float(value) for value in getattr(camera, "params", [])]
+    width = _positive_float(getattr(camera, "width", None))
+    height = _positive_float(getattr(camera, "height", None))
+    if not width or not height:
+        return None
+    if model == "SIMPLE_PINHOLE" and len(params) >= 3:
+        focal_x = focal_y = params[0]
+        principal_x, principal_y = params[1:3]
+    elif model == "PINHOLE" and len(params) >= 4:
+        focal_x, focal_y, principal_x, principal_y = params[:4]
+    else:
+        return None
+    if focal_x <= 0 or focal_y <= 0:
+        return None
+    return {
+        "camera_id": getattr(camera, "camera_id", None),
+        "model": model,
+        "width": int(width),
+        "height": int(height),
+        "focal_length_normalized": round(
+            math.sqrt(focal_x * focal_y) / math.sqrt(width * height), 6
+        ),
+        "principal_point_normalized": [
+            round(principal_x / width, 6),
+            round(principal_y / height, 6),
+        ],
+    }
+
+
+def _unavailable_drift_report(reason: str, camera_count: int) -> dict[str, Any]:
+    return {
+        "available": False,
+        "status": "unavailable",
+        "source": "colmap_sparse_model",
+        "camera_count": camera_count,
+        "reason": reason,
+        "caveats": _drift_caveats(),
+    }
+
+
+def _drift_caveats() -> list[str]:
+    return [
+        (
+            "This compares COLMAP camera estimates; it is not an absolute calibration "
+            "or accuracy measurement."
+        ),
+        "The report is a cross-camera consistency signal, not a temporal calibration trace.",
+        (
+            "EXIF make, model, and focal-length metadata identify or seed a camera; "
+            "they are not self-calibration output."
+        ),
+        "Use surveyed GCP/checkpoint validation to assess geospatial accuracy.",
+    ]
 
 
 def _profile_name(data: dict[str, Any]) -> str:
