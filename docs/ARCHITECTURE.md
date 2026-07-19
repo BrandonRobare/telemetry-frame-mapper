@@ -51,7 +51,7 @@ FastAPI app (`backend.main:app`), SQLite via SQLAlchemy (PostgreSQL-swappable th
     references beside the current mapped-products GeoPackage, without a GIS SDK.
   - `reconstruction.py` — the heavy pipeline (below).
   - `colmap_io.py` / `ply_io.py` / `splat_trainer.py` — COLMAP sparse-model loader (numpy), INRIA-layout 3DGS PLY I/O + opacity-prune LODs (numpy), and the gsplat training loop (torch/gsplat, lazily imported so the backend never requires them).
-- **Config:** `config.yaml` at repo root → `AppConfig` dataclass; relative directory settings resolve against the config file's location. Reconstruction presets (`quick`/`full`) live under the `reconstruction:` key.
+- **Config:** `config.yaml` at repo root → `AppConfig` dataclass; relative directory settings resolve against the config file's location. Reconstruction presets (`quick`/`full`) live under the `reconstruction:` key. The `logging:` block configures a local stdlib rotating JSONL handler for the `backend` logger; it has no remote transport and writes under the config directory by default.
 - **Backups:** `artifact_backup.py` creates versioned SQLite/config/artifact snapshots. An opt-in
   stdlib thread schedules exactly one named backup target per day; it calls that same service,
   prevents overlap with a lock, and exposes safe run state at `GET /storage/backup-schedule`.

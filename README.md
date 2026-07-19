@@ -81,6 +81,13 @@ pip install -e ".[dev]"
 
 The CLI requires `ffmpeg` and `exiftool` on your PATH (or pass `--ffmpeg` / `--exiftool`).
 
+### Backend logs
+
+The backend writes local JSON Lines logs by default to `logs/backend.jsonl`. Configure the
+`logging` block in `config.yaml` to change its level, directory, file name, rotation size, or
+retention count; set `enabled: false` to disable it. The log path is resolved relative to the
+configuration file, and rotation is handled locally by Python's standard library.
+
 ### External tool gates
 
 Required for v1.0 release smoke:

@@ -39,6 +39,7 @@ exiftool_geotags.args
 # WebODM/Desktop install data
 resources/app/data/
 resources/app/logs/
+logs/
 resources/app/apps/
 *.log
 
