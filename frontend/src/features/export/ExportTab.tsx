@@ -174,6 +174,34 @@ function MeshExportCard({ job }: { job: Job }) {
   )
 }
 
+function PotreeExportCard({ job }: { job: Job }) {
+  const { addToast } = useToast()
+  const potreeMutation = useMutation({
+    mutationFn: () => post<{ output_dir: string }>(`/reconstruction/${job.id}/potree`),
+    onSuccess: ({ output_dir }) => addToast(`Potree export ready in ${output_dir}`, 'success'),
+    onError: (err: Error) => addToast(`Potree export failed: ${err.message}`, 'error'),
+  })
+
+  return (
+    <div className="flex gap-2 items-center">
+      <a
+        href={`${BASE_URL}/reconstruction/${job.id}/pointcloud`}
+        download={`pointcloud_${job.id}.las`}
+        style={downloadLinkStyle}
+      >
+        Download LAS
+      </a>
+      <Button
+        variant="ghost"
+        disabled={potreeMutation.isPending}
+        onClick={() => potreeMutation.mutate()}
+      >
+        {potreeMutation.isPending ? 'Converting…' : 'Generate Potree'}
+      </Button>
+    </div>
+  )
+}
+
 const downloadLinkStyle: CSSProperties = {
   padding: '5px 10px',
   borderRadius: 'var(--radius-sm)',
@@ -781,22 +809,7 @@ export default function ExportTab() {
                   {job.preset} · {job.frames_used} frames
                 </div>
               </div>
-              <a
-                href={`${BASE_URL}/reconstruction/${job.id}/pointcloud`}
-                download={`pointcloud_${job.id}.las`}
-                style={{
-                  padding: '5px 10px',
-                  borderRadius: 'var(--radius-sm)',
-                  fontSize: 12,
-                  background: 'var(--accent-soft)',
-                  border: '1px solid var(--accent-soft)',
-                  color: 'var(--accent-strong)',
-                  textDecoration: 'none',
-                  whiteSpace: 'nowrap',
-                }}
-              >
-                Download LAS
-              </a>
+              <PotreeExportCard job={job} />
             </div>
           ))}
           </div>
