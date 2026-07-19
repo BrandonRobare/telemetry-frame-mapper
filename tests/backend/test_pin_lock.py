@@ -49,6 +49,7 @@ def test_pin_lock_rejects_then_unlocks_all_protected_routes(client, enabled_pin_
     for path in ("/", "/sessions", "/processed/thumbnail.jpg", "/share/token/example"):
         assert client.get(path).status_code == 401
     assert client.get("/health").status_code == 200
+    assert client.get("/metrics").status_code == 200
     assert client.get("/pin-lock/status").json() == {"enabled": True}
 
     failed = client.post("/pin-lock/unlock", json={"pin": "wrong"})
