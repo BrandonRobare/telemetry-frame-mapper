@@ -103,6 +103,15 @@ default). Check only the non-secret state at `GET /pin-lock/status`. Restarting 
 all unlock sessions. If the configured hash environment variable is absent, the backend refuses to
 start rather than silently running unlocked.
 
+### Prometheus metrics
+
+`GET /metrics` remains reachable without an unlock cookie, including while the optional PIN lock
+is enabled, so a local scraper can check it. Keep the default loopback bind; if the backend is
+exposed on a LAN, protect this endpoint with a reverse proxy or firewall. It returns Prometheus
+text exposition with the fixed application version, process start time, and a lightweight `SELECT
+1` database probe. It deliberately emits no project, file, user, or location data and does not
+scan application tables.
+
 ## 5. GPU splat training (optional)
 
 Torch and gsplat are **deliberately not** in the pip extras — CUDA-enabled torch is not on the default PyPI index, and gsplat must compile against your torch/CUDA combination. Follow the step-by-step in [SETUP.md](SETUP.md). Without them, everything still works except splat training itself: reconstructions complete in `colmap_only` mode.
