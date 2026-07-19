@@ -444,3 +444,35 @@ classes absent from ADE20K. Treat the output as an operator QA aid, not a survey
 truth layer. If more than about 30% of points are unlabeled on a normal survey,
 recheck frame coverage, COLMAP registration, and GPU dependency status before
 trusting downstream LAS classifications.
+
+## ML-assisted defect detection: investigation verdict
+
+No automatic defect-detection workflow is currently available. The Semantic
+Labels workflow is **not** a crack, corrosion, water-damage, or missing-material
+classifier: its SegFormer-B0 model is trained for ADE20K scene parsing and its
+output is deliberately collapsed to the six broad classes above. In particular,
+the `structure` label means a scene region is structural; it is not evidence that
+the region is defect-free or defective. The model card identifies this checkpoint
+as ADE20K `scene_parse_150`, not an aerial-inspection or defect dataset
+([model card](https://huggingface.co/nvidia/segformer-b0-finetuned-ade-512-512)).
+
+Use the existing **Review** tab to flag a defect, select one or more supporting
+photos, and record category, severity, and notes. Semantic Labels can be used as
+an optional scene-context overlay while reviewing, but never to create defect
+records automatically or to prioritize a safety decision without operator review.
+
+Before an automatic workflow can ship, a candidate must use a defect-labelled,
+representative aerial-inspection dataset and produce a localized candidate plus
+confidence for each supported defect class. It is accepted only after an
+independent held-out survey validates the agreed per-class precision/recall and
+false-negative limits at the intended operating threshold, with every candidate
+remaining reviewable in the existing manual workflow. Reject a candidate that
+only produces broad scene classes, lacks held-out validation, cannot localize the
+defect to source imagery, or cannot expose a threshold/confidence for review.
+
+The next experiment is to collect or license representative, image-level and
+defect-localized crack/corrosion examples for one narrowly defined asset type;
+write the class definitions and pass/fail metrics before training; then compare a
+defect-specific baseline against a held-out flight before proposing any API or UI
+automation. This keeps the current manual evidence trail useful whether the
+experiment succeeds or is rejected.
