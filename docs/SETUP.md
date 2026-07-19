@@ -98,3 +98,38 @@ Optional/manual reconstruction tools:
 - **SuGaR** (`sugar_scene`/`sugar`) — mesh export only. [SuGaR](https://github.com/Anttwo/SuGaR) has no pip-installable release; it must be installed manually by cloning that repo, and is not included in the Python `reconstruction` extra. Mesh export is optional — splat viewing and the rest of reconstruction work fine without it.
 
 CI should use fakes/mocks for external binaries and optional reconstruction libraries. Real `ffmpeg`/`exiftool` smoke is must-pass for v1.0; real COLMAP/gsplat/SuGaR/video-render smoke is optional/manual unless reconstruction is promoted to production-ready.
+
+## Optional remote GPU worker
+
+Remote execution is off by default. It is intended for an operator-controlled worker on a private,
+authenticated network; this backend does not provision workers, copy image bytes, or expose a worker
+to the public internet. The API server and worker must see the same `imports_dir`, `data_dir`, and
+`exports_dir` paths (for example via a mounted shared volume).
+
+Set only the endpoint settings in `config.yaml`, then place the bearer token in the environment named
+by `auth_token_env` before starting the backend. Do not put tokens in YAML, documentation, or shell
+history. HTTPS is required; `allow_insecure_http: true` is only for an isolated development network.
+
+```yaml
+remote_worker:
+  enabled: true
+  url: "https://gpu-worker.internal"
+  auth_token_env: "REMOTE_WORKER_TOKEN"
+  timeout_seconds: 10
+  poll_interval_seconds: 2
+  allow_insecure_http: false
+```
+
+The worker implements this small JSON protocol:
+
+- `POST /v1/reconstructions` receives `local_job_id`, `reconstruction_id`, `preset`, `colmap_dir`,
+  and `image_ids`, and returns `202 {"job_id": "..."}`.
+- `GET /v1/reconstructions/{job_id}` returns a status object: `queued` or `running` with optional
+  `step` and `progress_pct`; `complete` with optional `result.frames_registered`, `gaussian_count`,
+  `psnr`, and `ssim`; or `failed`/`cancelled` with an `error`.
+- `POST /v1/reconstructions/{job_id}/cancel` requests cancellation.
+
+The local durable queue saves the returned worker job id and resumes polling it after a retry, so a
+temporary API-side failure does not submit a duplicate reconstruction. The Jobs queue API exposes
+that remote job id for diagnostics. A worker must write artifacts to the shared configured paths;
+artifact transfer and arbitrary worker-supplied local paths are intentionally out of scope.
