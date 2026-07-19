@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 import backend.main as main
-from backend.core.config import get_pin_lock_config
+from backend.core.config import get_api_key_config, get_pin_lock_config
 from backend.services.share_links import hash_password
 
 
@@ -20,6 +20,17 @@ def enabled_pin_lock(monkeypatch):
     main.app.state.pin_lock_sessions.clear()
     yield
     main.app.state.pin_lock_sessions.clear()
+
+
+@pytest.fixture
+def enabled_api_key(enabled_pin_lock, monkeypatch):
+    monkeypatch.setattr(
+        main,
+        "api_key_config",
+        {"enabled": True, "key_hash_env": "TEST_API_KEY_HASH"},
+    )
+    monkeypatch.setenv("TEST_API_KEY_HASH", hash_password("automation-key"))
+    yield
 
 
 def test_pin_lock_disabled_leaves_routes_unlocked(client):
@@ -64,6 +75,38 @@ def test_pin_lock_rejects_then_unlocks_all_protected_routes(client, enabled_pin_
     assert "path=/" in cookie
     assert "secure" not in cookie
     assert client.get("/sessions").status_code != 401
+
+
+def test_api_key_requires_an_enabled_pin_lock(tmp_path, monkeypatch):
+    config = Path(tmp_path / "config.yaml")
+    config.write_text("api_key:\n  enabled: true\n  key_hash_env: TEST_API_KEY_HASH\n")
+    monkeypatch.setenv("TEST_API_KEY_HASH", hash_password("automation-key"))
+    with pytest.raises(ValueError, match="requires pin_lock.enabled"):
+        get_api_key_config(str(config))
+
+
+def test_api_key_rejects_missing_or_malformed_hash(tmp_path, monkeypatch):
+    config = Path(tmp_path / "config.yaml")
+    config.write_text(
+        "pin_lock:\n  enabled: true\n  pin_hash_env: TEST_PIN_HASH\n"
+        "api_key:\n  enabled: true\n  key_hash_env: TEST_API_KEY_HASH\n"
+    )
+    monkeypatch.setenv("TEST_PIN_HASH", hash_password("1234"))
+    monkeypatch.delenv("TEST_API_KEY_HASH", raising=False)
+    with pytest.raises(ValueError, match="valid scrypt hash"):
+        get_api_key_config(str(config))
+    monkeypatch.setenv("TEST_API_KEY_HASH", "not-a-hash")
+    with pytest.raises(ValueError, match="valid scrypt hash"):
+        get_api_key_config(str(config))
+
+
+def test_api_key_allows_protected_routes_without_cookie(client, enabled_api_key):
+    assert client.get("/sessions").status_code == 401
+    assert client.get("/sessions", headers={"x-drone-mapping-key": "wrong"}).status_code == 401
+    assert client.get(
+        "/sessions", headers={"X-Drone-Mapping-Key": "automation-key"}
+    ).status_code == 200
+    assert client.get("/metrics").status_code == 200
 
 
 def test_pin_lock_cookie_is_secure_for_https_proxy(client, enabled_pin_lock):
