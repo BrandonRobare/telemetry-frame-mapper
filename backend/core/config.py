@@ -539,10 +539,14 @@ def get_pin_lock_config(path: str = "config.yaml") -> dict:
         raise ValueError("pin_lock.enabled must be true or false")
     if not isinstance(result["pin_hash_env"], str) or not result["pin_hash_env"].strip():
         raise ValueError("pin_lock.pin_hash_env must name an environment variable")
+    if isinstance(result["session_ttl"], bool):
+        raise ValueError("pin_lock.session_ttl must be an integer of at least 60 seconds")
     try:
-        result["session_ttl"] = max(60, int(result["session_ttl"]))
+        result["session_ttl"] = int(result["session_ttl"])
     except (TypeError, ValueError) as exc:
-        raise ValueError("pin_lock.session_ttl must be a positive number of seconds") from exc
+        raise ValueError("pin_lock.session_ttl must be an integer of at least 60 seconds") from exc
+    if result["session_ttl"] < 60:
+        raise ValueError("pin_lock.session_ttl must be an integer of at least 60 seconds")
     if result["enabled"]:
         pin_hash = os.environ.get(result["pin_hash_env"])
         try:

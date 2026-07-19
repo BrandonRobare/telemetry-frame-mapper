@@ -37,6 +37,14 @@ def test_pin_lock_rejects_missing_or_malformed_hash(tmp_path, monkeypatch):
         get_pin_lock_config(str(config))
 
 
+@pytest.mark.parametrize("ttl", ["true", "59", "0", "not-a-number"])
+def test_pin_lock_rejects_invalid_session_ttl(tmp_path, ttl):
+    config = Path(tmp_path / "config.yaml")
+    config.write_text(f"pin_lock:\n  session_ttl: {ttl}\n")
+    with pytest.raises(ValueError, match="integer of at least 60"):
+        get_pin_lock_config(str(config))
+
+
 def test_pin_lock_rejects_then_unlocks_all_protected_routes(client, enabled_pin_lock):
     for path in ("/", "/sessions", "/processed/thumbnail.jpg", "/share/token/example"):
         assert client.get(path).status_code == 401

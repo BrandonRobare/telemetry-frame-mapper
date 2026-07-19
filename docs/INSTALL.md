@@ -90,12 +90,12 @@ For a single-user deployment on a trusted local network, set `pin_lock.enabled: 
 PIN in shell history, then set the named environment variable before starting the backend:
 
 ```powershell
-$env:DRONE_MAPPING_PIN_HASH = python -c "import os; from backend.services.share_links import hash_password; print(hash_password(os.environ['DRONE_MAPPING_PIN']))"
+$env:DRONE_MAPPING_PIN_HASH = python -c "from getpass import getpass; from backend.services.share_links import hash_password; print(hash_password(getpass('PIN: ')))"
 ```
 
-Set `DRONE_MAPPING_PIN` only in the process environment used for this command, then remove it after
-generating the hash. Use a persistent secret manager or service environment for production; the
-PowerShell assignment above lasts only for that shell. While enabled, every API endpoint, the browser app and its static
+The prompt does not echo or store the PIN in shell history. Use a persistent secret manager or
+service environment for production; the PowerShell assignment above lasts only for that shell.
+While enabled, every API endpoint, the browser app and its static
 assets, `/processed` files, and share routes require an unlock cookie. `/health` and FastAPI docs
 remain available for operations. Unlock with `POST /pin-lock/unlock` JSON `{"pin":"..."}`; a
 successful `204` sets an HttpOnly, SameSite=Lax cookie valid for `session_ttl` seconds (8 hours by
