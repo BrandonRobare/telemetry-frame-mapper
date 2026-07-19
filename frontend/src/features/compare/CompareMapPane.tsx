@@ -1,8 +1,12 @@
 import { useEffect, useRef } from 'react'
-import { MapContainer, TileLayer, useMap } from 'react-leaflet'
+import { GeoJSON, MapContainer, TileLayer, useMap } from 'react-leaflet'
+import type { LatLngBoundsExpression } from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { useMapStore } from '../../shared/stores/mapStore'
+import { useFootprints } from '../map/hooks/useFootprints'
+import type { Footprint } from '../../types/api'
 import { comparisonViewportSource, shouldApplyComparisonViewport } from './comparisonViewport'
+import { comparisonFootprintBounds, comparisonFootprintGeoJson } from './comparisonFootprints'
 
 const ESRI_SATELLITE =
   'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
@@ -39,7 +43,37 @@ function SyncController({ reconstructionId }: { reconstructionId: number }) {
   return null
 }
 
-export default function CompareMapPane({ reconstructionId }: { reconstructionId: number }) {
+function InitialSessionBounds({ footprints }: { footprints: Footprint[] }) {
+  const map = useMap()
+  const syncedViewport = useMapStore((state) => state.syncedViewport)
+  const fitted = useRef(false)
+
+  useEffect(() => {
+    if (fitted.current || syncedViewport) return
+    const bounds = comparisonFootprintBounds(footprints)
+    if (bounds.length > 0) {
+      map.fitBounds(bounds as LatLngBoundsExpression, { padding: [12, 12] })
+      fitted.current = true
+    }
+  }, [footprints, map, syncedViewport])
+
+  return null
+}
+
+function SessionFootprints({ footprints }: { footprints: Footprint[] }) {
+  const overlay = comparisonFootprintGeoJson(footprints)
+
+  return overlay.features.length > 0 ? (
+    <GeoJSON
+      data={overlay}
+      style={{ color: '#B87C4C', fillColor: '#B87C4C', fillOpacity: 0.16, weight: 1.5 }}
+    />
+  ) : null
+}
+
+export default function CompareMapPane({ reconstructionId, sessionId }: { reconstructionId: number; sessionId: number }) {
+  const { data: footprints = [] } = useFootprints(sessionId)
+
   return (
     <MapContainer
       center={[35, -80]}
@@ -50,6 +84,8 @@ export default function CompareMapPane({ reconstructionId }: { reconstructionId:
     >
       <TileLayer url={ESRI_SATELLITE} attribution="© Esri" />
       <SyncController reconstructionId={reconstructionId} />
+      <InitialSessionBounds footprints={footprints} />
+      <SessionFootprints footprints={footprints} />
     </MapContainer>
   )
 }

@@ -332,7 +332,7 @@ export default function CompareTab() {
                       <p className="text-xs" style={{ color: 'var(--text-muted)', margin: '2px 0 0' }}>Reconstruction #{job.id} · {job.preset}</p>
                     </div>
                     <p className="text-xs" style={{ color: 'var(--text-muted)', margin: 0 }}>{job.frames_used} frames · {job.status}</p>
-                    <CompareMapPane reconstructionId={job.id} />
+                    <CompareMapPane reconstructionId={job.id} sessionId={job.session_id} />
                     <Button variant="ghost" size="sm" onClick={() => openInViewer(job)}>Open synced 3D view</Button>
                   </article>
                 ))}
