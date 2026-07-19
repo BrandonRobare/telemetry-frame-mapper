@@ -517,6 +517,36 @@ def get_deployment_config(path: str = "config.yaml") -> dict:
     return result
 
 
+def get_cesium_ion_config(path: str = "config.yaml") -> dict:
+    """Return the explicitly opt-in Cesium ion upload settings, without its token."""
+    try:
+        with open(path) as f:
+            data = yaml.safe_load(f) or {}
+    except FileNotFoundError:
+        data = {}
+
+    defaults = {
+        "enabled": False,
+        "api_url": "https://api.cesium.com/v1",
+        "token_env": "CESIUM_ION_TOKEN",
+        "timeout_seconds": 60,
+        "allow_insecure_http": False,
+    }
+    configured = data.get("cesium_ion", {})
+    if not isinstance(configured, dict):
+        return defaults
+    result = {**defaults, **configured}
+    result["enabled"] = bool(result["enabled"])
+    result["api_url"] = str(result["api_url"]).rstrip("/")
+    result["token_env"] = str(result["token_env"])
+    result["allow_insecure_http"] = bool(result["allow_insecure_http"])
+    try:
+        result["timeout_seconds"] = max(1, int(result["timeout_seconds"]))
+    except (TypeError, ValueError):
+        result["timeout_seconds"] = defaults["timeout_seconds"]
+    return result
+
+
 def get_pin_lock_config(path: str = "config.yaml") -> dict:
     """Return the opt-in, single-user local PIN lock configuration.
 
