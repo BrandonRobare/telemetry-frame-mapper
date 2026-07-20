@@ -879,6 +879,29 @@ def download_pointcloud(
     )
 
 
+@router.post("/{reconstruction_id}/potree")
+def generate_potree_export(reconstruction_id: int, db: DBSession = Depends(get_db)):
+    """Convert an already-generated LAS/LAZ point cloud for Potree hosting."""
+    from ..services.potree_export import export_potree
+
+    rec = db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Reconstruction not found")
+    if not rec.pointcloud_path:
+        raise HTTPException(
+            status_code=422,
+            detail="LAS point cloud is unavailable; download the reconstruction point cloud first",
+        )
+    try:
+        source_path = _safe_export_http_path(Path(rec.pointcloud_path))
+        metadata_path = export_potree(
+            source_path, _reconstruction_artifact_path(reconstruction_id, "potree")
+        )
+    except (FileNotFoundError, RuntimeError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"output_dir": str(metadata_path.parent), "metadata_path": str(metadata_path)}
+
+
 @router.post("/{reconstruction_id}/mesh", response_model=MeshStatusOut, status_code=202)
 def generate_mesh(reconstruction_id: int, db: DBSession = Depends(get_db)):
     try:
