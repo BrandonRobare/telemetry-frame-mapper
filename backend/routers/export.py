@@ -810,6 +810,7 @@ def export_webodm_package(
             zip_path,
             images,
             options,
+            exports_dir=exports_dir,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
