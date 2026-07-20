@@ -215,6 +215,11 @@ def test_patch_rejects_posix_system_storage_path(client, tmp_config):
     assert resp.status_code == 422
 
 
+def test_patch_rejects_posix_system_storage_descendant(client, tmp_config):
+    resp = client.patch("/settings", json={"general": {"exports_dir": "/etc/telemetry"}})
+    assert resp.status_code == 422
+
+
 def test_patch_rejects_home_root_storage_path(client, tmp_config):
     resp = client.patch("/settings", json={"general": {"data_dir": str(Path.home())}})
     assert resp.status_code == 422
