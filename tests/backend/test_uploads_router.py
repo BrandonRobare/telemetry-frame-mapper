@@ -97,6 +97,42 @@ def test_browser_upload_chunks_complete_and_start_import(client, tmp_path):
     assert mock_start.call_args.args[0] == session_id
 
 
+def test_browser_upload_accepts_user_selected_cloud_synced_folder(client, tmp_path):
+    """Cloud-provider authorization stays in the desktop sync client/browser picker."""
+    cfg = type("Cfg", (), {"imports_dir": str(tmp_path / "imports")})()
+    limits = {
+        "chunk_size_bytes": 4,
+        "max_file_bytes": 10,
+        "max_total_bytes": 20,
+        "quota_bytes": 100,
+        "cleanup_after_hours": 24,
+        "accepted_extensions": [".jpg"],
+    }
+    with patch("backend.routers.uploads.get_config", return_value=cfg), \
+         patch("backend.routers.uploads.get_browser_upload_config", return_value=limits), \
+         patch("backend.routers.uploads.start_import"):
+        start = client.post("/uploads/imports/start", json={
+            "name": "Cloud Drive Flight",
+            "total_bytes": 4,
+            "files": [{"path": "OneDrive/flight/a.jpg", "size": 4}],
+        })
+        assert start.status_code == 200
+        upload_id = start.json()["upload_id"]
+
+        chunk = client.post(
+            f"/uploads/imports/{upload_id}/chunk",
+            data={"path": "OneDrive/flight/a.jpg", "offset": "0"},
+            files={"chunk": ("chunk", b"jpeg", "application/octet-stream")},
+        )
+        assert chunk.status_code == 200
+        assert client.post(f"/uploads/imports/{upload_id}/complete").status_code == 200
+
+    uploaded = (
+        tmp_path / "imports" / ".browser_uploads" / upload_id / "OneDrive" / "flight" / "a.jpg"
+    )
+    assert uploaded.read_bytes() == b"jpeg"
+
+
 def test_browser_upload_cancel_removes_staging_dir(client, tmp_path):
     cfg = type("Cfg", (), {"imports_dir": str(tmp_path / "imports")})()
     limits = {
