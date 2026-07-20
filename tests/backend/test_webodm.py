@@ -50,7 +50,13 @@ def test_webodm_client_uses_documented_project_task_and_poll_contract(tmp_path, 
     responses = [
         httpx.Response(201, json={"id": 17}, request=httpx.Request("POST", "https://webodm.example.test/api/projects/")),
         httpx.Response(201, json={"id": 23}, request=httpx.Request("POST", "https://webodm.example.test/api/projects/17/tasks/")),
-        httpx.Response(200, json={"id": 23, "status": 20}, request=httpx.Request("GET", "https://webodm.example.test/api/projects/17/tasks/23/")),
+        httpx.Response(
+            200,
+            json={"id": 23, "project": 17, "status": 20},
+            request=httpx.Request(
+                "GET", "https://webodm.example.test/api/projects/17/tasks/23/"
+            ),
+        ),
     ]
 
     with patch("backend.services.webodm.httpx.request", side_effect=responses) as request:
@@ -88,6 +94,22 @@ def test_webodm_download_uses_documented_asset_endpoint(tmp_path, monkeypatch):
 
     assert saved.read_bytes() == b"geotiff"
     assert request.call_args.args == ("GET", "https://webodm.example.test/api/projects/17/tasks/23/download/orthophoto.tif")
+
+
+def test_webodm_get_task_rejects_mismatched_response_identity(monkeypatch):
+    monkeypatch.setenv("WEBODM_TEST_JWT", "test-secret")
+    response = httpx.Response(
+        200,
+        json={"id": 24, "project": 17, "status": 20},
+        request=httpx.Request(
+            "GET", "https://webodm.example.test/api/projects/17/tasks/23/"
+        ),
+    )
+    with (
+        patch("backend.services.webodm.httpx.request", return_value=response),
+        pytest.raises(WebODMError, match="identity did not match"),
+    ):
+        get_task(_config(), 17, 23)
 
 
 def test_webodm_download_rejects_traversal_asset(tmp_path):
@@ -242,20 +264,34 @@ def test_pull_results_requires_completed_task_and_saves_to_exports(client, tmp_p
     monkeypatch.setattr(webodm_router, "get_webodm_config", _config)
     config = type("Cfg", (), {"exports_dir": str(tmp_path / "exports")})()
     monkeypatch.setattr(webodm_router, "get_config", lambda: config)
-    with patch.object(webodm_router, "get_task", return_value={"status": 20}):
+    with patch.object(
+        webodm_router,
+        "get_task",
+        return_value={"id": 23, "project": 17, "status": 20},
+    ):
         assert client.post("/webodm/projects/17/tasks/23/results", json={}).status_code == 409
-    output = tmp_path / "exports" / "webodm" / "17" / "23" / "orthophoto.tif"
+    output = tmp_path / "exports" / "downloaded" / "orthophoto.tif"
     with (
         patch.object(
             webodm_router,
             "get_task",
-            return_value={"status": 40, "available_assets": ["orthophoto.tif"]},
+            return_value={
+                "id": 23,
+                "project": 17,
+                "status": 40,
+                "available_assets": ["orthophoto.tif"],
+            },
         ),
         patch.object(webodm_router, "download_asset", return_value=output) as download,
     ):
-        response = client.post(
-            "/webodm/projects/17/tasks/23/results", json={"assets": ["orthophoto.tif"]}
-        )
-    assert response.status_code == 200
-    assert response.json()["saved_assets"] == [str(output)]
-    assert download.call_args.args[-1] == output.parent
+        responses = [
+            client.post(
+                "/webodm/projects/17/tasks/23/results",
+                json={"assets": ["orthophoto.tif"]},
+            )
+            for _ in range(2)
+        ]
+    assert [response.status_code for response in responses] == [200, 200]
+    assert all(response.json()["saved_assets"] == [str(output)] for response in responses)
+    expected_dir = tmp_path / "exports" / "webodm" / "17" / "23"
+    assert [call.args[-1] for call in download.call_args_list] == [expected_dir, expected_dir]

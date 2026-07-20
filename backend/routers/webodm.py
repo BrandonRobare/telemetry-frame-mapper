@@ -116,7 +116,12 @@ def pull_task_results(project_id: int, task_id: int, body: PullResultsIn):
             raise HTTPException(
                 status_code=422, detail="WebODM task has no supported mapping assets"
             )
-        output_dir = Path(get_config().exports_dir) / "webodm" / str(project_id) / str(task_id)
+        output_dir = (
+            Path(get_config().exports_dir)
+            / "webodm"
+            / str(task["project"])
+            / str(task["id"])
+        )
         saved = [
             str(download_asset(config, project_id, task_id, asset, output_dir))
             for asset in sorted(requested)

@@ -814,7 +814,7 @@ def export_webodm_package(
         odm_options_for(options.mode, has_gcp=options.include_gcp)
         exports_dir = Path(get_config().exports_dir)
         zip_path = _safe_export_path(
-            exports_dir / f"webodm_package_{session_id}_{options.mode}.zip", exports_dir
+            exports_dir / f"webodm_package_{session.id}_{options.mode}.zip", exports_dir
         )
         return build_webodm_package(
             zip_path,
