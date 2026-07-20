@@ -127,8 +127,10 @@ def test_cesium_client_rejects_bundle_outside_exports(tmp_path, monkeypatch):
     ):
         bundle.parent.mkdir(parents=True, exist_ok=True)
         bundle.write_bytes(b"zip")
-        with pytest.raises(CesiumIonError, match="inside the exports directory"):
-            upload_tileset(_config(), bundle, "Mission")
+        with patch("builtins.open") as bundle_open:
+            with pytest.raises(CesiumIonError, match="inside the exports directory"):
+                upload_tileset(_config(), bundle, "Mission")
+        bundle_open.assert_not_called()
 
 
 def test_cesium_path_check_preserves_filesystem_root():
