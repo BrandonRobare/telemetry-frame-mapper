@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import tempfile
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -117,12 +116,12 @@ def pull_task_results(project_id: int, task_id: int, body: PullResultsIn):
             raise HTTPException(
                 status_code=422, detail="WebODM task has no supported mapping assets"
             )
-        try:
-            downloads_root = Path(get_config().exports_dir) / "webodm"
-            downloads_root.mkdir(parents=True, exist_ok=True)
-            output_dir = Path(tempfile.mkdtemp(prefix="results-", dir=downloads_root))
-        except OSError as exc:
-            raise WebODMError(f"Unable to prepare WebODM download directory: {exc}") from exc
+        output_dir = (
+            Path(get_config().exports_dir)
+            / "webodm"
+            / str(task["project"])
+            / str(task["id"])
+        )
         saved = [
             str(download_asset(config, project_id, task_id, asset, output_dir))
             for asset in sorted(requested)
