@@ -81,6 +81,10 @@ pip install -e ".[dev]"
 
 The CLI requires `ffmpeg` and `exiftool` on your PATH (or pass `--ffmpeg` / `--exiftool`).
 
+For a non-developer Windows install, build the distributable with the documented
+[Windows installer workflow](docs/WINDOWS-INSTALLER.md). It keeps application data in
+`%LOCALAPPDATA%\\Telemetry Frame Mapper` rather than under Program Files.
+
 ### Backend logs
 
 The backend writes local JSON Lines logs by default to `logs/backend.jsonl`. Configure the
