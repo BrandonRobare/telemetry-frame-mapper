@@ -53,17 +53,22 @@ def build_reproducibility_manifest(
     entries = []
     for artifact in artifacts:
         resolved = os.path.normcase(os.path.normpath(os.path.realpath(artifact)))
-        try:
-            safe = any(os.path.commonpath((root, resolved)) == root for root in safe_roots)
-        except ValueError:
-            safe = False
-        if not safe:
+        for root in safe_roots:
+            root_prefix = root if root.endswith(os.sep) else f"{root}{os.sep}"
+            if resolved != root and not resolved.startswith(root_prefix):
+                continue
+            p = Path(resolved)
+            entry = {"path": str(p), "exists": p.exists()}
+            if p.is_file():
+                h = hashlib.sha256()
+                with open(p, "rb") as f:
+                    for chunk in iter(lambda: f.read(1024 * 1024), b""):
+                        h.update(chunk)
+                entry.update({"size_bytes": p.stat().st_size, "sha256": h.hexdigest()})
+            entries.append(entry)
+            break
+        else:
             raise ValueError("artifact_path is outside configured safe directories")
-        p = Path(resolved)
-        entry = {"path": str(p), "exists": p.exists()}
-        if p.is_file():
-            entry.update({"size_bytes": p.stat().st_size, "sha256": sha256_file(p)})
-        entries.append(entry)
     return {
         "manifest_version": 1,
         "created_at": datetime.now(timezone.utc).isoformat(),
