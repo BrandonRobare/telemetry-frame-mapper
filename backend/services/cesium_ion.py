@@ -89,7 +89,7 @@ def _signing_key(secret: str, date: str, region: str) -> bytes:
     return key
 
 
-def _upload_bundle(config: dict, upload: dict, bundle: Path) -> None:
+def _upload_bundle(config: dict, upload: dict, filename: str, body: bytes) -> None:
     """Upload one ZIP with temporary S3 credentials returned by ion.
 
     Cesium provides a bucket/prefix plus short-lived AWS credentials.  Signing
@@ -105,10 +105,9 @@ def _upload_bundle(config: dict, upload: dict, bundle: Path) -> None:
     if parsed.scheme != "https" or not parsed.netloc or parsed.username or parsed.password:
         raise CesiumIonError("Cesium ion returned an unsafe upload endpoint")
 
-    key = f"{prefix.rstrip('/')}/{bundle.name}"
+    key = f"{prefix.rstrip('/')}/{filename}"
     canonical_uri = f"{parsed.path.rstrip('/')}/{quote(key, safe='/~')}".replace("//", "/")
     url = f"{parsed.scheme}://{parsed.netloc}{canonical_uri}"
-    body = bundle.read_bytes()
     now = datetime.now(timezone.utc)
     timestamp, date = now.strftime("%Y%m%dT%H%M%SZ"), now.strftime("%Y%m%d")
     region = str(upload.get("region") or "us-east-1")
@@ -153,10 +152,12 @@ def _upload_bundle(config: dict, upload: dict, bundle: Path) -> None:
         raise CesiumIonError("Cesium ion storage upload failed; check quota and retry") from exc
 
 
-def upload_tileset(config: dict, bundle: Path, name: str) -> dict:
+def upload_tileset(config: dict, bundle_name: str, body: bytes, name: str) -> dict:
     """Create one 3D Tiles asset, upload the ZIP, and start Cesium processing."""
-    if not bundle.is_file():
-        raise CesiumIonError("Cesium ion upload bundle does not exist")
+    _base_url(config)
+    _headers(config)
+    if not bundle_name or Path(bundle_name).name != bundle_name:
+        raise CesiumIonError("Cesium ion upload bundle name must be a filename")
     created = _response_object(
         _request(
             config,
@@ -173,7 +174,7 @@ def upload_tileset(config: dict, bundle: Path, name: str) -> dict:
     complete = created.get("onComplete")
     if not isinstance(upload, dict) or not isinstance(complete, dict):
         raise CesiumIonError(f"Cesium ion asset {asset_id} did not provide upload instructions")
-    _upload_bundle(config, upload, bundle)
+    _upload_bundle(config, upload, bundle_name, body)
     method, url = complete.get("method"), complete.get("url")
     if not isinstance(method, str) or not isinstance(url, str) or not url:
         raise CesiumIonError(f"Cesium ion asset {asset_id} did not provide completion instructions")
