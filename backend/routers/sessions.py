@@ -289,18 +289,8 @@ def bulk_sessions(body: BulkSessionRequest, db: DBSession = Depends(get_db)):
             if body.operation == "archive":
                 from ..services.session_bundle import build_session_archive
 
-                exports_dir = os.path.normpath(os.path.realpath(get_config().exports_dir))
-                zip_path = os.path.normpath(
-                    os.path.realpath(os.path.join(exports_dir, f"session_{s.id}_archive.zip"))
-                )
-                exports_root = os.path.normcase(exports_dir)
-                archive_path = os.path.normcase(zip_path)
-                exports_prefix = (
-                    exports_root if exports_root.endswith(os.sep) else f"{exports_root}{os.sep}"
-                )
-                if not archive_path.startswith(exports_prefix):
-                    raise ValueError("Session archive path is outside exports directory")
-                archive = build_session_archive(Path(zip_path), s, db)
+                zip_path = Path(get_config().exports_dir) / f"session_{session_id}_archive.zip"
+                archive = build_session_archive(zip_path, s, db)
                 outcomes.append(
                     BulkSessionOutcome(
                         session_id=session_id, ok=True, bundle_path=archive["bundle_path"]
@@ -448,18 +438,8 @@ def archive_session(session_id: int, db: DBSession = Depends(get_db)):
     s = db.query(SessionModel).filter(SessionModel.id == session_id).first()
     if not s:
         raise HTTPException(status_code=404, detail="Session not found")
-    exports_dir = os.path.normpath(os.path.realpath(get_config().exports_dir))
-    zip_path = os.path.normpath(
-        os.path.realpath(os.path.join(exports_dir, f"session_{s.id}_archive.zip"))
-    )
-    exports_root = os.path.normcase(exports_dir)
-    archive_path = os.path.normcase(zip_path)
-    exports_prefix = exports_root if exports_root.endswith(os.sep) else f"{exports_root}{os.sep}"
-    if not archive_path.startswith(exports_prefix):
-        raise HTTPException(
-            status_code=422, detail="Session archive path is outside exports directory"
-        )
-    return build_session_archive(Path(zip_path), s, db)
+    zip_path = Path(get_config().exports_dir) / f"session_{session_id}_archive.zip"
+    return build_session_archive(zip_path, s, db)
 
 
 class RestoreRequest(BaseModel):
