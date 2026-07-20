@@ -7,6 +7,7 @@ interface ActiveLayers {
   footprints: boolean
   coverage: boolean
   heatmap: boolean
+  slope: boolean
   targetArea: boolean
 }
 
@@ -14,7 +15,7 @@ interface SyncedViewport {
   lat: number
   lon: number
   zoom: number
-  source: 'leaflet' | '3d'
+  source: 'leaflet' | '3d' | `comparison:${number}`
 }
 
 interface MapStore {
@@ -24,7 +25,9 @@ interface MapStore {
   theme: Theme
   sidebarOpen: boolean
   basemapId: BasemapId
+  slopeOpacity: number
   setBasemapId: (id: BasemapId) => void
+  setSlopeOpacity: (opacity: number) => void
   setProject: (id: number | null) => void
   setSession: (id: number | null) => void
   toggleLayer: (key: keyof ActiveLayers) => void
@@ -34,6 +37,8 @@ interface MapStore {
   setRequestedTab: (tab: string | null) => void
   targetSessionId: number | null
   setTargetSessionId: (id: number | null) => void
+  targetReconstructionId: number | null
+  setTargetReconstructionId: (id: number | null) => void
   splitPaneActive: boolean
   toggleSplitPane: () => void
   syncedViewport: SyncedViewport | null
@@ -92,7 +97,7 @@ function saveBasemap(id: BasemapId) {
 export const useMapStore = create<MapStore>((set) => ({
   selectedProjectId: null,
   selectedSessionId: null,
-  activeLayers: { footprints: true, coverage: true, heatmap: false, targetArea: true },
+  activeLayers: { footprints: true, coverage: true, heatmap: false, slope: false, targetArea: true },
   theme: savedTheme,
   sidebarOpen: true,
   basemapId: getSavedBasemap(),
@@ -100,6 +105,8 @@ export const useMapStore = create<MapStore>((set) => ({
     saveBasemap(id)
     return { basemapId: id }
   }),
+  slopeOpacity: 0.65,
+  setSlopeOpacity: (opacity) => set({ slopeOpacity: Math.min(1, Math.max(0, opacity)) }),
 
   setProject: (id) => set({ selectedProjectId: id }),
 
@@ -121,6 +128,8 @@ export const useMapStore = create<MapStore>((set) => ({
   setRequestedTab: (tab) => set({ requestedTab: tab }),
   targetSessionId: null,
   setTargetSessionId: (id) => set({ targetSessionId: id }),
+  targetReconstructionId: null,
+  setTargetReconstructionId: (id) => set({ targetReconstructionId: id }),
   splitPaneActive: false,
   toggleSplitPane: () => set((s) => ({ splitPaneActive: !s.splitPaneActive })),
   syncedViewport: null,

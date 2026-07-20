@@ -42,13 +42,24 @@ across 19 routers.
   scoring (OpenCV); DJI XMP parsing for relative altitude, yaw, and gimbal pitch.
 - **Session organization:** tags (short labels, max 40 chars) and free-text
   operator notes per session via `PATCH /sessions/{id}`; edit them in the Map
-  tab's session sidebar and filter the session picker by tag.
+  tab's session sidebar and filter the session picker by tag. The top-bar
+  **Bulk** picker can select visible sessions to assign a project, add or
+  replace tags, or archive each with the normal portable bundle. It reports an
+  outcome for every selected session; deletion requires typing the exact value
+  `DELETE` and uses the same cleanup path as a single-session delete.
 - **Geometry & coverage:** ground-footprint computation (Shapely/UTM from
   altitude + heading); coverage analysis against drawn target areas with gap and
   overlap detection.
 - **Mission planning:** lawnmower flight-plan generation with KML/GPX export and
   battery-count estimates.
-- **Flight-log sync:** match DJI FlightRecord CSV timestamps to frames.
+- **Flight-log sync:** upload a supported telemetry CSV, preview timing deltas, then
+  match positions to frames. Supported header contracts are DJI FlightRecord
+  (`time(millisecond)`, `OSD.latitude`, `OSD.longitude`, optional
+  `OSD.altitude[m]`), Autel (`Time(ms)`, `Latitude`, `Longitude`, `Altitude(m)`),
+  Parrot fdr-lite (`time`, `latitude`, `longitude`, `altitude`), and ArduPilot
+  MAVExplorer POS (`timestamp`, `TimeUS`, `Lat`, `Lng`, `Alt`). CSV uploads with
+  missing or unrecognized coordinate headers are rejected; this app does not
+  fabricate a position.
 - **Battery/flight records:** per-session operator field records
   (`/sessions/{id}/flight-entries`) — battery ID, start/end charge %, flight
   duration (derived from flight-log telemetry when omitted), and notes.
@@ -71,6 +82,9 @@ across 19 routers.
   no content. The mesh is assumed to sit in a local East-North-Up frame centered on that GPS
   centroid — good enough to place it on the globe, not a substitute for a full similarity-transform
   fit against ground control.
+- **Cesium ion publishing:** with an explicitly enabled `cesium_ion` configuration and a token held
+  only in its named environment variable, `POST /export/reconstructions/{id}/cesium-ion` uploads
+  that existing share bundle and returns the ion asset ID. See [CESIUM-ION.md](CESIUM-ION.md).
 - **Session archive/restore:** `POST /sessions/{id}/archive` bundles a session's
   full DB state (images, flight logs, reconstructions with lineage,
   measurements, annotations, defects, etc.) plus its artifact files into one
@@ -105,9 +119,9 @@ across 19 routers.
 | **Field Checklist** | Pre-flight and post-flight operator reminders — checkboxes for defaults (batteries charged, SD card formatted, propellers inspected, firmware/RTH height set, GPS lock, takeoff altitude recorded; video+SRT copied, frames extracted, battery state noted), plus custom items you add/remove and a reset-checks action. Saved to this browser's local storage — no session or backend involved |
 | **Reconstruct** | Start quick/full reconstruction jobs |
 | **Jobs** | Resource monitor (CPU/RAM/GPU) with live job logs; job completion/failure fires an in-app toast (and a desktop notification when the tab is hidden and permission is granted) |
-| **Storage** | Disk usage by category and a file browser |
+| **Storage** | Disk usage by category, a file browser, and configured artifact backups |
 | **Splat Viewer** | In-browser gaussian-splat rendering, PSNR/SSIM sparklines, coverage-gap heatmap, GPS-pinned annotations, distance/area measurement, ortho/3D split view, flythrough recording, presentation/narration mode |
-| **Compare** | Voxel change detection between two reconstructions of the same site |
+| **Compare** | Voxel change detection between two reconstructions of the same site, plus a selected-project trend table of existing session quality, coverage, and completed-reconstruction metrics. It is read-only: `—` means a metric has not yet been recorded. |
 | **Settings** | App preferences, import/storage paths, mission parameters, reconstruction presets, rendering/export defaults |
 
 Light/dark theme with persistence.
@@ -212,7 +226,76 @@ data, just no splat.
 SuGaR mesh, a server-rendered or browser-recorded flythrough MP4, GeoJSON, and a
 WebODM/OpenDroneMap georeferencing CSV-only zip.
 
+### Pix4D and DroneDeploy control-point CSVs
+
+The API can translate surveyed WGS84 control points for either **Pix4D** or
+**DroneDeploy** without storing them in the project database:
+
+This is not a DroneDeploy or Pix4D project/package importer. See
+[DroneDeploy and Pix4D project import](VENDOR-PROJECT-IMPORT.md) for the
+documented boundary, supported migration path, and requirements for a future
+safe importer.
+
+- `POST /georeferencing/control-points/import` accepts `{"format":"pix4d"|"dronedeploy","contents":"..."}`.
+- `POST /georeferencing/control-points/export` accepts `{"format":"pix4d"|"dronedeploy","points":[...]}` and returns CSV text.
+
+Both supported mappings are deliberately limited to the shared geographic
+contract: no header row, one row per point as
+`label,latitude,longitude,elevation_m` in WGS84/EPSG:4326. Latitude is column
+2 and longitude is column 3. The importer rejects headers, empty labels,
+duplicate labels, non-numeric elevations, malformed rows, and coordinates
+outside WGS84 ranges. Pix4D projected-coordinate/accuracy variants are not
+converted by this WGS84 endpoint; choose the coordinate system in Pix4D when
+importing a projected survey file.
+
+Example export request:
+
+```json
+{
+  "format": "dronedeploy",
+  "points": [{"label": "north-pad", "latitude": 41.2, "longitude": -81.5, "altitude_m": 300.25}]
+}
+```
+
+The returned `contents` is `north-pad,41.20000000,-81.50000000,300.250` plus a
+newline, ready to save as a `.csv` for either supported WGS84 workflow.
+
+### GeoPackage mapped-product export
+
+`GET /export/reconstructions/{reconstruction_id}/geopackage` downloads a QGIS-ready
+GeoPackage in the configured project target CRS. Add `?comparison_id={id}` to include
+the completed comparison's changed voxel cells. The exporter writes only available
+layers, in this stable order: `image_locations`, `footprints`, `flight_paths`,
+`coverage_gaps`, `measurements`, and `comparison_change_cells`. Invalid or unavailable
+source geometry is skipped; the request remains useful for the layers that exist.
+
+If `exports/{reconstruction_id}/dsm.tif` or `dem.tif` already exists, the package adds
+the non-spatial `raster_references` table with its path. It does not create, copy, or
+embed raster data, so add that TIFF separately in QGIS when needed.
+
+### QGIS and ArcGIS Pro project files
+
+`POST /export/reconstructions/{reconstruction_id}/gis-project-files` first refreshes
+`mapped_products.gpkg`, then writes these deterministic sibling files in
+`exports/{reconstruction_id}/`: `mapped_products.qgz`, `mapped_products.lyrx`, and
+`mapped_products_gis_manifest.json`. The response and manifest list their fixed file
+names, the GeoPackage layers that were present, and optional `dsm.tif`/`dem.tif` sidecars.
+Both GIS files use relative sibling references, so move the complete directory together.
+Add `?comparison_id={id}` to include the same completed comparison layer as the
+GeoPackage export. QGIS gets a zipped XML project; ArcGIS Pro gets a CIM layer-document
+JSON file. Neither export creates, copies, or embeds raster data.
+
 ---
+
+### Orthomosaic tiles (WMS / WMTS-style)
+
+After an orthomosaic export finishes, discover its layer with
+`GET /tiles/{reconstruction_id}/wms?SERVICE=WMS&REQUEST=GetCapabilities`.
+The layer name is `reconstruction-{reconstruction_id}`. Request a WMS PNG in Web
+Mercator with `REQUEST=GetMap`, `LAYERS`, `CRS=EPSG:3857`, `BBOX=west,south,east,north`,
+`WIDTH`, and `HEIGHT`; only `image/png` is supported. Slippy-map clients can instead use
+`GET /tiles/{reconstruction_id}/wmts/{z}/{x}/{y}.png` (XYZ/Web Mercator, zoom 0-22).
+These endpoints reproject the exported GeoTIFF on demand; they neither create imagery nor cache tiles.
 
 ## 3. The gaussian-splat trainer
 
@@ -376,3 +459,35 @@ classes absent from ADE20K. Treat the output as an operator QA aid, not a survey
 truth layer. If more than about 30% of points are unlabeled on a normal survey,
 recheck frame coverage, COLMAP registration, and GPU dependency status before
 trusting downstream LAS classifications.
+
+## ML-assisted defect detection: investigation verdict
+
+No automatic defect-detection workflow is currently available. The Semantic
+Labels workflow is **not** a crack, corrosion, water-damage, or missing-material
+classifier: its SegFormer-B0 model is trained for ADE20K scene parsing and its
+output is deliberately collapsed to the six broad classes above. In particular,
+the `structure` label means a scene region is structural; it is not evidence that
+the region is defect-free or defective. The model card identifies this checkpoint
+as ADE20K `scene_parse_150`, not an aerial-inspection or defect dataset
+([model card](https://huggingface.co/nvidia/segformer-b0-finetuned-ade-512-512)).
+
+Use the existing **Review** tab to flag a defect, select one or more supporting
+photos, and record category, severity, and notes. Semantic Labels can be used as
+an optional scene-context overlay while reviewing, but never to create defect
+records automatically or to prioritize a safety decision without operator review.
+
+Before an automatic workflow can ship, a candidate must use a defect-labelled,
+representative aerial-inspection dataset and produce a localized candidate plus
+confidence for each supported defect class. It is accepted only after an
+independent held-out survey validates the agreed per-class precision/recall and
+false-negative limits at the intended operating threshold, with every candidate
+remaining reviewable in the existing manual workflow. Reject a candidate that
+only produces broad scene classes, lacks held-out validation, cannot localize the
+defect to source imagery, or cannot expose a threshold/confidence for review.
+
+The next experiment is to collect or license representative, image-level and
+defect-localized crack/corrosion examples for one narrowly defined asset type;
+write the class definitions and pass/fail metrics before training; then compare a
+defect-specific baseline against a held-out flight before proposing any API or UI
+automation. This keeps the current manual evidence trail useful whether the
+experiment succeeds or is rejected.

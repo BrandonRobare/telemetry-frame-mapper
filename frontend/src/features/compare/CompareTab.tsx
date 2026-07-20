@@ -4,8 +4,18 @@ import { get, post } from '../../shared/api/client'
 import { Button } from '../../shared/components/Button'
 import { useToast } from '../../shared/hooks/useToast'
 import { useMapStore } from '../../shared/stores/mapStore'
-import type { ComparisonCell, ComparisonDiff, Job, Session, SessionComparison } from '../../types/api'
+import type {
+  ComparisonCell,
+  ComparisonDiff,
+  Job,
+  Session,
+  SessionComparison,
+  SiteTrend,
+} from '../../types/api'
 import { formatComparisonSummary, normalizeCellsForOverlay, visibleComparisonCells } from './formatDiff'
+import { formatTrendDate, formatTrendPercent, formatTrendValue } from './formatTrends'
+import { comparisonGridJobs } from './comparisonGrid'
+import CompareMapPane from './CompareMapPane'
 import TabHeader from '../../shared/components/TabHeader'
 
 const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
@@ -41,6 +51,15 @@ function useComparisonDiff(comparisonId: number | null, ready: boolean) {
     queryKey: ['comparison-diff', comparisonId],
     queryFn: () => get<ComparisonDiff>(`/comparisons/${comparisonId!}/diff`),
     enabled: comparisonId !== null && ready,
+  })
+}
+
+function useProjectTrends(projectId: number | null) {
+  return useQuery<SiteTrend>({
+    queryKey: ['project-trends', projectId],
+    queryFn: () => get<SiteTrend>(`/projects/${projectId!}/trends`),
+    enabled: projectId !== null,
+    staleTime: 30_000,
   })
 }
 
@@ -89,13 +108,15 @@ function optionLabel(job: Job, sessionsById: Map<number, string>) {
 }
 
 export default function CompareTab() {
-  const { selectedSessionId } = useMapStore()
+  const { selectedProjectId, selectedSessionId, setSession, setTargetReconstructionId, setRequestedTab } = useMapStore()
   const { addToast } = useToast()
   const qc = useQueryClient()
   const { data: sessions = [] } = useSessions()
   const { data: jobs = [], isLoading } = useJobs()
   const [reconstructionAId, setReconstructionAId] = useState<number | null>(null)
   const [reconstructionBId, setReconstructionBId] = useState<number | null>(null)
+  const [reconstructionCId, setReconstructionCId] = useState<number | null>(null)
+  const [reconstructionDId, setReconstructionDId] = useState<number | null>(null)
   const [comparisonId, setComparisonId] = useState<number | null>(null)
   const [showNew, setShowNew] = useState(true)
   const [showRemoved, setShowRemoved] = useState(true)
@@ -110,8 +131,10 @@ export default function CompareTab() {
   )
   const recA = completedJobs.find((job) => job.id === reconstructionAId) ?? null
   const recB = completedJobs.find((job) => job.id === reconstructionBId) ?? null
+  const gridJobs = comparisonGridJobs(completedJobs, [reconstructionAId, reconstructionBId, reconstructionCId, reconstructionDId])
   const { data: comparison } = useComparison(comparisonId)
   const { data: diff } = useComparisonDiff(comparisonId, comparison?.status === 'complete')
+  const { data: trends, isLoading: trendsLoading } = useProjectTrends(selectedProjectId)
 
   useEffect(() => {
     if (reconstructionAId !== null || completedJobs.length === 0) return
@@ -148,6 +171,12 @@ export default function CompareTab() {
   const visibleCells = visibleComparisonCells(diff, showNew, showRemoved)
   const canCompare = !!recA && !!recB && recA.id !== recB.id
 
+  function openInViewer(job: Job) {
+    setSession(job.session_id)
+    setTargetReconstructionId(job.id)
+    setRequestedTab('splat')
+  }
+
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
       <TabHeader
@@ -156,6 +185,65 @@ export default function CompareTab() {
       />
       <div className="flex-1 overflow-y-auto p-6" style={{ color: 'var(--text)' }}>
       <div className="mx-auto flex flex-col gap-6" style={{ maxWidth: 980 }}>
+        <section
+          className="p-5 flex flex-col gap-3"
+          style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}
+        >
+          <div>
+            <h2 className="text-base font-semibold" style={{ color: 'var(--text)', margin: 0 }}>
+              Site trend
+            </h2>
+            <p className="text-sm" style={{ color: 'var(--text-muted)', margin: '4px 0 0' }}>
+              Existing session, coverage, and completed-reconstruction metrics for this project.
+            </p>
+          </div>
+          {selectedProjectId === null && (
+            <p className="text-sm" style={{ color: 'var(--text-muted)', margin: 0 }}>
+              Select a project to see its flight trend.
+            </p>
+          )}
+          {selectedProjectId !== null && trendsLoading && (
+            <p className="text-sm" style={{ color: 'var(--text-muted)', margin: 0 }}>
+              Loading site trend…
+            </p>
+          )}
+          {trends && trends.points.length === 0 && (
+            <p className="text-sm" style={{ color: 'var(--text-muted)', margin: 0 }}>
+              No sessions have been imported for this project.
+            </p>
+          )}
+          {trends && trends.points.length > 0 && (
+            <div style={{ overflowX: 'auto' }}>
+              <table className="w-full text-sm" style={{ borderCollapse: 'collapse', minWidth: 720 }}>
+                <caption className="sr-only">Time-ordered metrics for the selected project</caption>
+                <thead style={{ color: 'var(--text-muted)', fontSize: 12 }}>
+                  <tr>
+                    {['Flight', 'Session', 'Usable', 'Coverage', 'Registered', 'PSNR', 'SSIM'].map((label) => (
+                      <th key={label} scope="col" className="text-left" style={trendCellStyle}>{label}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {trends.points.map((point) => (
+                    <tr key={point.session_id} style={{ borderTop: '1px solid var(--border)' }}>
+                      <td style={trendCellStyle}>{formatTrendDate(point.imported_at)}</td>
+                      <th scope="row" className="text-left font-medium" style={trendCellStyle}>{point.session_name}</th>
+                      <td style={trendCellStyle}>{formatTrendPercent(point.usable_pct)}</td>
+                      <td style={trendCellStyle}>{formatTrendPercent(point.coverage_pct)}</td>
+                      <td style={trendCellStyle}>{point.frames_registered ?? '—'}</td>
+                      <td style={trendCellStyle}>{formatTrendValue(point.psnr)}</td>
+                      <td style={trendCellStyle}>{formatTrendValue(point.ssim, 3)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          <p className="text-xs" style={{ color: 'var(--text-muted)', margin: 0 }}>
+            — means that metric has not been recorded yet. No trend calculation is run in the background.
+          </p>
+        </section>
+
         <section
           className="p-5 flex flex-col gap-4"
           style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}
@@ -177,6 +265,7 @@ export default function CompareTab() {
           )}
 
           {completedJobs.length >= 2 && (
+            <>
             <div className="grid gap-4" style={{ gridTemplateColumns: '1fr 1fr auto' }}>
               <label className="flex flex-col gap-1 text-xs" style={{ color: 'var(--text-muted)' }}>
                 Baseline
@@ -213,6 +302,43 @@ export default function CompareTab() {
                 {compareMutation.isPending ? 'Starting…' : 'Compare'}
               </Button>
             </div>
+            <div>
+              <p className="text-xs" style={{ color: 'var(--text-muted)', margin: '0 0 8px' }}>
+                Add up to two completed reconstructions for a 3–4-up synchronized map-context review. The first two remain the backend diff pair.
+              </p>
+              <div className="grid gap-4" style={{ gridTemplateColumns: '1fr 1fr' }}>
+                <label className="flex flex-col gap-1 text-xs" style={{ color: 'var(--text-muted)' }}>
+                  Third view (optional)
+                  <select value={reconstructionCId ?? ''} onChange={(event) => setReconstructionCId(event.target.value ? Number(event.target.value) : null)} style={selectStyle}>
+                    <option value="">None</option>
+                    {completedJobs.map((job) => <option key={job.id} value={job.id}>{optionLabel(job, sessionsById)}</option>)}
+                  </select>
+                </label>
+                <label className="flex flex-col gap-1 text-xs" style={{ color: 'var(--text-muted)' }}>
+                  Fourth view (optional)
+                  <select value={reconstructionDId ?? ''} onChange={(event) => setReconstructionDId(event.target.value ? Number(event.target.value) : null)} style={selectStyle}>
+                    <option value="">None</option>
+                    {completedJobs.map((job) => <option key={job.id} value={job.id}>{optionLabel(job, sessionsById)}</option>)}
+                  </select>
+                </label>
+              </div>
+            </div>
+            {gridJobs.length >= 2 && (
+              <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(${gridJobs.length}, minmax(0, 1fr))` }}>
+                {gridJobs.map((job) => (
+                  <article key={job.id} className="p-3 flex flex-col gap-2" style={{ border: '1px solid var(--border)', background: 'var(--surface-2)' }}>
+                    <div>
+                      <p className="text-xs font-medium" style={{ color: 'var(--text)', margin: 0 }}>{sessionsById.get(job.session_id) ?? `Session ${job.session_id}`}</p>
+                      <p className="text-xs" style={{ color: 'var(--text-muted)', margin: '2px 0 0' }}>Reconstruction #{job.id} · {job.preset}</p>
+                    </div>
+                    <p className="text-xs" style={{ color: 'var(--text-muted)', margin: 0 }}>{job.frames_used} frames · {job.status}</p>
+                    <CompareMapPane reconstructionId={job.id} sessionId={job.session_id} />
+                    <Button variant="ghost" size="sm" onClick={() => openInViewer(job)}>Open synced 3D view</Button>
+                  </article>
+                ))}
+              </div>
+            )}
+            </>
           )}
         </section>
 
@@ -284,3 +410,5 @@ const selectStyle = {
   fontSize: 13,
   fontFamily: 'inherit',
 }
+
+const trendCellStyle = { padding: '8px 10px 8px 0', whiteSpace: 'nowrap' as const }

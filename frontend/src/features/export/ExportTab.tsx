@@ -152,6 +152,16 @@ function MeshExportCard({ job }: { job: Job }) {
           )}
           {mesh?.mesh_obj_path && (
             <a
+              href={`${BASE_URL}/export/reconstructions/${job.id}/usd`}
+              download={`mesh_${job.id}_usd_handoff.zip`}
+              style={downloadLinkStyle}
+              title="USDA mesh, source assets, and georeferencing sidecar."
+            >
+              Download USDA + georef
+            </a>
+          )}
+          {mesh?.mesh_obj_path && (
+            <a
               href={`${BASE_URL}/reconstruction/${job.id}/mesh?format=obj`}
               download={`mesh_${job.id}.obj`}
               style={downloadLinkStyle}
@@ -170,6 +180,34 @@ function MeshExportCard({ job }: { job: Job }) {
           )}
         </div>
       )}
+    </div>
+  )
+}
+
+function PotreeExportCard({ job }: { job: Job }) {
+  const { addToast } = useToast()
+  const potreeMutation = useMutation({
+    mutationFn: () => post<{ output_dir: string }>(`/reconstruction/${job.id}/potree`),
+    onSuccess: ({ output_dir }) => addToast(`Potree export ready in ${output_dir}`, 'success'),
+    onError: (err: Error) => addToast(`Potree export failed: ${err.message}`, 'error'),
+  })
+
+  return (
+    <div className="flex gap-2 items-center">
+      <a
+        href={`${BASE_URL}/reconstruction/${job.id}/pointcloud`}
+        download={`pointcloud_${job.id}.las`}
+        style={downloadLinkStyle}
+      >
+        Download LAS
+      </a>
+      <Button
+        variant="ghost"
+        disabled={potreeMutation.isPending}
+        onClick={() => potreeMutation.mutate()}
+      >
+        {potreeMutation.isPending ? 'Converting…' : 'Generate Potree'}
+      </Button>
     </div>
   )
 }
@@ -290,7 +328,9 @@ export default function ExportTab() {
     reconstruction_id: number
     session_id: number
     share_token: string
+    share_link_id: number
   } | null>(null)
+  const [sharePassword, setSharePassword] = useState('')
 
   const webodmMutation = useMutation({
     mutationFn: () =>
@@ -312,10 +352,14 @@ export default function ExportTab() {
     const fn = async () => {
       const data = await post<{
         share_token: string
+        share_link_id: number
         reconstruction_id: number
         session_id: number
-      }>(`/export/reconstructions/${reconstructionId}/share-link`)
+      }>(`/export/reconstructions/${reconstructionId}/share-link`, {
+        password: sharePassword || undefined,
+      })
       setShareResult(data)
+      setSharePassword('')
       return data
     }
     fn().catch((err: Error) => {
@@ -467,7 +511,7 @@ export default function ExportTab() {
               className="text-sm mt-1"
               style={{ color: 'var(--text-muted)', margin: '4px 0 0' }}
             >
-              Generate a signed, time-limited share link for a completed reconstruction.
+              Generate a revocable, time-limited share link for a completed reconstruction.
               The public viewer is read-only — it shows geo-referenced splats and meshes
               without exposing operator controls.
             </p>
@@ -484,6 +528,17 @@ export default function ExportTab() {
               No completed reconstructions available to share.
             </p>
           )}
+
+          <label className="text-sm flex flex-col gap-1" style={{ color: 'var(--text-muted)', maxWidth: 320 }}>
+            Optional password
+            <input
+              type="password"
+              value={sharePassword}
+              onChange={(event) => setSharePassword(event.target.value)}
+              autoComplete="new-password"
+              placeholder="Protect new links"
+            />
+          </label>
 
           {(completedReconstructions ?? []).length > 0 && (
             <div style={{ borderTop: '1px solid var(--border)' }}>
@@ -764,22 +819,7 @@ export default function ExportTab() {
                   {job.preset} · {job.frames_used} frames
                 </div>
               </div>
-              <a
-                href={`${BASE_URL}/reconstruction/${job.id}/pointcloud`}
-                download={`pointcloud_${job.id}.las`}
-                style={{
-                  padding: '5px 10px',
-                  borderRadius: 'var(--radius-sm)',
-                  fontSize: 12,
-                  background: 'var(--accent-soft)',
-                  border: '1px solid var(--accent-soft)',
-                  color: 'var(--accent-strong)',
-                  textDecoration: 'none',
-                  whiteSpace: 'nowrap',
-                }}
-              >
-                Download LAS
-              </a>
+              <PotreeExportCard job={job} />
             </div>
           ))}
           </div>

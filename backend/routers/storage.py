@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import time
 from pathlib import Path, PurePosixPath, PureWindowsPath
+from typing import Literal
 
-from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel
+from fastapi import APIRouter, HTTPException, Query, Request
+from pydantic import BaseModel, Field
 
-from ..core.config import get_config
+from ..core.config import get_backup_config, get_config
 from ..services.storage_summary_cache import _cache, invalidate_storage_summary_cache
 
 router = APIRouter(prefix="/storage", tags=["storage"])
@@ -179,6 +180,14 @@ class ApplyPolicyRequest(BaseModel):
     execute: bool = False
 
 
+class BackupRequest(BaseModel):
+    destination: Literal["local", "rclone"]
+    local_destination: str | None = None
+    artifacts: list[Literal["imports", "processed", "exports"]] = Field(
+        default_factory=lambda: ["processed", "exports"]
+    )
+
+
 @router.post("/apply-policy")
 def apply_storage_policy(body: ApplyPolicyRequest):
     """Preview or execute storage lifecycle rules.
@@ -204,3 +213,40 @@ def apply_storage_policy(body: ApplyPolicyRequest):
     if "error" in result:
         raise HTTPException(status_code=422, detail=result["error"])
     return result
+
+
+@router.post("/backup")
+def create_artifact_backup(body: BackupRequest):
+    """Create a versioned, additive snapshot at a configured backup destination."""
+    from ..services.artifact_backup import BackupError, create_backup
+
+    try:
+        return create_backup(
+            destination=body.destination,
+            local_destination=body.local_destination,
+            artifacts=body.artifacts,
+            cfg=get_config(),
+            config_path=Path("config.yaml"),
+            backup_config=get_backup_config(),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except BackupError as exc:
+        raise HTTPException(status_code=502, detail="Backup could not be completed") from exc
+
+
+@router.get("/backup-schedule")
+def get_backup_schedule_status(request: Request):
+    """Return the safe operational state of the configured daily backup."""
+    scheduler = getattr(request.app.state, "backup_scheduler", None)
+    if scheduler is None:
+        return {
+            "enabled": False,
+            "target": None,
+            "daily_at": None,
+            "running": False,
+            "last_run": None,
+            "next_run": None,
+            "result": None,
+        }
+    return scheduler.status()

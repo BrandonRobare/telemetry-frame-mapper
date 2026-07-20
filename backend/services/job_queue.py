@@ -44,6 +44,10 @@ _shutdown = threading.Event()
 _max_concurrent_gpu: int = 1  # Only one GPU job at a time
 
 
+class JobNonRetryableError(RuntimeError):
+    """A handler failure that should be recorded without re-queuing the job."""
+
+
 def register_handler(job_type: str, handler: Callable) -> None:
     """Register a callable to execute when a job of ``job_type`` is drained.
 
@@ -142,6 +146,7 @@ def cancel_job(job_id: int) -> bool:
 
 
 def _serialize(entry: JobQueueEntry) -> dict:
+    payload = json.loads(entry.payload_json) if entry.payload_json else {}
     return {
         "id": entry.id,
         "job_type": entry.job_type,
@@ -154,7 +159,23 @@ def _serialize(entry: JobQueueEntry) -> dict:
         "created_at": entry.created_at.isoformat() if entry.created_at else None,
         "started_at": entry.started_at.isoformat() if entry.started_at else None,
         "completed_at": entry.completed_at.isoformat() if entry.completed_at else None,
+        "remote_job_id": payload.get("remote_job_id"),
     }
+
+
+def update_payload(job_id: int, **values: object) -> None:
+    """Merge durable handler metadata into a job payload without adding schema columns."""
+    db = _make_session()
+    try:
+        entry = db.query(JobQueueEntry).filter(JobQueueEntry.id == job_id).first()
+        if entry is None:
+            return
+        payload = json.loads(entry.payload_json) if entry.payload_json else {}
+        payload.update(values)
+        entry.payload_json = json.dumps(payload)
+        db.commit()
+    finally:
+        db.close()
 
 
 def start_worker() -> None:
@@ -332,6 +353,8 @@ def _execute_job(
         if entry is None:
             return
         handler(entry, db, cancel)
+    except JobNonRetryableError as exc:
+        _mark_failed(job_id, str(exc)[:5000], db=db)
     except Exception as exc:
         db = _make_session()
         try:
@@ -379,7 +402,9 @@ def mark_complete(job_id: int) -> None:
     """Mark a job as successfully completed."""
     db = _make_session()
     try:
-        db.query(JobQueueEntry).filter(JobQueueEntry.id == job_id).update({
+        db.query(JobQueueEntry).filter(
+            JobQueueEntry.id == job_id, JobQueueEntry.status != "cancelled"
+        ).update({
             "status": "completed",
             "completed_at": datetime.now(timezone.utc),
         })

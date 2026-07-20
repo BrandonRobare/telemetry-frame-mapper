@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { MapContainer, TileLayer, GeoJSON, useMap } from 'react-leaflet'
+import { MapContainer, TileLayer, GeoJSON, ImageOverlay, useMap } from 'react-leaflet'
 import type { LatLngBoundsExpression, Layer } from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import type { Footprint, CoverageResult } from '../../types/api'
@@ -34,6 +34,7 @@ interface Props {
   coverage: CoverageResult | null
   isLoading: boolean
   error: Error | null
+  slopeOverlay: { imageUrl: string; bounds: [[number, number], [number, number]] } | null
 }
 
 function FitBounds({ footprints }: { footprints: Footprint[] }) {
@@ -68,8 +69,8 @@ function FitBounds({ footprints }: { footprints: Footprint[] }) {
   return null
 }
 
-export default function LeafletMapView({ footprints, coverage, isLoading, error }: Props) {
-  const { activeLayers, basemapId, setBasemapId } = useMapStore()
+export default function LeafletMapView({ footprints, coverage, isLoading, error, slopeOverlay }: Props) {
+  const { activeLayers, basemapId, setBasemapId, slopeOpacity } = useMapStore()
   const basemap = BASEMAPS[basemapId as keyof typeof BASEMAPS] ?? BASEMAPS.esri_satellite
 
   if (error) {
@@ -213,6 +214,10 @@ export default function LeafletMapView({ footprints, coverage, isLoading, error 
               weight: 1.5,
             }}
           />
+        )}
+
+        {activeLayers.slope && slopeOverlay && (
+          <ImageOverlay url={slopeOverlay.imageUrl} bounds={slopeOverlay.bounds} opacity={slopeOpacity} />
         )}
 
         <FitBounds footprints={activeLayers.footprints ? footprints : []} />

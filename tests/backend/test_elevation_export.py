@@ -1,0 +1,104 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+from backend.db.models import Reconstruction
+from backend.db.models import Session as SessionModel
+from backend.services.elevation_export import NODATA, export_elevation_geotiff
+
+
+def _require_raster_dependencies() -> None:
+    pytest.importorskip("laspy")
+    pytest.importorskip("rasterio")
+    pytest.importorskip("pyproj")
+
+
+@pytest.fixture
+def classified_las(tmp_path: Path) -> Path:
+    _require_raster_dependencies()
+    import laspy
+    import numpy as np
+    from pyproj import CRS
+
+    path = tmp_path / "pointcloud.las"
+    header = laspy.LasHeader(point_format=3, version="1.4")
+    header.scales = np.array([0.001, 0.001, 0.001])
+    header.offsets = np.array([500000.0, 5000000.0, 0.0])
+    header.add_crs(CRS.from_epsg(32617))
+    cloud = laspy.LasData(header)
+    cloud.x = [500000.1, 500000.1, 500001.1]
+    cloud.y = [5000001.1, 5000001.1, 5000000.1]
+    cloud.z = [10.0, 12.0, 8.0]
+    cloud.classification = [2, 2, 1]
+    cloud.write(path)
+    return path
+
+
+def test_dsm_geotiff_has_maximum_values_crs_and_nodata(classified_las: Path, tmp_path: Path):
+    _require_raster_dependencies()
+    import rasterio
+
+    result = export_elevation_geotiff(
+        classified_las, tmp_path / "dsm.tif", product="dsm", resolution_m=1.0
+    )
+
+    with rasterio.open(result["path"]) as dataset:
+        values = dataset.read(1)
+        assert dataset.crs.to_epsg() == 32617
+        assert dataset.nodata == NODATA
+        assert values.tolist() == [[12.0, NODATA], [NODATA, 8.0]]
+
+
+def test_dem_requires_ground_labels(classified_las: Path, tmp_path: Path):
+    _require_raster_dependencies()
+    import laspy
+
+    cloud = laspy.read(classified_las)
+    cloud.classification = [1, 1, 1]
+    cloud.write(classified_las)
+
+    with pytest.raises(ValueError, match="no ASPRS ground"):
+        export_elevation_geotiff(
+            classified_las, tmp_path / "dem.tif", product="dem", resolution_m=1.0
+        )
+
+
+def test_dem_route_returns_422_without_ground_labels(
+    client, classified_las: Path, monkeypatch, tmp_path
+):
+    import backend.routers.export as export_router
+    from backend.db.database import get_db
+    from backend.main import app
+
+    monkeypatch.setattr(
+        export_router,
+        "get_config",
+        lambda: type("Cfg", (), {"exports_dir": str(tmp_path / "exports")})(),
+    )
+    exports = tmp_path / "exports" / "1"
+    exports.mkdir(parents=True)
+    pointcloud = exports / "pointcloud.las"
+    pointcloud.write_bytes(classified_las.read_bytes())
+    import laspy
+
+    cloud = laspy.read(pointcloud)
+    cloud.classification = [1, 1, 1]
+    cloud.write(pointcloud)
+
+    db = next(app.dependency_overrides[get_db]())
+    session = SessionModel(name="S", folder_path=str(tmp_path))
+    db.add(session)
+    db.commit()
+    rec = Reconstruction(session_id=session.id, status="complete", pointcloud_path=str(pointcloud))
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+
+    response = client.post(
+        f"/export/reconstructions/{rec.id}/elevation?product=dem&resolution_m=1"
+    )
+
+    assert response.status_code == 422
+    assert "no ASPRS ground" in response.json()["detail"]
