@@ -77,6 +77,8 @@ class TestCompactSplatExportRoute:
         assert body["point_count"] == 20
         assert body["preset"] == "web"
         out = Path(body["splat_path"])
+        assert out.parent == exports_dir.resolve()
+        assert out.name == f"reconstruction_{rec.id}_web.splat"
         assert out.is_file()
         assert out.stat().st_size == 32 * 20
         assert body["byte_size"] == 32 * 20
