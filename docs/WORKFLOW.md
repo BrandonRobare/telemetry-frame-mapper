@@ -60,7 +60,7 @@ The backend creates `data/drone_mapping.db` (SQLite) on first run. Start it from
 
 During import the backend reads GPS EXIF and DJI XMP (relative altitude, yaw, gimbal pitch), scores each image for sharpness/brightness, computes ground footprints, and generates thumbnails.
 
-When the import finishes, the modal shows a Quick QA card. Alongside completeness and blur checks it runs GPS-lock heuristics over the imported coordinates: frames stuck at (0, 0), coordinates frozen across many consecutive frames, and implausible position jumps all produce warnings. If any appear, re-check the flight's GPS quality (or sync a flight log in the GPS Sync tab) before reconstructing.
+When the import finishes, the modal shows a Quick QA card. Alongside completeness and blur checks it runs GPS-lock heuristics over the imported coordinates: frames stuck at (0, 0), coordinates frozen across many consecutive frames, and implausible position jumps all produce warnings. It also flags variable lighting when the persisted per-frame brightness scores have a 10th-to-90th percentile spread of 60 or more (with at least five scored frames), which avoids a single outlier while surfacing shadows or changing exposure that may hurt reconstruction consistency. If any appear, re-check the flight's GPS quality (or sync a flight log in the GPS Sync tab) before reconstructing.
 
 ## 5. Review on the map, plan, and flag
 

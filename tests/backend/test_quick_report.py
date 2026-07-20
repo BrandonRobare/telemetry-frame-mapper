@@ -150,6 +150,26 @@ def test_quick_report_endpoint(client):
     assert data["gps_completeness_pct"] == 100.0
     assert data["blur_pct"] == 0.0
     assert data["exposure_issue_pct"] == 0.0
+    assert data["lighting_inconsistent"] is False
+    assert data["lighting_p10_p90_spread"] == 0.0
+
+
+def test_preflight_flags_variable_lighting(client):
+    from backend.db.database import get_db
+    from backend.main import app
+
+    db = next(app.dependency_overrides[get_db]())
+    session = _make_session(db)
+    t0 = datetime(2026, 1, 1, 12, 0, 0)
+
+    for i, brightness in enumerate([20, 30, 128, 220, 230]):
+        _add_image(db, session.id, i, timestamp=t0 + timedelta(seconds=i), brightness=brightness)
+
+    report = build_preflight_quality_report(session.id, db)
+    lighting = report["quality"]["lighting"]
+    assert lighting["p10_p90_spread"] == 210.0
+    assert lighting["inconsistent"] is True
+    assert any("Lighting varies substantially" in warning for warning in report["warnings"])
 
 
 def test_quick_report_404(client):
