@@ -432,12 +432,14 @@ def archive_session(session_id: int, db: DBSession = Depends(get_db)):
     """Export a session as a portable .zip: its row, every cascaded child row, and
     any artifact files that exist on disk. Restore it elsewhere with POST /sessions/restore.
     """
+    from ..services.reconstruction import _safe_export_path
     from ..services.session_bundle import build_session_archive
 
     s = db.query(SessionModel).filter(SessionModel.id == session_id).first()
     if not s:
         raise HTTPException(status_code=404, detail="Session not found")
-    zip_path = Path(get_config().exports_dir) / f"session_{session_id}_archive.zip"
+    exports_dir = Path(get_config().exports_dir)
+    zip_path = _safe_export_path(exports_dir / f"session_{session_id}_archive.zip", exports_dir)
     return build_session_archive(zip_path, s, db)
 
 

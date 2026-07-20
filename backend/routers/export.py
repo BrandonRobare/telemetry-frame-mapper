@@ -442,15 +442,18 @@ def export_reproducibility_manifest(workflow: str, artifact_path: str | None = N
 def export_reconstruction_share_bundle(reconstruction_id: int, db: DBSession = Depends(get_db)):
     """Create a static share bundle for a completed reconstruction."""
     from ..db.models import Reconstruction
+    from ..services.reconstruction import _safe_export_path
     from ..services.share_bundle import build_share_bundle
 
     rec = db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).first()
     if not rec:
         raise HTTPException(status_code=404, detail="Reconstruction not found")
     try:
-        return build_share_bundle(
-            Path(get_config().exports_dir) / f"reconstruction_{reconstruction_id}_share.zip", rec
+        exports_dir = Path(get_config().exports_dir)
+        bundle_path = _safe_export_path(
+            exports_dir / f"reconstruction_{reconstruction_id}_share.zip", exports_dir
         )
+        return build_share_bundle(bundle_path, rec)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -459,12 +462,16 @@ def export_reconstruction_share_bundle(reconstruction_id: int, db: DBSession = D
 def upload_reconstruction_to_cesium_ion(reconstruction_id: int, db: DBSession = Depends(get_db)):
     """Publish the existing Cesium-ready 3D Tiles share bundle to Cesium ion."""
     from ..services.cesium_ion import CesiumIonError, upload_tileset
+    from ..services.reconstruction import _safe_export_path
     from ..services.share_bundle import build_share_bundle
 
     rec = db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).first()
     if not rec:
         raise HTTPException(status_code=404, detail="Reconstruction not found")
-    bundle = Path(get_config().exports_dir) / f"reconstruction_{reconstruction_id}_share.zip"
+    exports_dir = Path(get_config().exports_dir)
+    bundle = _safe_export_path(
+        exports_dir / f"reconstruction_{reconstruction_id}_share.zip", exports_dir
+    )
     try:
         build_share_bundle(bundle, rec)
         name = f"Reconstruction {reconstruction_id}"
@@ -621,8 +628,9 @@ def export_compact_splat(
     exports_dir = Path(get_config().exports_dir)
     # preset is user-supplied and lands in the filename; confine the resolved path to
     # exports_dir (matches _safe_export_http_path / _safe_manifest_artifact_path elsewhere).
-    out_path = _safe_export_path(exports_dir / f"reconstruction_{reconstruction_id}_{preset}.splat",
-                                 exports_dir)
+    out_path = _safe_export_path(
+        exports_dir / f"reconstruction_{reconstruction_id}_{preset}.splat", exports_dir
+    )
     ply_io.write_splat(cloud, out_path)
     return {
         "splat_path": str(out_path),
@@ -782,17 +790,31 @@ def export_webodm_package(
     db: DBSession = Depends(get_db),
 ):
     """Build a complete WebODM/OpenDroneMap package with images and options manifest."""
-    from ..services.webodm_package import WebodmPackageOptions, build_webodm_package
+    from ..services.reconstruction import _safe_export_path
+    from ..services.webodm_package import (
+        WebodmPackageOptions,
+        build_webodm_package,
+        odm_options_for,
+    )
 
     session = db.query(SessionModel).filter(SessionModel.id == session_id).first()
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     images = db.query(Image).filter(Image.session_id == session_id, Image.usable == True).all()  # noqa: E712
     try:
+        options = WebodmPackageOptions(
+            mode=mode, include_images=include_images, include_gcp=include_gcp
+        )
+        # Validate before the value contributes to an output filename.
+        odm_options_for(options.mode, has_gcp=options.include_gcp)
+        exports_dir = Path(get_config().exports_dir)
+        zip_path = _safe_export_path(
+            exports_dir / f"webodm_package_{session_id}_{options.mode}.zip", exports_dir
+        )
         return build_webodm_package(
-            Path(get_config().exports_dir) / f"webodm_package_{session_id}_{mode}.zip",
+            zip_path,
             images,
-            WebodmPackageOptions(mode=mode, include_images=include_images, include_gcp=include_gcp),
+            options,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
