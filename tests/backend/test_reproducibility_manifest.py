@@ -1,5 +1,7 @@
 from urllib.parse import quote
 
+import pytest
+
 from backend.services.reproducibility_manifest import build_reproducibility_manifest, sha256_file
 
 
@@ -10,6 +12,7 @@ def test_manifest_hashes_artifacts(tmp_path):
         workflow="export",
         settings={"mode": "webodm"},
         artifacts=[artifact],
+        artifact_roots=[tmp_path],
         dataset={"session_id": 1},
     )
     assert manifest["manifest_version"] == 1
@@ -65,3 +68,20 @@ def test_manifest_endpoint_rejects_arbitrary_path(client, tmp_path, monkeypatch)
     )
     assert resp.status_code == 422
     assert "outside configured safe directories" in resp.json()["detail"]
+
+
+def test_manifest_rejects_sibling_of_configured_root(tmp_path):
+    safe_root = tmp_path / "safe"
+    safe_root.mkdir()
+    sibling = tmp_path / "safe-sibling"
+    sibling.mkdir()
+    artifact = sibling / "secret.txt"
+    artifact.write_text("secret")
+
+    with pytest.raises(ValueError, match="outside configured safe directories"):
+        build_reproducibility_manifest(
+            workflow="export",
+            settings={},
+            artifacts=[artifact],
+            artifact_roots=[safe_root],
+        )

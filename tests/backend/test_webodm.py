@@ -90,6 +90,11 @@ def test_webodm_download_uses_documented_asset_endpoint(tmp_path, monkeypatch):
     assert request.call_args.args == ("GET", "https://webodm.example.test/api/projects/17/tasks/23/download/orthophoto.tif")
 
 
+def test_webodm_download_rejects_traversal_asset(tmp_path):
+    with pytest.raises(WebODMError, match="supported mapping filename"):
+        download_asset(_config(), 17, 23, "../escape.tif", tmp_path / "exports")
+
+
 def test_webodm_cancel_uses_documented_endpoint(monkeypatch):
     monkeypatch.setenv("WEBODM_TEST_JWT", "test-secret")
     response = httpx.Response(

@@ -77,6 +77,8 @@ class TestCompactSplatExportRoute:
         assert body["point_count"] == 20
         assert body["preset"] == "web"
         out = Path(body["splat_path"])
+        assert out.parent == exports_dir.resolve()
+        assert out.name == f"reconstruction_{rec.id}_web.splat"
         assert out.is_file()
         assert out.stat().st_size == 32 * 20
         assert body["byte_size"] == 32 * 20
@@ -116,4 +118,20 @@ class TestCompactSplatExportRoute:
         rec = _make_rec(db, session, splat_path=str(splat_path))
 
         resp = client.post(f"/export/reconstructions/{rec.id}/splat", params={"preset": "bogus"})
+        assert resp.status_code == 422
+
+    def test_traversal_preset_is_rejected(self, client, tmp_path):
+        db = _db(client)
+        session = SessionModel(name="S", folder_path=str(tmp_path))
+        db.add(session)
+        db.commit()
+        db.refresh(session)
+        splat_path = tmp_path / "splat.ply"
+        _write_splat_ply(splat_path, 5)
+        rec = _make_rec(db, session, splat_path=str(splat_path))
+
+        resp = client.post(
+            f"/export/reconstructions/{rec.id}/splat", params={"preset": "../escape"}
+        )
+
         assert resp.status_code == 422

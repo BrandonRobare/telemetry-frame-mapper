@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import os
 import platform
 import shutil
 import subprocess
@@ -39,10 +40,26 @@ def binary_version(name: str) -> dict:
 
 
 def build_reproducibility_manifest(
-    *, workflow: str, settings: dict, artifacts: Iterable[Path], dataset: dict | None = None
+    *,
+    workflow: str,
+    settings: dict,
+    artifacts: Iterable[Path],
+    artifact_roots: Iterable[Path],
+    dataset: dict | None = None,
 ) -> dict:
+    safe_roots = tuple(
+        os.path.normcase(os.path.normpath(os.path.realpath(root))) for root in artifact_roots
+    )
     entries = []
-    for p in artifacts:
+    for artifact in artifacts:
+        resolved = os.path.normcase(os.path.normpath(os.path.realpath(artifact)))
+        try:
+            safe = any(os.path.commonpath((root, resolved)) == root for root in safe_roots)
+        except ValueError:
+            safe = False
+        if not safe:
+            raise ValueError("artifact_path is outside configured safe directories")
+        p = Path(resolved)
         entry = {"path": str(p), "exists": p.exists()}
         if p.is_file():
             entry.update({"size_bytes": p.stat().st_size, "sha256": sha256_file(p)})

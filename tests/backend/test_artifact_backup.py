@@ -100,6 +100,21 @@ def test_local_backup_rejects_destination_outside_allowlist(tmp_path):
         )
 
 
+def test_local_backup_rejects_sibling_of_approved_destination(tmp_path):
+    cfg, config, database, target = _inputs(tmp_path)
+
+    with pytest.raises(ValueError, match="not an approved"):
+        create_backup(
+            destination="local",
+            local_destination=str(target.with_name(f"{target.name}-sibling")),
+            artifacts=[],
+            cfg=cfg,
+            config_path=config,
+            database_path=database,
+            backup_config={"local_destinations": [str(target)], "rclone_remote": ""},
+        )
+
+
 def test_local_backup_rejects_destination_inside_selected_artifacts(tmp_path):
     cfg, config, database, _ = _inputs(tmp_path)
     target = Path(cfg.exports_dir) / "backups"

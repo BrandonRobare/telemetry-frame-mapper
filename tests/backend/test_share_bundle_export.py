@@ -2,6 +2,8 @@ import json
 import math
 import zipfile
 
+import pytest
+
 import backend.routers.export as export_router
 from backend.db.models import Image, Reconstruction
 from backend.db.models import Session as SessionModel
@@ -93,3 +95,14 @@ def test_share_bundle_tileset_valid_without_glb(client, tmp_path, monkeypatch):
     assert root["boundingVolume"]["region"] != [0, 0, 0, 0, 0, 0]
     assert tileset["geometricError"] > 0
     assert "content" not in root
+
+
+def test_share_bundle_rejects_path_outside_exports(tmp_path):
+    from backend.services.share_bundle import build_share_bundle
+
+    with pytest.raises(ValueError, match="outside exports directory"):
+        build_share_bundle(
+            tmp_path / "exports" / ".." / "exports2" / "share.zip",
+            Reconstruction(),
+            tmp_path / "exports",
+        )
