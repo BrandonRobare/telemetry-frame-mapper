@@ -453,7 +453,7 @@ def export_reconstruction_share_bundle(reconstruction_id: int, db: DBSession = D
         bundle_path = _safe_export_path(
             exports_dir / f"reconstruction_{reconstruction_id}_share.zip", exports_dir
         )
-        return build_share_bundle(bundle_path, rec)
+        return build_share_bundle(bundle_path, rec, exports_dir)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -473,7 +473,7 @@ def upload_reconstruction_to_cesium_ion(reconstruction_id: int, db: DBSession = 
         exports_dir / f"reconstruction_{reconstruction_id}_share.zip", exports_dir
     )
     try:
-        build_share_bundle(bundle, rec)
+        build_share_bundle(bundle, rec, exports_dir)
         name = f"Reconstruction {reconstruction_id}"
         return upload_tileset(get_cesium_ion_config(), bundle, name)
     except (CesiumIonError, ValueError) as exc:
