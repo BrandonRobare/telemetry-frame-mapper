@@ -378,7 +378,7 @@ export default function ImportModal({ open, onClose }: ImportModalProps) {
               disabled={isBusy}
               onClick={() => setMode('browser')}
             >
-              Upload files
+              Upload / cloud drive
             </Button>
             <Button
               type="button"
@@ -428,12 +428,12 @@ export default function ImportModal({ open, onClose }: ImportModalProps) {
                 <div className="text-sm" style={{ color: 'var(--text)', marginBottom: 4 }}>
                   Drop a JPEG folder or image batch here
                 </div>
-                <div className="text-xs">or click to choose files from your browser</div>
+                <div className="text-xs">or choose a local or cloud-synced folder</div>
               </div>
               <p className="text-xs" style={{ color: 'var(--text-muted)', marginTop: 8 }}>
                 {summary.count > 0
                   ? `${summary.count} JPEG files selected (${formatBytes(summary.totalBytes)})`
-                  : 'Large imports are uploaded in chunks and can be cancelled while in progress.'}
+                  : 'Choose a folder synced by OneDrive, Google Drive, Dropbox, or another desktop client. Files are uploaded in chunks; the app never receives cloud-provider credentials.'}
               </p>
             </div>
           ) : (
