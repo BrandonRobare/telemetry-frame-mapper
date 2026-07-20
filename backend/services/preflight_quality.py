@@ -17,6 +17,8 @@ _COVERAGE_MIN_OVERLAP_RATIO = 0.15
 _COVERAGE_HIGH_OVERLAP_RATIO = 0.85
 _TIMESTAMP_GAP_MULTIPLIER = 3.0
 _TIMESTAMP_GAP_MIN_SECONDS = 2.0
+_LIGHTING_MIN_SAMPLES = 5
+_LIGHTING_P10_P90_SPREAD_THRESHOLD = 60.0
 
 # Match-density diagnostics
 _MATCH_SAMPLE_STRIDE = 10  # only sample every Nth usable image pair
@@ -47,6 +49,12 @@ def _histogram(values: list[float], bins: list[float]) -> list[dict]:
         {"min": bins[index], "max": bins[index + 1], "count": counts[index]}
         for index in range(len(counts))
     ]
+
+
+def _percentile(sorted_values: list[float], percentile: float) -> float:
+    """Return the nearest-rank percentile for a non-empty sorted list."""
+    index = round((len(sorted_values) - 1) * percentile)
+    return sorted_values[index]
 
 
 def _timestamp_seconds(ts: datetime) -> float:
@@ -142,6 +150,21 @@ def _image_quality(images: list[Image]) -> dict:
     blurry = sum(1 for value in sharpness_values if value < blur_threshold)
     dark = sum(1 for value in brightness_values if value < dark_threshold)
     bright = sum(1 for value in brightness_values if value > bright_threshold)
+    sorted_brightness = sorted(brightness_values)
+    lighting = {
+        "sample_count": len(sorted_brightness),
+        "p10_p90_spread": None,
+        "threshold": _LIGHTING_P10_P90_SPREAD_THRESHOLD,
+        "inconsistent": False,
+    }
+    if len(sorted_brightness) >= _LIGHTING_MIN_SAMPLES:
+        p10 = _percentile(sorted_brightness, 0.10)
+        p90 = _percentile(sorted_brightness, 0.90)
+        spread = round(p90 - p10, 1)
+        lighting.update({
+            "p10_p90_spread": spread,
+            "inconsistent": spread >= _LIGHTING_P10_P90_SPREAD_THRESHOLD,
+        })
     return {
         "blur_threshold": blur_threshold,
         "dark_threshold": dark_threshold,
@@ -159,6 +182,7 @@ def _image_quality(images: list[Image]) -> dict:
         "brightness_histogram": _histogram(
             brightness_values, [0, DARK_THRESHOLD, 85, 128, 170, BRIGHT_THRESHOLD, 255]
         ),
+        "lighting": lighting,
     }
 
 
@@ -335,6 +359,12 @@ def build_preflight_quality_report(session_id: int, db: DBSession) -> dict:
     if quality["dark_pct"] + quality["bright_pct"] >= 20:
         warnings.append("Exposure issues detected in a significant share of frames")
         score -= 12
+    if quality["lighting"]["inconsistent"]:
+        warnings.append(
+            "Lighting varies substantially across the flight; shadows or changing exposure may "
+            "hurt reconstruction consistency"
+        )
+        score -= 10
     if coverage["warnings"]:
         warnings.extend(coverage["warnings"])
         score -= 12

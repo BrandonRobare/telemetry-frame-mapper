@@ -215,6 +215,7 @@ class PreflightImageQualityOut(BaseModel):
     flag_counts: dict[str, int]
     sharpness_histogram: list[HistogramBin]
     brightness_histogram: list[HistogramBin]
+    lighting: dict
 
 
 class PreflightCoverageOut(BaseModel):
