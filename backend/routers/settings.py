@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from pathlib import Path, PureWindowsPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
 
 import yaml
@@ -191,6 +191,14 @@ def _reject_unsafe_storage_path(value: str) -> None:
     if stripped in {"~", "~/", "~\\"}:
         raise ValueError("storage paths cannot point at the home directory root")
 
+    posix_path = PurePosixPath(stripped)
+    blocked_posix = tuple(
+        PurePosixPath(candidate)
+        for candidate in ("/", "/etc", "/usr", "/bin", "/sbin", "/var", "/System", "/Windows")
+    )
+    if any(posix_path == blocked or blocked in posix_path.parents for blocked in blocked_posix):
+        raise ValueError("storage paths cannot point at root, home, or system directories")
+
     path = Path(stripped).expanduser()
     try:
         resolved = path.resolve(strict=False)
@@ -199,15 +207,7 @@ def _reject_unsafe_storage_path(value: str) -> None:
 
     home = Path.home().resolve()
     blocked = {
-        Path("/"),
         home,
-        Path("/etc"),
-        Path("/usr"),
-        Path("/bin"),
-        Path("/sbin"),
-        Path("/var"),
-        Path("/System"),
-        Path("/Windows"),
     }
     if resolved in blocked:
         raise ValueError("storage paths cannot point at root, home, or system directories")
