@@ -39,11 +39,10 @@ def binary_version(name: str) -> dict:
 
 
 def build_reproducibility_manifest(
-    *, workflow: str, settings: dict, artifacts: Iterable[str | Path], dataset: dict | None = None
+    *, workflow: str, settings: dict, artifacts: Iterable[Path], dataset: dict | None = None
 ) -> dict:
     entries = []
-    for raw in artifacts:
-        p = Path(raw)
+    for p in artifacts:
         entry = {"path": str(p), "exists": p.exists()}
         if p.is_file():
             entry.update({"size_bytes": p.stat().st_size, "sha256": sha256_file(p)})
