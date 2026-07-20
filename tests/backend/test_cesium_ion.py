@@ -38,7 +38,13 @@ def test_upload_uses_ion_create_s3_put_and_completion_without_exposing_credentia
     tmp_path, monkeypatch
 ):
     monkeypatch.setenv("CESIUM_ION_TEST_TOKEN", "ion-secret")
-    bundle = tmp_path / "tiles.zip"
+    exports_dir = tmp_path / "exports"
+    bundle = exports_dir / "tiles.zip"
+    monkeypatch.setattr(
+        "backend.services.cesium_ion.get_config",
+        lambda: type("Cfg", (), {"exports_dir": str(exports_dir)})(),
+    )
+    bundle.parent.mkdir()
     bundle.write_bytes(b"zip")
     created = httpx.Response(
         201,
@@ -89,7 +95,13 @@ def test_upload_uses_ion_create_s3_put_and_completion_without_exposing_credentia
 
 
 def test_cesium_client_rejects_disabled_missing_token_and_unsafe_url(tmp_path, monkeypatch):
-    bundle = tmp_path / "tiles.zip"
+    exports_dir = tmp_path / "exports"
+    bundle = exports_dir / "tiles.zip"
+    monkeypatch.setattr(
+        "backend.services.cesium_ion.get_config",
+        lambda: type("Cfg", (), {"exports_dir": str(exports_dir)})(),
+    )
+    bundle.parent.mkdir()
     bundle.write_bytes(b"zip")
     with pytest.raises(CesiumIonError, match="disabled"):
         upload_tileset(_config(enabled=False), bundle, "Mission")
@@ -98,6 +110,24 @@ def test_cesium_client_rejects_disabled_missing_token_and_unsafe_url(tmp_path, m
     monkeypatch.setenv("CESIUM_ION_TEST_TOKEN", "secret")
     with pytest.raises(CesiumIonError, match="HTTPS"):
         upload_tileset(_config(api_url="http://cesium.test/v1"), bundle, "Mission")
+
+
+def test_cesium_client_rejects_bundle_outside_exports(tmp_path, monkeypatch):
+    exports_dir = tmp_path / "exports"
+    monkeypatch.setenv("CESIUM_ION_TEST_TOKEN", "secret")
+    monkeypatch.setattr(
+        "backend.services.cesium_ion.get_config",
+        lambda: type("Cfg", (), {"exports_dir": str(exports_dir)})(),
+    )
+
+    for bundle in (
+        exports_dir / ".." / "outside" / "tiles.zip",
+        tmp_path / "exports-other" / "tiles.zip",
+    ):
+        bundle.parent.mkdir(parents=True, exist_ok=True)
+        bundle.write_bytes(b"zip")
+        with pytest.raises(CesiumIonError, match="inside the exports directory"):
+            upload_tileset(_config(), bundle, "Mission")
 
 
 def _db(client):
