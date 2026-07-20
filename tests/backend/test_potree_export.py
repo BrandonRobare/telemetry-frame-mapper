@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
 
 from backend.db.models import Reconstruction
 from backend.db.models import Session as SessionModel
+from backend.services.potree_export import _directory_prefix
 
 
 def _db(client):
@@ -114,3 +116,10 @@ def test_potree_export_rejects_paths_outside_exports(tmp_path, monkeypatch):
     ):
         with pytest.raises(ValueError, match="inside the exports directory"):
             export_potree(source, output_dir)
+
+
+def test_potree_path_check_preserves_filesystem_root():
+    root = os.path.normcase(os.path.abspath(os.sep))
+
+    assert _directory_prefix(root) == root
+    assert os.path.normcase(os.path.join(root, "exports")).startswith(_directory_prefix(root))
