@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import shutil
 import sqlite3
@@ -116,18 +117,19 @@ def _approved_local_destination(value: str | None, allowed: list, config_path: P
         raise ValueError(
             "local_destination must match a configured backup.local_destinations entry"
         )
-    config_dir = config_path.resolve().parent
-    approved = []
+    config_dir = os.path.normpath(os.path.realpath(config_path.parent))
+    approved: list[Path] = []
     for candidate in allowed:
         if not isinstance(candidate, str) or not candidate.strip():
             continue
-        path = Path(candidate).expanduser()
-        approved.append((config_dir / path if not path.is_absolute() else path).resolve())
-    requested = Path(value).expanduser()
-    requested = (config_dir / requested if not requested.is_absolute() else requested).resolve()
-    if requested not in approved:
-        raise ValueError("local_destination is not an approved backup destination")
-    return requested
+        path = os.path.expanduser(candidate)
+        approved.append(Path(os.path.normpath(os.path.realpath(os.path.join(config_dir, path)))))
+    requested = os.path.expanduser(value)
+    requested = os.path.normpath(os.path.realpath(os.path.join(config_dir, requested)))
+    for path in approved:
+        if requested == os.path.normpath(os.path.realpath(path)):
+            return path
+    raise ValueError("local_destination is not an approved backup destination")
 
 
 def _validated_rclone_remote(value: object) -> str:
