@@ -1,8 +1,11 @@
 import zipfile
 
+import pytest
+
 import backend.routers.export as export_router
 from backend.db.models import Image
 from backend.db.models import Session as SessionModel
+from backend.services.webodm_package import WebodmPackageOptions, build_webodm_package
 
 
 def _db(client):
@@ -49,3 +52,17 @@ def test_webodm_package_includes_images_and_manifest(client, tmp_path, monkeypat
         "gcp_list.txt",
         "images/frame_001.jpg",
     } <= names
+
+
+@pytest.mark.parametrize("filename", ["../escape.zip", "../exports-sibling/package.zip"])
+def test_webodm_package_rejects_path_outside_exports(tmp_path, filename):
+    exports = tmp_path / "exports"
+    exports.mkdir()
+
+    with pytest.raises(ValueError, match="inside exports directory"):
+        build_webodm_package(
+            exports / filename,
+            [],
+            WebodmPackageOptions(),
+            exports_dir=exports,
+        )

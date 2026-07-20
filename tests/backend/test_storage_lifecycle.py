@@ -208,6 +208,36 @@ def test_execute_archives_age_based_raw_frames(tmp_path):
     assert archived.is_relative_to((exports / "storage_archive").resolve())
 
 
+def test_execute_does_not_expose_storage_exception(tmp_path, monkeypatch):
+    imports = tmp_path / "imports"
+    imports.mkdir()
+    session_dir = imports / "old_session"
+    session_dir.mkdir()
+    (session_dir / "frame.jpg").write_bytes(b"x")
+    exports = tmp_path / "exports"
+    exports.mkdir()
+    (tmp_path / "processed").mkdir()
+    (tmp_path / "data").mkdir()
+    cfg = AppConfig(
+        imports_dir=str(imports),
+        processed_dir=str(tmp_path / "processed"),
+        exports_dir=str(exports),
+        data_dir=str(tmp_path / "data"),
+    )
+    def fail_move(*_):
+        raise OSError(r"C:\internal\secret")
+
+    monkeypatch.setattr("backend.services.storage_lifecycle.shutil.move", fail_move)
+
+    result = apply_policy(
+        [{"target": "raw_frames", "age_days": 0}], execute=True, cfg=cfg, db=_FakeDb()
+    )
+
+    assert result["executed"]["failed"] == [
+        {"path": str(session_dir.resolve()), "reason": "operation failed"}
+    ]
+
+
 def test_apply_policy_without_db_dry_run_returns_empty_candidates(tmp_path):
     cfg = AppConfig(
         imports_dir=str(tmp_path / "imports"),

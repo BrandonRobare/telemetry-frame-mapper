@@ -10,6 +10,12 @@ from urllib.parse import urlparse
 
 import httpx
 
+_ASSET_FILENAMES = {
+    "orthophoto.tif": "orthophoto.tif",
+    "georeferenced_model.las": "georeferenced_model.las",
+    "georeferenced_model.ply": "georeferenced_model.ply",
+}
+
 
 class WebODMError(RuntimeError):
     """WebODM is unavailable, misconfigured, or returned an invalid response."""
@@ -118,9 +124,9 @@ def cancel_task(config: dict, project_id: int, task_id: int) -> None:
 def download_asset(
     config: dict, project_id: int, task_id: int, asset: str, output_dir: Path
 ) -> Path:
-    filename = Path(asset).name
-    if filename != asset or not filename:
-        raise WebODMError("WebODM asset name must be a filename")
+    filename = _ASSET_FILENAMES.get(asset)
+    if filename is None:
+        raise WebODMError("WebODM asset is not a supported mapping filename")
     response = _request(
         config, "GET", f"/api/projects/{project_id}/tasks/{task_id}/download/{filename}"
     )
