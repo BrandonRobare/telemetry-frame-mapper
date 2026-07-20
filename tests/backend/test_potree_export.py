@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from backend.db.models import Reconstruction
 from backend.db.models import Session as SessionModel
 
@@ -45,6 +47,10 @@ def test_potree_export_runs_converter_and_returns_metadata(client, tmp_path, mon
         "backend.routers.reconstruction.get_config",
         lambda: type("Cfg", (), {"exports_dir": str(exports_dir)})(),
     )
+    monkeypatch.setattr(
+        "backend.services.potree_export.get_config",
+        lambda: type("Cfg", (), {"exports_dir": str(exports_dir)})(),
+    )
 
     calls = []
 
@@ -76,6 +82,10 @@ def test_potree_export_reports_missing_converter(client, tmp_path, monkeypatch):
         "backend.routers.reconstruction.get_config",
         lambda: type("Cfg", (), {"exports_dir": str(exports_dir)})(),
     )
+    monkeypatch.setattr(
+        "backend.services.potree_export.get_config",
+        lambda: type("Cfg", (), {"exports_dir": str(exports_dir)})(),
+    )
     monkeypatch.delenv("POTREE_CONVERTER", raising=False)
     monkeypatch.setattr("backend.services.potree_export.shutil.which", lambda _name: None)
     rec = _completed_reconstruction(client, source)
@@ -84,3 +94,23 @@ def test_potree_export_reports_missing_converter(client, tmp_path, monkeypatch):
 
     assert response.status_code == 422
     assert "POTREE_CONVERTER" in response.json()["detail"]
+
+
+def test_potree_export_rejects_paths_outside_exports(tmp_path, monkeypatch):
+    exports_dir = tmp_path / "exports"
+    source = exports_dir / "pointcloud.las"
+    source.parent.mkdir()
+    source.write_bytes(b"LAS")
+    monkeypatch.setattr(
+        "backend.services.potree_export.get_config",
+        lambda: type("Cfg", (), {"exports_dir": str(exports_dir)})(),
+    )
+
+    from backend.services.potree_export import export_potree
+
+    for output_dir in (
+        exports_dir / ".." / "outside" / "potree",
+        exports_dir.parent / "exports-other" / "potree",
+    ):
+        with pytest.raises(ValueError, match="inside the exports directory"):
+            export_potree(source, output_dir)
