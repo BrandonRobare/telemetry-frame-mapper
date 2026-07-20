@@ -79,6 +79,22 @@ def test_restore_rejects_sibling_of_allowed_directory(client, tmp_path):
     assert resp.status_code == 400
 
 
+def test_restore_finds_nested_archive_from_allowed_root(client, tmp_path):
+    cfg = _cfg(tmp_path)
+    archive = tmp_path / "imports" / "incoming" / "bundle.zip"
+    archive.parent.mkdir(parents=True)
+    archive.write_bytes(b"zip")
+
+    with patch(
+        "backend.services.session_bundle.restore_session_archive",
+        return_value={"session_id": 7},
+    ) as restore:
+        resp = _restore(client, cfg, str(archive))
+
+    assert resp.status_code == 200
+    assert restore.call_args.args[0] == archive
+
+
 def test_session_archive_rejects_sibling_of_exports(tmp_path):
     from backend.services.session_bundle import build_session_archive
 
