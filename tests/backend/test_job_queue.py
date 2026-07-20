@@ -20,6 +20,7 @@ from backend.services.job_queue import (
     register_handler,
     shutdown_worker,
     start_worker,
+    update_payload,
 )
 from tests.conftest import TestSessionLocal
 
@@ -157,6 +158,25 @@ def test_get_job_returns_single_entry(setup_test_db):
     assert job["job_type"] == "reconstruction"
 
     assert get_job(999999) is None
+
+
+def test_update_payload_preserves_existing_queue_payload(setup_test_db):
+    from backend.db.database import get_db
+    from backend.main import app
+
+    db = next(app.dependency_overrides[get_db]())
+    s = _make_session(db)
+    rec = Reconstruction(session_id=s.id, preset="quick", status="pending", frames_used=1)
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+
+    entry = enqueue(RECONSTRUCTION, rec.id, payload={"preset": "quick"})
+    update_payload(entry.id, remote_job_id="worker-11")
+
+    assert get_job(entry.id)["remote_job_id"] == "worker-11"
+    stored = db.query(JobQueueEntry).filter(JobQueueEntry.id == entry.id).first()
+    assert stored.payload_json == '{"preset": "quick", "remote_job_id": "worker-11"}'
 
 
 # ---------------------------------------------------------------------------

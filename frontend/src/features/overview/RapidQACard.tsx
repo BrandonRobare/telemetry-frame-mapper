@@ -89,6 +89,13 @@ export default function RapidQACard({ report, compact = false }: Props) {
         <Metric label="Time" value={`${report.timestamp_completeness_pct.toFixed(0)}%`} />
         <Metric label="Blur" value={`${report.blur_pct.toFixed(0)}%`} />
         <Metric label="Exposure" value={`${report.exposure_issue_pct.toFixed(0)}%`} />
+        {report.lighting_p10_p90_spread != null && (
+          <Metric
+            label="Lighting"
+            value={report.lighting_inconsistent ? 'Variable' : 'Stable'}
+            danger={report.lighting_inconsistent}
+          />
+        )}
         <Metric label="Overlap" value={covStr} />
         {report.match_density_avg_matches != null && (
           <Metric

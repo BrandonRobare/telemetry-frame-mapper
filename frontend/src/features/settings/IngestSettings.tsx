@@ -100,6 +100,14 @@ export default function IngestSettings() {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
         <Field
+          label="SD-card watch folders"
+          hint="Optional auto-import is configured in config.yaml under auto_import. Only listed roots are scanned; restart the backend after changing it."
+        >
+          <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
+            Status: GET /auto-import/status
+          </span>
+        </Field>
+        <Field
           label="Thumbnail Size (px)"
           hint="Pixel width/height of generated preview thumbnails"
           error={validationErrors.thumbnail_size_px}

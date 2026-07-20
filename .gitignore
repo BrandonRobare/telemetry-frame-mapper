@@ -7,6 +7,7 @@ __pycache__/
 .coverage
 htmlcov/
 dist/
+dist-installer/
 build/
 *.egg-info/
 .venv*
@@ -39,6 +40,7 @@ exiftool_geotags.args
 # WebODM/Desktop install data
 resources/app/data/
 resources/app/logs/
+logs/
 resources/app/apps/
 *.log
 

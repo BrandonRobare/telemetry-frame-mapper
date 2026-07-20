@@ -6,6 +6,25 @@ export interface Project {
   session_count: number;
 }
 
+export interface SiteTrendPoint {
+  session_id: number
+  session_name: string
+  imported_at: string | null
+  photo_count: number
+  usable_count: number
+  usable_pct: number | null
+  coverage_pct: number | null
+  reconstruction_id: number | null
+  frames_registered: number | null
+  psnr: number | null
+  ssim: number | null
+}
+
+export interface SiteTrend {
+  project_id: number
+  points: SiteTrendPoint[]
+}
+
 export interface Session {
   id: number;
   name: string;
@@ -17,6 +36,31 @@ export interface Session {
   notes: string | null;
   tags: string[];
   project_id: number | null;
+}
+
+export type SessionSearchSource = 'session' | 'log' | 'defect'
+
+export interface SessionSearchMatch {
+  source: SessionSearchSource
+  snippet: string
+}
+
+export interface SessionSearchResult extends Session {
+  matches: SessionSearchMatch[]
+}
+
+export type BulkSessionOperation = 'archive' | 'assign_project' | 'replace_tags' | 'add_tags' | 'delete'
+
+export interface BulkSessionOutcome {
+  session_id: number
+  ok: boolean
+  error: string | null
+  bundle_path: string | null
+}
+
+export interface BulkSessionResponse {
+  operation: BulkSessionOperation
+  outcomes: BulkSessionOutcome[]
 }
 
 export interface Image {
@@ -196,6 +240,12 @@ export interface PreflightQualityReport {
     flag_counts: Record<string, number>;
     sharpness_histogram: HistogramBin[];
     brightness_histogram: HistogramBin[];
+    lighting: {
+      sample_count: number;
+      p10_p90_spread: number | null;
+      threshold: number;
+      inconsistent: boolean;
+    };
   };
   coverage: {
     footprint_count: number;
@@ -226,6 +276,8 @@ export interface QuickReport {
   estimated_overlap_pct: number | null;
   match_density_weak_ratio: number | null;
   match_density_avg_matches: number | null;
+  lighting_inconsistent: boolean;
+  lighting_p10_p90_spread: number | null;
 }
 
 export interface Job {
@@ -257,6 +309,16 @@ export interface StorageStats {
     data: number;
   };
   by_session: StorageSessionBreakdown[];
+}
+
+export interface BackupScheduleStatus {
+  enabled: boolean
+  target: string | null
+  daily_at: string | null
+  running: boolean
+  last_run: string | null
+  next_run: string | null
+  result: { status: 'success' | 'failed' | 'configuration_error'; snapshot_id?: string } | null
 }
 
 export interface SystemResources {

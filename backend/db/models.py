@@ -281,6 +281,38 @@ class Reconstruction(Base):
     measurements = relationship(
         "Measurement", back_populates="reconstruction", cascade="all, delete-orphan"
     )
+    share_links = relationship(
+        "ShareLink", back_populates="reconstruction", cascade="all, delete-orphan"
+    )
+
+
+class ShareLink(Base):
+    """A revocable, opaque public link. Raw tokens are never persisted."""
+
+    __tablename__ = "share_links"
+    id = Column(Integer, primary_key=True, index=True)
+    reconstruction_id = Column(Integer, ForeignKey("reconstructions.id"), nullable=False)
+    token_hash = Column(String, nullable=False, unique=True, index=True)
+    expires_at = Column(DateTime, nullable=False)
+    password_hash = Column(Text)
+    revoked_at = Column(DateTime)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    reconstruction = relationship("Reconstruction", back_populates="share_links")
+    unlock_sessions = relationship(
+        "ShareLinkUnlockSession", back_populates="share_link", cascade="all, delete-orphan"
+    )
+
+
+class ShareLinkUnlockSession(Base):
+    """One server-issued, cookie-backed unlock session for a protected share link."""
+
+    __tablename__ = "share_link_unlock_sessions"
+    id = Column(Integer, primary_key=True, index=True)
+    share_link_id = Column(Integer, ForeignKey("share_links.id"), nullable=False)
+    token_hash = Column(String, nullable=False, unique=True, index=True)
+    expires_at = Column(DateTime, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    share_link = relationship("ShareLink", back_populates="unlock_sessions")
 
 
 class ReconstructionFrame(Base):
@@ -395,3 +427,14 @@ class JobQueueEntry(Base):
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     started_at = Column(DateTime)
     completed_at = Column(DateTime)
+
+
+class AutoImportRecord(Base):
+    """A claimed watch-folder import.  The unique manifest fingerprint survives restarts."""
+
+    __tablename__ = "auto_import_records"
+    id = Column(Integer, primary_key=True, index=True)
+    fingerprint = Column(String, nullable=False, unique=True, index=True)
+    source_path = Column(String, nullable=False)
+    session_id = Column(Integer, ForeignKey("sessions.id"), nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))

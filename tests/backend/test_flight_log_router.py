@@ -2,6 +2,10 @@ from __future__ import annotations
 
 from datetime import datetime
 
+import pytest
+
+from backend.services.flight_log_sync import FlightLogCSVError, parse_autel_csv
+
 UTC_EPOCH_PLUS_HALF = datetime(1970, 1, 1, 0, 0, 0, 500000)
 UTC_EPOCH_PLUS_ONE = datetime(1970, 1, 1, 0, 0, 1)
 
@@ -14,6 +18,24 @@ CSV_BYTES = (
     b"1000,35.0,-80.0,100.0\n"
     b"2000,35.001,-80.001,101.0\n"
 )
+
+VENDOR_CSVS = [
+    (
+        "autel.csv",
+        b"Time(ms),Latitude,Longitude,Altitude(m)\n1000,35.0,-80.0,100.0\n",
+        "autel_csv",
+    ),
+    (
+        "fdr-lite-5hz.csv",
+        b"time,latitude,longitude,altitude\n1710000000,35.0,-80.0,101.0\n",
+        "parrot_csv",
+    ),
+    (
+        "POS.csv",
+        b"timestamp,TimeUS,Lat,Lng,Alt\n1710000000.0,500000,35.0,-80.0,102.0\n",
+        "ardupilot_csv",
+    ),
+]
 
 
 def _make_session(client):
@@ -80,6 +102,54 @@ def test_upload_flight_log_success(client):
     assert data["filename"] == "log.csv"
     assert data["point_count"] == 2
     assert "id" in data
+
+
+@pytest.mark.parametrize(("filename", "content", "format_name"), VENDOR_CSVS)
+def test_upload_vendor_flight_log_csv(client, filename, content, format_name):
+    s = _make_session(client)
+
+    resp = client.post(
+        "/flight-logs/upload",
+        files={"file": (filename, content, "text/csv")},
+        data={"session_id": str(s.id)},
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["format"] == format_name
+    assert resp.json()["point_count"] == 1
+
+
+def test_upload_csv_rejects_unknown_headers_without_guessing_coordinates(client):
+    s = _make_session(client)
+    content = b"timestamp,latitude,longitude\n1710000000,35.0,-80.0\n"
+
+    resp = client.post(
+        "/flight-logs/upload",
+        files={"file": ("unknown.csv", content, "text/csv")},
+        data={"session_id": str(s.id)},
+    )
+
+    assert resp.status_code == 422
+    assert "Unsupported flight log CSV headers" in resp.json()["detail"]
+
+
+def test_autel_csv_reports_missing_required_headers():
+    with pytest.raises(FlightLogCSVError, match="missing required header"):
+        parse_autel_csv(b"Time(ms),Latitude,Longitude\n1000,35.0,-80.0\n")
+
+
+def test_upload_vendor_csv_rejects_invalid_coordinates(client):
+    s = _make_session(client)
+    content = b"time,latitude,longitude,altitude\n1710000000,95.0,-80.0,100.0\n"
+
+    resp = client.post(
+        "/flight-logs/upload",
+        files={"file": ("fdr-lite-5hz.csv", content, "text/csv")},
+        data={"session_id": str(s.id)},
+    )
+
+    assert resp.status_code == 422
+    assert "out-of-range coordinates" in resp.json()["detail"]
 
 
 # ---------------------------------------------------------------------------

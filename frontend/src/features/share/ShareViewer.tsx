@@ -1,5 +1,6 @@
+import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { get } from '../../shared/api/client'
+import { get, post } from '../../shared/api/client'
 
 interface ShareViewerPayload {
   reconstruction_id: number
@@ -15,6 +16,7 @@ interface ShareViewerPayload {
     mesh_glb: string | null
     mesh_obj: string | null
   }
+  legacy_token_required: boolean
   generated_at: number
 }
 
@@ -27,8 +29,10 @@ function getToken(): string {
 
 export default function ShareViewer() {
   const token = getToken()
+  const [password, setPassword] = useState('')
+  const [unlockError, setUnlockError] = useState('')
 
-  const { data, isLoading, error } = useQuery<ShareViewerPayload>({
+  const { data, isLoading, error, refetch, isFetching } = useQuery<ShareViewerPayload>({
     queryKey: ['share', token],
     queryFn: () => get<ShareViewerPayload>(`/share/token/${token}`),
     enabled: !!token,
@@ -62,6 +66,26 @@ export default function ShareViewer() {
 
   if (error) {
     const msg = error instanceof Error ? error.message : 'Failed to load share'
+    if (msg === 'Share link password required') {
+      return (
+        <SharePasswordPrompt
+          password={password}
+          onPasswordChange={setPassword}
+          error={unlockError}
+          busy={isFetching}
+          onSubmit={async () => {
+            setUnlockError('')
+            try {
+              await post<void>(`/share/token/${token}/unlock`, { password })
+              setPassword('')
+              await refetch()
+            } catch (unlockErr) {
+              setUnlockError(unlockErr instanceof Error ? unlockErr.message : 'Password unlock failed')
+            }
+          }}
+        />
+      )
+    }
     return <ShareError status={403} message={msg} />
   }
 
@@ -151,7 +175,7 @@ export default function ShareViewer() {
           <div className="flex gap-2 flex-wrap">
             {data.artifacts.pointcloud && (
               <a
-                href={data.artifacts.pointcloud + '?token=' + encodeURIComponent(token)}
+                href={artifactUrl(data.artifacts.pointcloud, token, data.legacy_token_required)}
                 className="text-sm no-underline whitespace-nowrap"
                 style={{
                   padding: '5px 10px',
@@ -166,7 +190,7 @@ export default function ShareViewer() {
             )}
             {data.artifacts.mesh_glb && (
               <a
-                href={data.artifacts.mesh_glb + '&token=' + encodeURIComponent(token)}
+                href={artifactUrl(data.artifacts.mesh_glb, token, data.legacy_token_required)}
                 className="text-sm no-underline whitespace-nowrap"
                 style={{
                   padding: '5px 10px',
@@ -181,7 +205,7 @@ export default function ShareViewer() {
             )}
             {data.artifacts.mesh_obj && (
               <a
-                href={data.artifacts.mesh_obj + '&token=' + encodeURIComponent(token)}
+                href={artifactUrl(data.artifacts.mesh_obj, token, data.legacy_token_required)}
                 className="text-sm no-underline whitespace-nowrap"
                 style={{
                   padding: '5px 10px',
@@ -235,6 +259,52 @@ function ShareError({ status, message }: { status: number; message: string }) {
       >
         Back to Telemetry Frame Mapper
       </a>
+    </div>
+  )
+}
+
+function artifactUrl(path: string, token: string, legacy: boolean) {
+  if (!legacy) return path
+  return path + (path.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(token)
+}
+
+function SharePasswordPrompt({
+  password,
+  onPasswordChange,
+  onSubmit,
+  error,
+  busy,
+}: {
+  password: string
+  onPasswordChange: (value: string) => void
+  onSubmit: () => Promise<void>
+  error: string
+  busy: boolean
+}) {
+  return (
+    <div
+      className="flex flex-col items-center justify-center gap-4"
+      style={{ minHeight: '100vh', background: 'var(--bg)', color: 'var(--text)' }}
+    >
+      <form
+        className="p-5 flex flex-col gap-3"
+        style={{ width: 320, background: 'var(--surface)', border: '1px solid var(--border)' }}
+        onSubmit={(event) => { event.preventDefault(); void onSubmit() }}
+      >
+        <h1 className="text-base font-semibold" style={{ margin: 0 }}>Password-protected share</h1>
+        <label className="text-sm" htmlFor="share-password">Password</label>
+        <input
+          id="share-password"
+          type="password"
+          value={password}
+          onChange={(event) => onPasswordChange(event.target.value)}
+          autoComplete="current-password"
+          autoFocus
+          required
+        />
+        {error && <p className="text-sm" style={{ color: 'var(--danger)', margin: 0 }}>{error}</p>}
+        <button type="submit" disabled={busy || !password}>Unlock</button>
+      </form>
     </div>
   )
 }

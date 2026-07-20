@@ -111,6 +111,7 @@ class ReconstructionSettings(BaseModel):
     sift_max_features: int | None = Field(default=None, gt=0)
     matcher: str | None = None
     camera_model: str | None = None
+    single_camera: bool | None = None
     presets: PresetsSettings | None = None
 
     @field_validator("matcher")
@@ -341,6 +342,7 @@ def patch_settings(body: SettingsPatch) -> dict:
             "sift_max_features",
             "matcher",
             "camera_model",
+            "single_camera",
         ):
             val = getattr(body.reconstruction, key)
             if val is not None:

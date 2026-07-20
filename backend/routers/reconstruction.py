@@ -12,10 +12,19 @@ from fastapi.responses import FileResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session as DBSession
 
-from ..core.config import get_config, get_render_config
+from ..core.config import get_config, get_render_config, get_webodm_config
 from ..db.database import get_db
-from ..db.models import Reconstruction, ReconstructionFrame, SessionFrameSelection, TargetArea
+from ..db.models import (
+    Image,
+    Reconstruction,
+    ReconstructionFrame,
+    SessionFrameSelection,
+    TargetArea,
+)
+from ..db.models import Session as SessionModel
 from ..services.artifact_cleanup import cleanup_reconstruction_artifacts
+from ..services.camera_calibration import build_calibration_drift_report
+from ..services.colmap_io import read_model
 from ..services.preflight_quality import build_preflight_quality_report
 from ..services.quality_report import (
     build_quality_scorecard,
@@ -32,6 +41,7 @@ from ..services.reconstruction import (
     compute_coverage_gaps,
     current_reconstruction_status_version,
     get_rec_log,
+    plan_dense_rerun,
     semantic_overlay_bytes,
     start_flythrough_render,
     start_mesh_export,
@@ -41,19 +51,19 @@ from ..services.reconstruction import (
 )
 from ..services.semantic_labels import semantic_summary
 from ..services.splat_cleanup import cleanup_ply_file
-from ..services.splat_transform import (
-    cleanup_splat as _splat_transform_cleanup,
-)
+from ..services.splat_transform import cleanup_splat as _splat_transform_cleanup
 from ..services.splat_transform import (
     compress_splat as _splat_transform_compress,
 )
 from ..services.splat_transform import (
     splat_transform_available as _splat_transform_probe,
 )
+from ..services.webodm import WebODMError, create_project, create_task, validate_connection_config
 
 router = APIRouter(prefix="/reconstruction", tags=["reconstruction"])
 logger = logging.getLogger(__name__)
 VALID_PRESETS = {"quick", "full"}
+VALID_BACKENDS = {"colmap", "webodm"}
 
 
 def _safe_export_http_path(path: Path) -> Path:
@@ -105,6 +115,8 @@ class StartIn(BaseModel):
     preset: str = "quick"
     target_area_id: int | None = None
     parent_reconstruction_id: int | None = None
+    backend: str = "colmap"
+    webodm_options: list[WebODMTaskOption] = Field(default_factory=list)
 
     @field_validator("preset")
     @classmethod
@@ -113,12 +125,25 @@ class StartIn(BaseModel):
             raise ValueError(f"preset must be one of {VALID_PRESETS}")
         return v
 
+    @field_validator("backend")
+    @classmethod
+    def validate_backend(cls, v: str) -> str:
+        if v not in VALID_BACKENDS:
+            raise ValueError(f"backend must be one of {VALID_BACKENDS}")
+        return v
+
     @field_validator("session_ids")
     @classmethod
     def validate_session_ids(cls, v: list[int] | None) -> list[int] | None:
         if v is not None and len(v) < 2:
             raise ValueError("session_ids must contain at least two session IDs")
         return v
+
+
+class DenseRerunIn(BaseModel):
+    """Explicit acknowledgement before a weak-area rerun is queued."""
+
+    confirm: bool = False
 
 
 class ReconstructionOut(BaseModel):
@@ -173,6 +198,23 @@ class ReconstructionOut(BaseModel):
         return None
 
 
+class WebODMReconstructionOut(BaseModel):
+    """A submitted remote task; poll it through the existing WebODM API."""
+
+    backend: str = "webodm"
+    session_id: int
+    project_id: int
+    task_id: int
+    images_submitted: int
+    status_url: str
+    results_url: str
+
+
+class WebODMTaskOption(BaseModel):
+    name: str = Field(min_length=1)
+    value: str | int | float | bool
+
+
 class HistogramBin(BaseModel):
     min: float
     max: float
@@ -206,6 +248,7 @@ class PreflightImageQualityOut(BaseModel):
     flag_counts: dict[str, int]
     sharpness_histogram: list[HistogramBin]
     brightness_histogram: list[HistogramBin]
+    lighting: dict
 
 
 class PreflightCoverageOut(BaseModel):
@@ -383,6 +426,87 @@ def _raise_start_error(exc: ValueError) -> None:
     raise HTTPException(status_code=422, detail=msg) from exc
 
 
+def _webodm_start_error(exc: WebODMError) -> HTTPException:
+    return HTTPException(status_code=422, detail=str(exc))
+
+
+def _webodm_backend_status() -> dict:
+    config = get_webodm_config()
+    try:
+        validate_connection_config(config)
+    except WebODMError as exc:
+        return {"id": "webodm", "available": False, "detail": str(exc)}
+    return {
+        "id": "webodm",
+        "available": True,
+        "detail": "Submits a remote WebODM task; poll and pull results through /webodm.",
+    }
+
+
+@router.get("/backends")
+def list_backends():
+    """List selectable reconstruction backends without exposing credentials."""
+    return {
+        "backends": [
+            {
+                "id": "colmap",
+                "available": True,
+                "detail": "Runs the local COLMAP reconstruction through the persistent job queue.",
+            },
+            _webodm_backend_status(),
+        ]
+    }
+
+
+def _start_webodm_reconstruction(body: StartIn, db: DBSession) -> WebODMReconstructionOut:
+    config = get_webodm_config()
+    try:
+        validate_connection_config(config)
+    except WebODMError as exc:
+        raise _webodm_start_error(exc) from exc
+    if body.session_id is None or body.session_ids is not None:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "WebODM backend requires exactly one session_id; multi-session runs are unsupported"
+            ),
+        )
+    if body.target_area_id is not None or body.parent_reconstruction_id is not None:
+        raise HTTPException(
+            status_code=422,
+            detail="WebODM backend does not support target-area crops or reconstruction lineage",
+        )
+    session = db.query(SessionModel).filter(SessionModel.id == body.session_id).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    image_rows = db.query(Image).filter(
+        Image.session_id == session.id, Image.usable.is_(True)
+    ).all()
+    images = [Path(image.filepath) for image in image_rows if Path(image.filepath).is_file()]
+    if len(images) < 2:
+        raise HTTPException(status_code=422, detail="Session needs at least two usable image files")
+    try:
+        project_id = create_project(config, session.name)
+        task_id = create_task(
+            config,
+            project_id,
+            session.name,
+            images,
+            [option.model_dump() for option in body.webodm_options],
+        )
+    except WebODMError as exc:
+        raise _webodm_start_error(exc) from exc
+    root = f"/webodm/projects/{project_id}/tasks/{task_id}"
+    return WebODMReconstructionOut(
+        session_id=session.id,
+        project_id=project_id,
+        task_id=task_id,
+        images_submitted=len(images),
+        status_url=root,
+        results_url=f"{root}/results",
+    )
+
+
 @router.get("/preflight/{session_id}", response_model=PreflightReportOut)
 def get_preflight_report(session_id: int, db: DBSession = Depends(get_db)):
     try:
@@ -391,8 +515,10 @@ def get_preflight_report(session_id: int, db: DBSession = Depends(get_db)):
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
-@router.post("/start", response_model=ReconstructionOut, status_code=201)
+@router.post("/start", response_model=ReconstructionOut | WebODMReconstructionOut, status_code=201)
 def start(body: StartIn, db: DBSession = Depends(get_db)):
+    if body.backend == "webodm":
+        return _start_webodm_reconstruction(body, db)
     if body.session_ids is not None:
         # Multi-session merge
         from ..services.session_merge import (
@@ -476,6 +602,54 @@ def get_diagnostics(reconstruction_id: int, db: DBSession = Depends(get_db)):
     return build_reconstruction_diagnostics(db, rec)
 
 
+def _dense_rerun_plan_or_http_error(rec: Reconstruction, db: DBSession) -> dict:
+    try:
+        return plan_dense_rerun(db, rec)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/{reconstruction_id}/dense-rerun-plan")
+def get_dense_rerun_plan(reconstruction_id: int, db: DBSession = Depends(get_db)):
+    """Preview the explicit child rerun; this endpoint never starts work."""
+    rec = db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Reconstruction not found")
+    return _dense_rerun_plan_or_http_error(rec, db)
+
+
+@router.post("/{reconstruction_id}/dense-rerun", response_model=ReconstructionOut, status_code=201)
+def start_dense_rerun(
+    reconstruction_id: int, body: DenseRerunIn, db: DBSession = Depends(get_db)
+):
+    """Queue a denser child reconstruction only after an explicit confirmation."""
+    if not body.confirm:
+        raise HTTPException(status_code=422, detail="Set confirm=true to queue the dense rerun")
+    rec = db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Reconstruction not found")
+    active_child = db.query(Reconstruction).filter(
+        Reconstruction.parent_reconstruction_id == rec.id,
+        Reconstruction.status.in_(["pending", "running_colmap", "running_gsplat"]),
+    ).first()
+    if active_child:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Dense rerun {active_child.id} is already in progress",
+        )
+    plan = _dense_rerun_plan_or_http_error(rec, db)
+    try:
+        return start_reconstruction(
+            rec.session_id,
+            plan["preset"],
+            db,
+            parent_reconstruction_id=rec.id,
+            selected_image_ids=plan["rerun_image_ids"],
+        )
+    except ValueError as exc:
+        _raise_start_error(exc)
+
+
 def _ancestor_chain(rec: Reconstruction) -> list[int]:
     chain: list[int] = []
     seen = {rec.id}
@@ -549,7 +723,9 @@ def stream_status_events(reconstruction_id: int, db: DBSession = Depends(get_db)
     )
 
 
-LIVE_RECONSTRUCTION_STATUSES = {"pending", "running_colmap", "running_gsplat", "cancelling"}
+LIVE_RECONSTRUCTION_STATUSES = {
+    "pending", "running_colmap", "running_gsplat", "running_remote", "cancelling"
+}
 
 
 @router.post("/{reconstruction_id}/cancel", response_model=ReconstructionOut)
@@ -701,6 +877,29 @@ def download_pointcloud(
         media_type=media_type,
         filename=filename,
     )
+
+
+@router.post("/{reconstruction_id}/potree")
+def generate_potree_export(reconstruction_id: int, db: DBSession = Depends(get_db)):
+    """Convert an already-generated LAS/LAZ point cloud for Potree hosting."""
+    from ..services.potree_export import export_potree
+
+    rec = db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Reconstruction not found")
+    if not rec.pointcloud_path:
+        raise HTTPException(
+            status_code=422,
+            detail="LAS point cloud is unavailable; download the reconstruction point cloud first",
+        )
+    try:
+        source_path = _safe_export_http_path(Path(rec.pointcloud_path))
+        metadata_path = export_potree(
+            source_path, _reconstruction_artifact_path(reconstruction_id, "potree")
+        )
+    except (FileNotFoundError, RuntimeError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"output_dir": str(metadata_path.parent), "metadata_path": str(metadata_path)}
 
 
 @router.post("/{reconstruction_id}/mesh", response_model=MeshStatusOut, status_code=202)
@@ -1125,6 +1324,23 @@ def get_quality_scorecard(reconstruction_id: int, db: DBSession = Depends(get_db
     coverage_gaps = _load_coverage_gaps_from_disk(rec)
 
     return build_quality_scorecard(rec, frames, training_metrics, coverage_gaps)
+
+
+@router.get("/{reconstruction_id}/calibration-drift-report")
+def get_calibration_drift_report(reconstruction_id: int, db: DBSession = Depends(get_db)):
+    """Return a bounded consistency report from COLMAP's completed sparse model."""
+    rec = db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Reconstruction not found")
+    if rec.status != "complete":
+        raise HTTPException(status_code=202, detail="Reconstruction still in progress")
+
+    sparse_dir = Path(rec.colmap_dir or "") / "sparse" / "0"
+    try:
+        cameras = list(read_model(sparse_dir).cameras.values()) if rec.colmap_dir else []
+    except (OSError, RuntimeError, ValueError):
+        cameras = []
+    return build_calibration_drift_report(cameras)
 
 
 @router.post("/{reconstruction_id}/validate-checkpoints")
