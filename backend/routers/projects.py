@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session as DBSession
 
 from ..core.config import get_config
 from ..db.database import SessionLocal, get_db
+from ..db.models import CoverageRun, Reconstruction
 from ..db.models import Project as ProjectModel
 from ..db.models import Session as SessionModel
 from ..services.ingest_orchestrator import start_import
@@ -35,6 +36,27 @@ class ProjectOut(BaseModel):
 class ImportRequest(BaseModel):
     folder_path: str
     name: str
+
+
+class SiteTrendPointOut(BaseModel):
+    """One existing session's read-only quality and reconstruction snapshot."""
+
+    session_id: int
+    session_name: str
+    imported_at: datetime.datetime | None
+    photo_count: int
+    usable_count: int
+    usable_pct: float | None
+    coverage_pct: float | None
+    reconstruction_id: int | None
+    frames_registered: int | None
+    psnr: float | None
+    ssim: float | None
+
+
+class SiteTrendOut(BaseModel):
+    project_id: int
+    points: list[SiteTrendPointOut]
 
 
 @router.get("/", response_model=list[ProjectOut])
@@ -119,6 +141,105 @@ def list_project_sessions(project_id: int, db: DBSession = Depends(get_db)):
         .all()
     )
     return sessions
+
+
+@router.get("/{project_id}/trends", response_model=SiteTrendOut)
+def get_project_trends(project_id: int, db: DBSession = Depends(get_db)):
+    """Return a time-ordered, read-only trend projection for one project.
+
+    The projection deliberately reads only session, coverage-run, and completed
+    reconstruction rows. It does not create a snapshot or run any quality work.
+    """
+    project = db.query(ProjectModel).filter(ProjectModel.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    sessions = (
+        db.query(SessionModel)
+        .filter(SessionModel.project_id == project_id)
+        .order_by(
+            SessionModel.imported_at.is_(None),
+            SessionModel.imported_at.asc(),
+            SessionModel.id.asc(),
+        )
+        .all()
+    )
+    session_ids = [session.id for session in sessions]
+    if not session_ids:
+        return SiteTrendOut(project_id=project_id, points=[])
+
+    latest_reconstruction: dict[int, Reconstruction] = {}
+    reconstructions = (
+        db.query(Reconstruction)
+        .filter(
+            Reconstruction.session_id.in_(session_ids),
+            Reconstruction.status == "complete",
+        )
+        .order_by(
+            Reconstruction.completed_at.is_(None),
+            Reconstruction.completed_at.desc(),
+            Reconstruction.id.desc(),
+        )
+        .all()
+    )
+    for reconstruction in reconstructions:
+        latest_reconstruction.setdefault(reconstruction.session_id, reconstruction)
+
+    latest_coverage: dict[int, CoverageRun] = {}
+    coverage_runs = (
+        db.query(CoverageRun)
+        .filter(CoverageRun.session_ids.in_([str(session_id) for session_id in session_ids]))
+        .order_by(CoverageRun.run_at.desc(), CoverageRun.id.desc())
+        .all()
+    )
+    for coverage_run in coverage_runs:
+        # CoverageRun currently persists one session id as text (see coverage router).
+        session_id = int(coverage_run.session_ids)
+        latest_coverage.setdefault(session_id, coverage_run)
+
+    return SiteTrendOut(
+        project_id=project_id,
+        points=[
+            SiteTrendPointOut(
+                session_id=session.id,
+                session_name=session.name,
+                imported_at=session.imported_at,
+                photo_count=session.photo_count or 0,
+                usable_count=session.usable_count or 0,
+                usable_pct=(
+                    round((session.usable_count or 0) / session.photo_count * 100, 1)
+                    if session.photo_count
+                    else None
+                ),
+                coverage_pct=(
+                    latest_coverage[session.id].coverage_pct
+                    if session.id in latest_coverage
+                    else None
+                ),
+                reconstruction_id=(
+                    latest_reconstruction[session.id].id
+                    if session.id in latest_reconstruction
+                    else None
+                ),
+                frames_registered=(
+                    latest_reconstruction[session.id].frames_registered
+                    if session.id in latest_reconstruction
+                    else None
+                ),
+                psnr=(
+                    latest_reconstruction[session.id].psnr
+                    if session.id in latest_reconstruction
+                    else None
+                ),
+                ssim=(
+                    latest_reconstruction[session.id].ssim
+                    if session.id in latest_reconstruction
+                    else None
+                ),
+            )
+            for session in sessions
+        ],
+    )
 
 
 @router.post("/{project_id}/sessions/import", response_model=SessionOut)

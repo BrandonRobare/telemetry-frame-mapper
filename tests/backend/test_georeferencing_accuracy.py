@@ -269,6 +269,23 @@ def test_quality_scorecard_complete(client):
     assert data["quality"]["psnr_final"] == 28.3
 
 
+def test_calibration_drift_report_is_unavailable_when_sparse_model_is_missing(client):
+    db = _db(client)
+    session = SessionModel(name="CalibrationReport", folder_path="/tmp/calibration-report")
+    db.add(session)
+    db.commit()
+    db.refresh(session)
+    rec = Reconstruction(session_id=session.id, status="complete", colmap_dir="/tmp/missing-colmap")
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+
+    resp = client.get(f"/reconstruction/{rec.id}/calibration-drift-report")
+
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "unavailable"
+
+
 # ---------------------------------------------------------------------------
 #  Checkpoint validation endpoint
 # ---------------------------------------------------------------------------

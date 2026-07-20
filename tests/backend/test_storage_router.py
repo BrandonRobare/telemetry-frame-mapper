@@ -34,3 +34,10 @@ def test_get_storage_summary_total_is_sum_of_parts(client):
 def test_get_storage_summary_returns_list_for_by_session(client):
     resp = client.get("/storage/summary")
     assert isinstance(resp.json()["by_session"], list)
+
+
+def test_backup_schedule_status_is_available_without_exposing_target_details(client):
+    resp = client.get("/storage/backup-schedule")
+    assert resp.status_code == 200
+    assert resp.json()["enabled"] is False
+    assert "local_destination" not in resp.text

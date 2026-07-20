@@ -26,6 +26,9 @@ pip install -e ".[dev]"
 
 Verify: `drone-video-geotagger --help` and `pytest` (all tests should pass without any external binaries installed).
 
+For a packaged Windows application instead of a developer checkout, see the
+[Windows installer workflow](WINDOWS-INSTALLER.md).
+
 ## 2. External binaries
 
 The CLI shells out to `ffmpeg` and `exiftool`; reconstruction shells out to `colmap`. Each must be on `PATH` (the CLI also accepts `--ffmpeg` / `--exiftool` paths explicitly).
@@ -82,6 +85,59 @@ uvicorn backend.main:app --reload    # API: http://localhost:8000, docs: /docs
 ```
 
 First run creates `data/drone_mapping.db` (SQLite — set `DATABASE_URL` to use PostgreSQL instead). Optional mission parameters (camera FOV, overlap targets, CRS, directories) live in [config.yaml](../config.yaml).
+
+### Optional local PIN lock
+
+For a single-user deployment on a trusted local network, set `pin_lock.enabled: true` in
+`config.yaml`. The PIN itself never goes in YAML. Generate an scrypt hash without putting the
+PIN in shell history, then set the named environment variable before starting the backend:
+
+```powershell
+$env:DRONE_MAPPING_PIN_HASH = python -c "from getpass import getpass; from backend.services.share_links import hash_password; print(hash_password(getpass('PIN: ')))"
+```
+
+The prompt does not echo or store the PIN in shell history. Use a persistent secret manager or
+service environment for production; the PowerShell assignment above lasts only for that shell.
+While enabled, every API endpoint, the browser app and its static
+assets, `/processed` files, and share routes require an unlock cookie. `/health` and FastAPI docs
+remain available for operations. Unlock with `POST /pin-lock/unlock` JSON `{"pin":"..."}`; a
+successful `204` sets an HttpOnly, SameSite=Lax cookie valid for `session_ttl` seconds (8 hours by
+default). Check only the non-secret state at `GET /pin-lock/status`. Restarting the backend clears
+all unlock sessions. If the configured hash environment variable is absent, the backend refuses to
+start rather than silently running unlocked.
+
+### Optional automation API key
+
+For scripts that cannot retain the PIN unlock cookie, enable `api_key.enabled: true` alongside
+`pin_lock.enabled: true`. The key is an alternative credential for the same protected routes; it
+does not create a separate authentication system or make an otherwise-unlocked app private. Store
+only its scrypt hash in the named environment variable:
+
+```powershell
+$env:DRONE_MAPPING_API_KEY_HASH = python -c "from getpass import getpass; from backend.services.share_links import hash_password; print(hash_password(getpass('API key: ')))"
+```
+
+The prompt does not echo or store the key in shell history. After restarting the backend, send the
+plain key only in the `X-Drone-Mapping-Key` request header, for example:
+
+```powershell
+curl.exe -H "X-Drone-Mapping-Key: your-key" http://127.0.0.1:8000/sessions
+```
+
+Never put the plain key in `config.yaml`, a URL, or a script committed to source control. To revoke
+it, replace the environment variable with a newly generated hash and restart the backend; every
+previous key immediately stops working. An enabled API-key block without an enabled, valid PIN lock
+is rejected at startup. `/metrics` intentionally remains unauthenticated for local Prometheus
+scraping, exactly as documented below.
+
+### Prometheus metrics
+
+`GET /metrics` remains reachable without an unlock cookie, including while the optional PIN lock
+is enabled, so a local scraper can check it. Keep the default loopback bind; if the backend is
+exposed on a LAN, protect this endpoint with a reverse proxy or firewall. It returns Prometheus
+text exposition with the fixed application version, process start time, and a lightweight `SELECT
+1` database probe. It deliberately emits no project, file, user, or location data and does not
+scan application tables.
 
 ## 5. GPU splat training (optional)
 
