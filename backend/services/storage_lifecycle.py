@@ -340,8 +340,8 @@ def apply_policy(
                     else:
                         p.unlink()
                     removed.append(str(resolved))
-            except (OSError, ValueError) as exc:
-                failed.append({"path": str(resolved), "reason": str(exc)})
+            except (OSError, ValueError):
+                failed.append({"path": str(resolved), "reason": "operation failed"})
 
         result["executed"] = {"removed": removed, "archived": archived, "failed": failed}
         result["summary"]["removed_items"] = len(removed)
