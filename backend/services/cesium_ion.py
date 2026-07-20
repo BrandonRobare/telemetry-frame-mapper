@@ -162,17 +162,16 @@ def upload_tileset(config: dict, bundle: Path, name: str) -> dict:
     """Create one 3D Tiles asset, upload the ZIP, and start Cesium processing."""
     _base_url(config)
     _headers(config)
-    exports_root = os.path.normpath(os.path.realpath(get_config().exports_dir))
-    bundle = Path(os.path.normpath(os.path.realpath(bundle)))
-    exports_root_cmp = os.path.normcase(exports_root)
-    exports_prefix = _directory_prefix(exports_root_cmp)
-    bundle_cmp = os.path.normcase(str(bundle))
-    inside_exports = bundle_cmp == exports_root_cmp or bundle_cmp.startswith(exports_prefix)
-    if not inside_exports:
+    exports_root = os.path.normcase(os.path.normpath(os.path.realpath(get_config().exports_dir)))
+    bundle_path = os.path.normcase(os.path.normpath(os.path.realpath(bundle)))
+    exports_prefix = _directory_prefix(exports_root)
+    if bundle_path != exports_root and not bundle_path.startswith(exports_prefix):
         raise CesiumIonError("Cesium ion upload bundle must be inside the exports directory")
-    if not bundle.is_file():
-        raise CesiumIonError("Cesium ion upload bundle does not exist")
-    body = bundle.read_bytes()
+    try:
+        with open(bundle_path, "rb") as bundle_file:
+            body = bundle_file.read()
+    except OSError as exc:
+        raise CesiumIonError("Cesium ion upload bundle does not exist") from exc
     created = _response_object(
         _request(
             config,
@@ -189,7 +188,7 @@ def upload_tileset(config: dict, bundle: Path, name: str) -> dict:
     complete = created.get("onComplete")
     if not isinstance(upload, dict) or not isinstance(complete, dict):
         raise CesiumIonError(f"Cesium ion asset {asset_id} did not provide upload instructions")
-    _upload_bundle(config, upload, bundle.name, body)
+    _upload_bundle(config, upload, os.path.basename(bundle_path), body)
     method, url = complete.get("method"), complete.get("url")
     if not isinstance(method, str) or not isinstance(url, str) or not url:
         raise CesiumIonError(f"Cesium ion asset {asset_id} did not provide completion instructions")
