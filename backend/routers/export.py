@@ -599,7 +599,13 @@ def export_compact_splat(
         raise HTTPException(status_code=404, detail="Reconstruction not found")
     if not rec.splat_path:
         raise HTTPException(status_code=422, detail="Reconstruction has no splat")
-    if preset not in _SPLAT_EXPORT_PRESETS:
+    if preset == "web":
+        output_preset = "web"
+    elif preset == "preview":
+        output_preset = "preview"
+    elif preset == "medium":
+        output_preset = "medium"
+    else:
         raise HTTPException(status_code=422, detail=f"Unknown preset: {preset}")
 
     cloud = ply_io.read_3dgs_ply(Path(rec.splat_path))
@@ -618,14 +624,20 @@ def export_compact_splat(
             quats=cloud.quats[order],
         )
 
-    from ..services.reconstruction import _safe_export_path
-
-    exports_dir = Path(get_config().exports_dir)
-    # preset is user-supplied and lands in the filename; confine the resolved path to
-    # exports_dir (matches _safe_export_http_path / _safe_manifest_artifact_path elsewhere).
-    out_path = _safe_export_path(
-        exports_dir / f"reconstruction_{reconstruction_id}_{preset}.splat", exports_dir
+    exports_dir = os.path.normcase(os.path.normpath(os.path.realpath(get_config().exports_dir)))
+    out_path = os.path.normcase(
+        os.path.normpath(
+            os.path.realpath(
+                os.path.join(exports_dir, f"reconstruction_{rec.id}_{output_preset}.splat")
+            )
+        )
     )
+    exports_prefix = exports_dir if exports_dir.endswith(os.sep) else f"{exports_dir}{os.sep}"
+    if not out_path.startswith(exports_prefix):
+        raise HTTPException(
+            status_code=422, detail="Splat export path is outside exports directory"
+        )
+    out_path = Path(out_path)
     ply_io.write_splat(cloud, out_path)
     return {
         "splat_path": str(out_path),
