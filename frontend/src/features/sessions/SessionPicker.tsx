@@ -3,6 +3,8 @@ import { useSessions } from './useSessions'
 import { useMapStore } from '../../shared/stores/mapStore'
 import { Skeleton } from '../../shared/components/Skeleton'
 import { collectTags, filterSessionsByTag } from './sessionTags'
+import BulkSessionOperations from './BulkSessionOperations'
+import SessionSearch from './SessionSearch'
 
 interface SessionPickerProps {
   /** Called when the user clicks the empty-state "Import" prompt */
@@ -26,7 +28,7 @@ const SELECT_STYLE: React.CSSProperties = {
 
 export default function SessionPicker({ onImport, projectId }: SessionPickerProps) {
   const { data: sessions, isLoading } = useSessions(projectId)
-  const { selectedSessionId, setSession } = useMapStore()
+  const { selectedSessionId, setSession, setProject } = useMapStore()
   const [tagFilter, setTagFilter] = useState<string | null>(null)
 
   const allTags = collectTags(sessions ?? [])
@@ -65,6 +67,10 @@ export default function SessionPicker({ onImport, projectId }: SessionPickerProp
 
   return (
     <span className="inline-flex items-center gap-1.5">
+      <SessionSearch onSelect={(session) => {
+        setProject(session.project_id)
+        setSession(session.id)
+      }} />
       <select
         value={selectedSessionId ?? ''}
         onChange={(e) => setSession(parseInt(e.target.value, 10))}
@@ -98,6 +104,7 @@ export default function SessionPicker({ onImport, projectId }: SessionPickerProp
           ))}
         </select>
       )}
+      <BulkSessionOperations sessions={visibleSessions} />
     </span>
   )
 }

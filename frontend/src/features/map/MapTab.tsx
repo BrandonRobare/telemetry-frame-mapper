@@ -4,6 +4,7 @@ import { useMapStore } from '../../shared/stores/mapStore'
 import { useSession } from './hooks/useSession'
 import { useFootprints } from './hooks/useFootprints'
 import { useCoverageResult } from './hooks/useCoverageResult'
+import { useSlopeOverlay } from './hooks/useSlopeOverlay'
 import { isLiveImportStatus, useSessionProgress } from '../../shared/api/useSessionProgress'
 import LeafletMapView from './LeafletMap'
 import LayerControls from './LayerControls'
@@ -17,7 +18,7 @@ interface Props {
 }
 
 export default function MapTab({ onImport }: Props) {
-  const { selectedSessionId, sidebarOpen, toggleSidebar } = useMapStore()
+  const { selectedSessionId, sidebarOpen, toggleSidebar, activeLayers } = useMapStore()
   const queryClient = useQueryClient()
 
   const { data: session } = useSession(selectedSessionId)
@@ -27,6 +28,7 @@ export default function MapTab({ onImport }: Props) {
     live: isImporting,
   })
   const { data: coverage } = useCoverageResult(selectedSessionId)
+  const slopeOverlay = useSlopeOverlay(selectedSessionId, activeLayers.slope)
 
   // Once the live import settles (done/error), refetch once more so the map
   // reflects the authoritative final footprint/session state, then drop back
@@ -86,10 +88,11 @@ export default function MapTab({ onImport }: Props) {
         <LeafletMapView
           footprints={footprints}
           coverage={coverage ?? null}
+          slopeOverlay={slopeOverlay.data ?? null}
           isLoading={isLoading}
           error={error as Error | null}
         />
-        <LayerControls />
+        <LayerControls slopeError={slopeOverlay.error instanceof Error ? slopeOverlay.error.message : undefined} />
       </div>
 
       {/* Collapse / expand tab — sibling of aside so overflow-y-auto can't clip it */}

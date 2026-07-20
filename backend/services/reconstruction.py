@@ -14,7 +14,12 @@ from pathlib import Path
 from shapely.geometry import Point, shape
 from sqlalchemy.orm import Session as DBSession
 
-from backend.core.config import get_config, get_reconstruction_config, get_render_config
+from backend.core.config import (
+    get_config,
+    get_reconstruction_config,
+    get_remote_worker_config,
+    get_render_config,
+)
 from backend.db.database import SessionLocal
 from backend.db.models import (
     Image,
@@ -31,10 +36,18 @@ from backend.services.job_queue import (
     MESH_EXPORT,
     RECONSTRUCTION,
     SESSION_COMPARISON,
+    JobNonRetryableError,
     enqueue,
     mark_complete,
     register_handler,
+    update_payload,
 )
+from backend.services.remote_worker import (
+    RemoteWorkerError,
+    dispatch_reconstruction,
+    get_reconstruction_status,
+)
+from backend.services.remote_worker import cancel_reconstruction as cancel_remote_reconstruction
 from backend.services.semantic_labels import (
     NUM_CLASSES,
     accumulate_votes,
@@ -263,6 +276,7 @@ def _run_colmap(
     cfg = get_reconstruction_config()
 
     camera_model = cfg.get("camera_model", "PINHOLE")
+    single_camera = "1" if cfg.get("single_camera", True) else "0"
     matcher_key = cfg.get("matcher", "exhaustive")
     mapper_key = cfg.get("mapper", "incremental")
     spatial_min = int(cfg.get("spatial_matcher_min_images", 150))
@@ -316,7 +330,7 @@ def _run_colmap(
              "--image_path", image_path,
              f"--SiftExtraction.max_num_features={cfg['sift_max_features']}",
              "--ImageReader.camera_model", camera_model,
-             "--ImageReader.single_camera", "1"],
+             "--ImageReader.single_camera", single_camera],
             "feature extraction",
             8.0,
         ),
@@ -545,6 +559,91 @@ def build_reconstruction_diagnostics(db: DBSession, rec: Reconstruction) -> dict
         "timeline_heatmap": timeline,
         "map_heatmap": map_heatmap,
         "suggestions": suggestions,
+    }
+
+
+def plan_dense_rerun(db: DBSession, rec: Reconstruction) -> dict:
+    """Find weak source-frame spans and a denser, viable child selection.
+
+    COLMAP's per-frame error is the only registration evidence used here.  A
+    null error means the frame was not registered *only when at least one
+    source frame has a parsed error*, avoiding guesses from incomplete output.
+    """
+    if rec.source_session_ids:
+        raise ValueError("Dense rerun currently supports single-session reconstructions only")
+    if rec.status != "complete":
+        raise ValueError("Reconstruction must be complete before planning a dense rerun")
+
+    cfg = get_reconstruction_config().get("dense_rerun", {})
+    min_run = max(1, int(cfg.get("min_weak_run_frames", 2)))
+    error_threshold = float(cfg.get("high_reprojection_error_px", 2.0))
+    context = max(0, int(cfg.get("context_frames", 1)))
+
+    source_frames = db.query(ReconstructionFrame).filter(
+        ReconstructionFrame.reconstruction_id == rec.id
+    ).all()
+    source_ids = {frame.image_id for frame in source_frames}
+    if not source_ids:
+        raise ValueError("Reconstruction has no recorded source frames")
+    frame_by_id = {frame.image_id: frame for frame in source_frames}
+    if not any(frame.colmap_error_px is not None for frame in source_frames):
+        raise ValueError("Per-frame reprojection data is unavailable; cannot identify weak areas")
+
+    images = db.query(Image).filter(
+        Image.session_id == rec.session_id
+    ).order_by(Image.timestamp, Image.id).all()
+    source_images = [image for image in images if image.id in source_ids]
+    if len(source_images) != len(source_ids):
+        raise ValueError("Some source frames are no longer available in the session")
+
+    weak_runs: list[list[Image]] = []
+    current: list[Image] = []
+    for image in source_images:
+        error = frame_by_id[image.id].colmap_error_px
+        weak = error is None or error >= error_threshold
+        if weak:
+            current.append(image)
+        elif current:
+            if len(current) >= min_run:
+                weak_runs.append(current)
+            current = []
+    if len(current) >= min_run:
+        weak_runs.append(current)
+    if not weak_runs:
+        raise ValueError("No weak registration span meets the configured rerun threshold")
+
+    index_by_id = {image.id: index for index, image in enumerate(images)}
+    rerun_ids = set(source_ids)
+    spans = []
+    for run in weak_runs:
+        start = max(0, index_by_id[run[0].id] - context)
+        end = min(len(images), index_by_id[run[-1].id] + context + 1)
+        added = [
+            image.id for image in images[start:end] if image.usable and image.id not in source_ids
+        ]
+        rerun_ids.update(added)
+        spans.append({
+            "source_image_ids": [image.id for image in run],
+            "candidate_image_ids": [image.id for image in images[start:end] if image.usable],
+            "added_image_ids": added,
+            "start_image_id": run[0].id,
+            "end_image_id": run[-1].id,
+        })
+    if len(rerun_ids) == len(source_ids):
+        raise ValueError("Weak areas have no additional usable frames for a denser rerun")
+
+    return {
+        "reconstruction_id": rec.id,
+        "preset": rec.preset,
+        "thresholds": {
+            "min_weak_run_frames": min_run,
+            "high_reprojection_error_px": error_threshold,
+            "context_frames": context,
+        },
+        "source_image_ids": [image.id for image in source_images],
+        "rerun_image_ids": [image.id for image in images if image.id in rerun_ids],
+        "added_image_ids": [image.id for image in images if image.id in rerun_ids - source_ids],
+        "weak_spans": spans,
     }
 
 
@@ -1829,6 +1928,7 @@ def start_reconstruction(
     target_area_geojson: str | None = None,
     source_session_ids: list[int] | None = None,
     parent_reconstruction_id: int | None = None,
+    selected_image_ids: list[int] | None = None,
 ) -> Reconstruction:
     """Create Reconstruction record and enqueue a background job. Returns the record."""
     running = db.query(Reconstruction).filter(
@@ -1869,13 +1969,21 @@ def start_reconstruction(
             Image.usable == True,  # noqa: E712
         ).all()
 
-        # Manual frame selection overrides the usable pool
-        selected_rows = db.query(SessionFrameSelection).filter(
-            SessionFrameSelection.session_id == session_id
-        ).all()
-        if selected_rows:
-            selected_ids = {row.image_id for row in selected_rows}
+        if selected_image_ids is None:
+            # Manual frame selection overrides the usable pool for ordinary runs.
+            selected_rows = db.query(SessionFrameSelection).filter(
+                SessionFrameSelection.session_id == session_id
+            ).all()
+            if selected_rows:
+                selected_ids = {row.image_id for row in selected_rows}
+                images = [img for img in images if img.id in selected_ids]
+        else:
+            # A lineage-aware rerun supplies an immutable selection.  Do not
+            # read or alter the user's session-level selection preference.
+            selected_ids = set(selected_image_ids)
             images = [img for img in images if img.id in selected_ids]
+            if len(images) != len(selected_ids):
+                raise ValueError("Dense rerun selection includes unavailable or unusable images")
 
         # Target area crop filters the pool
         if target_area_geojson:
@@ -1982,6 +2090,11 @@ def _run_pipeline(entry, db, cancel: threading.Event) -> None:
     preset = kw.get("preset", "quick")
     colmap_dir = Path(kw.get("colmap_dir", ""))
     image_ids = kw.get("image_ids", [])
+    remote_cfg = get_remote_worker_config()
+    if remote_cfg["enabled"]:
+        _run_remote_pipeline(entry, db, cancel, kw, remote_cfg)
+        mark_complete(entry.id)
+        return
     try:
         images = db.query(Image).filter(Image.id.in_(image_ids)).all()
         recon_cfg = get_reconstruction_config()
@@ -2151,6 +2264,102 @@ def _run_pipeline(entry, db, cancel: threading.Event) -> None:
         raise
     else:
         mark_complete(entry.id)
+
+
+def _run_remote_pipeline(
+    entry, db: DBSession, cancel: threading.Event, payload: dict, config: dict
+) -> None:
+    """Dispatch once and poll a configured shared-storage worker through the existing queue."""
+    reconstruction_id = entry.target_id
+    remote_job_id = payload.get("remote_job_id")
+    try:
+        if not isinstance(remote_job_id, str) or not remote_job_id:
+            remote_job_id = dispatch_reconstruction(config, payload, reconstruction_id, entry.id)
+            update_payload(entry.id, remote_job_id=remote_job_id)
+            _log_rec(reconstruction_id, f"Remote worker accepted job {remote_job_id}")
+
+        while not cancel.is_set():
+            status = get_reconstruction_status(config, remote_job_id)
+            state = status.get("status")
+            if state in {"queued", "running"}:
+                _update_rec(
+                    db,
+                    reconstruction_id,
+                    status="running_remote",
+                    step=str(status.get("step", "remote worker"))[:200],
+                    progress_pct=float(status.get("progress_pct", 0.0)),
+                )
+                cancel.wait(config["poll_interval_seconds"])
+                continue
+            if state == "complete":
+                result = status.get("result", {})
+                result = result if isinstance(result, dict) else {}
+                _update_rec(
+                    db,
+                    reconstruction_id,
+                    status="complete",
+                    step="done",
+                    progress_pct=100.0,
+                    frames_registered=result.get("frames_registered"),
+                    gaussian_count=result.get("gaussian_count"),
+                    psnr=result.get("psnr"),
+                    ssim=result.get("ssim"),
+                    completed_at=datetime.now(timezone.utc),
+                )
+                _log_rec(reconstruction_id, "Remote worker: complete")
+                return
+            if state == "cancelled":
+                message = str(status.get("error", "Remote worker cancelled"))[
+                    :_ERROR_MSG_MAX_CHARS
+                ]
+                _update_rec(
+                    db,
+                    reconstruction_id,
+                    status="cancelled",
+                    step="cancelled",
+                    error_msg=message,
+                    completed_at=datetime.now(timezone.utc),
+                )
+                entry.status = "cancelled"
+                entry.completed_at = datetime.now(timezone.utc)
+                db.commit()
+                return
+            if state == "failed":
+                message = str(status.get("error", f"Remote worker {state}"))[:_ERROR_MSG_MAX_CHARS]
+                _update_rec(
+                    db,
+                    reconstruction_id,
+                    status=state,
+                    step=state,
+                    error_msg=message,
+                    completed_at=datetime.now(timezone.utc),
+                )
+                raise JobNonRetryableError(message)
+            raise RemoteWorkerError("Remote worker returned an unknown job status")
+    except RemoteWorkerError as exc:
+        _update_rec(
+            db,
+            reconstruction_id,
+            status="failed",
+            step="remote worker error",
+            error_msg=str(exc)[:_ERROR_MSG_MAX_CHARS],
+            completed_at=datetime.now(timezone.utc),
+        )
+        raise JobNonRetryableError(str(exc)) from exc
+    if cancel.is_set():
+        if isinstance(remote_job_id, str) and remote_job_id:
+            try:
+                cancel_remote_reconstruction(config, remote_job_id)
+            except RemoteWorkerError:
+                _log_rec(reconstruction_id, "Remote worker cancellation request failed")
+        _update_rec(
+            db,
+            reconstruction_id,
+            status="cancelled",
+            step="cancelled",
+            error_msg="Cancelled by user",
+            completed_at=datetime.now(timezone.utc),
+        )
 
 
 # Register job queue handlers at import time so they're available when

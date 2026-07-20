@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+import ipaddress
 import math
 import os
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
+from urllib.parse import urlparse
 
 import yaml
 
+from backend.core.application_logging import logging_config
 from backend.services.camera_calibration import default_camera_profiles, normalize_profiles
 
 
@@ -124,6 +127,12 @@ def _reconstruction_config_from_data(data: dict) -> dict:
         "mapper": "incremental",
         "spatial_matcher_min_images": 150,
         "camera_model": "PINHOLE",
+        "single_camera": True,
+        "dense_rerun": {
+            "min_weak_run_frames": 2,
+            "high_reprojection_error_px": 2.0,
+            "context_frames": 1,
+        },
         "camera_profiles": default_camera_profiles(),
         "presets": {
             "quick": {
@@ -171,6 +180,77 @@ def get_reconstruction_config(path: str = "config.yaml") -> dict:
     return _reconstruction_config_from_data(data)
 
 
+def get_remote_worker_config(path: str = "config.yaml") -> dict:
+    """Return the explicitly opt-in network reconstruction worker settings.
+
+    The token itself is never kept in YAML: ``auth_token_env`` names the
+    environment variable that holds it.  HTTPS is required unless an operator
+    deliberately opts into HTTP for an isolated development network.
+    """
+    try:
+        with open(path) as f:
+            data = yaml.safe_load(f) or {}
+    except FileNotFoundError:
+        data = {}
+
+    defaults = {
+        "enabled": False,
+        "url": "",
+        "auth_token_env": "REMOTE_WORKER_TOKEN",
+        "timeout_seconds": 10,
+        "poll_interval_seconds": 2,
+        "allow_insecure_http": False,
+    }
+    configured = data.get("remote_worker", {})
+    if not isinstance(configured, dict):
+        return defaults
+    result = {**defaults, **configured}
+    result["enabled"] = bool(result["enabled"])
+    result["url"] = str(result["url"]).rstrip("/")
+    result["auth_token_env"] = str(result["auth_token_env"])
+    result["allow_insecure_http"] = bool(result["allow_insecure_http"])
+    for key in ("timeout_seconds", "poll_interval_seconds"):
+        try:
+            result[key] = max(1, int(result[key]))
+        except (TypeError, ValueError):
+            result[key] = defaults[key]
+    return result
+
+
+def get_webodm_config(path: str = "config.yaml") -> dict:
+    """Return the explicitly opt-in WebODM connection settings.
+
+    ``jwt_env`` names an environment variable; the JWT itself is deliberately
+    never read from or written to YAML.
+    """
+    try:
+        with open(path) as f:
+            data = yaml.safe_load(f) or {}
+    except FileNotFoundError:
+        data = {}
+
+    defaults = {
+        "enabled": False,
+        "url": "",
+        "jwt_env": "WEBODM_JWT",
+        "timeout_seconds": 30,
+        "allow_insecure_http": False,
+    }
+    configured = data.get("webodm", {})
+    if not isinstance(configured, dict):
+        return defaults
+    result = {**defaults, **configured}
+    result["enabled"] = bool(result["enabled"])
+    result["url"] = str(result["url"]).rstrip("/")
+    result["jwt_env"] = str(result["jwt_env"])
+    result["allow_insecure_http"] = bool(result["allow_insecure_http"])
+    try:
+        result["timeout_seconds"] = max(1, int(result["timeout_seconds"]))
+    except (TypeError, ValueError):
+        result["timeout_seconds"] = defaults["timeout_seconds"]
+    return result
+
+
 def default_ingest_config() -> dict:
     """Return ingest defaults without reading config.yaml."""
     return _ingest_config_from_data({})
@@ -198,6 +278,45 @@ def get_ingest_config(path: str = "config.yaml") -> dict:
     except FileNotFoundError:
         data = {}
     return _ingest_config_from_data(data)
+
+
+def get_auto_import_config(path: str = "config.yaml") -> dict:
+    """Return the opt-in SD-card/watch-folder import configuration.
+
+    This deliberately lives outside the normal import paths: watched folders are
+    an explicit allowlist and are never inferred from a mounted drive.
+    """
+    try:
+        with open(path) as f:
+            data = yaml.safe_load(f) or {}
+    except FileNotFoundError:
+        data = {}
+
+    defaults = {
+        "enabled": False,
+        "roots": [],
+        "poll_interval_seconds": 10,
+        "stable_seconds": 30,
+    }
+    configured = data.get("auto_import", {})
+    if not isinstance(configured, dict):
+        return defaults
+    result = {**defaults, **configured}
+    result["enabled"] = bool(result["enabled"])
+    roots = result["roots"]
+    if isinstance(roots, list):
+        result["roots"] = [str(root) for root in roots if isinstance(root, str)]
+    else:
+        result["roots"] = []
+    try:
+        result["poll_interval_seconds"] = max(1, int(result["poll_interval_seconds"]))
+    except (TypeError, ValueError):
+        result["poll_interval_seconds"] = defaults["poll_interval_seconds"]
+    try:
+        result["stable_seconds"] = max(0, int(result["stable_seconds"]))
+    except (TypeError, ValueError):
+        result["stable_seconds"] = defaults["stable_seconds"]
+    return result
 
 
 def default_render_config() -> dict:
@@ -290,3 +409,214 @@ def get_browser_upload_config(path: str = "config.yaml") -> dict:
     }
     browser_uploads = data.get("browser_uploads", {})
     return {**defaults, **browser_uploads}
+
+
+def get_backup_config(path: str = "config.yaml") -> dict:
+    """Return the secret-free destinations allowed for artifact backups."""
+    try:
+        with open(path) as f:
+            data = yaml.safe_load(f) or {}
+    except FileNotFoundError:
+        data = {}
+
+    defaults = {"local_destinations": [], "rclone_remote": ""}
+    backup = data.get("backup", {})
+    return {**defaults, **backup}
+
+
+def get_backup_schedule_config(path: str = "config.yaml") -> dict:
+    """Return the opt-in daily backup schedule without exposing target values."""
+    try:
+        with open(path) as f:
+            data = yaml.safe_load(f) or {}
+    except FileNotFoundError:
+        data = {}
+
+    backup = data.get("backup", {})
+    schedule = backup.get("schedule", {}) if isinstance(backup, dict) else {}
+    defaults = {"enabled": False, "target": "", "daily_at": "02:00"}
+    return {**defaults, **schedule} if isinstance(schedule, dict) else defaults
+
+
+def get_logging_config(path: str = "config.yaml") -> dict:
+    """Return validated local application logging settings from config.yaml."""
+    try:
+        with open(path) as f:
+            data = yaml.safe_load(f) or {}
+    except FileNotFoundError:
+        data = {}
+    return logging_config(data, path)
+
+
+def get_deployment_config(path: str = "config.yaml") -> dict:
+    """Return the validated bind and CORS settings for ``python -m backend``."""
+    try:
+        with open(path) as f:
+            data = yaml.safe_load(f) or {}
+    except FileNotFoundError:
+        data = {}
+
+    defaults = {
+        "host": "127.0.0.1",
+        "port": 8000,
+        "cors_origins": ["http://localhost:5173", "http://localhost:3000"],
+    }
+    deployment = data.get("deployment", {})
+    if not isinstance(deployment, dict):
+        return defaults
+    result = {**defaults, **deployment}
+    if not isinstance(result["host"], str):
+        raise ValueError("deployment.host must be an IP address or hostname")
+    host = result["host"].strip()
+    try:
+        ipaddress.ip_address(host)
+    except ValueError as exc:
+        allowed_hostname_chars = "-.abcdefghijklmnopqrstuvwxyz0123456789"
+        labels = host.split(".")
+        if (
+            not host
+            or any(char not in allowed_hostname_chars for char in host.lower())
+            or any(not label or label.startswith("-") or label.endswith("-") for label in labels)
+        ):
+            raise ValueError("deployment.host must be an IP address or hostname") from exc
+    result["host"] = host
+    if isinstance(result["port"], bool):
+        raise ValueError("deployment.port must be an integer from 1 to 65535")
+    try:
+        result["port"] = int(result["port"])
+    except (TypeError, ValueError) as exc:
+        raise ValueError("deployment.port must be an integer from 1 to 65535") from exc
+    if not 1 <= result["port"] <= 65535:
+        raise ValueError("deployment.port must be an integer from 1 to 65535")
+    origins = result["cors_origins"]
+    if not isinstance(origins, list) or not origins:
+        raise ValueError("deployment.cors_origins must be a non-empty list of HTTP origins")
+    for origin in origins:
+        if not isinstance(origin, str):
+            raise ValueError("deployment.cors_origins must contain HTTP(S) origins without paths")
+        parsed = urlparse(origin)
+        try:
+            port = parsed.port
+        except ValueError as exc:
+            raise ValueError(
+                "deployment.cors_origins must contain HTTP(S) origins without paths"
+            ) from exc
+        if (
+            parsed.scheme not in {"http", "https"}
+            or not parsed.netloc
+            or parsed.username
+            or parsed.password
+            or port is not None and not 1 <= port <= 65535
+            or parsed.path not in {"", "/"}
+            or parsed.params
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise ValueError("deployment.cors_origins must contain HTTP(S) origins without paths")
+    result["cors_origins"] = [origin.rstrip("/") for origin in origins]
+    return result
+
+
+def get_cesium_ion_config(path: str = "config.yaml") -> dict:
+    """Return the explicitly opt-in Cesium ion upload settings, without its token."""
+    try:
+        with open(path) as f:
+            data = yaml.safe_load(f) or {}
+    except FileNotFoundError:
+        data = {}
+
+    defaults = {
+        "enabled": False,
+        "api_url": "https://api.cesium.com/v1",
+        "token_env": "CESIUM_ION_TOKEN",
+        "timeout_seconds": 60,
+        "allow_insecure_http": False,
+    }
+    configured = data.get("cesium_ion", {})
+    if not isinstance(configured, dict):
+        return defaults
+    result = {**defaults, **configured}
+    result["enabled"] = bool(result["enabled"])
+    result["api_url"] = str(result["api_url"]).rstrip("/")
+    result["token_env"] = str(result["token_env"])
+    result["allow_insecure_http"] = bool(result["allow_insecure_http"])
+    try:
+        result["timeout_seconds"] = max(1, int(result["timeout_seconds"]))
+    except (TypeError, ValueError):
+        result["timeout_seconds"] = defaults["timeout_seconds"]
+    return result
+
+
+def get_pin_lock_config(path: str = "config.yaml") -> dict:
+    """Return the opt-in, single-user local PIN lock configuration.
+
+    The PIN hash stays in the named environment variable, never in YAML.
+    Enabled-but-unusable configuration is rejected at startup rather than
+    accidentally exposing the app without a lock.
+    """
+    try:
+        with open(path) as f:
+            data = yaml.safe_load(f) or {}
+    except FileNotFoundError:
+        data = {}
+
+    defaults = {"enabled": False, "pin_hash_env": "DRONE_MAPPING_PIN_HASH", "session_ttl": 28800}
+    configured = data.get("pin_lock", {})
+    if not isinstance(configured, dict):
+        raise ValueError("pin_lock must be a mapping")
+    result = {**defaults, **configured}
+    if not isinstance(result["enabled"], bool):
+        raise ValueError("pin_lock.enabled must be true or false")
+    if not isinstance(result["pin_hash_env"], str) or not result["pin_hash_env"].strip():
+        raise ValueError("pin_lock.pin_hash_env must name an environment variable")
+    if isinstance(result["session_ttl"], bool):
+        raise ValueError("pin_lock.session_ttl must be an integer of at least 60 seconds")
+    try:
+        result["session_ttl"] = int(result["session_ttl"])
+    except (TypeError, ValueError) as exc:
+        raise ValueError("pin_lock.session_ttl must be an integer of at least 60 seconds") from exc
+    if result["session_ttl"] < 60:
+        raise ValueError("pin_lock.session_ttl must be an integer of at least 60 seconds")
+    if result["enabled"]:
+        pin_hash = os.environ.get(result["pin_hash_env"])
+        try:
+            salt, digest = pin_hash.split("$", 1) if pin_hash else ("", "")
+            if len(bytes.fromhex(salt)) != 16 or len(bytes.fromhex(digest)) != 64:
+                raise ValueError
+        except ValueError as exc:
+            raise ValueError(
+                f"pin_lock requires {result['pin_hash_env']} to contain a valid scrypt hash"
+            ) from exc
+    return result
+
+
+def get_api_key_config(path: str = "config.yaml") -> dict:
+    """Return the optional automation key configuration for a PIN-locked app."""
+    try:
+        with open(path) as f:
+            data = yaml.safe_load(f) or {}
+    except FileNotFoundError:
+        data = {}
+
+    defaults = {"enabled": False, "key_hash_env": "DRONE_MAPPING_API_KEY_HASH"}
+    configured = data.get("api_key", {})
+    if not isinstance(configured, dict):
+        raise ValueError("api_key must be a mapping")
+    result = {**defaults, **configured}
+    if not isinstance(result["enabled"], bool):
+        raise ValueError("api_key.enabled must be true or false")
+    if not isinstance(result["key_hash_env"], str) or not result["key_hash_env"].strip():
+        raise ValueError("api_key.key_hash_env must name an environment variable")
+    if result["enabled"]:
+        if not get_pin_lock_config(path)["enabled"]:
+            raise ValueError("api_key.enabled requires pin_lock.enabled")
+        key_hash = os.environ.get(result["key_hash_env"])
+        try:
+            salt, digest = key_hash.split("$", 1) if key_hash else ("", "")
+            if len(bytes.fromhex(salt)) != 16 or len(bytes.fromhex(digest)) != 64:
+                raise ValueError
+        except ValueError as exc:
+            raise ValueError(
+                f"api_key requires {result['key_hash_env']} to contain a valid scrypt hash"
+            ) from exc
+    return result

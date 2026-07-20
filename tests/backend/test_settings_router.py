@@ -178,6 +178,13 @@ def test_patch_reconstruction_matcher(client, tmp_config):
     assert resp.json()["reconstruction"]["matcher"] == "sequential"
 
 
+def test_patch_reconstruction_can_opt_into_per_camera_estimates(client, tmp_config):
+    resp = client.patch("/settings", json={"reconstruction": {"single_camera": False}})
+
+    assert resp.status_code == 200
+    assert resp.json()["reconstruction"]["single_camera"] is False
+
+
 def test_patch_reconstruction_preset_key(client, tmp_config):
     resp = client.patch(
         "/settings",

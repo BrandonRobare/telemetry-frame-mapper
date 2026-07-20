@@ -61,7 +61,9 @@ exports/          KML/GPX mission plan exports (gitignored)
 - **Export** — WebODM georeferencing CSV-only zip, GeoJSON, LAS point cloud, mesh GLB/OBJ/MTL.
 - **Session Log · Reconstruct · Jobs · Storage** — event history, preset-based job start, resource monitor with live logs, disk usage + file browser.
 - **Splat Viewer** — in-browser gaussian-splat rendering, PSNR/SSIM sparklines, coverage-gap heatmap, GPS-pinned annotations, distance/area measurement, ortho/3D split view, flythrough recording, presentation/narration mode.
-- **Compare** — voxel change detection between two reconstructions of the same site.
+- **Compare** — voxel change detection plus a project-scoped, read-only flight trend table. It
+  reuses stored usable-frame, coverage, and completed-reconstruction metrics; missing values stay
+  blank rather than triggering new analysis.
 - **Settings** — app preferences, import/storage paths, mission parameters, reconstruction presets, rendering/export defaults.
 - Dark/light theme with persistence.
 
@@ -79,6 +81,17 @@ pip install -e ".[dev]"
 
 The CLI requires `ffmpeg` and `exiftool` on your PATH (or pass `--ffmpeg` / `--exiftool`).
 
+For a non-developer Windows install, build the distributable with the documented
+[Windows installer workflow](docs/WINDOWS-INSTALLER.md). It keeps application data in
+`%LOCALAPPDATA%\\Telemetry Frame Mapper` rather than under Program Files.
+
+### Backend logs
+
+The backend writes local JSON Lines logs by default to `logs/backend.jsonl`. Configure the
+`logging` block in `config.yaml` to change its level, directory, file name, rotation size, or
+retention count; set `enabled: false` to disable it. The log path is resolved relative to the
+configuration file, and rotation is handled locally by Python's standard library.
+
 ### External tool gates
 
 Required for v1.0 release smoke:
@@ -95,6 +108,7 @@ Optional/manual reconstruction gates:
 | `colmap` | Reconstruct tab SfM workspace pipeline | Reconstruction job fails with `COLMAP executable not found` install guidance. |
 | `torch` + `gsplat` + CUDA-capable GPU | Gaussian splat training, thumbnails, optional server video renderer | Manual two-step install (see [docs/SETUP.md](docs/SETUP.md)) — intentionally not in the `[reconstruction]` extra; without it training is skipped and the job completes COLMAP-only; thumbnail generation degrades silently; server video rendering tells users to use browser recording or install optional reconstruction dependencies. |
 | SuGaR (`sugar_scene`/`sugar`) | Mesh export | Not installed by the Python extra; install from the upstream SuGaR project when mesh export is needed. Mesh export job fails with `SuGaR is not installed` optional dependency guidance. |
+| PotreeConverter | Potree export | Install the [PotreeConverter](https://github.com/potree/PotreeConverter) executable on `PATH`, or set `POTREE_CONVERTER` to its executable path. Download a reconstruction LAS first, then select **Generate Potree**; the API creates `exports/{id}/potree/metadata.json` and its accompanying hierarchy. |
 
 CI should use fakes/mocks for these tools. Real `ffmpeg`/`exiftool` CLI smoke is must-pass for v1.0; real COLMAP/gsplat/SuGaR/video-render smoke is optional/manual unless the release explicitly advertises reconstruction as production-ready.
 
@@ -174,15 +188,111 @@ drone-video-geotagger \
 
 The Import dialog defaults to **Browser upload**: choose or drag a folder of frames in the browser, and the app streams files to the backend in chunks before starting the same import pipeline used by server-side paths. This is the easiest path when the image folder is on your workstation but not already under `imports/`. The legacy **Server path** mode remains available for folders that already live under the backend's `imports/` directory.
 
+### Cloud-drive import
+
+Use **Upload / cloud drive** in the Import dialog to select a JPEG folder that a desktop client has
+already synced from OneDrive, Google Drive, Dropbox, or another provider. The provider client and
+operating system authorize access; the browser submits only the files you explicitly select through
+the same chunked upload flow as a local folder.
+
+The backend deliberately has no "import from URL" endpoint and does not store cloud-provider OAuth
+tokens or credentials. A direct provider integration needs an explicit provider choice, registered
+OAuth client and redirect URI, least-privilege scope, encrypted token lifecycle, and redirect/DNS
+policy before it can be added safely. Until then, use the provider's desktop sync or download flow
+and select the resulting folder in the browser.
+
+### SD-card / watch-folder auto-import
+
+Set `auto_import.enabled` and explicitly list each mounted card or staging folder in `config.yaml`, then restart the backend. The watcher uses polling, waits until a media directory is unchanged for `stable_seconds`, and starts the existing image-import pipeline. It never discovers drives or imports paths outside `roots`; `GET /auto-import/status` reports missing, unsupported, and watched roots. A persisted media-manifest fingerprint prevents a completed claim from being imported again after a restart.
+
+```yaml
+auto_import:
+  enabled: true
+  roots:
+    - "E:/DCIM"
+  poll_interval_seconds: 10
+  stable_seconds: 30
+```
+
+The watcher imports directories containing configured image extensions (JPEG by default). It does not copy card contents, watch video-only folders, or retry a folder once its fingerprint has been claimed; move/copy edited media to a new folder if a new import is intended.
+
 ### Backend
 
 ```bash
-uvicorn backend.main:app --reload
+python -m backend
 # API at http://localhost:8000
 # Interactive docs at http://localhost:8000/docs
 ```
 
-Optional: copy `config.yaml.example` to `config.yaml` and adjust mission parameters (altitude, FOV, overlap, target CRS). Upload limits are configurable in `config.yaml` under `upload_limits` (`flight_log_max_bytes` and `srt_max_bytes`, both 10 MiB by default).
+`python -m backend` reads the `deployment` section of `config.yaml`. It stays loopback-only by default. To serve a trusted LAN frontend, explicitly set the bind address and each allowed browser origin; do not use wildcard origins.
+
+```yaml
+deployment:
+  host: "192.168.1.50"
+  port: 8000
+  cors_origins:
+    - "http://192.168.1.50:5173"
+```
+
+For development reloads, pass host and port directly to `uvicorn backend.main:app --reload`; its command-line values take precedence. Upload limits are configurable in `config.yaml` under `upload_limits` (`flight_log_max_bytes` and `srt_max_bytes`, both 10 MiB by default).
+
+### Reconstruction share links
+
+The Export tab creates a revocable, opaque link for a completed reconstruction. New links default
+to seven days and may be protected with an optional password. The bearer token is shown only in the
+creation response and lives only in the viewer URL; it is never stored as plaintext or appended to
+artifact URLs. Password verification issues a `HttpOnly`, `SameSite=Lax`, `/share`-scoped session
+cookie (marked `Secure` for HTTPS or a TLS proxy). Owners can inspect lifecycle state with
+`GET /export/reconstructions/{id}/share-links` and revoke one with
+`POST /export/reconstructions/{id}/share-links/{share_link_id}/revoke`.
+
+Public responses use `401` when password unlock is required, `403` for an incorrect password or
+token/reconstruction mismatch, and `410` after expiry or revocation. Existing signed links remain
+supported until their signed expiry; their legacy artifact query-token format is not emitted for new
+links.
+
+### Artifact backup
+
+`POST /storage/backup` creates an additive, versioned snapshot of the live SQLite database,
+sanitized `config.yaml`, and the selected `imports`, `processed`, and/or `exports` directories.
+Every copied file is SHA-256 recorded in `manifest.json`; the SQLite file is created with SQLite's
+backup API, so WAL/SHM sidecars are not copied. Configure the allowed destination first:
+
+```yaml
+backup:
+  local_destinations:
+    - "E:/telemetry-backups"
+  rclone_remote: "archive:telemetry-backups"  # credentials stay in rclone config
+```
+
+Then submit either `{ "destination": "local", "local_destination": "E:/telemetry-backups" }`
+or `{ "destination": "rclone" }`, with an optional `artifacts` list (defaults to
+`["processed", "exports"]`). Local paths must exactly match the allowlist. Remote backups use
+`rclone copy`, never `sync` or deletion flags; rclone credentials and command output are never
+persisted in the snapshot or returned by the API.
+
+To schedule one opt-in daily backup, define a named target from the same allowlist and select it
+by name. `daily_at` uses the server's local clock. `GET /storage/backup-schedule` returns only
+operational status (last run, next run, and success/failure result), never target credentials or
+command output.
+
+```yaml
+backup:
+  local_destinations:
+    - "E:/telemetry-backups"
+  targets:
+    nightly_local:
+      destination: local
+      local_destination: "E:/telemetry-backups"
+      artifacts: ["processed", "exports"]
+  schedule:
+    enabled: true
+    target: nightly_local
+    daily_at: "02:00"
+```
+
+The scheduler runs only one backup at a time, so a slow remote copy is not overlapped by the next
+scheduled run. Leave `enabled: false` (the default) to keep it off.
 
 ## CLI inputs
 
@@ -204,6 +314,9 @@ Frame index rule: the index is the **last** number in each filename — `frame_0
 - `exiftool_geotags.args` — generated ExifTool argument file
 
 Upload the geotagged folder to WebODM; it reads GPS EXIF tags on import.
+
+For an opt-in API upload, polling, cancellation, and result-download workflow, see
+[WebODM round trip](docs/WEBODM.md). Credentials stay in an environment variable.
 
 ## Tests
 
