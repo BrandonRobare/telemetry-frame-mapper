@@ -270,8 +270,8 @@ def apply_policy(
                     disk_pct=float(disk_pct) if disk_pct is not None else None,
                 )
             )
-        except (ValueError, TypeError) as exc:
-            return {"error": f"Invalid rule: {exc}"}
+        except (ValueError, TypeError):
+            return {"error": "Invalid storage-policy rule"}
 
     all_candidates: list[dict] = []
     if db is None:
