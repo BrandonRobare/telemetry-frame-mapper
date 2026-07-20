@@ -11,12 +11,6 @@ from urllib.parse import quote, urlparse
 
 import httpx
 
-from ..core.config import get_config
-
-
-def _directory_prefix(root: str) -> str:
-    return root if root.endswith(os.sep) else f"{root}{os.sep}"
-
 
 class CesiumIonError(RuntimeError):
     """Cesium ion is disabled, misconfigured, or did not accept an upload."""
@@ -158,20 +152,12 @@ def _upload_bundle(config: dict, upload: dict, filename: str, body: bytes) -> No
         raise CesiumIonError("Cesium ion storage upload failed; check quota and retry") from exc
 
 
-def upload_tileset(config: dict, bundle: Path, name: str) -> dict:
+def upload_tileset(config: dict, bundle_name: str, body: bytes, name: str) -> dict:
     """Create one 3D Tiles asset, upload the ZIP, and start Cesium processing."""
     _base_url(config)
     _headers(config)
-    exports_root = os.path.normcase(os.path.normpath(os.path.realpath(get_config().exports_dir)))
-    bundle_path = os.path.normcase(os.path.normpath(os.path.realpath(bundle)))
-    exports_prefix = _directory_prefix(exports_root)
-    if bundle_path != exports_root and not bundle_path.startswith(exports_prefix):
-        raise CesiumIonError("Cesium ion upload bundle must be inside the exports directory")
-    try:
-        with open(bundle_path, "rb") as bundle_file:
-            body = bundle_file.read()
-    except OSError as exc:
-        raise CesiumIonError("Cesium ion upload bundle does not exist") from exc
+    if not bundle_name or Path(bundle_name).name != bundle_name:
+        raise CesiumIonError("Cesium ion upload bundle name must be a filename")
     created = _response_object(
         _request(
             config,
@@ -188,7 +174,7 @@ def upload_tileset(config: dict, bundle: Path, name: str) -> dict:
     complete = created.get("onComplete")
     if not isinstance(upload, dict) or not isinstance(complete, dict):
         raise CesiumIonError(f"Cesium ion asset {asset_id} did not provide upload instructions")
-    _upload_bundle(config, upload, os.path.basename(bundle_path), body)
+    _upload_bundle(config, upload, bundle_name, body)
     method, url = complete.get("method"), complete.get("url")
     if not isinstance(method, str) or not isinstance(url, str) or not url:
         raise CesiumIonError(f"Cesium ion asset {asset_id} did not provide completion instructions")

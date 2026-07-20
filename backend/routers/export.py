@@ -469,13 +469,11 @@ def upload_reconstruction_to_cesium_ion(reconstruction_id: int, db: DBSession = 
     if not rec:
         raise HTTPException(status_code=404, detail="Reconstruction not found")
     exports_dir = Path(get_config().exports_dir)
-    bundle = _safe_export_path(
-        exports_dir / f"reconstruction_{reconstruction_id}_share.zip", exports_dir
-    )
+    bundle = _safe_export_path(exports_dir / f"reconstruction_{rec.id}_share.zip", exports_dir)
     try:
         build_share_bundle(bundle, rec)
-        name = f"Reconstruction {reconstruction_id}"
-        return upload_tileset(get_cesium_ion_config(), bundle, name)
+        name = f"Reconstruction {rec.id}"
+        return upload_tileset(get_cesium_ion_config(), bundle.name, bundle.read_bytes(), name)
     except (CesiumIonError, ValueError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
