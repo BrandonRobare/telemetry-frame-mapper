@@ -14,6 +14,10 @@ import httpx
 from ..core.config import get_config
 
 
+def _directory_prefix(root: str) -> str:
+    return root if root.endswith(os.sep) else f"{root}{os.sep}"
+
+
 class CesiumIonError(RuntimeError):
     """Cesium ion is disabled, misconfigured, or did not accept an upload."""
 
@@ -161,10 +165,9 @@ def upload_tileset(config: dict, bundle: Path, name: str) -> dict:
     exports_root = os.path.normpath(os.path.realpath(get_config().exports_dir))
     bundle = Path(os.path.normpath(os.path.realpath(bundle)))
     exports_root_cmp = os.path.normcase(exports_root)
+    exports_prefix = _directory_prefix(exports_root_cmp)
     bundle_cmp = os.path.normcase(str(bundle))
-    inside_exports = bundle_cmp == exports_root_cmp or bundle_cmp.startswith(
-        f"{exports_root_cmp}{os.sep}"
-    )
+    inside_exports = bundle_cmp == exports_root_cmp or bundle_cmp.startswith(exports_prefix)
     if not inside_exports:
         raise CesiumIonError("Cesium ion upload bundle must be inside the exports directory")
     if not bundle.is_file():
