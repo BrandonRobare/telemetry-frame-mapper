@@ -5,6 +5,8 @@ import shutil
 import subprocess
 from pathlib import Path
 
+from ..core.config import get_config
+
 
 def _converter_path() -> str:
     configured = os.environ.get("POTREE_CONVERTER")
@@ -19,6 +21,17 @@ def _converter_path() -> str:
 
 def export_potree(source_path: Path, output_dir: Path) -> Path:
     """Convert an existing LAS/LAZ file into a Potree-compatible output directory."""
+    exports_root = os.path.normpath(os.path.realpath(get_config().exports_dir))
+    source_path = Path(os.path.normpath(os.path.realpath(source_path)))
+    output_dir = Path(os.path.normpath(os.path.realpath(output_dir)))
+    exports_root_cmp = os.path.normcase(exports_root)
+    for path in (source_path, output_dir):
+        candidate = os.path.normcase(str(path))
+        inside_exports = candidate == exports_root_cmp or candidate.startswith(
+            f"{exports_root_cmp}{os.sep}"
+        )
+        if not inside_exports:
+            raise ValueError("Potree paths must be inside the exports directory")
     if source_path.suffix.lower() not in {".las", ".laz"}:
         raise ValueError("Potree export requires a LAS or LAZ point cloud")
     if not source_path.is_file():
