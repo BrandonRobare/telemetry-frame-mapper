@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import zipfile
 from datetime import datetime
@@ -93,6 +94,15 @@ def _bundle_artifacts(
 def build_session_archive(zip_path: Path, session: Session, db: DBSession) -> dict:
     """Build a portable .zip of a session: its row, every cascaded child row
     (serialized to JSON), and any artifact files that exist on disk."""
+    exports_root = os.path.normcase(os.path.normpath(os.path.realpath(get_config().exports_dir)))
+    archive_path = os.path.normcase(os.path.normpath(os.path.realpath(zip_path)))
+    exports_prefix = (
+        exports_root if exports_root.endswith(os.sep) else f"{exports_root}{os.sep}"
+    )
+    if not archive_path.startswith(exports_prefix):
+        raise ValueError(f"Session archive path {zip_path} is outside exports directory")
+    zip_path = Path(archive_path)
+
     images = db.query(Image).filter(Image.session_id == session.id).all()
     image_ids = [i.id for i in images]
     footprints = (
