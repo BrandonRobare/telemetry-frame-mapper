@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -96,6 +98,32 @@ def test_potree_export_reports_missing_converter(client, tmp_path, monkeypatch):
 
     assert response.status_code == 422
     assert "POTREE_CONVERTER" in response.json()["detail"]
+
+
+def test_potree_route_derives_output_from_persisted_id(tmp_path, monkeypatch):
+    from backend.routers.reconstruction import generate_potree_export
+
+    source = tmp_path / "pointcloud.las"
+    source.write_bytes(b"LAS")
+    rec = SimpleNamespace(id=7, pointcloud_path=str(source))
+    db = MagicMock()
+    db.query.return_value.filter.return_value.first.return_value = rec
+    artifact_path = MagicMock(return_value=tmp_path)
+    monkeypatch.setattr(
+        "backend.routers.reconstruction._reconstruction_artifact_path",
+        artifact_path,
+    )
+    monkeypatch.setattr(
+        "backend.routers.reconstruction._safe_export_http_path", lambda path: path
+    )
+    monkeypatch.setattr(
+        "backend.services.potree_export.export_potree",
+        lambda _source, output: output / "metadata.json",
+    )
+
+    generate_potree_export(999, db)
+
+    artifact_path.assert_called_once_with(rec.id, "potree")
 
 
 def test_potree_export_rejects_paths_outside_exports(tmp_path, monkeypatch):
