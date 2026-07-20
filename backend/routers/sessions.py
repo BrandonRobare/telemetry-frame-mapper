@@ -456,27 +456,24 @@ def restore_session(req: RestoreRequest, db: DBSession = Depends(get_db)):
     # zip_path is user-supplied; confine it to the app's own data roots so it can't be
     # used to read arbitrary files off the server filesystem.
     cfg = get_config()
-    zip_path = os.path.normcase(os.path.normpath(os.path.realpath(req.zip_path)))
-    imports_root = os.path.normcase(os.path.normpath(os.path.realpath(cfg.imports_dir)))
-    exports_root = os.path.normcase(os.path.normpath(os.path.realpath(cfg.exports_dir)))
-    data_root = os.path.normcase(os.path.normpath(os.path.realpath(cfg.data_dir)))
-    imports_prefix = (
-        imports_root if imports_root.endswith(os.sep) else f"{imports_root}{os.sep}"
-    )
-    exports_prefix = (
-        exports_root if exports_root.endswith(os.sep) else f"{exports_root}{os.sep}"
-    )
-    data_prefix = data_root if data_root.endswith(os.sep) else f"{data_root}{os.sep}"
-    if not (
-        zip_path.startswith(imports_prefix)
-        or zip_path.startswith(exports_prefix)
-        or zip_path.startswith(data_prefix)
-    ):
-        zip_path = None
-    if zip_path is None:
+    requested_path = os.path.normcase(os.path.normpath(os.path.realpath(req.zip_path)))
+    zip_path = None
+    inside_root = False
+    for root_value in (cfg.imports_dir, cfg.exports_dir, cfg.data_dir):
+        root = os.path.normcase(os.path.normpath(os.path.realpath(root_value)))
+        prefix = root if root.endswith(os.sep) else f"{root}{os.sep}"
+        if requested_path != root and not requested_path.startswith(prefix):
+            continue
+        inside_root = True
+        for candidate in Path(root).rglob("*"):
+            candidate_path = os.path.normcase(os.path.realpath(candidate))
+            if candidate.is_file() and candidate_path == requested_path:
+                zip_path = candidate
+                break
+        break
+    if not inside_root:
         raise HTTPException(status_code=400, detail="Archive path is outside allowed directories")
-    zip_path = Path(zip_path)
-    if not zip_path.is_file():
+    if zip_path is None:
         raise HTTPException(status_code=404, detail="Archive zip not found")
     try:
         return restore_session_archive(zip_path, db)

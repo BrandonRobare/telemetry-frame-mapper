@@ -902,7 +902,7 @@ def generate_potree_export(reconstruction_id: int, db: DBSession = Depends(get_d
     try:
         source_path = _safe_export_http_path(Path(rec.pointcloud_path))
         metadata_path = export_potree(
-            source_path, _reconstruction_artifact_path(reconstruction_id, "potree")
+            source_path, _reconstruction_artifact_path(rec.id, "potree")
         )
     except (FileNotFoundError, RuntimeError, ValueError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
