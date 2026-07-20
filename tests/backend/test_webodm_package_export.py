@@ -1,4 +1,5 @@
 import zipfile
+from pathlib import Path
 
 import pytest
 
@@ -44,6 +45,7 @@ def test_webodm_package_includes_images_and_manifest(client, tmp_path, monkeypat
         f"/export/webodm-package?session_id={session.id}&mode=gcp&include_gcp=true"
     ).json()
     assert "--gcp gcp_list.txt" in body["odm_options"]
+    assert Path(body["zip_path"]).name == f"webodm_package_{session.id}_gcp.zip"
     with zipfile.ZipFile(body["zip_path"]) as zf:
         names = set(zf.namelist())
     assert {

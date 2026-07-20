@@ -114,7 +114,12 @@ def create_task(
 
 
 def get_task(config: dict, project_id: int, task_id: int) -> dict:
-    return _json(_request(config, "GET", f"/api/projects/{project_id}/tasks/{task_id}/"))
+    task = _json(_request(config, "GET", f"/api/projects/{project_id}/tasks/{task_id}/"))
+    if type(task.get("project")) is not int or type(task.get("id")) is not int:
+        raise WebODMError("WebODM task response did not include integer project and task ids")
+    if task["project"] != project_id or task["id"] != task_id:
+        raise WebODMError("WebODM task response identity did not match the requested task")
+    return task
 
 
 def cancel_task(config: dict, project_id: int, task_id: int) -> None:
