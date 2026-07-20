@@ -643,7 +643,7 @@ def export_compact_splat(
             status_code=422, detail="Splat export path is outside exports directory"
         )
     out_path = Path(out_path)
-    ply_io.write_splat(cloud, out_path)
+    ply_io.write_splat(cloud, out_path, exports_dir)
     return {
         "splat_path": str(out_path),
         "point_count": int(cloud.means.shape[0]),
