@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from unittest.mock import patch
 
 import httpx
@@ -9,7 +10,7 @@ import backend.routers.export as export_router
 from backend.core.config import get_cesium_ion_config
 from backend.db.models import Image, Reconstruction
 from backend.db.models import Session as SessionModel
-from backend.services.cesium_ion import CesiumIonError, upload_tileset
+from backend.services.cesium_ion import CesiumIonError, _directory_prefix, upload_tileset
 
 
 def _config(**overrides):
@@ -128,6 +129,13 @@ def test_cesium_client_rejects_bundle_outside_exports(tmp_path, monkeypatch):
         bundle.write_bytes(b"zip")
         with pytest.raises(CesiumIonError, match="inside the exports directory"):
             upload_tileset(_config(), bundle, "Mission")
+
+
+def test_cesium_path_check_preserves_filesystem_root():
+    root = os.path.normcase(os.path.abspath(os.sep))
+
+    assert _directory_prefix(root) == root
+    assert os.path.normcase(os.path.join(root, "exports")).startswith(_directory_prefix(root))
 
 
 def _db(client):
