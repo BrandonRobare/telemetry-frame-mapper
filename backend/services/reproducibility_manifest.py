@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import platform
 import shutil
 import subprocess
@@ -31,8 +32,9 @@ def binary_version(name: str) -> dict:
             check=False,
         )
         version = proc.stdout.splitlines()[0] if proc.stdout else None
-    except Exception as exc:
-        version = f"unavailable: {exc}"
+    except Exception:
+        logging.getLogger("backend").warning("Unable to determine %s version", name, exc_info=True)
+        version = "unavailable"
     return {"available": True, "path": path, "version": version}
 
 

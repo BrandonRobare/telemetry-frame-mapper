@@ -434,8 +434,15 @@ def _webodm_backend_status() -> dict:
     config = get_webodm_config()
     try:
         validate_connection_config(config)
-    except WebODMError as exc:
-        return {"id": "webodm", "available": False, "detail": str(exc)}
+    except WebODMError:
+        logging.getLogger("backend").warning(
+            "WebODM backend is unavailable", exc_info=True
+        )
+        return {
+            "id": "webodm",
+            "available": False,
+            "detail": "WebODM connection is unavailable; review configuration and server logs.",
+        }
     return {
         "id": "webodm",
         "available": True,
