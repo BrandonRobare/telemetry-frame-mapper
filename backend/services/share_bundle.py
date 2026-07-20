@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import zipfile
 from pathlib import Path
 
@@ -42,7 +43,16 @@ def build_share_manifest(rec: Reconstruction) -> dict:
     }
 
 
-def build_share_bundle(zip_path: Path, rec: Reconstruction) -> dict:
+def build_share_bundle(zip_path: Path, rec: Reconstruction, exports_dir: Path) -> dict:
+    exports_root = os.path.normcase(os.path.normpath(os.path.realpath(exports_dir)))
+    bundle_path = os.path.normcase(os.path.normpath(os.path.realpath(zip_path)))
+    exports_prefix = (
+        exports_root if exports_root.endswith(os.sep) else f"{exports_root}{os.sep}"
+    )
+    if not bundle_path.startswith(exports_prefix):
+        raise ValueError(f"Share bundle path {zip_path} is outside exports directory")
+    zip_path = Path(bundle_path)
+
     manifest = build_share_manifest(rec)
     zip_path.parent.mkdir(parents=True, exist_ok=True)
     copied = []
