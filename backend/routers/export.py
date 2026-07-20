@@ -34,6 +34,59 @@ from ..services.geometry_exports import feature_collection, geometry_feature
 router = APIRouter(prefix="/export", tags=["export"])
 
 
+@router.get("/reconstructions/{reconstruction_id}/usd")
+def export_usd_handoff(reconstruction_id: int, db: DBSession = Depends(get_db)):
+    """Download a self-contained USDA mesh and georeferencing handoff ZIP."""
+    from ..services.reconstruction import _load_geo_transform_for_reconstruction, _safe_export_path
+    from ..services.usd_export import write_usda_handoff
+
+    rec = db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Reconstruction not found")
+    if rec.status != "complete":
+        raise HTTPException(
+            status_code=422, detail="Reconstruction must be complete before USD export"
+        )
+    if not rec.mesh_obj_path:
+        raise HTTPException(
+            status_code=422, detail="USD geometry export requires an existing OBJ mesh"
+        )
+
+    exports_dir = Path(get_config().exports_dir)
+    try:
+        obj_path = _safe_export_path(Path(rec.mesh_obj_path), exports_dir)
+        if not obj_path.is_file():
+            raise ValueError("OBJ mesh file not found on disk")
+        glb_path = None
+        if rec.mesh_glb_path:
+            glb_path = _safe_export_path(Path(rec.mesh_glb_path), exports_dir)
+            if not glb_path.is_file():
+                raise ValueError("GLB mesh file not found on disk")
+        output_dir = _safe_export_path(exports_dir / str(rec.id), exports_dir)
+        usda_path, sidecar_path = write_usda_handoff(
+            output_dir,
+            obj_path,
+            reconstruction_id=rec.id,
+            session_id=rec.session_id,
+            geo_transform=_load_geo_transform_for_reconstruction(rec),
+            source_glb=glb_path,
+        )
+        bundle_path = output_dir / f"mesh_{rec.id}_usd_handoff.zip"
+        with zipfile.ZipFile(bundle_path, "w", compression=zipfile.ZIP_DEFLATED) as bundle:
+            bundle.write(usda_path, "mesh.usda")
+            bundle.write(sidecar_path, "mesh.usd.georef.json")
+            bundle.write(obj_path, "source/mesh.obj")
+            if glb_path:
+                bundle.write(glb_path, "source/mesh.glb")
+    except (OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return FileResponse(
+        bundle_path,
+        media_type="application/zip",
+        filename=f"mesh_{rec.id}_usd_handoff.zip",
+    )
+
+
 @router.get("/reconstructions/{reconstruction_id}/geopackage")
 def export_geopackage(
     reconstruction_id: int,

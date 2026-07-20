@@ -152,6 +152,16 @@ function MeshExportCard({ job }: { job: Job }) {
           )}
           {mesh?.mesh_obj_path && (
             <a
+              href={`${BASE_URL}/export/reconstructions/${job.id}/usd`}
+              download={`mesh_${job.id}_usd_handoff.zip`}
+              style={downloadLinkStyle}
+              title="USDA mesh, source assets, and georeferencing sidecar."
+            >
+              Download USDA + georef
+            </a>
+          )}
+          {mesh?.mesh_obj_path && (
+            <a
               href={`${BASE_URL}/reconstruction/${job.id}/mesh?format=obj`}
               download={`mesh_${job.id}.obj`}
               style={downloadLinkStyle}
