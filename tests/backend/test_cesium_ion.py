@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 from unittest.mock import patch
 
 import httpx
@@ -10,7 +9,7 @@ import backend.routers.export as export_router
 from backend.core.config import get_cesium_ion_config
 from backend.db.models import Image, Reconstruction
 from backend.db.models import Session as SessionModel
-from backend.services.cesium_ion import CesiumIonError, _directory_prefix, upload_tileset
+from backend.services.cesium_ion import CesiumIonError, upload_tileset
 
 
 def _config(**overrides):
@@ -36,17 +35,9 @@ def test_cesium_config_is_disabled_and_secret_free_by_default(tmp_path):
 
 
 def test_upload_uses_ion_create_s3_put_and_completion_without_exposing_credentials(
-    tmp_path, monkeypatch
+    monkeypatch,
 ):
     monkeypatch.setenv("CESIUM_ION_TEST_TOKEN", "ion-secret")
-    exports_dir = tmp_path / "exports"
-    bundle = exports_dir / "tiles.zip"
-    monkeypatch.setattr(
-        "backend.services.cesium_ion.get_config",
-        lambda: type("Cfg", (), {"exports_dir": str(exports_dir)})(),
-    )
-    bundle.parent.mkdir()
-    bundle.write_bytes(b"zip")
     created = httpx.Response(
         201,
         json={
@@ -77,7 +68,7 @@ def test_upload_uses_ion_create_s3_put_and_completion_without_exposing_credentia
     with patch(
         "backend.services.cesium_ion.httpx.request", side_effect=[created, uploaded, completed]
     ) as request:
-        result = upload_tileset(_config(), bundle, "Mission")
+        result = upload_tileset(_config(), "tiles.zip", b"zip", "Mission")
 
     assert result == {"asset_id": 81, "status": "AWAITING_FILES"}
     create, storage, complete = request.call_args_list
@@ -95,49 +86,21 @@ def test_upload_uses_ion_create_s3_put_and_completion_without_exposing_credentia
     assert complete.kwargs["headers"] == {"Authorization": "Bearer ion-secret"}
 
 
-def test_cesium_client_rejects_disabled_missing_token_and_unsafe_url(tmp_path, monkeypatch):
-    exports_dir = tmp_path / "exports"
-    bundle = exports_dir / "tiles.zip"
-    monkeypatch.setattr(
-        "backend.services.cesium_ion.get_config",
-        lambda: type("Cfg", (), {"exports_dir": str(exports_dir)})(),
-    )
-    bundle.parent.mkdir()
-    bundle.write_bytes(b"zip")
+def test_cesium_client_rejects_disabled_missing_token_and_unsafe_url(monkeypatch):
     with pytest.raises(CesiumIonError, match="disabled"):
-        upload_tileset(_config(enabled=False), bundle, "Mission")
+        upload_tileset(_config(enabled=False), "tiles.zip", b"zip", "Mission")
     with pytest.raises(CesiumIonError, match="missing"):
-        upload_tileset(_config(), bundle, "Mission")
+        upload_tileset(_config(), "tiles.zip", b"zip", "Mission")
     monkeypatch.setenv("CESIUM_ION_TEST_TOKEN", "secret")
     with pytest.raises(CesiumIonError, match="HTTPS"):
-        upload_tileset(_config(api_url="http://cesium.test/v1"), bundle, "Mission")
+        upload_tileset(_config(api_url="http://cesium.test/v1"), "tiles.zip", b"zip", "Mission")
 
 
-def test_cesium_client_rejects_bundle_outside_exports(tmp_path, monkeypatch):
-    exports_dir = tmp_path / "exports"
+def test_cesium_client_rejects_unsafe_bundle_filename(monkeypatch):
     monkeypatch.setenv("CESIUM_ION_TEST_TOKEN", "secret")
-    monkeypatch.setattr(
-        "backend.services.cesium_ion.get_config",
-        lambda: type("Cfg", (), {"exports_dir": str(exports_dir)})(),
-    )
 
-    for bundle in (
-        exports_dir / ".." / "outside" / "tiles.zip",
-        tmp_path / "exports-other" / "tiles.zip",
-    ):
-        bundle.parent.mkdir(parents=True, exist_ok=True)
-        bundle.write_bytes(b"zip")
-        with patch("builtins.open") as bundle_open:
-            with pytest.raises(CesiumIonError, match="inside the exports directory"):
-                upload_tileset(_config(), bundle, "Mission")
-        bundle_open.assert_not_called()
-
-
-def test_cesium_path_check_preserves_filesystem_root():
-    root = os.path.normcase(os.path.abspath(os.sep))
-
-    assert _directory_prefix(root) == root
-    assert os.path.normcase(os.path.join(root, "exports")).startswith(_directory_prefix(root))
+    with pytest.raises(CesiumIonError, match="must be a filename"):
+        upload_tileset(_config(), "../tiles.zip", b"zip", "Mission")
 
 
 def _db(client):
@@ -181,7 +144,8 @@ def test_cesium_route_builds_existing_bundle_and_returns_only_asset_status(
 
     assert response.status_code == 200
     assert response.json() == {"asset_id": 81, "status": "AWAITING_FILES"}
-    assert upload.call_args.args[1].name == f"reconstruction_{rec.id}_share.zip"
+    assert upload.call_args.args[1] == f"reconstruction_{rec.id}_share.zip"
+    assert upload.call_args.args[2].startswith(b"PK")
 
 
 def test_cesium_route_returns_actionable_safe_error(client, tmp_path, monkeypatch):
