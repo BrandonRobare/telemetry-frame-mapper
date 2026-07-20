@@ -1,3 +1,4 @@
+from pathlib import Path
 from urllib.parse import quote
 
 import pytest
@@ -85,6 +86,23 @@ def test_manifest_rejects_sibling_of_configured_root(tmp_path):
             artifacts=[artifact],
             artifact_roots=[safe_root],
         )
+
+
+def test_manifest_allows_configured_root(tmp_path):
+    safe_root = tmp_path / "safe"
+    safe_root.mkdir()
+
+    manifest = build_reproducibility_manifest(
+        workflow="export",
+        settings={},
+        artifacts=[safe_root],
+        artifact_roots=[safe_root],
+    )
+
+    entry = manifest["artifacts"][0]
+    assert entry["exists"] is True
+    assert Path(entry["path"]).samefile(safe_root)
+    assert "sha256" not in entry
 
 
 def test_manifest_rejects_parent_traversal(tmp_path):

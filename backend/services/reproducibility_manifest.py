@@ -54,8 +54,10 @@ def build_reproducibility_manifest(
     for artifact in artifacts:
         resolved = os.path.normcase(os.path.normpath(os.path.realpath(artifact)))
         for root in safe_roots:
-            root_prefix = root if root.endswith(os.sep) else f"{root}{os.sep}"
-            if resolved.startswith(root_prefix):
+            if resolved.startswith(root):
+                suffix = resolved[len(root) :]
+                if suffix and not root.endswith(os.sep) and not suffix.startswith(os.sep):
+                    continue
                 p = Path(resolved)
                 entry = {"path": str(p), "exists": p.exists()}
                 if p.is_file():
