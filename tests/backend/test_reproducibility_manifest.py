@@ -85,3 +85,39 @@ def test_manifest_rejects_sibling_of_configured_root(tmp_path):
             artifacts=[artifact],
             artifact_roots=[safe_root],
         )
+
+
+def test_manifest_rejects_parent_traversal(tmp_path):
+    safe_root = tmp_path / "safe"
+    safe_root.mkdir()
+    outside = tmp_path / "secret.txt"
+    outside.write_text("secret")
+
+    with pytest.raises(ValueError, match="outside configured safe directories"):
+        build_reproducibility_manifest(
+            workflow="export",
+            settings={},
+            artifacts=[safe_root / ".." / outside.name],
+            artifact_roots=[safe_root],
+        )
+
+
+def test_manifest_rejects_symlink_escape(tmp_path):
+    safe_root = tmp_path / "safe"
+    safe_root.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "secret.txt").write_text("secret")
+    link = safe_root / "linked"
+    try:
+        link.symlink_to(outside, target_is_directory=True)
+    except OSError:
+        pytest.skip("directory symlinks are unavailable")
+
+    with pytest.raises(ValueError, match="outside configured safe directories"):
+        build_reproducibility_manifest(
+            workflow="export",
+            settings={},
+            artifacts=[link / "secret.txt"],
+            artifact_roots=[safe_root],
+        )
