@@ -244,7 +244,7 @@ def test_pull_results_requires_completed_task_and_saves_to_exports(client, tmp_p
     monkeypatch.setattr(webodm_router, "get_config", lambda: config)
     with patch.object(webodm_router, "get_task", return_value={"status": 20}):
         assert client.post("/webodm/projects/17/tasks/23/results", json={}).status_code == 409
-    output = tmp_path / "exports" / "webodm" / "17" / "23" / "orthophoto.tif"
+    output = tmp_path / "exports" / "downloaded" / "orthophoto.tif"
     with (
         patch.object(
             webodm_router,
@@ -258,4 +258,6 @@ def test_pull_results_requires_completed_task_and_saves_to_exports(client, tmp_p
         )
     assert response.status_code == 200
     assert response.json()["saved_assets"] == [str(output)]
-    assert download.call_args.args[-1] == output.parent
+    download_dir = download.call_args.args[-1]
+    assert download_dir.parent == tmp_path / "exports" / "webodm"
+    assert download_dir.name.startswith("results-")
