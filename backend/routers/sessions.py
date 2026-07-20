@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime
 import json
+import os
 import re
 import zipfile
 from pathlib import Path, PurePosixPath
@@ -288,8 +289,18 @@ def bulk_sessions(body: BulkSessionRequest, db: DBSession = Depends(get_db)):
             if body.operation == "archive":
                 from ..services.session_bundle import build_session_archive
 
-                zip_path = Path(get_config().exports_dir) / f"session_{session_id}_archive.zip"
-                archive = build_session_archive(zip_path, s, db)
+                exports_dir = os.path.normpath(os.path.realpath(get_config().exports_dir))
+                zip_path = os.path.normpath(
+                    os.path.realpath(os.path.join(exports_dir, f"session_{s.id}_archive.zip"))
+                )
+                exports_root = os.path.normcase(exports_dir)
+                archive_path = os.path.normcase(zip_path)
+                exports_prefix = (
+                    exports_root if exports_root.endswith(os.sep) else f"{exports_root}{os.sep}"
+                )
+                if not archive_path.startswith(exports_prefix):
+                    raise ValueError("Session archive path is outside exports directory")
+                archive = build_session_archive(Path(zip_path), s, db)
                 outcomes.append(
                     BulkSessionOutcome(
                         session_id=session_id, ok=True, bundle_path=archive["bundle_path"]
@@ -432,15 +443,23 @@ def archive_session(session_id: int, db: DBSession = Depends(get_db)):
     """Export a session as a portable .zip: its row, every cascaded child row, and
     any artifact files that exist on disk. Restore it elsewhere with POST /sessions/restore.
     """
-    from ..services.reconstruction import _safe_export_path
     from ..services.session_bundle import build_session_archive
 
     s = db.query(SessionModel).filter(SessionModel.id == session_id).first()
     if not s:
         raise HTTPException(status_code=404, detail="Session not found")
-    exports_dir = Path(get_config().exports_dir)
-    zip_path = _safe_export_path(exports_dir / f"session_{session_id}_archive.zip", exports_dir)
-    return build_session_archive(zip_path, s, db)
+    exports_dir = os.path.normpath(os.path.realpath(get_config().exports_dir))
+    zip_path = os.path.normpath(
+        os.path.realpath(os.path.join(exports_dir, f"session_{s.id}_archive.zip"))
+    )
+    exports_root = os.path.normcase(exports_dir)
+    archive_path = os.path.normcase(zip_path)
+    exports_prefix = exports_root if exports_root.endswith(os.sep) else f"{exports_root}{os.sep}"
+    if not archive_path.startswith(exports_prefix):
+        raise HTTPException(
+            status_code=422, detail="Session archive path is outside exports directory"
+        )
+    return build_session_archive(Path(zip_path), s, db)
 
 
 class RestoreRequest(BaseModel):
@@ -452,21 +471,31 @@ def restore_session(req: RestoreRequest, db: DBSession = Depends(get_db)):
     """Restore a session archive (from POST /sessions/{id}/archive) as a brand-new
     session with fresh IDs. Never modifies or clobbers an existing session.
     """
-    from ..services.reconstruction import _safe_export_path
     from ..services.session_bundle import restore_session_archive
 
     # zip_path is user-supplied; confine it to the app's own data roots so it can't be
     # used to read arbitrary files off the server filesystem.
     cfg = get_config()
-    zip_path = None
-    for root in (cfg.imports_dir, cfg.exports_dir, cfg.data_dir):
-        try:
-            zip_path = _safe_export_path(Path(req.zip_path), Path(root))
-            break
-        except ValueError:
-            continue
+    zip_path = os.path.normcase(os.path.normpath(os.path.realpath(req.zip_path)))
+    imports_root = os.path.normcase(os.path.normpath(os.path.realpath(cfg.imports_dir)))
+    exports_root = os.path.normcase(os.path.normpath(os.path.realpath(cfg.exports_dir)))
+    data_root = os.path.normcase(os.path.normpath(os.path.realpath(cfg.data_dir)))
+    imports_prefix = (
+        imports_root if imports_root.endswith(os.sep) else f"{imports_root}{os.sep}"
+    )
+    exports_prefix = (
+        exports_root if exports_root.endswith(os.sep) else f"{exports_root}{os.sep}"
+    )
+    data_prefix = data_root if data_root.endswith(os.sep) else f"{data_root}{os.sep}"
+    if not (
+        zip_path.startswith(imports_prefix)
+        or zip_path.startswith(exports_prefix)
+        or zip_path.startswith(data_prefix)
+    ):
+        zip_path = None
     if zip_path is None:
         raise HTTPException(status_code=400, detail="Archive path is outside allowed directories")
+    zip_path = Path(zip_path)
     if not zip_path.is_file():
         raise HTTPException(status_code=404, detail="Archive zip not found")
     try:
