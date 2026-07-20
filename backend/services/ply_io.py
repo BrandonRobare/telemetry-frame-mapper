@@ -27,6 +27,7 @@ gsplat installed.
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -213,7 +214,7 @@ _SPLAT_DTYPE = np.dtype(
 _SH_C0 = 0.28209479177387814
 
 
-def write_splat(cloud: GaussianCloud, dst: Path) -> Path:
+def write_splat(cloud: GaussianCloud, dst: Path, output_root: Path) -> Path:
     """Write *cloud* as a compact 32-byte-per-gaussian ``.splat`` (antimatter15 web format).
 
     This is the dependency-free web/SH-quantization preset: higher-order SH
@@ -230,6 +231,13 @@ def write_splat(cloud: GaussianCloud, dst: Path) -> Path:
     expect x,y,z,w instead — if a target viewer renders garbled orientation,
     swap the ``quats[:, [1, 2, 3, 0]]`` reindex here.
     """
+    root = os.path.normcase(os.path.normpath(os.path.realpath(output_root)))
+    output_path = os.path.normcase(os.path.normpath(os.path.realpath(dst)))
+    root_prefix = root if root.endswith(os.sep) else f"{root}{os.sep}"
+    if not output_path.startswith(root_prefix):
+        raise ValueError(f"Splat output path {dst} is outside the export directory")
+    dst = Path(output_path)
+
     n = _validate_cloud(cloud)
     order = prune_order(cloud.opacities, keep_ratio=1.0)
 
