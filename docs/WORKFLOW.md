@@ -128,6 +128,10 @@ When a job finishes (complete, failed, or cancelled) the app shows a toast from 
   `product=dem` is available only when that LAS has ASPRS ground (class 2) labels; otherwise the API returns 422
   rather than treating non-ground surfaces as terrain,
 - **Mesh (GLB/OBJ/MTL)** — optional, requires a manual [SuGaR](https://github.com/Anttwo/SuGaR) install (not on PyPI); always writes `mesh_georef.json` so the mesh keeps its UTM transform.
+- **USD handoff (USDA)** — `GET /export/reconstructions/{id}/usd` downloads a ZIP containing a
+  standard USDA `Mesh` generated from the existing OBJ, its OBJ/GLB source assets, and
+  `mesh.usd.georef.json`. It preserves the stored local-to-UTM similarity transform, but does not
+  claim surveyed accuracy; use GCP/checkpoint validation when accuracy matters.
 
 **Compare tab** — after a second flight of the same site, run voxel change detection between two reconstructions: green = new, red = removed, exportable as GeoJSON.
 
