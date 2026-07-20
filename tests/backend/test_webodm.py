@@ -124,7 +124,7 @@ def test_reconstruction_backends_make_webodm_opt_in_and_secret_free(client, monk
     assert unavailable[1] == {
         "id": "webodm",
         "available": False,
-        "detail": "WebODM integration is disabled in config.yaml",
+        "detail": "WebODM connection is unavailable; review configuration and server logs.",
     }
 
     monkeypatch.setenv("WEBODM_TEST_JWT", "test-secret")
