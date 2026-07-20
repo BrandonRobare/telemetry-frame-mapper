@@ -408,22 +408,6 @@ def export_webodm_georeferencing_csv(session_id: int, db: DBSession = Depends(ge
     }
 
 
-def _safe_manifest_artifact_path(raw_path: str) -> Path:
-    from ..services.reconstruction import _safe_export_path
-
-    cfg = get_config()
-    for root_value in (cfg.imports_dir, cfg.processed_dir, cfg.exports_dir, cfg.data_dir):
-        root = Path(root_value)
-        try:
-            return _safe_export_path(Path(raw_path), root)
-        except ValueError:
-            continue
-    raise HTTPException(
-        status_code=422,
-        detail="artifact_path is outside configured safe directories",
-    )
-
-
 @router.post("/reproducibility-manifest")
 def export_reproducibility_manifest(workflow: str, artifact_path: str | None = None):
     """Generate a reproducibility manifest for an import/reconstruction/export artifact."""
@@ -434,8 +418,19 @@ def export_reproducibility_manifest(workflow: str, artifact_path: str | None = N
         k: getattr(cfg, k)
         for k in ("target_crs", "default_basemap", "exports_dir", "processed_dir")
     }
-    artifacts = [_safe_manifest_artifact_path(artifact_path)] if artifact_path else []
-    return build_reproducibility_manifest(workflow=workflow, settings=settings, artifacts=artifacts)
+    roots = [
+        Path(value) for value in (cfg.imports_dir, cfg.processed_dir, cfg.exports_dir, cfg.data_dir)
+    ]
+    artifacts = [Path(artifact_path)] if artifact_path else []
+    try:
+        return build_reproducibility_manifest(
+            workflow=workflow,
+            settings=settings,
+            artifacts=artifacts,
+            artifact_roots=roots,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.post("/reconstructions/{reconstruction_id}/share-bundle")
