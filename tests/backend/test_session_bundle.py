@@ -3,6 +3,8 @@ from __future__ import annotations
 import zipfile
 from unittest.mock import patch
 
+import pytest
+
 from backend.db.models import (
     Annotation,
     Defect,
@@ -40,7 +42,10 @@ def _cfg(tmp_path):
 
 
 def _archive(client, cfg, session_id):
-    with patch("backend.routers.sessions.get_config", return_value=cfg):
+    with (
+        patch("backend.routers.sessions.get_config", return_value=cfg),
+        patch("backend.services.session_bundle.get_config", return_value=cfg),
+    ):
         return client.post(f"/sessions/{session_id}/archive")
 
 
@@ -67,6 +72,21 @@ def test_restore_rejects_zip_path_outside_allowed_dirs(client, tmp_path):
     # a path outside imports/exports/data must not be readable via restore (path injection)
     resp = _restore(client, _cfg(tmp_path), str(tmp_path / "evil.zip"))
     assert resp.status_code == 400
+
+
+def test_restore_rejects_sibling_of_allowed_directory(client, tmp_path):
+    resp = _restore(client, _cfg(tmp_path), str(tmp_path / "exports2" / "bundle.zip"))
+    assert resp.status_code == 400
+
+
+def test_session_archive_rejects_sibling_of_exports(tmp_path):
+    from backend.services.session_bundle import build_session_archive
+
+    with (
+        patch("backend.services.session_bundle.get_config", return_value=_cfg(tmp_path)),
+        pytest.raises(ValueError, match="outside exports directory"),
+    ):
+        build_session_archive(tmp_path / "exports2" / "bundle.zip", None, None)
 
 
 def test_restore_artifact_rejects_zip_slip(tmp_path):
