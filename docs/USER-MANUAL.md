@@ -35,8 +35,7 @@ photogrammetry tool (WebODM, OpenDroneMap, COLMAP) can ingest them.
 ### Backend — FastAPI service
 
 A local REST API (binds to localhost, self-documented at `/docs`) covering
-ingest, analysis, planning, reconstruction, and export — 77 endpoints
-across 19 routers.
+ingest, analysis, planning, reconstruction, and export.
 
 - **Import & quality:** session import; per-image sharpness and brightness
   scoring (OpenCV); DJI XMP parsing for relative altitude, yaw, and gimbal pitch.

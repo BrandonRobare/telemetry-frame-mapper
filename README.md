@@ -29,7 +29,7 @@ This repository is a monorepo with three components:
 ```
 src/              CLI package (drone-video-geotagger command)
 backend/          FastAPI app (API server, DB models, services)
-frontend/         Vite + React frontend (13-tab workflow UI)
+frontend/         Vite + React frontend (workflow UI)
 tests/            pytest suite (tests/cli/ and tests/backend/)
 data/             SQLite database (gitignored)
 imports/          Drop folder for raw images and flight logs (gitignored)
@@ -52,7 +52,7 @@ exports/          KML/GPX mission plan exports (gitignored)
 - Exports: WebODM georeferencing CSV-only zip, GeoJSON, LAS 1.4 point cloud, optional SuGaR mesh, flythrough video.
 - SQLite database via SQLAlchemy (swappable for PostgreSQL via `DATABASE_URL`) with Alembic-managed schema migrations.
 
-### Frontend (13 tabs, all functional)
+### Frontend
 - **Overview** — pipeline status, session summary, import call-to-action, and reconstruction readiness.
 - **Map** — Leaflet + ESRI satellite, footprint polygons, coverage overlay, session stats sidebar.
 - **GPS Sync** — DJI FlightRecord CSV matching with timing deltas.
@@ -321,9 +321,9 @@ For an opt-in API upload, polling, cancellation, and result-download workflow, s
 ## Tests
 
 ```bash
-pytest        # 355 tests (CLI + backend)
+pytest        # CLI + backend tests
 ruff check .  # linter
-cd frontend && npm test -- --run   # 83 frontend unit tests (vitest)
+cd frontend && npm test -- --run   # frontend unit tests (vitest)
 ```
 
 Tests use inline fixture data and temporary paths — no real flight files required. CI mocks all external binaries (no real ffmpeg, exiftool, COLMAP, or GPU).
