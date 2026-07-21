@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from pathlib import Path
 
-from drone_video_geotagger.exiftool import build_exiftool_args
+from drone_video_geotagger.exiftool import build_exiftool_args, write_exiftool_args_file
 from drone_video_geotagger.frames import FrameTag
 
 
@@ -29,3 +29,24 @@ def test_build_exiftool_args_contains_gps_tags() -> None:
     assert "-GPSAltitude=352.438" in args
     assert "-DateTimeOriginal=2025:08:06 18:28:47" in args
     assert any("frame_00001.jpg" in str(a) for a in args)
+
+
+def test_write_exiftool_args_file_non_ascii_path(tmp_path: Path) -> None:
+    tag = FrameTag(
+        source=Path("frames/café_0001.jpg"),
+        target=tmp_path / "café_0001.jpg",
+        frame_index=1,
+        seconds=0,
+        lat=41.125,
+        lon=-81.25,
+        rel_alt_m=115.5,
+        abs_alt_m=352.438,
+        timestamp=None,
+    )
+    args_path = tmp_path / "args.txt"
+
+    write_exiftool_args_file([tag], args_path)
+
+    content = args_path.read_text(encoding="utf-8")
+    assert "café_0001.jpg" in content
+    assert content.startswith("-charset\nfilename=UTF8\n")

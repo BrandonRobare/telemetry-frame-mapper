@@ -26,7 +26,7 @@ def timestamp_values(
 
 
 def build_exiftool_args(tags: list[FrameTag], exiftool: str | Path = "exiftool") -> list[str]:
-    args: list[str] = []
+    args: list[str] = ["-charset", "filename=UTF8"]
     for tag in tags:
         exif_time, gps_date, gps_time, subsec = timestamp_values(tag.timestamp)
         args.extend(
@@ -63,7 +63,9 @@ def write_exiftool_args_file(
     tags: list[FrameTag], args_path: Path, exiftool: str | Path = "exiftool"
 ) -> None:
     args_path.parent.mkdir(parents=True, exist_ok=True)
-    args_path.write_text("\n".join(build_exiftool_args(tags, exiftool)) + "\n", newline="\n")
+    args_path.write_text(
+        "\n".join(build_exiftool_args(tags, exiftool)) + "\n", encoding="utf-8", newline="\n"
+    )
 
 
 def write_exif(exiftool: str | Path, tags: list[FrameTag], args_path: Path) -> None:
