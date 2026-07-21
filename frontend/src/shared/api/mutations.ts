@@ -71,7 +71,7 @@ export function useImportSession() {
     queryFn: () => get<{
       processed: number
       total: number
-      status: 'running' | 'done' | 'error'
+      status: 'running' | 'done' | 'error' | 'unknown'
       error?: string
     }>(
       `/sessions/${importingSessionId}/progress`
@@ -104,6 +104,13 @@ export function useImportSession() {
 
   return {
     ...mutation,
+    // Also clear the tracked session id so closing the modal fully resets. The effect
+    // above clears it on done/error, but 'unknown' (progress lost after an API restart,
+    // #507) has no effect branch — without this, reopening would resurface the dead import.
+    reset: () => {
+      mutation.reset()
+      setImportingSessionId(null)
+    },
     progress: progressQuery.data ?? null,
     isImporting: importingSessionId !== null,
   }
