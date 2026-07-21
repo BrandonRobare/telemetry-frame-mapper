@@ -164,7 +164,10 @@ export default function ImportModal({ open, onClose }: ImportModalProps) {
         ? 5          // show a sliver while total hasn't been computed yet
         : 0
 
-  const isBusy = isPending || isImporting || isBrowserUploading
+  // Terminal 'unknown' state: the server lost this import's in-memory progress (e.g. after
+  // an API restart, #507). Treat it as not-busy so the user can close/dismiss the modal.
+  const progressUnavailable = isImporting && progress?.status === 'unknown'
+  const isBusy = (isPending || isImporting || isBrowserUploading) && !progressUnavailable
   const backendDown = backendStatus === 'down'
   const errorMessage = browserError
     || (isError
@@ -509,7 +512,7 @@ export default function ImportModal({ open, onClose }: ImportModalProps) {
             </div>
           )}
 
-          {isImporting && progress && (
+          {isImporting && progress && progress.status !== 'unknown' && (
             <div style={{ marginBottom: 20 }}>
               <div className="flex justify-between text-xs" style={{ color: 'var(--text-muted)', marginBottom: 6 }}>
                 <span>
@@ -538,6 +541,21 @@ export default function ImportModal({ open, onClose }: ImportModalProps) {
                   }}
                 />
               </div>
+            </div>
+          )}
+
+          {/* Progress lost (e.g. API restarted mid-import) — terminal, not an error */}
+          {progressUnavailable && (
+            <div
+              className="text-xs rounded"
+              style={{
+                padding: '8px 12px', marginBottom: 16,
+                background: 'var(--surface-2)',
+                border: '1px solid var(--border)',
+                color: 'var(--text-muted)',
+              }}
+            >
+              Progress unavailable — the import may have been interrupted; check the session list.
             </div>
           )}
 
@@ -616,7 +634,7 @@ export default function ImportModal({ open, onClose }: ImportModalProps) {
                 ? 'Uploading…'
                 : isPending
                   ? 'Creating…'
-                  : isImporting
+                  : isImporting && !progressUnavailable
                     ? 'Importing…'
                     : mode === 'browser' ? 'Upload & Import' : 'Import'}
             </Button>
