@@ -8,16 +8,23 @@ import piexif
 from PIL import Image
 
 
-def _rational_to_float(rational) -> float:
-    """Convert EXIF rational to float. Handles GPS coord triplets and single rationals."""
-    if isinstance(rational, (list, tuple)) and len(rational) == 3:
-        d = rational[0][0] / rational[0][1]
-        m = rational[1][0] / rational[1][1]
-        s = rational[2][0] / rational[2][1]
-        return d + m / 60 + s / 3600
-    if isinstance(rational, tuple) and len(rational) == 2:
-        return rational[0] / rational[1] if rational[1] != 0 else 0.0
-    return 0.0
+def _rational_to_float(rational) -> float | None:
+    """Convert EXIF rational to float. Handles GPS coord triplets and single rationals.
+
+    Returns None when a denominator is zero (corrupt/degenerate EXIF) so callers
+    treat the value as missing instead of crashing on a ZeroDivisionError.
+    """
+    try:
+        if isinstance(rational, (list, tuple)) and len(rational) == 3:
+            d = rational[0][0] / rational[0][1]
+            m = rational[1][0] / rational[1][1]
+            s = rational[2][0] / rational[2][1]
+            return d + m / 60 + s / 3600
+        if isinstance(rational, tuple) and len(rational) == 2:
+            return rational[0] / rational[1]
+    except ZeroDivisionError:
+        return None
+    return None
 
 
 def _extract_xmp_dji(filepath: str) -> dict:
@@ -139,19 +146,21 @@ def extract_exif(filepath: str) -> dict:
         if lat_raw and lon_raw:
             lat = _rational_to_float(lat_raw)
             lon = _rational_to_float(lon_raw)
-            if lat_ref == b"S":
-                lat = -lat
-            if lon_ref == b"W":
-                lon = -lon
-            result["latitude"] = lat
-            result["longitude"] = lon
-            result["gps_source"] = "exif"
+            if lat is not None and lon is not None:
+                if lat_ref == b"S":
+                    lat = -lat
+                if lon_ref == b"W":
+                    lon = -lon
+                result["latitude"] = lat
+                result["longitude"] = lon
+                result["gps_source"] = "exif"
 
         if alt_raw:
             altitude_m = _rational_to_float(alt_raw)
-            if alt_ref in (1, b"\x01"):
-                altitude_m = -altitude_m
-            result["altitude_m"] = altitude_m
+            if altitude_m is not None:
+                if alt_ref in (1, b"\x01"):
+                    altitude_m = -altitude_m
+                result["altitude_m"] = altitude_m
 
     xmp = _extract_xmp_dji(filepath)
     if "altitude_m" in xmp:
