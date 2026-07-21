@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import time
 from collections.abc import MutableMapping
 
@@ -32,3 +33,37 @@ def session_is_valid(sessions: MutableMapping[str, float], token: str | None) ->
         if expires_at <= now:
             del sessions[digest]
     return bool(token and sessions.get(token_hash(token), 0) > now)
+
+
+# Shared failed-unlock throttle for the PIN and share-link unlock endpoints.
+# ponytail: in-memory per-process counter — single-process deployment only;
+# move to DB if multi-worker ever ships.
+_BACKOFF_THRESHOLD = 5  # consecutive failures before backoff starts
+_LOCKOUT_THRESHOLD = 10  # consecutive failures before the long lockout
+_LOCKOUT_SECONDS = 15 * 60
+
+
+def unlock_retry_after(attempts: MutableMapping[str, list], client: str) -> int:
+    """Seconds this client must wait before another unlock attempt (0 if allowed now)."""
+    entry = attempts.get(client)
+    if not entry:
+        return 0
+    return max(0, math.ceil(entry[1] - time.time()))
+
+
+def record_unlock_failure(attempts: MutableMapping[str, list], client: str) -> None:
+    """Count a failed unlock and apply exponential backoff, then a 15-minute lockout."""
+    now = time.time()
+    entry = attempts.get(client) or [0, 0.0]
+    entry[0] += 1
+    fails = entry[0]
+    if fails >= _LOCKOUT_THRESHOLD:
+        entry[1] = now + _LOCKOUT_SECONDS
+    elif fails >= _BACKOFF_THRESHOLD:
+        entry[1] = now + 2 ** (fails - _BACKOFF_THRESHOLD + 1)  # 2s, 4s, 8s, 16s, 32s
+    attempts[client] = entry
+
+
+def reset_unlock_attempts(attempts: MutableMapping[str, list], client: str) -> None:
+    """Clear a client's failure streak after a successful unlock."""
+    attempts.pop(client, None)
