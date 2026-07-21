@@ -6,7 +6,11 @@ import pytest
 
 from backend.db.models import Reconstruction
 from backend.db.models import Session as SessionModel
-from backend.services.elevation_export import NODATA, export_elevation_geotiff
+from backend.services.elevation_export import (
+    MAX_RASTER_PIXELS,
+    NODATA,
+    export_elevation_geotiff,
+)
 
 
 def _require_raster_dependencies() -> None:
@@ -63,6 +67,66 @@ def test_dem_requires_ground_labels(classified_las: Path, tmp_path: Path):
         export_elevation_geotiff(
             classified_las, tmp_path / "dem.tif", product="dem", resolution_m=1.0
         )
+
+
+def test_over_pixel_budget_raises_before_allocation(tmp_path: Path):
+    _require_raster_dependencies()
+    import laspy
+    import numpy as np
+    from pyproj import CRS
+
+    path = tmp_path / "wide.las"
+    header = laspy.LasHeader(point_format=3, version="1.4")
+    header.scales = np.array([0.001, 0.001, 0.001])
+    header.offsets = np.array([500000.0, 5000000.0, 0.0])
+    header.add_crs(CRS.from_epsg(32617))
+    cloud = laspy.LasData(header)
+    # ~300 m span at 0.02 m resolution -> 15001 x 15001 ~= 225 MP, over the 100 MP cap.
+    cloud.x = [500000.0, 500300.0]
+    cloud.y = [5000000.0, 5000300.0]
+    cloud.z = [10.0, 12.0]
+    cloud.classification = [2, 2]
+    cloud.write(path)
+
+    with pytest.raises(ValueError, match=str(MAX_RASTER_PIXELS)):
+        export_elevation_geotiff(path, tmp_path / "dsm.tif", product="dsm", resolution_m=0.02)
+    # Guard fired before the raster was written: no output file allocated.
+    assert not (tmp_path / "dsm.tif").exists()
+
+
+def test_elevation_route_returns_422_below_resolution_floor(
+    client, classified_las: Path, monkeypatch, tmp_path
+):
+    import backend.routers.export as export_router
+    from backend.db.database import get_db
+    from backend.main import app
+
+    monkeypatch.setattr(
+        export_router,
+        "get_config",
+        lambda: type("Cfg", (), {"exports_dir": str(tmp_path / "exports")})(),
+    )
+    exports = tmp_path / "exports" / "1"
+    exports.mkdir(parents=True)
+    pointcloud = exports / "pointcloud.las"
+    pointcloud.write_bytes(classified_las.read_bytes())
+
+    db = next(app.dependency_overrides[get_db]())
+    session = SessionModel(name="S", folder_path=str(tmp_path))
+    db.add(session)
+    db.commit()
+    rec = Reconstruction(session_id=session.id, status="complete", pointcloud_path=str(pointcloud))
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+
+    # Router accepts 0.001 (> 0); the service floor guards the OOM allocation.
+    response = client.post(
+        f"/export/reconstructions/{rec.id}/elevation?product=dsm&resolution_m=0.001"
+    )
+
+    assert response.status_code == 422
+    assert "at least" in response.json()["detail"]
 
 
 def test_dem_route_returns_422_without_ground_labels(
