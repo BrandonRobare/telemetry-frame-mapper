@@ -19,7 +19,11 @@ _progress_lock = threading.Lock()
 
 def get_progress(session_id: int) -> dict:
     with _progress_lock:
-        return dict(_progress.get(session_id, {"processed": 0, "total": 0, "status": "unknown"}))
+        return dict(
+            _progress.get(
+                session_id, {"processed": 0, "total": 0, "skipped": 0, "status": "unknown"}
+            )
+        )
 
 
 def _run(session_id: int, folder: Path, db_factory) -> None:
@@ -46,17 +50,37 @@ def _run(session_id: int, folder: Path, db_factory) -> None:
                 accepted_files.append(p)
     total = len(accepted_files)
     with _progress_lock:
-        _progress[session_id] = {"processed": 0, "total": total, "status": "running"}
+        _progress[session_id] = {
+            "processed": 0,
+            "total": total,
+            "skipped": 0,
+            "status": "running",
+        }
 
     db: DBSession = db_factory()
     try:
         usable = 0
         imported = 0
+        skipped = 0
         cfg = load_config()
         ingest_thumbnail_size: int = int(ingest_cfg.get("thumbnail_size_px", cfg.thumbnail_size_px))
 
         for i, accepted_file in enumerate(accepted_files):
-            exif = extract_exif(str(accepted_file))
+            try:
+                exif = extract_exif(str(accepted_file))
+            except Exception as exc:
+                # One unreadable image must not fail the whole batch: skip it.
+                skipped += 1
+                db.add(SessionLogEntry(
+                    session_id=session_id,
+                    event_type="image_skipped",
+                    message=f"Skipped {accepted_file.name}: {exc}",
+                ))
+                with _progress_lock:
+                    _progress[session_id]["processed"] = i + 1
+                    _progress[session_id]["skipped"] = skipped
+                db.commit()
+                continue
 
             # filter_zero_gps: skip images where both lat and lon are exactly 0.0.
             lat = exif.get("latitude")
@@ -166,7 +190,7 @@ def _run(session_id: int, folder: Path, db_factory) -> None:
                 session_id=session_id,
                 event_type="import_complete",
                 photo_count=imported,
-                message=f"Imported {imported} images, {usable} usable",
+                message=f"Imported {imported} images, {usable} usable, {skipped} skipped",
             ))
             db.commit()
         with _progress_lock:
