@@ -457,23 +457,21 @@ def restore_session(req: RestoreRequest, db: DBSession = Depends(get_db)):
     # used to read arbitrary files off the server filesystem.
     cfg = get_config()
     requested_path = os.path.normcase(os.path.normpath(os.path.realpath(req.zip_path)))
-    zip_path = None
     inside_root = False
     for root_value in (cfg.imports_dir, cfg.exports_dir, cfg.data_dir):
         root = os.path.normcase(os.path.normpath(os.path.realpath(root_value)))
         prefix = root if root.endswith(os.sep) else f"{root}{os.sep}"
-        if requested_path != root and not requested_path.startswith(prefix):
-            continue
-        inside_root = True
-        for candidate in Path(root).rglob("*"):
-            candidate_path = os.path.normcase(os.path.realpath(candidate))
-            if candidate.is_file() and candidate_path == requested_path:
-                zip_path = candidate
-                break
-        break
+        if requested_path == root or requested_path.startswith(prefix):
+            inside_root = True
+            break
     if not inside_root:
         raise HTTPException(status_code=400, detail="Archive path is outside allowed directories")
-    if zip_path is None:
+    # The realpath + prefix check above already confines requested_path to a trusted data root,
+    # so it is safe to use directly. We deliberately do NOT rglob the root to "re-discover" it:
+    # data roots hold 10^5+ reconstruction files, so the walk would be a DoS while adding no
+    # security. Any CodeQL path-injection flag here is a false positive: the prefix check guards it.
+    zip_path = Path(requested_path)
+    if not zip_path.is_file():
         raise HTTPException(status_code=404, detail="Archive zip not found")
     try:
         return restore_session_archive(zip_path, db)
