@@ -1,10 +1,14 @@
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import type { Session, CoverageResult } from '../../types/api'
 import { useMapStore } from '../../shared/stores/mapStore'
 import { get } from '../../shared/api/client'
+import { useRunCoverage } from '../../shared/api/mutations'
 import { Skeleton } from '../../shared/components/Skeleton'
 import GlassSurface from '../../shared/components/GlassSurface'
 import SessionTagsNotes from '../sessions/SessionTagsNotes'
+
+interface TargetAreaOption { id: number; name: string }
 
 const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
 
@@ -59,12 +63,13 @@ function SidebarSkeleton() {
 }
 
 export default function SessionSidebar({ session, coverage, frameCount, isLoading }: Props) {
-  const { sidebarOpen, toggleSidebar, selectedSessionId } = useMapStore()
-  const queryClient = useQueryClient()
+  const { sidebarOpen, toggleSidebar } = useMapStore()
+  const [targetAreaId, setTargetAreaId] = useState<number | null>(null)
+  const runCoverage = useRunCoverage()
 
-  const coverageMutation = useMutation({
-    mutationFn: () => get(`/coverage/run?session_id=${selectedSessionId}`),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['coverage', selectedSessionId] }),
+  const { data: targetAreas } = useQuery<TargetAreaOption[]>({
+    queryKey: ['target-areas'],
+    queryFn: () => get<TargetAreaOption[]>('/target-areas/'),
   })
 
   if (!sidebarOpen) {
@@ -213,20 +218,53 @@ export default function SessionSidebar({ session, coverage, frameCount, isLoadin
       </div>
 
       {/* CTA */}
-      <button
-        onClick={() => coverageMutation.mutate()}
-        disabled={coverageMutation.isPending}
-        className="m-3 text-sm cursor-pointer border-none transition-all duration-150 active:scale-[0.98]"
-        style={{
-          padding: '8px',
-          background: coverageMutation.isPending ? 'var(--border-strong)' : 'var(--accent-strong)',
-          color: 'var(--on-accent)',
-          fontFamily: 'inherit',
-          opacity: coverageMutation.isPending ? 0.7 : 1,
-        }}
-      >
-        {coverageMutation.isPending ? 'Running…' : 'Run coverage analysis'}
-      </button>
+      {(() => {
+        const areas = targetAreas ?? []
+        const selectedId = targetAreaId ?? areas[0]?.id ?? null
+        const disabled = runCoverage.isPending || selectedId === null
+        return (
+          <div className="m-3 flex flex-col gap-2">
+            {areas.length > 0 ? (
+              <select
+                aria-label="Target area"
+                value={selectedId ?? ''}
+                onChange={(e) => setTargetAreaId(e.target.value ? Number(e.target.value) : null)}
+                className="text-sm"
+                style={{
+                  padding: '6px 8px',
+                  background: 'var(--surface-2)',
+                  border: '1px solid var(--border)',
+                  borderRadius: 'var(--radius-sm)',
+                  color: 'var(--text)',
+                  fontFamily: 'inherit',
+                }}
+              >
+                {areas.map((ta) => (
+                  <option key={ta.id} value={ta.id}>{ta.name}</option>
+                ))}
+              </select>
+            ) : (
+              <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                Draw a target area in the Plan tab first.
+              </p>
+            )}
+            <button
+              onClick={() => selectedId !== null && runCoverage.mutate({ sessionId: session.id, targetAreaId: selectedId })}
+              disabled={disabled}
+              className="text-sm cursor-pointer border-none transition-all duration-150 active:scale-[0.98]"
+              style={{
+                padding: '8px',
+                background: disabled ? 'var(--border-strong)' : 'var(--accent-strong)',
+                color: 'var(--on-accent)',
+                fontFamily: 'inherit',
+                opacity: disabled ? 0.7 : 1,
+              }}
+            >
+              {runCoverage.isPending ? 'Running…' : 'Run coverage analysis'}
+            </button>
+          </div>
+        )
+      })()}
     </aside>
   )
 }
