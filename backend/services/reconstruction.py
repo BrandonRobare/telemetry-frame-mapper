@@ -61,24 +61,28 @@ from backend.services.semantic_labels import (
 from backend.services.semantic_segmenter import segment_frame
 from backend.services.splat_trainer import ReconstructionCancelled, TrainerConfig
 
-# Maps reconstruction_id → cancel Event
-_cancel_events: dict[int, threading.Event] = {}
-
-# Tracks running subprocesses so cancel can terminate them immediately
+# Tracks the running COLMAP subprocess per reconstruction so cancel can
+# terminate it immediately instead of waiting for the current step to finish.
 _running_subprocess: dict[int, subprocess.Popen] = {}
+_running_subprocess_lock = threading.Lock()
 
 _rec_logs: dict[int, list[str]] = {}
 _rec_logs_lock = threading.Lock()
 
 
 def _kill_running_subprocess(reconstruction_id: int) -> None:
-    """Kill the COLMAP/gsplat subprocess for the given reconstruction, if any."""
-    proc = _running_subprocess.pop(reconstruction_id, None)
-    if proc is not None:
-        try:
-            proc.kill()
-        except Exception:
-            pass
+    """Terminate the running COLMAP subprocess for the reconstruction, if any."""
+    with _running_subprocess_lock:
+        proc = _running_subprocess.pop(reconstruction_id, None)
+    if proc is None:
+        return
+    try:
+        proc.terminate()  # TerminateProcess on Windows — sufficient for COLMAP
+        proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+    except Exception:
+        pass
 _mesh_jobs: set[int] = set()
 _mesh_jobs_lock = threading.Lock()
 _flythrough_jobs: set[int] = set()
@@ -254,6 +258,7 @@ def _run_colmap(
     progress_cb,
     cancel: threading.Event,
     *,
+    reconstruction_id: int | None = None,
     images_have_gps: bool = False,
     image_count: int = 0,
 ) -> int | None:
@@ -351,15 +356,30 @@ def _run_colmap(
             return None
         progress_cb(step_name, pct)
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True)
+            proc = subprocess.Popen(
+                cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+            )
         except FileNotFoundError as exc:
             raise RuntimeError(
                 "COLMAP executable not found: colmap. Install COLMAP and ensure it is on PATH "
                 "before starting reconstruction."
             ) from exc
-        if result.returncode != 0:
+        if reconstruction_id is not None:
+            with _running_subprocess_lock:
+                _running_subprocess[reconstruction_id] = proc
+        try:
+            _, stderr = proc.communicate()
+        finally:
+            if reconstruction_id is not None:
+                with _running_subprocess_lock:
+                    _running_subprocess.pop(reconstruction_id, None)
+        # A killed step surfaces as cancellation, not failure: cancel is set
+        # before the process is terminated (see cancel_reconstruction).
+        if cancel.is_set():
+            return None
+        if proc.returncode != 0:
             raise RuntimeError(
-                f"COLMAP {step_name} failed: {result.stderr[:_ERROR_MSG_MAX_CHARS]}"
+                f"COLMAP {step_name} failed: {stderr[:_ERROR_MSG_MAX_CHARS]}"
             )
 
     best_submodel = _pick_best_submodel(output_dir)
@@ -2030,17 +2050,16 @@ def start_reconstruction(
 
 
 def cancel_reconstruction(reconstruction_id: int) -> None:
-    """Signal the background thread to stop between pipeline steps.
+    """Signal the reconstruction to stop and terminate its running COLMAP subprocess.
 
-    Also terminates any running COLMAP or Gaussian Splatting subprocess
-    so the reconstruction thread can exit promptly instead of waiting for
-    the current step to finish (which can take 30+ minutes).
+    Cancelling the job queue entry sets the cancel Event the pipeline polls; that
+    stops Gaussian Splatting between iterations. COLMAP shells out to a blocking
+    subprocess, so it is killed directly instead of waiting for the current step
+    to finish (which can take 30+ minutes). The event is set *before* the kill so
+    the killed COLMAP step surfaces as cancellation rather than a failure.
     """
-    event = _cancel_events.get(reconstruction_id)
-    if event and not event.is_set():
-        event.set()
-    _kill_running_subprocess(reconstruction_id)
-    # Cancel any pending job queue entry for this reconstruction
+    # Cancel the job queue entry first so the pipeline's cancel Event is set
+    # before the COLMAP subprocess is terminated.
     from backend.services.job_queue import cancel_job as _cancel_job
     db = SessionLocal()
     try:
@@ -2057,6 +2076,7 @@ def cancel_reconstruction(reconstruction_id: int) -> None:
             _cancel_job(entry.id)
     finally:
         db.close()
+    _kill_running_subprocess(reconstruction_id)
 
 
 def _update_rec(db: DBSession, rec_id: int, **kwargs) -> None:
@@ -2151,6 +2171,7 @@ def _run_pipeline(entry, db, cancel: threading.Event) -> None:
             colmap_dir,
             progress_cb,
             cancel,
+            reconstruction_id=reconstruction_id,
             images_have_gps=len(gps_images) == len(images) and len(images) > 0,
             image_count=len(images),
         )
