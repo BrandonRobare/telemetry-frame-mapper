@@ -460,6 +460,7 @@ def get_deployment_config(path: str = "config.yaml") -> dict:
         "host": "127.0.0.1",
         "port": 8000,
         "cors_origins": ["http://localhost:5173", "http://localhost:3000"],
+        "allow_unauthenticated_lan": False,
     }
     deployment = data.get("deployment", {})
     if not isinstance(deployment, dict):
@@ -468,8 +469,9 @@ def get_deployment_config(path: str = "config.yaml") -> dict:
     if not isinstance(result["host"], str):
         raise ValueError("deployment.host must be an IP address or hostname")
     host = result["host"].strip()
+    host_is_loopback = host == "localhost"
     try:
-        ipaddress.ip_address(host)
+        host_is_loopback = ipaddress.ip_address(host).is_loopback
     except ValueError as exc:
         allowed_hostname_chars = "-.abcdefghijklmnopqrstuvwxyz0123456789"
         labels = host.split(".")
@@ -480,6 +482,17 @@ def get_deployment_config(path: str = "config.yaml") -> dict:
         ):
             raise ValueError("deployment.host must be an IP address or hostname") from exc
     result["host"] = host
+    if not isinstance(result["allow_unauthenticated_lan"], bool):
+        raise ValueError("deployment.allow_unauthenticated_lan must be true or false")
+    # Refuse to bind a non-loopback interface with no authentication in front of the
+    # otherwise-unauthenticated API, unless the operator explicitly opts in.
+    if not host_is_loopback and not result["allow_unauthenticated_lan"]:
+        if not (get_pin_lock_config(path)["enabled"] or get_api_key_config(path)["enabled"]):
+            raise ValueError(
+                f"deployment.host {host!r} is not loopback but no authentication is enabled. "
+                "Enable pin_lock (or api_key), bind to 127.0.0.1, or set "
+                "deployment.allow_unauthenticated_lan: true to override."
+            )
     if isinstance(result["port"], bool):
         raise ValueError("deployment.port must be an integer from 1 to 65535")
     try:

@@ -27,6 +27,9 @@ deployment:
   cors_origins:
     - "http://localhost:5173"
     - "http://localhost:3000"
+  # A non-loopback host with no pin_lock/api_key is refused at startup. Set this
+  # true only if you deliberately want the API reachable on the LAN unauthenticated.
+  allow_unauthenticated_lan: false
 
 # Optional single-user local lock. Store only the scrypt hash in the named
 # environment variable; restart the backend after enabling it.
