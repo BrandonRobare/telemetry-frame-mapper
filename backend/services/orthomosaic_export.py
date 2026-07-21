@@ -22,19 +22,15 @@ def _reconstruction_export_dir(reconstruction_id: int) -> Path:
 def _load_geo_transform_for_reconstruction(rec: Reconstruction) -> dict:
     import json as _json
 
+    from backend.services.reconstruction import _LOCAL_FRAME_GEO
+
     if rec.geo_transform:
         return _json.loads(rec.geo_transform)
     if rec.colmap_dir:
         from backend.services.reconstruction import _extract_geo_transform
 
-        return _extract_geo_transform(Path(rec.colmap_dir))
-    return {
-        "scale": 1.0,
-        "rotation": [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
-        "translation": [0.0, 0.0, 0.0],
-        "utm_zone": "unknown",
-        "utm_origin": [0.0, 0.0],
-    }
+        return _extract_geo_transform(Path(rec.colmap_dir)) or _LOCAL_FRAME_GEO
+    return dict(_LOCAL_FRAME_GEO)
 
 
 def _load_points_utm(rec: Reconstruction) -> tuple:
