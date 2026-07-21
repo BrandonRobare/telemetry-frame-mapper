@@ -4,6 +4,8 @@ import math
 from pathlib import Path
 
 NODATA = -9999.0
+MIN_RESOLUTION_M = 0.02
+MAX_RASTER_PIXELS = 100_000_000
 
 
 class DemUnavailableError(ValueError):
@@ -57,6 +59,15 @@ def export_elevation_geotiff(
     y_min, y_max = float(y.min()), float(y.max())
     width = max(1, int(math.floor((x_max - x_min) / resolution_m + 1e-9)) + 1)
     height = max(1, int(math.floor((y_max - y_min) / resolution_m + 1e-9)) + 1)
+    if resolution_m < MIN_RESOLUTION_M:
+        raise ValueError(
+            f"resolution_m must be at least {MIN_RESOLUTION_M} m; got {resolution_m}"
+        )
+    if width * height > MAX_RASTER_PIXELS:
+        raise ValueError(
+            f"Requested raster is {width}x{height} = {width * height} px, which exceeds "
+            f"the {MAX_RASTER_PIXELS} px limit; use a coarser resolution_m"
+        )
     columns = np.clip(((x - x_min) / resolution_m).astype(np.int64), 0, width - 1)
     rows = np.clip(((y_max - y) / resolution_m).astype(np.int64), 0, height - 1)
 
