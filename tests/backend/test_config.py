@@ -75,6 +75,7 @@ def test_deployment_config_defaults_to_loopback_and_local_frontends(tmp_path):
         "host": "127.0.0.1",
         "port": 8000,
         "cors_origins": ["http://localhost:5173", "http://localhost:3000"],
+        "allow_unauthenticated_lan": False,
     }
 
 
@@ -86,6 +87,7 @@ def test_deployment_config_accepts_explicit_lan_bind_and_origins(tmp_path):
         "deployment:\n"
         "  host: 192.168.1.50\n"
         "  port: '8080'\n"
+        "  allow_unauthenticated_lan: true\n"
         "  cors_origins:\n"
         "    - http://192.168.1.50:5173/\n"
     )
@@ -94,7 +96,32 @@ def test_deployment_config_accepts_explicit_lan_bind_and_origins(tmp_path):
         "host": "192.168.1.50",
         "port": 8080,
         "cors_origins": ["http://192.168.1.50:5173"],
+        "allow_unauthenticated_lan": True,
     }
+
+
+def test_deployment_config_refuses_lan_bind_without_auth(tmp_path):
+    from backend.core.config import get_deployment_config
+
+    path = tmp_path / "config.yaml"
+    path.write_text("deployment:\n  host: 0.0.0.0\n")
+
+    with pytest.raises(ValueError, match="not loopback but no authentication"):
+        get_deployment_config(str(path))
+
+
+def test_deployment_config_lan_bind_allowed_with_pin_lock(tmp_path, monkeypatch):
+    from backend.core.config import get_deployment_config
+    from backend.services.share_links import hash_password
+
+    path = tmp_path / "config.yaml"
+    path.write_text(
+        "deployment:\n  host: 192.168.1.50\n"
+        "pin_lock:\n  enabled: true\n  pin_hash_env: TEST_PIN_HASH\n"
+    )
+    monkeypatch.setenv("TEST_PIN_HASH", hash_password("1234"))
+
+    assert get_deployment_config(str(path))["host"] == "192.168.1.50"
 
 
 @pytest.mark.parametrize(

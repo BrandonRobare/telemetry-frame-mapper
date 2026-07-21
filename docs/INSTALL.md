@@ -106,6 +106,20 @@ default). Check only the non-secret state at `GET /pin-lock/status`. Restarting 
 all unlock sessions. If the configured hash environment variable is absent, the backend refuses to
 start rather than silently running unlocked.
 
+Repeated wrong PINs from the same client are throttled: after 5 consecutive failures each
+further attempt is delayed with exponential backoff, and after 10 the client is locked out for
+15 minutes. Blocked attempts return `429` with a `Retry-After` header; a correct PIN clears the
+counter. The same limiter guards `POST /share/token/{token}/unlock`. Counters live in memory and
+reset when the backend restarts.
+
+### Binding beyond loopback
+
+`deployment.host` defaults to `127.0.0.1`. If you set it to a LAN address or `0.0.0.0` while
+neither `pin_lock` nor `api_key` is enabled, the backend refuses to start — an unauthenticated API
+on the network would expose every project and file. Enable a PIN lock (or automation key), keep the
+loopback bind, or, only if you genuinely intend an open LAN deployment, set
+`deployment.allow_unauthenticated_lan: true` to override the guard.
+
 ### Optional automation API key
 
 For scripts that cannot retain the PIN unlock cookie, enable `api_key.enabled: true` alongside
