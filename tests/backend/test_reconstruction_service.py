@@ -1545,6 +1545,7 @@ def test_mesh_job_success_updates_status(setup_test_db, tmp_path):
     glb.write_bytes(b"glb")
 
     with patch("backend.services.reconstruction.SessionLocal", TestSessionLocal), \
+         patch("backend.services.job_queue._make_session", TestSessionLocal), \
          patch(
              "backend.services.reconstruction._export_mesh_assets",
              return_value={"glb": glb, "obj": None, "mtl": None, "georef": tmp_path / "geo.json"},
@@ -1721,6 +1722,7 @@ def test_flythrough_job_success_updates_status(setup_test_db, tmp_path):
         return output_path
 
     with patch("backend.services.reconstruction.SessionLocal", TestSessionLocal), \
+         patch("backend.services.job_queue._make_session", TestSessionLocal), \
          patch("backend.services.reconstruction.get_config") as mock_cfg, \
          patch("backend.services.reconstruction._run_video_renderer", side_effect=fake_render):
         mock_cfg.return_value.exports_dir = str(tmp_path / "exports")
