@@ -198,3 +198,111 @@ def test_remote_pipeline_preserves_worker_reported_cancellation(setup_test_db):
         assert rec.status == "cancelled"
         assert entry.status == "cancelled"
         cancel_remote.assert_not_called()
+
+
+def _remote_entry(db, remote_job_id: str | None = None) -> tuple:
+    from backend.db.models import JobQueueEntry, Reconstruction
+    from backend.db.models import Session as SessionModel
+
+    session = SessionModel(name="Remote", folder_path="/shared/imports")
+    db.add(session)
+    db.commit()
+    rec = Reconstruction(session_id=session.id, preset="quick", status="pending", frames_used=2)
+    db.add(rec)
+    db.commit()
+    payload = {"preset": "quick", "colmap_dir": "/shared/data/1", "image_ids": []}
+    if remote_job_id:
+        payload["remote_job_id"] = remote_job_id
+    entry = JobQueueEntry(
+        job_type="reconstruction",
+        target_id=rec.id,
+        status="running",
+        payload_json=json.dumps(payload),
+    )
+    db.add(entry)
+    db.commit()
+    db.refresh(entry)
+    return rec, entry
+
+
+def test_remote_pipeline_survives_transient_poll_failures(setup_test_db):
+    from tests.conftest import TestSessionLocal
+
+    with TestSessionLocal() as db:
+        rec, entry = _remote_entry(db, remote_job_id="w-transient")
+        # Two dropped polls (below the 5-failure threshold), then success.
+        poll = patch(
+            "backend.services.reconstruction.get_reconstruction_status",
+            side_effect=[
+                RemoteWorkerError("connection reset"),
+                RemoteWorkerError("read timeout"),
+                {"status": "complete", "result": {"frames_registered": 2, "gaussian_count": 9}},
+            ],
+        )
+        with poll, patch(
+            "backend.services.reconstruction.cancel_remote_reconstruction"
+        ) as cancel_remote:
+            _run_remote_pipeline(
+                entry,
+                db,
+                threading.Event(),
+                json.loads(entry.payload_json),
+                _config(poll_interval_seconds=0),
+            )
+
+        db.refresh(rec)
+        assert rec.status == "complete"
+        assert rec.frames_registered == 2
+        cancel_remote.assert_not_called()
+
+
+def test_remote_pipeline_fails_and_cancels_remote_after_sustained_failures(
+    setup_test_db, monkeypatch
+):
+    from tests.conftest import TestSessionLocal
+
+    # Inject short thresholds so we never wait the real 10-minute window.
+    monkeypatch.setattr(
+        "backend.services.reconstruction._REMOTE_POLL_MAX_CONSECUTIVE_FAILURES", 3
+    )
+    monkeypatch.setattr("backend.services.reconstruction._REMOTE_POLL_FAILURE_WINDOW_S", 0)
+
+    with TestSessionLocal() as db:
+        rec, entry = _remote_entry(db, remote_job_id="w-dead")
+        with patch(
+            "backend.services.reconstruction.get_reconstruction_status",
+            side_effect=RemoteWorkerError("connection reset"),
+        ), patch(
+            "backend.services.reconstruction.cancel_remote_reconstruction"
+        ) as cancel_remote:
+            with pytest.raises(JobNonRetryableError, match="unreachable"):
+                _run_remote_pipeline(
+                    entry,
+                    db,
+                    threading.Event(),
+                    json.loads(entry.payload_json),
+                    _config(poll_interval_seconds=0),
+                )
+
+        db.refresh(rec)
+        assert rec.status == "failed"
+        cancel_remote.assert_called_once_with(_config(poll_interval_seconds=0), "w-dead")
+
+
+def test_remote_pipeline_user_cancel_sends_remote_cancel(setup_test_db):
+    from tests.conftest import TestSessionLocal
+
+    with TestSessionLocal() as db:
+        rec, entry = _remote_entry(db, remote_job_id="w-usercancel")
+        cancel = threading.Event()
+        cancel.set()  # user cancelled before the first poll
+        with patch(
+            "backend.services.reconstruction.cancel_remote_reconstruction"
+        ) as cancel_remote:
+            _run_remote_pipeline(
+                entry, db, cancel, json.loads(entry.payload_json), _config()
+            )
+
+        db.refresh(rec)
+        assert rec.status == "cancelled"
+        cancel_remote.assert_called_once_with(_config(), "w-usercancel")
