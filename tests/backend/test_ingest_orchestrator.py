@@ -108,6 +108,21 @@ def _make_no_gps_jpg(folder: Path, name: str) -> Path:
     return p
 
 
+def _make_zero_denom_gps_jpg(folder: Path, name: str) -> Path:
+    """Create a JPEG whose GPS rationals have a zero denominator (corrupt EXIF)."""
+    p = folder / name
+    img = PILImage.new("RGB", (100, 100), color=(128, 128, 128))
+    gps_ifd = {
+        piexif.GPSIFD.GPSLatitudeRef: b"N",
+        piexif.GPSIFD.GPSLatitude: ((35, 1), (0, 0), (0, 1)),  # zero denominator in minutes
+        piexif.GPSIFD.GPSLongitudeRef: b"W",
+        piexif.GPSIFD.GPSLongitude: ((80, 1), (0, 0), (0, 1)),
+    }
+    exif_bytes = piexif.dump({"GPS": gps_ifd})
+    img.save(str(p), "JPEG", exif=exif_bytes)
+    return p
+
+
 def _db_factory_for_test():
     """Return a factory that yields a fresh in-memory test DB session."""
     from tests.conftest import TestSessionLocal
@@ -381,3 +396,117 @@ def test_run_creates_footprint_when_altitude_is_zero(tmp_path, setup_test_db):
     # With the 1 m AGL clamp in compute_footprint, zero barometric altitude
     # still produces a small (non-degenerate) footprint.
     assert footprint.ground_width_m > 0
+
+
+# ---------------------------------------------------------------------------
+# Issue #506: one corrupt image must not fail a whole batch
+# ---------------------------------------------------------------------------
+
+def test_run_zero_denominator_gps_image_lands_without_gps(tmp_path, setup_test_db):
+    """A zero-denominator-GPS image must import (without GPS), not kill the batch."""
+    from backend.db.database import get_db
+    from backend.db.models import Image as ImageModel
+    from backend.db.models import Session as SessionModel
+    from backend.main import app
+    from backend.services.ingest_orchestrator import _run, get_progress
+    from tests.conftest import TestSessionLocal
+
+    db = next(app.dependency_overrides[get_db]())
+    session = SessionModel(name="zero-denom-gps", folder_path=str(tmp_path),
+                           photo_count=0, usable_count=0)
+    db.add(session)
+    db.commit()
+    db.refresh(session)
+
+    _make_zero_denom_gps_jpg(tmp_path, "corrupt.jpg")
+    _make_gps_jpg(tmp_path, "valid.jpg", lat=35.0, lon=-80.0)
+
+    ingest_cfg = {
+        "accepted_extensions": [".jpg", ".jpeg"],
+        "filter_zero_gps": True,
+        "thumbnail_size_px": 64,
+        "thumbnail_jpeg_quality": 75,
+    }
+
+    with patch("backend.core.config.get_ingest_config", return_value=ingest_cfg), \
+         patch("backend.core.config.load_config") as mock_load_cfg:
+        mock_load_cfg.return_value.processed_dir = str(tmp_path)
+        mock_load_cfg.return_value.thumbnail_size_px = 64
+        mock_load_cfg.return_value.fov_horizontal_deg = 83
+        mock_load_cfg.return_value.fov_vertical_deg = 53
+        mock_load_cfg.return_value.target_crs = "EPSG:32617"
+        _run(session.id, tmp_path, TestSessionLocal)
+
+    db.expire_all()
+    images = {img.filename: img for img in
+              db.query(ImageModel).filter(ImageModel.session_id == session.id).all()}
+    # Batch completes; corrupt image lands with no GPS; valid image keeps its GPS.
+    assert get_progress(session.id)["status"] == "done"
+    assert "corrupt.jpg" in images
+    assert images["corrupt.jpg"].latitude is None
+    assert images["corrupt.jpg"].longitude is None
+    assert "valid.jpg" in images
+    assert images["valid.jpg"].latitude is not None
+    # Progress surfaces the skipped counter (0 here: the image landed, wasn't skipped).
+    assert get_progress(session.id)["skipped"] == 0
+
+
+def test_run_extract_failure_skips_image_not_batch(tmp_path, setup_test_db):
+    """If extract_exif raises for one image, that image is skipped, batch survives."""
+    from backend.db.database import get_db
+    from backend.db.models import Image as ImageModel
+    from backend.db.models import Session as SessionModel
+    from backend.db.models import SessionLogEntry
+    from backend.main import app
+    from backend.services import ingest_orchestrator
+    from backend.services.ingest_orchestrator import _run, get_progress
+    from tests.conftest import TestSessionLocal
+
+    db = next(app.dependency_overrides[get_db]())
+    session = SessionModel(name="extract-raises", folder_path=str(tmp_path),
+                           photo_count=0, usable_count=0)
+    db.add(session)
+    db.commit()
+    db.refresh(session)
+
+    _make_gps_jpg(tmp_path, "boom.jpg", lat=35.0, lon=-80.0)
+    _make_gps_jpg(tmp_path, "ok.jpg", lat=36.0, lon=-81.0)
+
+    real_extract = ingest_orchestrator.extract_exif
+
+    def flaky_extract(path):
+        if path.endswith("boom.jpg"):
+            raise RuntimeError("simulated decode failure")
+        return real_extract(path)
+
+    ingest_cfg = {
+        "accepted_extensions": [".jpg", ".jpeg"],
+        "filter_zero_gps": False,
+        "thumbnail_size_px": 64,
+        "thumbnail_jpeg_quality": 75,
+    }
+
+    with patch("backend.core.config.get_ingest_config", return_value=ingest_cfg), \
+         patch.object(ingest_orchestrator, "extract_exif", side_effect=flaky_extract), \
+         patch("backend.core.config.load_config") as mock_load_cfg:
+        mock_load_cfg.return_value.processed_dir = str(tmp_path)
+        mock_load_cfg.return_value.thumbnail_size_px = 64
+        mock_load_cfg.return_value.fov_horizontal_deg = 83
+        mock_load_cfg.return_value.fov_vertical_deg = 53
+        mock_load_cfg.return_value.target_crs = "EPSG:32617"
+        _run(session.id, tmp_path, TestSessionLocal)
+
+    db.expire_all()
+    filenames = {img.filename for img in
+                 db.query(ImageModel).filter(ImageModel.session_id == session.id).all()}
+    # Batch completes; failing image skipped, good image imported.
+    assert get_progress(session.id)["status"] == "done"
+    assert get_progress(session.id)["skipped"] == 1
+    assert "boom.jpg" not in filenames
+    assert "ok.jpg" in filenames
+    # Skip is logged with the filename.
+    skip_logs = db.query(SessionLogEntry).filter(
+        SessionLogEntry.session_id == session.id,
+        SessionLogEntry.event_type == "image_skipped",
+    ).all()
+    assert any("boom.jpg" in (log.message or "") for log in skip_logs)
