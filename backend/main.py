@@ -23,7 +23,15 @@ from backend.core.config import (
     get_pin_lock_config,
 )
 from backend.db.database import init_db
-from backend.services.pin_lock import create_session, session_is_valid, valid_api_key, valid_pin
+from backend.services.pin_lock import (
+    create_session,
+    record_unlock_failure,
+    reset_unlock_attempts,
+    session_is_valid,
+    unlock_retry_after,
+    valid_api_key,
+    valid_pin,
+)
 
 from .routers import annotations as annotations_router
 from .routers import auto_import as auto_import_router
@@ -122,6 +130,7 @@ deployment_config = get_deployment_config()
 pin_lock_config = get_pin_lock_config()
 api_key_config = get_api_key_config()
 app.state.pin_lock_sessions = {}
+app.state.unlock_attempts = {}
 app.add_middleware(
     CORSMiddleware,
     allow_origins=deployment_config["cors_origins"],
@@ -194,10 +203,20 @@ def unlock_pin_lock(body: dict[str, str], request: Request, response: Response):
     """Verify the configured scrypt PIN and issue a short-lived HttpOnly cookie."""
     if not pin_lock_config["enabled"]:
         raise HTTPException(status_code=404, detail="PIN lock is not enabled")
+    client = request.client.host if request.client else "unknown"
+    retry_after = unlock_retry_after(app.state.unlock_attempts, client)
+    if retry_after:
+        raise HTTPException(
+            status_code=429,
+            detail="Too many failed attempts",
+            headers={"Retry-After": str(retry_after)},
+        )
     pin = body.get("pin")
     pin_hash = os.environ[pin_lock_config["pin_hash_env"]]
     if not isinstance(pin, str) or not valid_pin(pin, pin_hash):
+        record_unlock_failure(app.state.unlock_attempts, client)
         raise HTTPException(status_code=403, detail="Incorrect PIN")
+    reset_unlock_attempts(app.state.unlock_attempts, client)
     token = create_session(app.state.pin_lock_sessions, pin_lock_config["session_ttl"])
     response.set_cookie(
         PIN_LOCK_COOKIE_NAME,

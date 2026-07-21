@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session as DBSession
 from ..core.config import get_config
 from ..db.database import get_db
 from ..db.models import Reconstruction, ShareLink, ShareLinkUnlockSession
+from ..services.pin_lock import record_unlock_failure, reset_unlock_attempts, unlock_retry_after
 from ..services.reconstruction import _safe_export_path
 from ..services.share_links import (
     SHARE_LINK_PREFIX,
@@ -168,6 +169,15 @@ def unlock_share_link(
     db: DBSession = Depends(get_db),
 ):
     """Verify a link password and issue a scoped HttpOnly unlock session."""
+    attempts = request.app.state.unlock_attempts
+    client = request.client.host if request.client else "unknown"
+    retry_after = unlock_retry_after(attempts, client)
+    if retry_after:
+        raise HTTPException(
+            status_code=429,
+            detail="Too many failed attempts",
+            headers={"Retry-After": str(retry_after)},
+        )
     raw_token = _bare_token(token)
     link = db.query(ShareLink).filter(ShareLink.token_hash == token_hash(raw_token)).first()
     if not link:
@@ -176,7 +186,9 @@ def unlock_share_link(
     if not link.password_hash:
         raise HTTPException(status_code=403, detail="Share link does not require a password")
     if not verify_password(body.password, link.password_hash):
+        record_unlock_failure(attempts, client)
         raise HTTPException(status_code=403, detail="Incorrect share link password")
+    reset_unlock_attempts(attempts, client)
     _set_unlock_cookie(response, request, link, db)
 
 

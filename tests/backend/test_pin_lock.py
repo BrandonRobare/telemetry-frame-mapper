@@ -18,8 +18,10 @@ def enabled_pin_lock(monkeypatch):
     )
     monkeypatch.setenv("TEST_PIN_HASH", hash_password("1234"))
     main.app.state.pin_lock_sessions.clear()
+    main.app.state.unlock_attempts.clear()
     yield
     main.app.state.pin_lock_sessions.clear()
+    main.app.state.unlock_attempts.clear()
 
 
 @pytest.fixture
@@ -107,6 +109,21 @@ def test_api_key_allows_protected_routes_without_cookie(client, enabled_api_key)
         "/sessions", headers={"X-Drone-Mapping-Key": "automation-key"}
     ).status_code == 200
     assert client.get("/metrics").status_code == 200
+
+
+def test_unlock_throttles_repeated_failures_then_resets(client, enabled_pin_lock):
+    for _ in range(5):
+        assert client.post("/pin-lock/unlock", json={"pin": "wrong"}).status_code == 403
+    blocked = client.post("/pin-lock/unlock", json={"pin": "1234"})
+    assert blocked.status_code == 429
+    assert int(blocked.headers["retry-after"]) > 0
+
+    # Expire the backoff window; a correct PIN then unlocks and clears the counter.
+    for entry in main.app.state.unlock_attempts.values():
+        entry[1] = 0
+    unlocked = client.post("/pin-lock/unlock", json={"pin": "1234"})
+    assert unlocked.status_code == 204
+    assert main.app.state.unlock_attempts == {}
 
 
 def test_pin_lock_cookie_is_secure_for_https_proxy(client, enabled_pin_lock):
