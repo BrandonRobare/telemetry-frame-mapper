@@ -350,13 +350,21 @@ def test_workspace_image_copied_or_linked():
         assert dest.exists()
 
 
+def _fake_colmap_popen(returncode=0, stderr=""):
+    """subprocess.Popen stand-in for a COLMAP step: communicate() then returncode."""
+    proc = MagicMock()
+    proc.communicate.return_value = ("", stderr)
+    proc.returncode = returncode
+    return proc
+
+
 def test_run_colmap_missing_binary_reports_install_guidance(tmp_path):
     import threading
     from unittest.mock import patch
 
     from backend.services.reconstruction import _run_colmap
 
-    with patch("backend.services.reconstruction.subprocess.run", side_effect=FileNotFoundError):
+    with patch("backend.services.reconstruction.subprocess.Popen", side_effect=FileNotFoundError):
         with pytest.raises(RuntimeError, match="COLMAP executable not found"):
             _run_colmap(tmp_path / "colmap", lambda *_args: None, threading.Event())
 
@@ -379,7 +387,7 @@ def _write_fake_images_txt(colmap_dir: Path, num_images: int) -> None:
 def test_run_colmap_returns_registered_image_count(tmp_path):
     """_run_colmap should return the count instead of discarding it."""
     import threading
-    from unittest.mock import MagicMock, patch
+    from unittest.mock import patch
 
     from backend.services.reconstruction import _run_colmap
 
@@ -387,8 +395,8 @@ def test_run_colmap_returns_registered_image_count(tmp_path):
     colmap_dir.mkdir()
     _write_fake_images_txt(colmap_dir, 3)
 
-    success = MagicMock(returncode=0, stderr="")
-    with patch("backend.services.reconstruction.subprocess.run", return_value=success):
+    with patch("backend.services.reconstruction.subprocess.Popen",
+               return_value=_fake_colmap_popen()):
         result = _run_colmap(colmap_dir, lambda *_args: None, threading.Event())
 
     assert result == 3
@@ -397,7 +405,7 @@ def test_run_colmap_returns_registered_image_count(tmp_path):
 def test_run_colmap_zero_registered_images_raises(tmp_path):
     """COLMAP completing but registering zero images is still a failure."""
     import threading
-    from unittest.mock import MagicMock, patch
+    from unittest.mock import patch
 
     from backend.services.reconstruction import _run_colmap
 
@@ -405,8 +413,8 @@ def test_run_colmap_zero_registered_images_raises(tmp_path):
     colmap_dir.mkdir()
     _write_fake_images_txt(colmap_dir, 0)
 
-    success = MagicMock(returncode=0, stderr="")
-    with patch("backend.services.reconstruction.subprocess.run", return_value=success):
+    with patch("backend.services.reconstruction.subprocess.Popen",
+               return_value=_fake_colmap_popen()):
         with pytest.raises(RuntimeError, match="Not enough feature matches"):
             _run_colmap(colmap_dir, lambda *_args: None, threading.Event())
 
@@ -414,7 +422,7 @@ def test_run_colmap_zero_registered_images_raises(tmp_path):
 def test_run_colmap_supports_guided_matcher(tmp_path):
     """Guided matcher presets should enable COLMAP guided matching."""
     import threading
-    from unittest.mock import MagicMock, patch
+    from unittest.mock import patch
 
     from backend.services.reconstruction import _run_colmap
 
@@ -422,7 +430,6 @@ def test_run_colmap_supports_guided_matcher(tmp_path):
     colmap_dir.mkdir()
     _write_fake_images_txt(colmap_dir, 1)
 
-    success = MagicMock(returncode=0, stderr="")
     cfg = {
         "camera_model": "PINHOLE",
         "matcher": "exhaustive_guided",
@@ -430,7 +437,8 @@ def test_run_colmap_supports_guided_matcher(tmp_path):
         "colmap_threads": 8,
     }
     with patch("backend.services.reconstruction.get_reconstruction_config", return_value=cfg), \
-         patch("backend.services.reconstruction.subprocess.run", return_value=success) as run:
+         patch("backend.services.reconstruction.subprocess.Popen",
+               return_value=_fake_colmap_popen()) as run:
         _run_colmap(colmap_dir, lambda *_args: None, threading.Event())
 
     matcher_cmd = run.call_args_list[1].args[0]
@@ -443,7 +451,7 @@ def test_run_colmap_supports_guided_matcher(tmp_path):
 def test_run_colmap_can_opt_into_per_camera_estimates(tmp_path):
     """Disabling shared intrinsics lets COLMAP emit multiple camera estimates."""
     import threading
-    from unittest.mock import MagicMock, patch
+    from unittest.mock import patch
 
     from backend.services.reconstruction import _run_colmap
 
@@ -457,9 +465,9 @@ def test_run_colmap_can_opt_into_per_camera_estimates(tmp_path):
         "sift_max_features": 8192,
         "colmap_threads": 8,
     }
-    success = MagicMock(returncode=0, stderr="")
     with patch("backend.services.reconstruction.get_reconstruction_config", return_value=cfg), \
-         patch("backend.services.reconstruction.subprocess.run", return_value=success) as run:
+         patch("backend.services.reconstruction.subprocess.Popen",
+               return_value=_fake_colmap_popen()) as run:
         _run_colmap(colmap_dir, lambda *_args: None, threading.Event())
 
     feature_cmd = run.call_args_list[0].args[0]
@@ -485,8 +493,8 @@ def test_run_colmap_progress_callback_sequence_rebalanced(tmp_path):
     )
 
     progress_cb = MagicMock()
-    success = MagicMock(returncode=0, stderr="")
-    with patch("backend.services.reconstruction.subprocess.run", return_value=success):
+    with patch("backend.services.reconstruction.subprocess.Popen",
+               return_value=_fake_colmap_popen()):
         _run_colmap(colmap_dir, progress_cb, threading.Event())
 
     assert progress_cb.call_args_list == [
@@ -496,6 +504,70 @@ def test_run_colmap_progress_callback_sequence_rebalanced(tmp_path):
         (("model conversion", 40.0), {}),
         (("colmap complete", 40.0), {}),
     ]
+
+
+def test_cancel_during_colmap_terminates_subprocess_and_marks_cancelled(setup_test_db):
+    """Cancelling mid-COLMAP kills the real subprocess within seconds and the
+    reconstruction ends up 'cancelled', not 'failed'."""
+    import sys
+    import threading
+    import time
+    from unittest.mock import MagicMock, patch
+
+    from backend.db.database import get_db
+    from backend.main import app
+    from backend.services import reconstruction as recon
+    from backend.services.reconstruction import (
+        _kill_running_subprocess,
+        _running_subprocess,
+    )
+    from backend.services.reconstruction import _run_pipeline_legacy as _run_pipeline
+    from tests.conftest import TestSessionLocal
+
+    db = next(app.dependency_overrides[get_db]())
+    with tempfile.TemporaryDirectory() as tmp:
+        rec, img, colmap_dir = _pipeline_fixture(db, tmp)
+        cancel = threading.Event()
+
+        real_popen = recon.subprocess.Popen
+
+        def fake_popen(_cmd, **kwargs):
+            # Ignore the COLMAP command; launch a real, killable long sleep.
+            return real_popen(
+                [sys.executable, "-c", "import time; time.sleep(60)"], **kwargs
+            )
+
+        with patch("backend.services.reconstruction._write_colmap_workspace", MagicMock()), \
+             patch("backend.services.reconstruction.subprocess.Popen", side_effect=fake_popen), \
+             patch("backend.services.reconstruction.SessionLocal", TestSessionLocal), \
+             patch("backend.services.reconstruction.get_config") as mock_cfg:
+            mock_cfg.return_value.data_dir = tmp
+            mock_cfg.return_value.exports_dir = tmp
+            mock_cfg.return_value.processed_dir = tmp
+
+            t = threading.Thread(
+                target=_run_pipeline, args=(rec.id, "quick", colmap_dir, [img.id], cancel)
+            )
+            t.start()
+
+            # Wait until the COLMAP subprocess is actually running.
+            deadline = time.monotonic() + 5
+            while rec.id not in _running_subprocess and time.monotonic() < deadline:
+                time.sleep(0.02)
+            proc = _running_subprocess.get(rec.id)
+            assert proc is not None, "COLMAP subprocess was never registered"
+
+            # Mirror cancel_reconstruction: set the cancel event, then kill.
+            cancel.set()
+            _kill_running_subprocess(rec.id)
+
+            t.join(timeout=10)
+            assert not t.is_alive(), "pipeline thread did not exit after cancel"
+            assert proc.poll() is not None, "COLMAP subprocess was not terminated"
+
+    db.refresh(rec)
+    assert rec.status == "cancelled"
+    assert rec.step == "cancelled"
 
 
 def test_build_reconstruction_diagnostics_reports_unregistered_frames(setup_test_db, tmp_path):
