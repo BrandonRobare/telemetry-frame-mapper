@@ -95,6 +95,26 @@ def test_restore_finds_nested_archive_from_allowed_root(client, tmp_path):
     assert restore.call_args.args[0] == archive
 
 
+def test_restore_does_not_enumerate_data_root(client, tmp_path, monkeypatch):
+    # restore must resolve the archive directly from the (already-confined) path, never by
+    # walking the data root — that walk would be a DoS on real roots (10^5+ files). #500
+    cfg = _cfg(tmp_path)
+    archive = tmp_path / "exports" / "bundle.zip"
+    archive.parent.mkdir(parents=True)
+    archive.write_bytes(b"zip")
+
+    def _boom(self, *a, **k):
+        raise AssertionError("restore must not rglob the data root")
+
+    monkeypatch.setattr("pathlib.Path.rglob", _boom)
+    with patch(
+        "backend.services.session_bundle.restore_session_archive",
+        return_value={"session_id": 9},
+    ):
+        resp = _restore(client, cfg, str(archive))
+    assert resp.status_code == 200
+
+
 def test_session_archive_rejects_sibling_of_exports(tmp_path):
     from backend.services.session_bundle import build_session_archive
 
