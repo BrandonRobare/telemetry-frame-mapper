@@ -14,9 +14,11 @@ from __future__ import annotations
 
 import json
 import logging
+import sys
 import threading
 from collections.abc import Callable
 from datetime import datetime, timezone
+from pathlib import Path
 
 from backend.db.database import SessionLocal
 from backend.db.models import JobQueueEntry
@@ -39,6 +41,7 @@ _handlers: dict[str, Callable] = {}
 _worker: threading.Thread | None = None
 _cancel_events: dict[int, threading.Event] = {}
 _shutdown = threading.Event()
+_lock_fh = None  # OS file lock guaranteeing a single drain worker across processes
 
 # Configurable caps
 _max_concurrent_gpu: int = 1  # Only one GPU job at a time
@@ -178,67 +181,140 @@ def update_payload(job_id: int, **values: object) -> None:
         db.close()
 
 
+def _lock_path() -> Path:
+    """Lockfile beside the SQLite DB so every process coordinates on the same file."""
+    from backend.db.database import REPO_ROOT, engine
+
+    db_file = engine.url.database
+    if db_file and db_file != ":memory:":
+        base = Path(db_file).resolve().parent
+    else:
+        base = REPO_ROOT / "data"
+    base.mkdir(parents=True, exist_ok=True)
+    return base / "jobq-worker.lock"
+
+
+def _acquire_worker_lock() -> bool:
+    """Take an exclusive OS lock so only one process drains the queue.
+
+    The OS drops the lock when the holder exits or crashes, so there is no
+    stale-lock handling.  Returns True on success, False if another process
+    already holds it.
+    """
+    global _lock_fh
+    if _lock_fh is not None:
+        return True
+    fh = open(_lock_path(), "a+")
+    try:
+        fh.seek(0)
+        if sys.platform == "win32":
+            import msvcrt
+
+            msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        fh.close()
+        return False
+    _lock_fh = fh
+    return True
+
+
+def _release_worker_lock() -> None:
+    global _lock_fh
+    if _lock_fh is None:
+        return
+    try:
+        _lock_fh.seek(0)
+        if sys.platform == "win32":
+            import msvcrt
+
+            msvcrt.locking(_lock_fh.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(_lock_fh.fileno(), fcntl.LOCK_UN)
+    except OSError:
+        pass
+    finally:
+        _lock_fh.close()
+        _lock_fh = None
+
+
 def start_worker() -> None:
-    """Launch the background drain loop (idempotent)."""
+    """Launch the background drain loop (idempotent).
+
+    Only the process that wins the OS drain lock runs a worker (and the
+    startup reaper); others keep serving requests while the lock holder
+    executes jobs.
+    """
+    # ponytail: single drain-worker via OS file lock — revisit if true
+    # multi-worker job execution is ever needed
     global _worker
     if _worker is not None and _worker.is_alive():
         return
+    if not _acquire_worker_lock():
+        logger.warning(
+            "JobQueue: drain-worker lock held by another process; not starting a "
+            "worker here (jobs run in the lock-holding process)."
+        )
+        return
+    reaped = claim_stale_jobs()
+    if reaped:
+        logger.info("JobQueue: recovered %d orphaned running jobs on startup", reaped)
     _shutdown.clear()
     _worker = threading.Thread(target=_drain_loop, daemon=True, name="jobq-worker")
     _worker.start()
 
 
 def shutdown_worker(timeout: float = 5.0) -> None:
-    """Signal the worker to stop and wait for it to finish."""
+    """Signal the worker to stop, wait for it, and release the drain lock."""
     _shutdown.set()
     if _worker is not None and _worker.is_alive():
         _worker.join(timeout=timeout)
+    _release_worker_lock()
 
 
 def claim_stale_jobs() -> int:
-    """Mark any jobs left in 'running' state as failed (crashed worker recovery).
+    """Recover jobs left 'running' by a previous process (startup, lock holder only).
 
-    Called at startup so that jobs orphaned by a previous unclean shutdown
-    are visible as failed instead of appearing to run forever.
+    A local job is truly dead — its worker thread died with the process — so it
+    is marked failed.  A reconstruction job whose target is ``running_remote`` is
+    NOT dead: the remote worker keeps computing.  Such rows are reset to
+    ``pending`` WITHOUT touching ``attempt`` so the drain loop re-dispatches and
+    the existing ``remote_job_id`` short-circuit resumes polling instead of
+    restarting the reconstruction.  Returns the number of rows acted on.
     """
+    from backend.db.models import Reconstruction
+
     db = _make_session()
     try:
         now = datetime.now(timezone.utc)
-        count = (
-            db.query(JobQueueEntry)
-            .filter(JobQueueEntry.status == "running")
-            .update(
-                {
-                    "status": "failed",
-                    "error_msg": "Worker restart — job was orphaned by previous shutdown",
-                    "completed_at": now,
-                },
-                synchronize_session="fetch",
-            )
-        )
-        db.commit()
-        return count
-    finally:
-        db.close()
-
-
-def _concurrent_by_type(job_type: str) -> int:
-    """Return count of currently running jobs of the given type."""
-    count = 0
-    with _RUNNING_LOCK:
-        for entry_id in _RUNNING_JOBS:
-            db = _make_session()
-            try:
-                entry = (
-                    db.query(JobQueueEntry)
-                    .filter(JobQueueEntry.id == entry_id)
+        acted = 0
+        for entry in db.query(JobQueueEntry).filter(JobQueueEntry.status == "running").all():
+            remote_alive = False
+            if entry.job_type == RECONSTRUCTION:
+                rec = (
+                    db.query(Reconstruction)
+                    .filter(Reconstruction.id == entry.target_id)
                     .first()
                 )
-                if entry is not None and entry.job_type == job_type:
-                    count += 1
-            finally:
-                db.close()
-    return count
+                remote_alive = rec is not None and rec.status == "running_remote"
+            if remote_alive:
+                entry.status = "pending"
+                entry.started_at = None
+                entry.error_msg = None
+            else:
+                entry.status = "failed"
+                entry.error_msg = "Worker restart — job was orphaned by previous shutdown"
+                entry.completed_at = now
+            acted += 1
+        db.commit()
+        return acted
+    finally:
+        db.close()
 
 
 # Module-level session factory — tests can override to point at the test DB.
@@ -249,6 +325,25 @@ def _set_session_factory(factory) -> None:
     """Replace the session factory (for test injection)."""
     global _make_session
     _make_session = factory
+
+
+def _claim_pending(db, entry_id: int, now: datetime) -> bool:
+    """Atomically move one pending row to running. True iff this caller won it."""
+    rows = (
+        db.query(JobQueueEntry)
+        .filter(JobQueueEntry.id == entry_id, JobQueueEntry.status == "pending")
+        .update(
+            {
+                "status": "running",
+                "started_at": now,
+                "attempt": JobQueueEntry.attempt + 1,
+                "error_msg": None,
+            },
+            synchronize_session=False,
+        )
+    )
+    db.commit()
+    return rows == 1
 
 
 def _drain_loop() -> None:
@@ -294,12 +389,10 @@ def _drain_loop() -> None:
                     db.commit()
                     continue
 
-                # Claim this job
-                entry.status = "running"
-                entry.started_at = datetime.now(timezone.utc)
-                entry.attempt += 1
-                entry.error_msg = None
-                db.commit()
+                # Atomic claim: flip pending→running in one conditional UPDATE so
+                # two drainers can never both grab the same row (double dispatch).
+                if not _claim_pending(db, entry.id, datetime.now(timezone.utc)):
+                    continue  # Lost the race — another claim won this row.
                 db.refresh(entry)
 
                 with _RUNNING_LOCK:
@@ -356,6 +449,13 @@ def _execute_job(
     except JobNonRetryableError as exc:
         _mark_failed(job_id, str(exc)[:5000], db=db)
     except Exception as exc:
+        # The handler's session may hold an aborted transaction — roll it back
+        # and close it before rebinding, or SQLite keeps the write lock and the
+        # retry hits "database is locked".
+        try:
+            db.rollback()
+        finally:
+            db.close()
         db = _make_session()
         try:
             entry = db.query(JobQueueEntry).filter(JobQueueEntry.id == job_id).first()
@@ -387,7 +487,9 @@ def _mark_failed(job_id: int, error: str, *, db=None) -> None:
     if own_db:
         db = _make_session()
     try:
-        db.query(JobQueueEntry).filter(JobQueueEntry.id == job_id).update({
+        db.query(JobQueueEntry).filter(
+            JobQueueEntry.id == job_id, JobQueueEntry.status != "cancelled"
+        ).update({
             "status": "failed",
             "error_msg": error,
             "completed_at": datetime.now(timezone.utc),
