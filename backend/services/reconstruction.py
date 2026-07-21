@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import math
 import os
 import re
@@ -96,6 +97,14 @@ _rec_status_versions: dict[int, int] = {}
 # tail to be actionable (the full log remains available via the
 # /reconstruction/{id}/log endpoint).
 _ERROR_MSG_MAX_CHARS = 5000
+
+logger = logging.getLogger(__name__)
+
+# Remote poll liveness: a single dropped poll (connection reset, read timeout)
+# must not orphan an hours-long remote job.  Declare the remote dead only after
+# BOTH thresholds are crossed; reset on any successful poll.
+_REMOTE_POLL_MAX_CONSECUTIVE_FAILURES = 5
+_REMOTE_POLL_FAILURE_WINDOW_S = 600  # 10 minutes since the last successful poll
 
 
 def _log_rec(rec_id: int, msg: str) -> None:
@@ -2266,12 +2275,25 @@ def _run_pipeline(entry, db, cancel: threading.Event) -> None:
         mark_complete(entry.id)
 
 
+def _cancel_remote_best_effort(config: dict, remote_job_id, reconstruction_id: int) -> None:
+    """Best-effort remote cancel so a terminal local transition never orphans a remote job."""
+    if not (isinstance(remote_job_id, str) and remote_job_id):
+        return
+    try:
+        cancel_remote_reconstruction(config, remote_job_id)
+    except RemoteWorkerError:
+        logger.warning("Remote cancel for job %s failed", remote_job_id)
+        _log_rec(reconstruction_id, "Remote worker cancellation request failed")
+
+
 def _run_remote_pipeline(
     entry, db: DBSession, cancel: threading.Event, payload: dict, config: dict
 ) -> None:
     """Dispatch once and poll a configured shared-storage worker through the existing queue."""
     reconstruction_id = entry.target_id
     remote_job_id = payload.get("remote_job_id")
+    consecutive_failures = 0
+    last_success = time.monotonic()
     try:
         if not isinstance(remote_job_id, str) or not remote_job_id:
             remote_job_id = dispatch_reconstruction(config, payload, reconstruction_id, entry.id)
@@ -2279,7 +2301,34 @@ def _run_remote_pipeline(
             _log_rec(reconstruction_id, f"Remote worker accepted job {remote_job_id}")
 
         while not cancel.is_set():
-            status = get_reconstruction_status(config, remote_job_id)
+            try:
+                status = get_reconstruction_status(config, remote_job_id)
+            except RemoteWorkerError as exc:
+                consecutive_failures += 1
+                elapsed = time.monotonic() - last_success
+                logger.warning(
+                    "Remote poll for reconstruction %s failed (attempt %d/%d): %s",
+                    reconstruction_id,
+                    consecutive_failures,
+                    _REMOTE_POLL_MAX_CONSECUTIVE_FAILURES,
+                    exc,
+                )
+                _log_rec(
+                    reconstruction_id,
+                    f"Remote poll failed (attempt {consecutive_failures}): {exc}",
+                )
+                if (
+                    consecutive_failures >= _REMOTE_POLL_MAX_CONSECUTIVE_FAILURES
+                    and elapsed >= _REMOTE_POLL_FAILURE_WINDOW_S
+                ):
+                    raise RemoteWorkerError(
+                        f"Remote worker unreachable for {int(elapsed)}s after "
+                        f"{consecutive_failures} consecutive poll failures: {exc}"
+                    ) from exc
+                cancel.wait(config["poll_interval_seconds"])
+                continue
+            consecutive_failures = 0
+            last_success = time.monotonic()
             state = status.get("status")
             if state in {"queued", "running"}:
                 _update_rec(
@@ -2345,13 +2394,10 @@ def _run_remote_pipeline(
             error_msg=str(exc)[:_ERROR_MSG_MAX_CHARS],
             completed_at=datetime.now(timezone.utc),
         )
+        _cancel_remote_best_effort(config, remote_job_id, reconstruction_id)
         raise JobNonRetryableError(str(exc)) from exc
     if cancel.is_set():
-        if isinstance(remote_job_id, str) and remote_job_id:
-            try:
-                cancel_remote_reconstruction(config, remote_job_id)
-            except RemoteWorkerError:
-                _log_rec(reconstruction_id, "Remote worker cancellation request failed")
+        _cancel_remote_best_effort(config, remote_job_id, reconstruction_id)
         _update_rec(
             db,
             reconstruction_id,
