@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import sys
 import threading
 import time
+from datetime import datetime, timezone
 
 import pytest
 
@@ -252,6 +254,37 @@ def test_claim_stale_jobs_marks_running_as_failed(setup_test_db):
     assert "orphaned" in (entry.error_msg or "")
 
 
+def test_claim_stale_jobs_requeues_running_remote_without_touching_attempts(setup_test_db):
+    from backend.db.database import get_db
+    from backend.main import app
+
+    db = next(app.dependency_overrides[get_db]())
+    s = _make_session(db)
+    rec = Reconstruction(
+        session_id=s.id, preset="quick", status="running_remote", frames_used=1
+    )
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+
+    entry = JobQueueEntry(
+        job_type=RECONSTRUCTION,
+        target_id=rec.id,
+        status="running",
+        attempt=1,
+        priority=5,
+    )
+    db.add(entry)
+    db.commit()
+    db.refresh(entry)
+
+    claim_stale_jobs()
+    db.refresh(entry)
+    assert entry.status == "pending", "remote-live reconstruction must be re-queued, not failed"
+    assert entry.attempt == 1, "reaper must not touch attempts for re-queued remote jobs"
+    assert entry.completed_at is None
+
+
 def test_claim_stale_jobs_does_not_touch_completed(setup_test_db):
     from backend.db.database import get_db
     from backend.main import app
@@ -441,3 +474,120 @@ def test_gpu_concurrency_is_honored(setup_test_db):
         if e.status in ("running", "pending"):
             e.status = "completed"
     db.commit()
+
+
+# ---------------------------------------------------------------------------
+# Atomic claim — no double dispatch under a race
+# ---------------------------------------------------------------------------
+
+def test_atomic_claim_lets_exactly_one_racer_win(setup_test_db):
+    from backend.db.database import get_db
+    from backend.main import app
+    from backend.services import job_queue as jq
+
+    db = next(app.dependency_overrides[get_db]())
+    s = _make_session(db)
+    rec = Reconstruction(session_id=s.id, preset="quick", status="pending", frames_used=1)
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+
+    entry = enqueue(RECONSTRUCTION, rec.id)
+
+    now = datetime.now(timezone.utc)
+    results: list[bool] = []
+    results_lock = threading.Lock()
+    start = threading.Barrier(6)
+
+    def racer():
+        start.wait()
+        won = False
+        # SQLite serialises writers; a loser may transiently see "database is
+        # locked" before the winner commits, so retry until we get a verdict.
+        while True:
+            session = TestSessionLocal()
+            try:
+                won = jq._claim_pending(session, entry.id, now)
+                break
+            except Exception:
+                session.rollback()
+                time.sleep(0.01)
+            finally:
+                session.close()
+        with results_lock:
+            results.append(won)
+
+    threads = [threading.Thread(target=racer) for _ in range(6)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=5)
+
+    assert sum(results) == 1, f"exactly one claim must win, got {sum(results)}"
+    stored = db.query(JobQueueEntry).filter(JobQueueEntry.id == entry.id).first()
+    assert stored.status == "running"
+    assert stored.attempt == 1
+
+
+# ---------------------------------------------------------------------------
+# _mark_failed must not overwrite a cancelled job
+# ---------------------------------------------------------------------------
+
+def test_mark_failed_does_not_overwrite_cancelled(setup_test_db):
+    from backend.db.database import get_db
+    from backend.main import app
+    from backend.services import job_queue as jq
+
+    db = next(app.dependency_overrides[get_db]())
+    s = _make_session(db)
+    rec = Reconstruction(session_id=s.id, preset="quick", status="pending", frames_used=1)
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+
+    entry = enqueue(RECONSTRUCTION, rec.id)
+    cancel_job(entry.id)
+
+    jq._mark_failed(entry.id, "boom")
+
+    stored = db.query(JobQueueEntry).filter(JobQueueEntry.id == entry.id).first()
+    assert stored.status == "cancelled", "a failure racing a cancel must not overwrite it"
+
+
+# ---------------------------------------------------------------------------
+# Drain-worker OS lock — a second acquirer backs off
+# ---------------------------------------------------------------------------
+
+def test_second_worker_lock_acquire_fails_gracefully(setup_test_db):
+    from backend.services import job_queue as jq
+
+    # Simulate another process already holding the lock via a raw handle.
+    path = jq._lock_path()
+    other = open(path, "a+")
+    other.seek(0)
+    try:
+        if sys.platform == "win32":
+            import msvcrt
+
+            msvcrt.locking(other.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(other.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        pytest.skip("OS file locking not exclusive here; cannot test lock contention")
+
+    try:
+        assert jq._acquire_worker_lock() is False
+        assert jq._lock_fh is None
+    finally:
+        other.seek(0)
+        if sys.platform == "win32":
+            import msvcrt
+
+            msvcrt.locking(other.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(other.fileno(), fcntl.LOCK_UN)
+        other.close()

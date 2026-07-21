@@ -61,16 +61,13 @@ async def lifespan(app: FastAPI):
     init_db()
     from backend.services.artifact_backup_schedule import scheduled_backup_from_config
     from backend.services.auto_import import AutoImportWatcher
-    from backend.services.job_queue import claim_stale_jobs, shutdown_worker, start_worker
+    from backend.services.job_queue import shutdown_worker, start_worker
 
     watcher = AutoImportWatcher()
     app.state.auto_import_watcher = watcher
     watcher.start()
-    claimed = claim_stale_jobs()
-    if claimed:
-        logging.getLogger("backend").info(
-            "JobQueue: marked %d orphaned running jobs as failed", claimed
-        )
+    # start_worker takes the single-drainer OS lock, reaps orphaned jobs, then
+    # runs the worker — all only in the lock-holding process.
     start_worker()
     backup_scheduler = scheduled_backup_from_config(get_config())
     app.state.backup_scheduler = backup_scheduler
