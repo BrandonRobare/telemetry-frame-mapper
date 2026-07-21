@@ -69,11 +69,13 @@ def lod_labels(
     return labels[order]
 
 
-def is_sidecar_stale(sidecar_path: Path, gaussian_count: int) -> bool:
+def is_sidecar_stale(sidecar_path: Path, gaussian_count: int | None = None) -> bool:
     """Return ``True`` when the sidecar is missing, mismatched, or out of date.
 
-    Stale when the file is absent/corrupt, the point count differs, or it was
-    written by an older schema version (missing version == pre-versioning).
+    Stale when the file is absent/corrupt, it was written by an older schema
+    version (missing version == pre-versioning), or — when *gaussian_count* is
+    given — the recorded point count differs.  Pass ``None`` to skip the count
+    check (e.g. read sites that don't have the point cloud loaded).
     """
     if not sidecar_path.exists():
         return True
@@ -84,7 +86,9 @@ def is_sidecar_stale(sidecar_path: Path, gaussian_count: int) -> bool:
         return True
     if meta.get("schema_version", 0) < _SEMANTIC_SCHEMA_VERSION:
         return True
-    return meta.get("gaussian_count", -1) != gaussian_count
+    if gaussian_count is not None and meta.get("gaussian_count", -1) != gaussian_count:
+        return True
+    return False
 
 
 # -- atomic NPZ write / read --------------------------------------------------

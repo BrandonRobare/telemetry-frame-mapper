@@ -53,6 +53,7 @@ from backend.services.semantic_labels import (
     NUM_CLASSES,
     accumulate_votes,
     finalize_labels,
+    is_sidecar_stale,
     lod_labels,
     project_to_view,
     read_sidecar,
@@ -1175,7 +1176,9 @@ def _export_point_cloud(
 
     classifications = None
     semantic_sidecar = _semantic_sidecar_for_splat(splat_path)
-    if semantic_sidecar.exists():
+    # A stale (older-schema / count-mismatched) sidecar holds wrong labels — treat
+    # it as absent so the export is unclassified rather than misclassified (#498).
+    if not is_sidecar_stale(semantic_sidecar, len(gaussian_xyz)):
         sidecar = read_sidecar(semantic_sidecar)
         classifications = _semantic_labels_to_asprs(
             points_xyz,
@@ -1384,6 +1387,9 @@ def semantic_overlay_bytes(rec: Reconstruction, lod: str = "preview") -> bytes:
     if not labels_path.exists():
         raise RuntimeError("Semantic labels not found")
     cloud = ply_io.read_3dgs_ply(Path(rec.splat_path))
+    # Stale sidecar (older schema / count mismatch) → treat as absent (#498).
+    if is_sidecar_stale(labels_path, len(cloud.means)):
+        raise RuntimeError("Semantic labels not found")
     data = read_sidecar(labels_path)
     render_cfg = get_render_config()
     if lod == "preview":
