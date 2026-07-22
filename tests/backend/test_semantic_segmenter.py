@@ -77,7 +77,7 @@ def test_load_segmenter_cuda_uses_float16(monkeypatch):
     seg._segmenter_cache.clear()
     seg._id_to_category_cache.clear()
 
-    import torch
+    torch = pytest.importorskip("torch")
 
     monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
 
