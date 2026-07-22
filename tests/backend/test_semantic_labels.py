@@ -125,6 +125,25 @@ class TestStaleness:
         bad.write_bytes(b"this is not an npz file")
         assert is_sidecar_stale(bad, 100) is True
 
+    def test_missing_schema_version_is_stale(self, tmp_path: Path):
+        """Pre-versioning sidecars (matching count, wrong labels) are stale."""
+        p = tmp_path / "semantic_labels.npz"
+        np.savez(p, meta=json.dumps({"gaussian_count": 5}))
+        assert is_sidecar_stale(p, 5) is True
+
+    def test_older_schema_version_is_stale(self, tmp_path: Path):
+        p = tmp_path / "semantic_labels.npz"
+        np.savez(p, meta=json.dumps({"gaussian_count": 5, "schema_version": 1}))
+        assert is_sidecar_stale(p, 5) is True
+
+    def test_current_schema_version_is_fresh(self, tmp_path: Path):
+        labels = np.zeros(5, dtype=np.uint8)
+        conf = np.zeros(5, dtype=np.float16)
+        med = np.zeros(2, dtype=np.uint8)
+        prv = np.zeros(1, dtype=np.uint8)
+        path = write_sidecar(tmp_path, labels, conf, med, prv)
+        assert is_sidecar_stale(path, 5) is False
+
 
 class TestPruneOrder:
     def test_prune_order_limits(self):
