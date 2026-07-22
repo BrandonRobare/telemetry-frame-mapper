@@ -14,177 +14,75 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from typing import Any
 
 import numpy as np
 
 logger = logging.getLogger(__name__)
 
-# -- ADE20K -> 6-class semantic mapping ---------------------------------------
-
-# ADE20K has 150 classes.  Each ADE20K class id maps to one of our six
-# semantic super-categories: 0=ground, 1=vegetation, 2=structure, 3=vehicle,
-# 4=water, 5=other.
+# -- label-string -> 6-class semantic mapping ---------------------------------
 #
-# The mapping is a 150-element uint8 LUT where ``lut[ade_id]`` gives the
-# semantic category.  Every id maps to a value < 6.
+# The checkpoint reports human-readable label strings (``model.config.id2label``)
+# whose *numbering* is checkpoint-specific — it must never be hard-coded.  We
+# map each label to one of six semantic super-categories by matching label
+# *terms*, then resolve id -> category once at load time via ``id2label``.
+# Category ids match ``semantic_labels.CLASS_NAMES`` order:
+#   0=ground, 1=vegetation, 2=structure, 3=vehicle, 4=water, 5=other.
 
-_ADE20K_TO_SEMANTIC: np.ndarray = np.full(150, 5, dtype=np.uint8)  # default: other
+SEMANTIC_OTHER = 5
 
-# ground (0) — earth, roads, floors, paths, fields
-for _cid in {
-    3,   # floor
-    9,   # grass (lawn)
-    14,  # earth, ground
-    23,  # sidewalk, pavement
-    26,  # road
-    27,  # runway
-    29,  # path
-    30,  # playingfield
-    52,  # sand
-    53,  # dirt track
-    54,  # runway (alt)
-    85,  # field
-    91,  # hill
-    96,  # land
-    116,  # runway (another)
-}:
-    _ADE20K_TO_SEMANTIC[_cid] = 0
+_CATEGORY_TERMS: dict[int, tuple[str, ...]] = {
+    0: ("road", "sidewalk", "earth", "ground", "path", "floor",
+        "sand", "field", "dirt track", "runway"),
+    1: ("tree", "grass", "plant", "palm", "flower", "bush"),
+    2: ("building", "house", "wall", "fence", "bridge", "skyscraper",
+        "hovel", "tower", "awning"),
+    3: ("car", "truck", "bus", "van", "boat", "ship", "airplane",
+        "bicycle", "motorbike"),
+    4: ("water", "sea", "lake", "river", "pool", "waterfall"),
+}
 
-# vegetation (1) — trees, plants, bushes, moss
-for _cid in {
-    4,   # tree
-    5,   # plant
-    8,   # flower
-    17,  # grass
-    18,  # plant (other)
-    21,  # palm
-    22,  # bush
-    66,  # moss
-    73,  # straw
-    84,  # trunk
-    110,  # forest / vegetation
-    129,  # vegetation (alt)
-}:
-    _ADE20K_TO_SEMANTIC[_cid] = 1
-
-# structure (2) — buildings, walls, bridges, fences, man-made standing objects
-for _cid in {
-    0,   # wall
-    1,   # building, edifice
-    6,   # cabinet
-    7,   # door
-    10,  # windowpane, window
-    11,  # awning
-    12,  # blind, screen
-    13,  # railing, banister
-    15,  # ceiling
-    16,  # curtain
-    19,  # painting, picture
-    20,  # post
-    24,  # stairs
-    25,  # escalator
-    28,  # fence, paling
-    31,  # column, pillar
-    32,  # signboard, sign
-    33,  # streetlight
-    34,  # sconce
-    35,  # canopy
-    36,  # bridge, span
-    37,  # booth, stall, kiosk
-    40,  # stove, oven
-    43,  # toilet
-    44,  # towel rail, towel bar
-    46,  # bathtub
-    47,  # shower
-    48,  # fireplace
-    56,  # skyscraper
-    57,  # hovel, hut, hutch, shack, shanty
-    58,  # house
-    65,  # arcade machine
-    71,  # booth
-    74,  # ruins
-    77,  # tent
-    81,  # net
-    83,  # grate
-    86,  # barn
-    88,  # pier, wharf, wharfage, dock
-    89,  # stage
-    97,  # chimney
-    99,  # fountain
-    100,  # pool table, billiard table, snooker table
-    101,  # stairs_moving
-    103,  # shower_curtain
-    105,  # teller machine, cash machine, ATM
-    108,  # corridor
-    111,  # stairway
-    114,  # base, pedestal, stand
-    118,  # skylight
-    119,  # tower
-    120,  # bridge_other
-    126,  # aquarium
-    135,  # clothes
-    144,  # greenhouse, nursery
-    148,  # shower_stall
-}:
-    _ADE20K_TO_SEMANTIC[_cid] = 2
-
-# vehicle (3) — cars, trucks, trains, boats, planes, bikes
-for _cid in {
-    38,  # bus, autobus, coach
-    39,  # car, auto, automobile, machine, motorcar
-    41,  # truck, motortruck
-    42,  # train
-    45,  # boat
-    49,  # airplane, aeroplane, plane
-    50,  # bike, bicycle, wheel
-    51,  # scooter
-    69,  # ship
-    70,  # van
-    72,  # helicopter
-    75,  # skateboard
-    80,  # motorbike, motorcycle
-    104,  # baby carriage, baby buggy, perambulator, pram, pushchair
-    113,  # bicycle_wheel
-    142,  # tricycle
-}:
-    _ADE20K_TO_SEMANTIC[_cid] = 3
-
-# water (4) — water, sea, river, lake, waterfall
-for _cid in {
-    60,  # water
-    87,  # waterfall
-    128,  # lake
-}:
-    _ADE20K_TO_SEMANTIC[_cid] = 4
-
-# everything else stays at 5 (other):
-#   2=sky, 55=keyboard, 59=floor_mat, 61=blind, 62=coffee_table,
-#   63=ottoman, 64=sofa, 67=pillow, 68=box, 76=platform,
-#   78=computer, 79=towel, 82=books, 90=case, 92=pot,
-#   93=glass, 94=barrel, 95=ottoman_other, 98=kitchen_island,
-#   102=basket, 106=printer, 107=flag, 109=conveyor_belt,
-#   112=light, 115=bench, 117=sculpture, 121=radiator,
-#   122=fan, 123=ceiling_fan, 124=swivel_chair, 125=range_hood,
-#   127=stool, 130=escalator_other, 131=microwave, 132=kitchen_counter,
-#   133=bag, 134=trash_can, 136=sofa_bed, 137=lamp, 138=nightstand,
-#   139=monitor, 140=ottoman_bench, 141=cushion, 143=shelf,
-#   145=chest_of_drawers, 146=wardrobe, 147=sofa_chair, 149=armchair
+_TERM_TO_CATEGORY: dict[str, int] = {
+    term: cat for cat, terms in _CATEGORY_TERMS.items() for term in terms
+}
 
 
-def ade20k_to_semantic(pixel_labels: np.ndarray) -> np.ndarray:
-    """Map per-pixel ADE20K class ids (0..149) to semantic super-categories (0..5).
+def _label_to_category(label: str) -> int:
+    """Map one label string to a semantic category (0..5).
 
-    Parameters
-    ----------
-    pixel_labels:
-        np.ndarray of uint8 (or int), any shape.  ADE20K fine-grained class ids.
-
-    Returns
-    -------
-        np.ndarray of uint8, same shape as input, values in 0..5.
+    ADE20K labels are often multi-term (``"tree;wood"``, ``"car, auto, machine"``).
+    The label is lower-cased and split on ``;``/``,``; the first term matching a
+    known category wins.  Unmatched labels (including ``sky``) map to ``other``.
     """
-    return _ADE20K_TO_SEMANTIC[np.asarray(pixel_labels, dtype=np.uint8)]
+    for raw in re.split(r"[;,]", label.lower()):
+        term = raw.strip()
+        if term in _TERM_TO_CATEGORY:
+            return _TERM_TO_CATEGORY[term]
+    return SEMANTIC_OTHER
+
+
+def build_id_to_category(id2label: dict[int, str] | None) -> np.ndarray:
+    """Build a class-id -> semantic-category LUT from a model's ``id2label``.
+
+    Returns a uint8 array where ``lut[class_id]`` is the semantic category
+    (0..5), sized to ``max(id) + 1`` so any predicted id indexes safely.  An
+    empty or missing map yields a single-element ``other`` LUT.
+    """
+    if not id2label:
+        return np.full(1, SEMANTIC_OTHER, dtype=np.uint8)
+    size = max(int(i) for i in id2label) + 1
+    lut = np.full(size, SEMANTIC_OTHER, dtype=np.uint8)
+    for cid, label in id2label.items():
+        lut[int(cid)] = _label_to_category(str(label))
+    return lut
+
+
+def _pipe_id2label(segmenter: Any) -> dict[int, str]:
+    """Best-effort extraction of a segmenter's ``id2label`` map."""
+    config = getattr(getattr(segmenter, "model", None), "config", None)
+    id2label = getattr(config, "id2label", None)
+    return dict(id2label) if id2label else {}
 
 
 # -- lazy dependency import ---------------------------------------------------
@@ -215,6 +113,7 @@ def _import_segmentation_deps():
 # -- segmenter loader + inference ---------------------------------------------
 
 _segmenter_cache: dict[str, Any] = {}
+_id_to_category_cache: dict[str, np.ndarray] = {}
 
 
 def load_segmenter(
@@ -265,10 +164,14 @@ def load_segmenter(
     }
 
     if device == "cuda":
-        pipeline_kwargs["torch_dtype"] = "torch.float16"
+        # transformers resolves string dtypes via ``getattr(torch, s)`` — must be
+        # the bare attribute name, not ``"torch.float16"`` (which raises).
+        pipeline_kwargs["torch_dtype"] = "float16"
 
     pipe = transformers.pipeline(**pipeline_kwargs)
     _segmenter_cache[model_id] = pipe
+    # Resolve id -> semantic category once, keyed to *this* checkpoint's ids.
+    _id_to_category_cache[model_id] = build_id_to_category(_pipe_id2label(pipe))
     return pipe
 
 
@@ -309,14 +212,12 @@ def segment_frame(
     label_map = np.full((h, w), 5, dtype=np.uint8)  # default: other
     confidence_map = np.zeros((h, w), dtype=np.float32)
 
-    # Build label2id from the model config.
-    label2id: dict[str, int] = {}
-    if hasattr(segmenter.model, "config"):
-        cfg = segmenter.model.config
-        if hasattr(cfg, "label2id") and cfg.label2id is not None:
-            label2id = cfg.label2id
-        elif hasattr(cfg, "id2label") and cfg.id2label is not None:
-            label2id = {v: k for k, v in cfg.id2label.items()}
+    # Resolve id -> semantic category for this checkpoint (cached at load time;
+    # rebuilt here if a segmenter was passed in without going through the cache).
+    id_to_category = _id_to_category_cache.get(model_id)
+    if id_to_category is None:
+        id_to_category = build_id_to_category(_pipe_id2label(segmenter))
+    label2id = {label: cid for cid, label in _pipe_id2label(segmenter).items()}
 
     for entry in results:
         label_str: str = entry["label"]
@@ -324,10 +225,10 @@ def segment_frame(
         mask = np.asarray(entry["mask"], dtype=bool)
 
         ade_id = label2id.get(label_str)
-        if ade_id is None:
+        if ade_id is None or ade_id >= len(id_to_category):
             continue
 
-        sem_id = int(_ADE20K_TO_SEMANTIC[ade_id])
+        sem_id = int(id_to_category[ade_id])
 
         # Higher confidence wins per-pixel.
         update = mask & (score > confidence_map)
