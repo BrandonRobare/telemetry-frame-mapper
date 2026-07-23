@@ -36,7 +36,7 @@ First stable release: a complete drone video → gaussian-splat pipeline. The he
 - Version bumped to 1.0.0 across the package, API, and frontend; classifier set to Production/Stable.
 - The `reconstruction` extra no longer pins gsplat (no resolvable CUDA wheel exists); GPU training is a documented manual install.
 - CLI frame index is now read from the **last** number in a filename, so prefixed names like `DJI_0081_frame_42.jpg` time correctly.
-- CI runs a Python 3.10/3.11/3.12 matrix plus a frontend lint/test/build job.
+- CI runs a Python 3.11/3.12 matrix plus a frontend lint/test/build job.
 
 ### Removed
 - Broken legacy Docker Compose files (`docker-compose.yml` referenced Dockerfiles that never existed). A supported single-container Dockerfile was added after 1.0 and is covered by CI build smoke.

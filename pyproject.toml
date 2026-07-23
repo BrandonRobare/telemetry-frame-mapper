@@ -7,7 +7,7 @@ name = "drone-video-geotagger"
 version = "1.0.0"
 description = "Geotags DJI drone video frames with GPS EXIF metadata for WebODM/OpenDroneMap processing."
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 license = "MIT"
 authors = [
   { name = "Brandon" }
@@ -19,7 +19,6 @@ classifiers = [
   "Intended Audience :: Science/Research",
   "License :: OSI Approved :: MIT License",
   "Programming Language :: Python :: 3",
-  "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Topic :: Multimedia :: Graphics",
@@ -39,7 +38,7 @@ backend = [
   "numpy>=2",
   "shapely==2.1.2",
   "geopandas==1.1.4",
-  "pyproj==3.7.1",
+  "pyproj==3.7.2",
   "httpx==0.28.1",
   "python-multipart==0.0.32",
   "aiofiles==25.1.0",
