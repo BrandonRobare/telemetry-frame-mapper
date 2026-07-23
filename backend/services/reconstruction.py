@@ -53,6 +53,7 @@ from backend.services.semantic_labels import (
     NUM_CLASSES,
     accumulate_votes,
     finalize_labels,
+    is_sidecar_stale,
     lod_labels,
     project_to_view,
     read_sidecar,
@@ -841,18 +842,55 @@ def compute_coverage_gaps(
     )
 
 
-def _extract_geo_transform(colmap_dir: Path) -> dict:
-    """Extract similarity transform from COLMAP model. Returns placeholder if unavailable."""
+# Identity transform used only as the downstream default for a *non*-georeferenced
+# reconstruction: it renders point sources in COLMAP's local frame and attaches no
+# CRS (utm_zone "unknown" -> _utm_epsg None). It is never stored in the DB — a
+# reconstruction that could not be georeferenced keeps rec.geo_transform NULL.
+_LOCAL_FRAME_GEO = {
+    "scale": 1.0,
+    "rotation": [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
+    "translation": [0.0, 0.0, 0.0],
+    "utm_zone": "unknown",
+    "utm_origin": [0.0, 0.0],
+}
+
+
+def _extract_geo_transform(colmap_dir: Path) -> dict | None:
+    """Return the persisted COLMAP->UTM transform, or None if none was solved.
+
+    The solve (backend.services.georeferencing_solve) writes geo_transform.json
+    only on success, so its absence means the reconstruction is not georeferenced.
+    """
     geo_ref = colmap_dir / "geo_transform.json"
     if geo_ref.exists():
         return json.loads(geo_ref.read_text())
-    return {
-        "scale": 1.0,
-        "rotation": [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
-        "translation": [0.0, 0.0, 0.0],
-        "utm_zone": "unknown",
-        "utm_origin": [0.0, 0.0],
-    }
+    return None
+
+
+def _compute_geo_transform(reconstruction_id: int, colmap_dir: Path, images: list) -> dict | None:
+    """Solve COLMAP-world -> UTM from camera centres and frame GPS (best effort).
+
+    Returns the transform dict (and writes geo_transform.json) on success, or None
+    when alignment is impossible/degenerate — logging the reason. Never raises.
+    """
+    from backend.services import georeferencing_solve
+
+    sparse_dir = _pick_best_submodel(colmap_dir / "sparse")
+    try:
+        geo = georeferencing_solve.compute_geo_transform(colmap_dir, sparse_dir, images)
+    except Exception as exc:  # best-effort: a solve failure must not fail the pipeline
+        logger.warning("Georeferencing solve raised for reconstruction %s: %s",
+                       reconstruction_id, exc)
+        _log_rec(reconstruction_id, f"Georeferencing failed: {exc}")
+        return None
+    if geo is None:
+        _log_rec(reconstruction_id, "Georeferencing: not georeferenced (alignment failed)")
+    else:
+        _log_rec(
+            reconstruction_id,
+            f"Georeferencing: aligned to UTM {geo['utm_zone']} (scale {geo['scale']:.4g})",
+        )
+    return geo
 
 
 def _filter_images_to_target_area(images: list, geom_geojson: str) -> list:
@@ -1094,10 +1132,10 @@ def _utm_epsg(utm_zone: str) -> int | None:
     return (32600 if match.group(2).upper() == "N" else 32700) + zone
 
 
-def _world_points_to_utm(points_xyz, geo: dict):
+def _world_points_to_utm(points_xyz, geo: dict | None):
     import numpy as np
 
-    if _utm_epsg(str(geo.get("utm_zone", ""))) is None:
+    if not geo or _utm_epsg(str(geo.get("utm_zone", ""))) is None:
         return points_xyz
 
     rotation = np.array(geo["rotation"], dtype=np.float64)
@@ -1175,7 +1213,9 @@ def _export_point_cloud(
 
     classifications = None
     semantic_sidecar = _semantic_sidecar_for_splat(splat_path)
-    if semantic_sidecar.exists():
+    # A stale (older-schema / count-mismatched) sidecar holds wrong labels — treat
+    # it as absent so the export is unclassified rather than misclassified (#498).
+    if not is_sidecar_stale(semantic_sidecar, len(gaussian_xyz)):
         sidecar = read_sidecar(semantic_sidecar)
         classifications = _semantic_labels_to_asprs(
             points_xyz,
@@ -1183,7 +1223,9 @@ def _export_point_cloud(
             sidecar["labels"],
         )
 
-    geo = _extract_geo_transform(colmap_dir)
+    # A non-georeferenced reconstruction (no solved transform) exports in the
+    # local COLMAP frame with no CRS attached — honest, not falsely georeferenced.
+    geo = _extract_geo_transform(colmap_dir) or _LOCAL_FRAME_GEO
     output_xyz = _world_points_to_utm(points_xyz, geo)
 
     header = laspy.LasHeader(point_format=3, version="1.4")
@@ -1384,6 +1426,9 @@ def semantic_overlay_bytes(rec: Reconstruction, lod: str = "preview") -> bytes:
     if not labels_path.exists():
         raise RuntimeError("Semantic labels not found")
     cloud = ply_io.read_3dgs_ply(Path(rec.splat_path))
+    # Stale sidecar (older schema / count mismatch) → treat as absent (#498).
+    if is_sidecar_stale(labels_path, len(cloud.means)):
+        raise RuntimeError("Semantic labels not found")
     data = read_sidecar(labels_path)
     render_cfg = get_render_config()
     if lod == "preview":
@@ -1424,11 +1469,17 @@ def _safe_export_path(path: Path, exports_dir: Path) -> Path:
 
 
 def _load_geo_transform_for_reconstruction(rec: Reconstruction) -> dict:
+    """Return the reconstruction's UTM transform, or the local-frame default.
+
+    Downstream point/mesh exporters always need a transform dict; a
+    non-georeferenced reconstruction falls back to _LOCAL_FRAME_GEO (identity,
+    no CRS) rather than None so those consumers render in the local frame.
+    """
     if rec.geo_transform:
         return json.loads(rec.geo_transform)
     if rec.colmap_dir:
-        return _extract_geo_transform(Path(rec.colmap_dir))
-    return _extract_geo_transform(Path(""))
+        return _extract_geo_transform(Path(rec.colmap_dir)) or _LOCAL_FRAME_GEO
+    return _LOCAL_FRAME_GEO
 
 
 def _mesh_georef_metadata(rec: Reconstruction, geo: dict) -> dict:
@@ -2197,10 +2248,10 @@ def _run_pipeline(entry, db, cancel: threading.Event) -> None:
             )
             return
 
-        geo = _extract_geo_transform(colmap_dir)
+        geo = _compute_geo_transform(reconstruction_id, colmap_dir, images)
         _update_rec(
             db, reconstruction_id,
-            geo_transform=json.dumps(geo),
+            geo_transform=json.dumps(geo) if geo else None,
             frames_registered=frames_registered,
         )
 
@@ -2364,6 +2415,16 @@ def _run_remote_pipeline(
             if state == "complete":
                 result = status.get("result", {})
                 result = result if isinstance(result, dict) else {}
+                # Worker and API share storage, so the sparse model lands locally
+                # at colmap_dir. Run the same in-process solve; leave the transform
+                # NULL (never a placeholder) if no local sparse model is present.
+                geo = None
+                colmap_dir = payload.get("colmap_dir")
+                if colmap_dir:
+                    images = db.query(Image).filter(
+                        Image.id.in_(payload.get("image_ids", []))
+                    ).all()
+                    geo = _compute_geo_transform(reconstruction_id, Path(colmap_dir), images)
                 _update_rec(
                     db,
                     reconstruction_id,
@@ -2374,6 +2435,7 @@ def _run_remote_pipeline(
                     gaussian_count=result.get("gaussian_count"),
                     psnr=result.get("psnr"),
                     ssim=result.get("ssim"),
+                    geo_transform=json.dumps(geo) if geo else None,
                     completed_at=datetime.now(timezone.utc),
                 )
                 _log_rec(reconstruction_id, "Remote worker: complete")

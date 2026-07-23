@@ -49,7 +49,7 @@ from ..services.reconstruction import (
     start_semantic_labeling,
     wait_for_reconstruction_status_change,
 )
-from ..services.semantic_labels import semantic_summary
+from ..services.semantic_labels import is_sidecar_stale, semantic_summary
 from ..services.splat_cleanup import cleanup_ply_file
 from ..services.splat_transform import cleanup_splat as _splat_transform_cleanup
 from ..services.splat_transform import (
@@ -1107,7 +1107,8 @@ def get_semantic_labels_summary(
             fallback = Path(rec.splat_path).parent / "semantic_labels.npz"
             if fallback.exists():
                 labels_path = fallback
-    if labels_path is None or not labels_path.exists():
+    # Stale sidecar (older schema version) holds wrong labels — treat as absent (#498).
+    if labels_path is None or not labels_path.exists() or is_sidecar_stale(labels_path):
         raise HTTPException(status_code=404, detail="Semantic labels not found")
     try:
         return semantic_summary(labels_path, lod=lod)

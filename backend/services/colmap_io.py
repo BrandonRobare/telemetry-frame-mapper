@@ -318,3 +318,13 @@ def world_to_cam_matrix(image: ColmapImage) -> np.ndarray:
     viewmat[:3, :3] = qvec_to_rotmat(image.qvec)
     viewmat[:3, 3] = np.asarray(image.tvec, dtype=np.float64)
     return viewmat
+
+
+def camera_center(image: ColmapImage) -> np.ndarray:
+    """Return the camera centre in world coordinates: ``C = -R^T @ t``.
+
+    ``qvec``/``tvec`` encode the world->camera pose (``X_cam = R @ X_world + t``),
+    so the camera position in world space is ``-R^T @ t``.
+    """
+    rotation = qvec_to_rotmat(image.qvec)
+    return -rotation.T @ np.asarray(image.tvec, dtype=np.float64)
