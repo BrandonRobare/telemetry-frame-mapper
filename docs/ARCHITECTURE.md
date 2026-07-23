@@ -117,5 +117,5 @@ exports/     plans, splats, LODs, LAS, diffs (gitignored)  ← exports/{reconstr
 - **External tools are subprocesses behind gates** — argv lists, never shell; missing binaries must produce install guidance, not tracebacks; CI never gets real binaries (all external tools are mocked).
 - **Heavy Python deps are lazy** — torch/gsplat/SuGaR/laspy import inside functions; `pip install .[backend]` and backend import must always work without them, degrading per the state machine above.
 - **The splat PLY layout is a contract** — exact INRIA property order, channel-major `f_rest`, wxyz quaternions; the browser viewer, LAS colorization, and coverage gaps all parse it.
-- **Paths are `Path` objects; Python 3.10+; `from __future__ import annotations`; ruff E/F/I/UP/B at line length 100.**
+- **Paths are `Path` objects; Python 3.11+; `from __future__ import annotations`; ruff E/F/I/UP/B at line length 100.**
 - Tests use inline fixtures only — real flight data never enters the repo (`.gitignore` enforces).
