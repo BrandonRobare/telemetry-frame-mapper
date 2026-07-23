@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/BrandonRobare/telemetry-frame-mapper/actions/workflows/ci.yml/badge.svg)](https://github.com/BrandonRobare/telemetry-frame-mapper/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![Latest release](https://img.shields.io/github/v/release/BrandonRobare/telemetry-frame-mapper)](https://github.com/BrandonRobare/telemetry-frame-mapper/releases/latest)
 
 A full pipeline from DJI drone video to a GPS-registered 3D gaussian splat: geotag extracted frames from the embedded telemetry, review coverage on a map, run COLMAP + gaussian-splat reconstruction, and explore/export the result — plus WebODM/OpenDroneMap-ready output at every step.
