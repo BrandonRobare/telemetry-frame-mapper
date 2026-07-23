@@ -4,7 +4,7 @@ What you need depends on how much of the pipeline you use:
 
 | You want to… | You need |
 |---|---|
-| Geotag video frames (CLI only) | Python 3.10+, `ffmpeg`, `exiftool` |
+| Geotag video frames (CLI only) | Python 3.11+, `ffmpeg`, `exiftool` |
 | Use the web app (map, review, plan, export) | + Node 18+, the `[backend]` Python extra |
 | Run 3D reconstruction | + COLMAP on PATH |
 | Train gaussian splats / render server-side | + NVIDIA GPU (4 GB+ VRAM), CUDA toolkit, torch + gsplat (see [SETUP.md](SETUP.md)) |
