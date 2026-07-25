@@ -829,8 +829,10 @@ def download_splat(
         "medium": rec.splat_medium_path,
         "preview": rec.splat_preview_path,
     }
-    splat_path = path_map[lod]
-    if not splat_path or not Path(splat_path).exists():
+    if not path_map[lod]:
+        raise HTTPException(status_code=404, detail=f"Splat file ({lod}) not found on disk")
+    splat_path = _safe_owned_http_path(Path(path_map[lod]))
+    if not splat_path.exists():
         raise HTTPException(status_code=404, detail=f"Splat file ({lod}) not found on disk")
 
     return FileResponse(
@@ -1273,10 +1275,12 @@ def get_coverage_gaps(reconstruction_id: int, db: DBSession = Depends(get_db)):
     if not rec.splat_path:
         raise HTTPException(status_code=404, detail="No splat available")
 
-    splat_path = Path(rec.splat_path)
+    splat_path = _safe_owned_http_path(Path(rec.splat_path))
 
-    if rec.coverage_gaps_path and Path(rec.coverage_gaps_path).exists():
-        return json.loads(Path(rec.coverage_gaps_path).read_text())
+    if rec.coverage_gaps_path:
+        gaps_path = _safe_owned_http_path(Path(rec.coverage_gaps_path))
+        if gaps_path.exists():
+            return json.loads(gaps_path.read_text())
 
     try:
         cells, output_path = compute_coverage_gaps(splat_path, reconstruction_id)

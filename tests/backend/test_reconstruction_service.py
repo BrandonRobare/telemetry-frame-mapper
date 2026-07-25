@@ -2207,3 +2207,38 @@ def test_semantic_overlay_bytes_frames_preview_payload(tmp_path, monkeypatch):
     count = struct.unpack("<I", payload[:4])[0]
     assert count == 1
     assert payload[-1] == 1
+
+
+def test_write_colmap_workspace_confines_image_filename_to_workspace(tmp_path, monkeypatch):
+    """Image.filename must never be joined onto the workspace dir unsanitised.
+
+    ingest.py derives it with os.path.basename, but a restored session bundle carries
+    the archive manifest's value verbatim. On Windows os.symlink raises without
+    Developer Mode, so the shutil.copy2 fallback would write attacker-controlled
+    bytes to an arbitrary path — e.g. overwriting config.yaml to disable the PIN lock.
+    """
+    from backend.services import reconstruction as recon
+
+    source = tmp_path / "source.jpg"
+    source.write_bytes(b"image bytes")
+    outside = tmp_path / "config.yaml"
+    outside.write_text("pin_lock:\n  enabled: true\n")
+
+    colmap_dir = tmp_path / "workspace" / "deep" / "nested"
+
+    class _Img:
+        filepath = str(source)
+        filename = "../../../config.yaml"
+        camera_make = None
+        camera_model_exif = None
+        focal_length_mm = None
+        width_px = None
+        height_px = None
+
+    # Force the copy2 fallback, which is what actually escapes on Windows.
+    monkeypatch.setattr(recon.os, "symlink", lambda *a, **k: (_ for _ in ()).throw(OSError()))
+
+    recon._write_colmap_workspace(colmap_dir, [_Img()])
+
+    assert outside.read_text().startswith("pin_lock:"), "workspace write escaped and clobbered it"
+    assert (colmap_dir / "images" / "config.yaml").read_bytes() == b"image bytes"

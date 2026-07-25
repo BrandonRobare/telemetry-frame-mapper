@@ -76,6 +76,7 @@ def test_deployment_config_defaults_to_loopback_and_local_frontends(tmp_path):
         "port": 8000,
         "cors_origins": ["http://localhost:5173", "http://localhost:3000"],
         "allow_unauthenticated_lan": False,
+        "allowed_hosts": [],
     }
 
 
@@ -97,6 +98,7 @@ def test_deployment_config_accepts_explicit_lan_bind_and_origins(tmp_path):
         "port": 8080,
         "cors_origins": ["http://192.168.1.50:5173"],
         "allow_unauthenticated_lan": True,
+        "allowed_hosts": [],
     }
 
 

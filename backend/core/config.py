@@ -461,6 +461,11 @@ def get_deployment_config(path: str = "config.yaml") -> dict:
         "port": 8000,
         "cors_origins": ["http://localhost:5173", "http://localhost:3000"],
         "allow_unauthenticated_lan": False,
+        # Host header allowlist (anti-DNS-rebinding). Empty means "derive from host +
+        # cors_origins + loopback", which covers every documented setup. Set it
+        # explicitly — or to ["*"] — when reaching the app by an address neither the
+        # bind host nor a CORS origin names, e.g. a container addressed by LAN IP.
+        "allowed_hosts": [],
     }
     deployment = data.get("deployment", {})
     if not isinstance(deployment, dict):
@@ -527,6 +532,12 @@ def get_deployment_config(path: str = "config.yaml") -> dict:
         ):
             raise ValueError("deployment.cors_origins must contain HTTP(S) origins without paths")
     result["cors_origins"] = [origin.rstrip("/") for origin in origins]
+    allowed_hosts = result["allowed_hosts"]
+    if not isinstance(allowed_hosts, list) or not all(
+        isinstance(entry, str) and entry.strip() for entry in allowed_hosts
+    ):
+        raise ValueError("deployment.allowed_hosts must be a list of hostnames")
+    result["allowed_hosts"] = [entry.strip() for entry in allowed_hosts]
     return result
 
 

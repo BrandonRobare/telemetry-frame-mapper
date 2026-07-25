@@ -10,7 +10,7 @@ import subprocess
 import threading
 import time
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 from shapely.geometry import Point, shape
 from sqlalchemy.orm import Session as DBSession
@@ -200,7 +200,15 @@ def _write_colmap_workspace(colmap_dir: Path, images: list) -> None:
 
     for img in images:
         src = Path(img.filepath)
-        dest = images_dir / img.filename
+        # Never trust the stored filename as a path fragment: a restored session bundle
+        # carries it verbatim from the archive manifest, so a value like
+        # "../../../config.yaml" would escape the workspace on the copy2 fallback below.
+        # PureWindowsPath (not PurePath) so "/", "\" and drive letters are all stripped
+        # regardless of the host OS — a POSIX server may restore a Windows-authored bundle.
+        safe_name = PureWindowsPath(img.filename or "").name
+        if not safe_name:
+            continue
+        dest = images_dir / safe_name
         if dest.exists():
             continue
         try:

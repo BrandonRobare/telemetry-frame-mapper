@@ -50,3 +50,33 @@ def test_write_exiftool_args_file_non_ascii_path(tmp_path: Path) -> None:
     content = args_path.read_text(encoding="utf-8")
     assert "café_0001.jpg" in content
     assert content.startswith("-charset\nfilename=UTF8\n")
+
+
+def test_external_file_arg_rejects_newline_in_path() -> None:
+    """ExifTool's -@ argfile is one argument per line, so a newline in a filename
+    injects options. ``-config`` loads a Perl file, i.e. code execution as the
+    pipeline user, and frame paths come from directory contents (SD-card import)."""
+    import pytest
+
+    from drone_video_geotagger.paths import external_file_arg
+
+    with pytest.raises(ValueError, match="newline"):
+        external_file_arg(Path("frames/frame\n-config\n/tmp/evil.cfg\n001.jpg"), "exiftool")
+
+
+def test_write_exiftool_args_file_rejects_injected_option(tmp_path: Path) -> None:
+    tag = FrameTag(
+        source=Path("frames/a.jpg"),
+        target=tmp_path / "a\n-config\nevil.cfg\n.jpg",
+        frame_index=1,
+        seconds=0,
+        lat=41.125,
+        lon=-81.25,
+        rel_alt_m=115.5,
+        abs_alt_m=352.438,
+        timestamp=None,
+    )
+    import pytest
+
+    with pytest.raises(ValueError):
+        write_exiftool_args_file([tag], tmp_path / "args.txt")

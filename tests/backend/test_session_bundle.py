@@ -410,3 +410,156 @@ def test_restore_drops_project_id_not_included_in_bundle(client, tmp_path):
 
     new_session = db.query(SessionModel).filter(SessionModel.id == new_session_id).first()
     assert new_session.project_id is None
+
+
+# ---------------------------------------------------------------------------
+# Crafted-manifest hardening. manifest.json is attacker-controlled input: the
+# archive path is confined to a data root, but POST /uploads/imports/{id}/chunk
+# lets anyone write arbitrary bytes into imports/, so archive *contents* are not
+# trusted just because the archive's location is.
+# ---------------------------------------------------------------------------
+
+_EMPTY_MANIFEST_TABLES = (
+    "images",
+    "footprints",
+    "flight_logs",
+    "flight_log_points",
+    "flight_entries",
+    "log_entries",
+    "reconstructions",
+    "reconstruction_frames",
+    "annotations",
+    "measurements",
+    "frame_selections",
+    "defects",
+    "defect_images",
+    "artifacts",
+)
+
+
+def _crafted_bundle(tmp_path, **tables):
+    """Write a bundle whose manifest.json is hand-authored rather than exported."""
+    import json
+
+    manifest = {t: [] for t in _EMPTY_MANIFEST_TABLES}
+    manifest["session"] = {"name": "crafted", "folder_path": "/srv/somewhere-else"}
+    manifest.update(tables)
+
+    zip_path = tmp_path / "imports" / "crafted.jpg"
+    zip_path.parent.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(zip_path, "w") as zf:
+        zf.writestr("manifest.json", json.dumps(manifest))
+    return zip_path
+
+
+def test_restore_drops_path_columns_not_backed_by_a_bundled_artifact(client, tmp_path):
+    # A manifest can name any file on the server. Every path column must come back
+    # NULL unless this restore actually wrote the file, otherwise a later
+    # GET /reconstruction/{id}/splat serves whatever the manifest pointed at.
+    cfg = _cfg(tmp_path)
+    db = _db(client)
+    secret = tmp_path / "id_rsa"
+    secret.write_text("PRIVATE KEY")
+
+    zip_path = _crafted_bundle(
+        tmp_path,
+        reconstructions=[
+            {
+                "id": 1,
+                "status": "complete",
+                "splat_path": str(secret),
+                "coverage_gaps_path": str(secret),
+                "colmap_dir": str(tmp_path),
+                "pointcloud_path": str(secret),
+            }
+        ],
+    )
+
+    resp = _restore(client, cfg, str(zip_path))
+    assert resp.status_code == 200
+
+    rec = (
+        db.query(Reconstruction)
+        .filter(Reconstruction.session_id == resp.json()["session_id"])
+        .one()
+    )
+    assert rec.splat_path is None
+    assert rec.coverage_gaps_path is None
+    assert rec.colmap_dir is None
+    assert rec.pointcloud_path is None
+
+
+def test_restore_strips_traversal_from_image_filename(client, tmp_path):
+    # filename is later joined onto the COLMAP workspace dir by _prepare_images, so a
+    # value like "../../../config.yaml" would escape it on the copy2 fallback.
+    cfg = _cfg(tmp_path)
+    db = _db(client)
+
+    zip_path = _crafted_bundle(
+        tmp_path,
+        images=[{"id": 1, "filename": r"../../../../config.yaml", "usable": True}],
+    )
+
+    resp = _restore(client, cfg, str(zip_path))
+    assert resp.status_code == 200
+
+    img = db.query(Image).filter(Image.session_id == resp.json()["session_id"]).one()
+    assert img.filename == "config.yaml"
+    assert ".." not in img.filepath
+
+
+def test_restore_strips_windows_traversal_from_image_filename(client, tmp_path):
+    # Backslash separators and drive letters must be stripped on any host OS — a
+    # POSIX server may restore a bundle authored on Windows.
+    cfg = _cfg(tmp_path)
+    db = _db(client)
+
+    zip_path = _crafted_bundle(
+        tmp_path,
+        images=[{"id": 1, "filename": r"C:\Windows\System32\evil.jpg", "usable": True}],
+    )
+
+    resp = _restore(client, cfg, str(zip_path))
+    assert resp.status_code == 200
+
+    img = db.query(Image).filter(Image.session_id == resp.json()["session_id"]).one()
+    assert img.filename == "evil.jpg"
+
+
+def test_restore_session_folder_path_is_not_taken_from_the_manifest(client, tmp_path):
+    cfg = _cfg(tmp_path)
+    db = _db(client)
+    zip_path = _crafted_bundle(tmp_path)
+
+    resp = _restore(client, cfg, str(zip_path))
+    assert resp.status_code == 200
+
+    session = (
+        db.query(SessionModel)
+        .filter(SessionModel.id == resp.json()["session_id"])
+        .one()
+    )
+    assert session.folder_path != "/srv/somewhere-else"
+    assert "restored_sessions" in session.folder_path
+
+
+def test_restore_rejects_unknown_column_without_committing_partial_rows(client, tmp_path):
+    # Model(**data) raises TypeError for a manifest key that isn't a column. That used
+    # to escape as a 500 *after* earlier tables had already committed, stranding a
+    # half-restored session and growing the DB on every retry.
+    cfg = _cfg(tmp_path)
+    db = _db(client)
+    before = db.query(SessionModel).count()
+
+    zip_path = _crafted_bundle(
+        tmp_path,
+        images=[{"id": 1, "filename": "a.jpg", "usable": True}],
+        reconstructions=[{"id": 1, "status": "complete", "not_a_real_column": 1}],
+    )
+
+    resp = _restore(client, cfg, str(zip_path))
+    assert resp.status_code == 422
+
+    db.rollback()
+    assert db.query(SessionModel).count() == before
+    assert db.query(SessionModel).filter(SessionModel.name == "crafted").count() == 0
