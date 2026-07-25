@@ -79,6 +79,11 @@ internal/
 .superpowers/
 docs/superpowers/
 skills-lock.json
+# Agent instruction files are deliberately local: they carry this machine's
+# workflow notes, not project documentation. Contributor-facing guidance belongs
+# in CONTRIBUTING.md and docs/.
+CLAUDE.md
+AGENTS.md
 
 # Dev dashboard (internal tool, not part of the public project)
 dashboard/
