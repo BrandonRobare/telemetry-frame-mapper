@@ -68,7 +68,7 @@ Cancellation is polled between steps and between training iterations; allow a fe
 1) Confirm the reconstruction actually produced a splat (`exports/{id}/splat.ply` exists; `colmap_only` runs have none). 2) Confirm the build passes an explicit PLY format to the viewer — without it the library mis-detects the format from the `?lod=preview` URL. 3) WebGL2 must be available (check `chrome://gpu`).
 
 **Annotations/measurements disabled, GPS readout missing.**
-The reconstruction's geo-transform couldn't be derived (UTM zone unknown) — typically when source frames lacked GPS EXIF. Re-import properly geotagged frames and reconstruct again.
+The reconstruction is not georeferenced: the COLMAP→UTM solve failed, so `geo_transform` is NULL. Three causes, in rough order of likelihood: (1) the flight line is near-collinear — a single straight pass gives the fit no lateral spread to work with, so fly a cross-pass or an offset leg; (2) fewer than three frames carry usable GPS EXIF; (3) the frames span too small an area for a stable fit. Re-import properly geotagged frames from a two-axis flight and reconstruct again. LAS/LAZ exports from a non-georeferenced reconstruction are still valid, but sit in a local frame with no CRS.
 
 ## General
 

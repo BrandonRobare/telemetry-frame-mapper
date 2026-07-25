@@ -5,7 +5,7 @@ What you need depends on how much of the pipeline you use:
 | You want to… | You need |
 |---|---|
 | Geotag video frames (CLI only) | Python 3.11+, `ffmpeg`, `exiftool` |
-| Use the web app (map, review, plan, export) | + Node 18+, the `[backend]` Python extra |
+| Use the web app (map, review, plan, export) | + Node 20.19+, the `[backend]` Python extra |
 | Run 3D reconstruction | + COLMAP on PATH |
 | Train gaussian splats / render server-side | + NVIDIA GPU (4 GB+ VRAM), CUDA toolkit, torch + gsplat (see [SETUP.md](SETUP.md)) |
 
@@ -74,7 +74,7 @@ npm install
 npm run dev      # http://localhost:5173
 ```
 
-Requires Node 18+. The UI expects the backend at `http://localhost:8000` (override with a `VITE_API_URL` env var).
+Requires Node 20.19+ (Vite 8 declares `^20.19.0 || >=22.12.0`). The UI expects the backend at `http://localhost:8000` (override with a `VITE_API_URL` env var).
 
 ## 4. Run it
 
@@ -120,6 +120,38 @@ on the network would expose every project and file. Enable a PIN lock (or automa
 loopback bind, or, only if you genuinely intend an open LAN deployment, set
 `deployment.allow_unauthenticated_lan: true` to override the guard.
 
+List every browser origin that may call the API in `deployment.cors_origins`. Wildcards are
+rejected at startup.
+
+```yaml
+deployment:
+  host: "192.168.1.50"
+  port: 8000
+  cors_origins:
+    - "http://192.168.1.50:5173"
+```
+
+### Host header allowlist
+
+The backend only answers requests addressed to a host it recognises. This blocks DNS rebinding,
+where a page on an attacker's domain re-resolves to `127.0.0.1` and becomes same-origin with your
+loopback instance — CORS cannot stop that, because the browser considers it the same origin.
+
+The allowlist is derived automatically from `deployment.host`, every hostname in
+`cors_origins`, and loopback, which covers every setup above. Set `deployment.allowed_hosts`
+explicitly only when you reach the app by an address none of those name — most often a container
+published on a LAN IP:
+
+```yaml
+deployment:
+  allowed_hosts:
+    - "192.168.1.50"
+    - "mapper.lan"
+```
+
+A request with an unlisted `Host` header gets `400 Invalid host header`. Use `["*"]` to disable the
+check entirely, which is only reasonable behind a reverse proxy that already validates the host.
+
 ### Optional automation API key
 
 For scripts that cannot retain the PIN unlock cookie, enable `api_key.enabled: true` alongside
@@ -153,7 +185,26 @@ text exposition with the fixed application version, process start time, and a li
 1` database probe. It deliberately emits no project, file, user, or location data and does not
 scan application tables.
 
-## 5. GPU splat training (optional)
+### Backend logs
+
+The backend writes JSON Lines to `logs/backend.jsonl` by default. The `logging` block in
+`config.yaml` sets its level, directory, file name, rotation size, and retention count; set
+`enabled: false` to turn it off. The path resolves relative to the config file, and rotation is
+handled by Python's standard library — nothing is sent anywhere.
+
+## 5. Optional tools
+
+Everything below is detected at runtime. Missing tools degrade specific features; they never break
+startup or the test suite.
+
+| Tool | Needed for | What happens without it |
+|---|---|---|
+| `colmap` | Reconstruct tab SfM | The job fails with `COLMAP executable not found` and install guidance. |
+| `torch` + `gsplat` + CUDA GPU | Splat training, GPU thumbnails, server-side video render | The job completes COLMAP-only; thumbnails degrade quietly; server video rendering tells you to record in the browser instead. Manual two-step install — see [SETUP.md](SETUP.md). |
+| SuGaR | Mesh export | Mesh export fails with `SuGaR is not installed`. No pip package exists; install from the upstream project. |
+| PotreeConverter | Potree export | Install the [PotreeConverter](https://github.com/potree/PotreeConverter) executable on `PATH`, or point `POTREE_CONVERTER` at it. Download a reconstruction LAS first, then choose **Generate Potree**; the API writes `exports/{id}/potree/metadata.json` and its hierarchy. |
+
+## 6. GPU splat training (optional)
 
 Torch and gsplat are **deliberately not** in the pip extras — CUDA-enabled torch is not on the default PyPI index, and gsplat must compile against your torch/CUDA combination. Follow the step-by-step in [SETUP.md](SETUP.md). Without them, everything still works except splat training itself: reconstructions complete in `colmap_only` mode.
 

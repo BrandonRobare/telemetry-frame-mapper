@@ -1,13 +1,19 @@
-# Drone Video Geotagger
+# Telemetry Frame Mapper
 
 [![CI](https://github.com/BrandonRobare/telemetry-frame-mapper/actions/workflows/ci.yml/badge.svg)](https://github.com/BrandonRobare/telemetry-frame-mapper/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![Latest release](https://img.shields.io/github/v/release/BrandonRobare/telemetry-frame-mapper)](https://github.com/BrandonRobare/telemetry-frame-mapper/releases/latest)
 
-A full pipeline from DJI drone video to a GPS-registered 3D gaussian splat: geotag extracted frames from the embedded telemetry, review coverage on a map, run COLMAP + gaussian-splat reconstruction, and explore/export the result — plus WebODM/OpenDroneMap-ready output at every step.
+DJI drones record GPS telemetry into a subtitle track inside the video file. Pull still frames out
+of that video and the location data does not come with them, which leaves photogrammetry software
+with nothing to work from.
 
-DJI videos can store GPS telemetry in an embedded subtitle track. Extracted still frames do not keep that location data. The CLI reads the DJI telemetry, lines it up with the extracted frame sequence, and writes GPS EXIF tags into the JPG files; the web app takes it from there:
+This project takes the telemetry back out, matches it to the extracted frames, and writes real GPS
+EXIF tags. From there a web app carries the same footage through coverage review, COLMAP
+reconstruction, gaussian-splat training, and export.
+
+![The Map tab showing footprint polygons and a coverage overlay for an imported flight](docs/images/map-coverage.png)
 
 ```
 DJI video ──ffmpeg──> frames ──CLI──> geotagged JPGs ──import──> map/review/plan
@@ -16,107 +22,119 @@ DJI video ──ffmpeg──> frames ──CLI──> geotagged JPGs ──impor
                                                                                  LAS/mesh/GeoJSON export
 ```
 
-New here? Follow the [end-to-end workflow tutorial](docs/WORKFLOW.md).
+Every stage also produces WebODM/OpenDroneMap-ready output, so you can stop at any point and take
+the frames elsewhere.
 
-This repository is a monorepo with three components:
+New here? Start with the [end-to-end workflow tutorial](docs/WORKFLOW.md).
 
-- **CLI** (`src/drone_video_geotagger/`) — standalone command-line geotagging tool
-- **Backend** (`backend/`) — FastAPI REST API for image import, quality analysis, coverage tracking, and mission planning
-- **Frontend** (`frontend/`) — React web app with an interactive map for visualising footprints, coverage, and session stats
+## Quickstart
+
+```bash
+pip install -e ".[backend,dev]"
+```
+
+`ffmpeg` and `exiftool` must be on your `PATH` (or passed with `--ffmpeg` / `--exiftool`). COLMAP
+and a CUDA GPU are needed only for reconstruction. Full setup, including per-platform binaries and
+GPU training, is in [docs/INSTALL.md](docs/INSTALL.md).
+
+Extract frames, then geotag them:
+
+```bash
+ffmpeg -i flight.mp4 -vf fps=8 extracted/frame_%05d.jpg
+drone-video-geotagger --video flight.mp4 --frames extracted --takeoff-altitude 236.94
+```
+
+That writes geotagged copies to `extracted_geotagged/`, ready to upload to WebODM.
+
+To use the web app instead:
+
+```bash
+./run.sh      # macOS / Linux
+run.bat       # Windows
+```
+
+Then open `http://localhost:5173`. (`dev.sh` / `dev.bat` do the same, but also create the virtualenv
+and install dependencies on first run.)
+
+## The CLI
+
+`drone-video-geotagger` reads the telemetry, interpolates a position for each frame, and writes the
+EXIF tags.
+
+| Flag | Description |
+|---|---|
+| `--video` | Source DJI video (MP4). Required. |
+| `--frames` | Folder of extracted JPG frames. Required. |
+| `--takeoff-altitude` | Takeoff altitude in metres above sea level. Required. |
+| `--output` | Folder for the geotagged copies. Defaults to `<frames>_geotagged`. |
+| `--srt` | Existing DJI SRT file. Extracted from the video when omitted. |
+| `--frame-rate` | Frame extraction rate. Estimated from the SRT when omitted. |
+| `--ffmpeg` | Path to the ffmpeg binary, if it is not on `PATH`. |
+| `--exiftool` | Path to the exiftool binary, if it is not on `PATH`. |
+| `--in-place` | Write tags into the source folder instead of making copies. |
+
+Frame numbering uses the **last** number in each filename, so `frame_00042.jpg` and
+`DJI_0081_frame_42.jpg` both resolve to frame 42. Files with no digits are skipped.
+
+Alongside the geotagged images it writes `frame_geotags.csv` — per-frame index, time offset,
+coordinates, altitudes, timestamp — for checking the alignment, plus `exiftool_geotags.args`, the
+generated ExifTool argument file.
+
+### Batch jobs
+
+`dvg-pipeline` runs a whole geotag → ingest → coverage → reconstruct → export sequence from a YAML
+job spec, with no web UI involved:
+
+```bash
+dvg-pipeline job.yml --dry-run   # print the step plan, change nothing
+dvg-pipeline job.yml
+```
+
+`--output-root` and `--log-dir` override the matching spec keys, and `-v` turns on debug logging.
+[docs/examples/pipeline-job-spec.yml](docs/examples/pipeline-job-spec.yml) is an annotated spec.
+
+## The web app
+
+The backend is a FastAPI service — 28 routers, self-documenting at `/docs` while running — covering
+import, quality scoring, footprint geometry, coverage analysis, mission planning, the reconstruction
+job pipeline, and the export formats. The frontend is a React app whose tabs follow the flight
+itself: import and review frames, check coverage on a map, plan the next flight, run a
+reconstruction, then explore the resulting splat and export it.
+
+[docs/USER-MANUAL.md](docs/USER-MANUAL.md) is the full reference for both.
 
 ## Repository layout
 
 ```
-src/              CLI package (drone-video-geotagger command)
+src/              CLI package (drone-video-geotagger, dvg-pipeline)
 backend/          FastAPI app (API server, DB models, services)
-frontend/         Vite + React frontend (workflow UI)
+frontend/         Vite + React frontend
 tests/            pytest suite (tests/cli/ and tests/backend/)
-data/             SQLite database (gitignored)
-imports/          Drop folder for raw images and flight logs (gitignored)
-processed/        Thumbnails and processed outputs (gitignored)
-exports/          KML/GPX mission plan exports (gitignored)
+packaging/        Windows installer build (PyInstaller + Inno Setup)
+docs/             Documentation
 ```
 
-## Features
+`data/`, `imports/`, `processed/`, and `exports/` are created at runtime and gitignored.
 
-### CLI
-- Extracts DJI SRT telemetry from an MP4 with `ffmpeg`, or reads an existing `.srt` file.
-- Interpolates latitude, longitude, and relative height for each extracted frame.
-- Writes GPS EXIF tags with `exiftool`.
-- Creates an audit CSV for inspecting frame timing and coordinates.
+## Documentation
 
-### Backend
-- REST API for image import, quality scoring (sharpness + brightness via OpenCV), and ground footprint computation from DJI XMP altitude/yaw (Shapely/UTM).
-- Coverage analysis, lawnmower mission planning with KML/GPX export, and flight-log sync.
-- Reconstruction job pipeline: COLMAP SfM (quick/full presets, target-area crop, frame selection), GPS geo-registration, gaussian-splat training, LOD generation, and per-frame reprojection-error reporting.
-- Exports: WebODM georeferencing CSV-only zip, GeoJSON, LAS 1.4 point cloud, optional SuGaR mesh, flythrough video.
-- SQLite database via SQLAlchemy (swappable for PostgreSQL via `DATABASE_URL`) with Alembic-managed schema migrations.
+| Doc | What it covers |
+|---|---|
+| [WORKFLOW.md](docs/WORKFLOW.md) | End-to-end tutorial: video → geotag → import → reconstruct → export |
+| [USER-MANUAL.md](docs/USER-MANUAL.md) | Full reference for the backend, the frontend, and the splat trainer |
+| [INSTALL.md](docs/INSTALL.md) | System requirements, per-platform setup, deployment and auth |
+| [SETUP.md](docs/SETUP.md) | GPU / CUDA / gsplat training setup |
+| [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | Exact error messages → causes → fixes |
+| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Component map, reconstruction state machine, design rules |
+| [WEBODM.md](docs/WEBODM.md) | WebODM round trip: upload, poll, download results |
+| [CESIUM-ION.md](docs/CESIUM-ION.md) | Cesium ion tileset upload |
+| [VENDOR-PROJECT-IMPORT.md](docs/VENDOR-PROJECT-IMPORT.md) | Importing Pix4D / DroneDeploy projects |
+| [WINDOWS-INSTALLER.md](docs/WINDOWS-INSTALLER.md) | Building the distributable Windows installer |
+| [CHANGELOG.md](CHANGELOG.md) | Release history |
 
-### Frontend
-- **Overview** — pipeline status, session summary, import call-to-action, and reconstruction readiness.
-- **Map** — Leaflet + ESRI satellite, footprint polygons, coverage overlay, session stats sidebar.
-- **GPS Sync** — DJI FlightRecord CSV matching with timing deltas.
-- **Review** — thumbnail grid, quality flags, COLMAP reprojection-error badges, reconstruction frame selection.
-- **Plan** — target-area drawing, lawnmower plan generation, KML/GPX export.
-- **Export** — WebODM georeferencing CSV-only zip, GeoJSON, LAS point cloud, mesh GLB/OBJ/MTL.
-- **Session Log · Reconstruct · Jobs · Storage** — event history, preset-based job start, resource monitor with live logs, disk usage + file browser.
-- **Splat Viewer** — in-browser gaussian-splat rendering, PSNR/SSIM sparklines, coverage-gap heatmap, GPS-pinned annotations, distance/area measurement, ortho/3D split view, flythrough recording, presentation/narration mode.
-- **Compare** — voxel change detection plus a project-scoped, read-only flight trend table. It
-  reuses stored usable-frame, coverage, and completed-reconstruction metrics; missing values stay
-  blank rather than triggering new analysis.
-- **Settings** — app preferences, import/storage paths, mission parameters, reconstruction presets, rendering/export defaults.
-- Dark/light theme with persistence.
+## Docker
 
-## Install
-
-All Python dependencies are managed through `pyproject.toml` optional extras:
-
-```bash
-# Everything (CLI + backend + dev tools)
-pip install -e ".[backend,dev]"
-
-# CLI + tests only (no backend dependencies)
-pip install -e ".[dev]"
-```
-
-The CLI requires `ffmpeg` and `exiftool` on your PATH (or pass `--ffmpeg` / `--exiftool`).
-
-For a non-developer Windows install, build the distributable with the documented
-[Windows installer workflow](docs/WINDOWS-INSTALLER.md). It keeps application data in
-`%LOCALAPPDATA%\\Telemetry Frame Mapper` rather than under Program Files.
-
-### Backend logs
-
-The backend writes local JSON Lines logs by default to `logs/backend.jsonl`. Configure the
-`logging` block in `config.yaml` to change its level, directory, file name, rotation size, or
-retention count; set `enabled: false` to disable it. The log path is resolved relative to the
-configuration file, and rotation is handled locally by Python's standard library.
-
-### External tool gates
-
-Required for v1.0 release smoke:
-
-| Tool | Required for | Gate |
-|---|---|---|
-| `ffmpeg` | CLI SRT extraction from DJI MP4 files | Must be on `PATH` or passed with `--ffmpeg`; missing binaries fail with install guidance. |
-| `exiftool` | CLI GPS EXIF writes | Must be on `PATH` or passed with `--exiftool`; missing binaries fail with install guidance. |
-
-Optional/manual reconstruction gates:
-
-| Tool/dependency | Required for | Expected failure mode when absent |
-|---|---|---|
-| `colmap` | Reconstruct tab SfM workspace pipeline | Reconstruction job fails with `COLMAP executable not found` install guidance. |
-| `torch` + `gsplat` + CUDA-capable GPU | Gaussian splat training, thumbnails, optional server video renderer | Manual two-step install (see [docs/SETUP.md](docs/SETUP.md)) — intentionally not in the `[reconstruction]` extra; without it training is skipped and the job completes COLMAP-only; thumbnail generation degrades silently; server video rendering tells users to use browser recording or install optional reconstruction dependencies. |
-| SuGaR (`sugar_scene`/`sugar`) | Mesh export | Not installed by the Python extra; install from the upstream SuGaR project when mesh export is needed. Mesh export job fails with `SuGaR is not installed` optional dependency guidance. |
-| PotreeConverter | Potree export | Install the [PotreeConverter](https://github.com/potree/PotreeConverter) executable on `PATH`, or set `POTREE_CONVERTER` to its executable path. Download a reconstruction LAS first, then select **Generate Potree**; the API creates `exports/{id}/potree/metadata.json` and its accompanying hierarchy. |
-
-CI should use fakes/mocks for these tools. Real `ffmpeg`/`exiftool` CLI smoke is must-pass for v1.0; real COLMAP/gsplat/SuGaR/video-render smoke is optional/manual unless the release explicitly advertises reconstruction as production-ready.
-
-The backend creates a SQLite database at `data/drone_mapping.db` on first run.
-
-### Docker single-container app
-
-Build and run a CPU-only image that serves the FastAPI backend and built frontend from one container:
+A CPU-only image serves the backend and the built frontend from one container:
 
 ```bash
 docker build -t telemetry-frame-mapper .
@@ -128,220 +146,31 @@ docker run --rm -p 8000:8000 \
   telemetry-frame-mapper
 ```
 
-Open `http://localhost:8000`. The image installs `ffmpeg`, `exiftool`, and COLMAP for CPU-only reconstruction. CUDA/torch/gsplat GPU training is intentionally out of scope for this image; use the manual GPU setup in `docs/SETUP.md` when needed. CI runs a Docker build smoke test so the image stays buildable; runtime GPU reconstruction remains a manual/local support tier.
+Open `http://localhost:8000`. The image bundles `ffmpeg`, `exiftool`, and COLMAP. GPU training is
+out of scope for it — use the manual setup in [docs/SETUP.md](docs/SETUP.md).
 
-### Frontend
-
-```bash
-cd frontend
-npm install
-npm run dev   # http://localhost:5173
-```
-
-Requires Node 18+.
-
-## Usage
-
-### Quick launch (web app)
-
-Once installed, start the backend + frontend and open the browser with one command:
+## Testing
 
 ```bash
-./run.sh      # macOS / Linux
-run.bat       # Windows (enters the VS build environment so GPU training works)
+pytest                              # CLI + backend
+ruff check .                        # linter
+cd frontend && npm test -- --run    # frontend (vitest)
 ```
 
-`run.bat`/`run.sh` are for everyday use; `dev.bat`/`dev.sh` do the same but also create the venv and install dependencies on first run.
+Tests use inline fixture data and temporary paths, and every external binary is mocked — no real
+ffmpeg, exiftool, COLMAP, or GPU required.
 
-### CLI — geotag frames
+## Contributing
 
-Extract frames from the video first:
-
-```bash
-ffmpeg -i flight.mp4 -vf fps=8 extracted/frame_%05d.jpg
-```
-
-Then geotag:
-
-```bash
-drone-video-geotagger \
-  --video flight.mp4 \
-  --frames extracted \
-  --takeoff-altitude 236.94
-```
-
-Writes geotagged copies to `extracted_geotagged/` by default. Add `--in-place` to write EXIF tags directly into the source frame folder instead of creating copies.
-
-If you already have the SRT telemetry file:
-
-```bash
-drone-video-geotagger \
-  --video flight.mp4 \
-  --frames extracted \
-  --srt flight.srt \
-  --takeoff-altitude 236.94 \
-  --frame-rate 8
-```
-
-
-### Browser upload import
-
-The Import dialog defaults to **Browser upload**: choose or drag a folder of frames in the browser, and the app streams files to the backend in chunks before starting the same import pipeline used by server-side paths. This is the easiest path when the image folder is on your workstation but not already under `imports/`. The legacy **Server path** mode remains available for folders that already live under the backend's `imports/` directory.
-
-### Cloud-drive import
-
-Use **Upload / cloud drive** in the Import dialog to select a JPEG folder that a desktop client has
-already synced from OneDrive, Google Drive, Dropbox, or another provider. The provider client and
-operating system authorize access; the browser submits only the files you explicitly select through
-the same chunked upload flow as a local folder.
-
-The backend deliberately has no "import from URL" endpoint and does not store cloud-provider OAuth
-tokens or credentials. A direct provider integration needs an explicit provider choice, registered
-OAuth client and redirect URI, least-privilege scope, encrypted token lifecycle, and redirect/DNS
-policy before it can be added safely. Until then, use the provider's desktop sync or download flow
-and select the resulting folder in the browser.
-
-### SD-card / watch-folder auto-import
-
-Set `auto_import.enabled` and explicitly list each mounted card or staging folder in `config.yaml`, then restart the backend. The watcher uses polling, waits until a media directory is unchanged for `stable_seconds`, and starts the existing image-import pipeline. It never discovers drives or imports paths outside `roots`; `GET /auto-import/status` reports missing, unsupported, and watched roots. A persisted media-manifest fingerprint prevents a completed claim from being imported again after a restart.
-
-```yaml
-auto_import:
-  enabled: true
-  roots:
-    - "E:/DCIM"
-  poll_interval_seconds: 10
-  stable_seconds: 30
-```
-
-The watcher imports directories containing configured image extensions (JPEG by default). It does not copy card contents, watch video-only folders, or retry a folder once its fingerprint has been claimed; move/copy edited media to a new folder if a new import is intended.
-
-### Backend
-
-```bash
-python -m backend
-# API at http://localhost:8000
-# Interactive docs at http://localhost:8000/docs
-```
-
-`python -m backend` reads the `deployment` section of `config.yaml`. It stays loopback-only by default. To serve a trusted LAN frontend, explicitly set the bind address and each allowed browser origin; do not use wildcard origins.
-
-```yaml
-deployment:
-  host: "192.168.1.50"
-  port: 8000
-  cors_origins:
-    - "http://192.168.1.50:5173"
-```
-
-For development reloads, pass host and port directly to `uvicorn backend.main:app --reload`; its command-line values take precedence. Upload limits are configurable in `config.yaml` under `upload_limits` (`flight_log_max_bytes` and `srt_max_bytes`, both 10 MiB by default).
-
-### Reconstruction share links
-
-The Export tab creates a revocable, opaque link for a completed reconstruction. New links default
-to seven days and may be protected with an optional password. The bearer token is shown only in the
-creation response and lives only in the viewer URL; it is never stored as plaintext or appended to
-artifact URLs. Password verification issues a `HttpOnly`, `SameSite=Lax`, `/share`-scoped session
-cookie (marked `Secure` for HTTPS or a TLS proxy). Owners can inspect lifecycle state with
-`GET /export/reconstructions/{id}/share-links` and revoke one with
-`POST /export/reconstructions/{id}/share-links/{share_link_id}/revoke`.
-
-Public responses use `401` when password unlock is required, `403` for an incorrect password or
-token/reconstruction mismatch, and `410` after expiry or revocation. Existing signed links remain
-supported until their signed expiry; their legacy artifact query-token format is not emitted for new
-links.
-
-### Artifact backup
-
-`POST /storage/backup` creates an additive, versioned snapshot of the live SQLite database,
-sanitized `config.yaml`, and the selected `imports`, `processed`, and/or `exports` directories.
-Every copied file is SHA-256 recorded in `manifest.json`; the SQLite file is created with SQLite's
-backup API, so WAL/SHM sidecars are not copied. Configure the allowed destination first:
-
-```yaml
-backup:
-  local_destinations:
-    - "E:/telemetry-backups"
-  rclone_remote: "archive:telemetry-backups"  # credentials stay in rclone config
-```
-
-Then submit either `{ "destination": "local", "local_destination": "E:/telemetry-backups" }`
-or `{ "destination": "rclone" }`, with an optional `artifacts` list (defaults to
-`["processed", "exports"]`). Local paths must exactly match the allowlist. Remote backups use
-`rclone copy`, never `sync` or deletion flags; rclone credentials and command output are never
-persisted in the snapshot or returned by the API.
-
-To schedule one opt-in daily backup, define a named target from the same allowlist and select it
-by name. `daily_at` uses the server's local clock. `GET /storage/backup-schedule` returns only
-operational status (last run, next run, and success/failure result), never target credentials or
-command output.
-
-```yaml
-backup:
-  local_destinations:
-    - "E:/telemetry-backups"
-  targets:
-    nightly_local:
-      destination: local
-      local_destination: "E:/telemetry-backups"
-      artifacts: ["processed", "exports"]
-  schedule:
-    enabled: true
-    target: nightly_local
-    daily_at: "02:00"
-```
-
-The scheduler runs only one backup at a time, so a slow remote copy is not overlapped by the next
-scheduled run. Leave `enabled: false` (the default) to keep it off.
-
-## CLI inputs
-
-| Flag | Description |
-|---|---|
-| `--video` | Source DJI video (MP4) |
-| `--frames` | Folder of extracted JPG frames |
-| `--takeoff-altitude` | Takeoff altitude in metres above sea level |
-| `--srt` | Optional DJI SRT file (extracted from video if omitted) |
-| `--frame-rate` | Optional frame extraction rate (estimated from SRT if omitted) |
-| `--in-place` | Write EXIF tags into the original frame folder instead of `<frames>_geotagged/` copies |
-
-Frame index rule: the index is the **last** number in each filename — `frame_00042.jpg` and `DJI_0081_frame_42.jpg` both index as frame 42. Files with no digits in the name are skipped.
-
-## CLI outputs
-
-- Geotagged JPG files in `<frames>_geotagged/`
-- `frame_geotags.csv` — frame index, time offset, lat/lon, relative and GPS altitude, timestamp
-- `exiftool_geotags.args` — generated ExifTool argument file
-
-Upload the geotagged folder to WebODM; it reads GPS EXIF tags on import.
-
-For an opt-in API upload, polling, cancellation, and result-download workflow, see
-[WebODM round trip](docs/WEBODM.md). Credentials stay in an environment variable.
-
-## Tests
-
-```bash
-pytest        # CLI + backend tests
-ruff check .  # linter
-cd frontend && npm test -- --run   # frontend unit tests (vitest)
-```
-
-Tests use inline fixture data and temporary paths — no real flight files required. CI mocks all external binaries (no real ffmpeg, exiftool, COLMAP, or GPU).
-
-## Documentation
-
-| Doc | What it covers |
-|---|---|
-| [docs/USER-MANUAL.md](docs/USER-MANUAL.md) | Full reference: capabilities, both data pipelines, and the gaussian-splat trainer |
-| [docs/WORKFLOW.md](docs/WORKFLOW.md) | End-to-end tutorial: DJI video → geotag → import → reconstruct → splat → export |
-| [docs/INSTALL.md](docs/INSTALL.md) | System requirements and per-platform setup (ffmpeg, exiftool, COLMAP) |
-| [docs/SETUP.md](docs/SETUP.md) | GPU / CUDA / gsplat training setup |
-| [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | Exact error messages → causes → fixes |
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Component map, reconstruction state machine, design rules |
-| [CHANGELOG.md](CHANGELOG.md) | Release notes |
-
-The backend API is self-documenting at `http://localhost:8000/docs` while running.
+See [CONTRIBUTING.md](CONTRIBUTING.md). Report security issues through
+[private advisories](https://github.com/BrandonRobare/telemetry-frame-mapper/security/advisories/new)
+rather than public issues — see [SECURITY.md](SECURITY.md).
 
 ## Privacy
 
-Do not commit real drone videos, FlightRecord files, extracted frames, SRT files, or geotagged images. The `.gitignore` blocks those by default. Run `git status --short` before pushing.
+Do not commit real drone videos, FlightRecord files, extracted frames, SRT files, or geotagged
+images. `.gitignore` blocks them by default; run `git status --short` before pushing.
+
+## License
+
+MIT — see [LICENSE](LICENSE).

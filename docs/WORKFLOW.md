@@ -4,7 +4,7 @@ This walks the full pipeline on real data: extract frames from a DJI flight vide
 
 > **Note.** The full pipeline is functional. Gaussian-splat **training** (the second half of step 6) needs torch + gsplat and a CUDA GPU installed (see [SETUP.md](SETUP.md)); without them, reconstructions complete in `colmap_only` mode — a sparse point cloud with no splat — and everything else still works.
 
-**Prerequisites:** everything in [INSTALL.md](INSTALL.md) — at minimum Python 3.11+, Node 18+, `ffmpeg`, `exiftool`; plus COLMAP and an NVIDIA GPU for reconstruction. When anything fails, check [TROUBLESHOOTING.md](TROUBLESHOOTING.md) first — most errors in this pipeline are missing-binary or path-rule issues with exact known fixes.
+**Prerequisites:** everything in [INSTALL.md](INSTALL.md) — at minimum Python 3.11+, Node 20.19+, `ffmpeg`, `exiftool`; plus COLMAP and an NVIDIA GPU for reconstruction. When anything fails, check [TROUBLESHOOTING.md](TROUBLESHOOTING.md) first — most errors in this pipeline are missing-binary or path-rule issues with exact known fixes.
 
 ---
 
