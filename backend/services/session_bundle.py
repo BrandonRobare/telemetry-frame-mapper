@@ -5,7 +5,7 @@ import os
 import shutil
 import zipfile
 from datetime import datetime
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 from sqlalchemy import DateTime
 from sqlalchemy.orm import Session as DBSession
@@ -44,6 +44,30 @@ _RECONSTRUCTION_PATH_FIELDS = (
     "ortho_path",
     "semantic_labels_path",
 )
+
+# Every path-bearing column on a restorable model, including the ones that are NOT
+# bundled as artifacts (colmap_dir, coverage_gaps_path, folder_path). manifest.json is
+# attacker-controlled input, so a restored row may only ever carry a path this module
+# wrote itself: these are all nulled before construction, and _restore_artifact then
+# repopulates only the fields whose files were genuinely in the archive. Without this,
+# a crafted manifest could point splat_path at any file the server can read.
+_PATH_COLUMNS = {
+    Session: ("folder_path",),
+    Image: _IMAGE_PATH_FIELDS,
+    FlightLog: _FLIGHT_LOG_PATH_FIELDS,
+    Reconstruction: _RECONSTRUCTION_PATH_FIELDS + ("colmap_dir", "coverage_gaps_path"),
+}
+
+
+def _sanitize_restored_row(model_cls, data: dict) -> dict:
+    """Strip untrusted filesystem paths from a manifest row before it becomes a model."""
+    for column in _PATH_COLUMNS.get(model_cls, ()):
+        data[column] = None
+    if model_cls is Image and data.get("filename"):
+        # PureWindowsPath (not PurePath) so "/", "\" and drive letters are stripped on
+        # any host OS — the filename is later joined onto the COLMAP workspace directory.
+        data["filename"] = PureWindowsPath(str(data["filename"])).name
+    return data
 
 
 def _dump(obj) -> dict:
@@ -215,32 +239,38 @@ def restore_session_archive(zip_path: Path, db: DBSession) -> dict:
     with zipfile.ZipFile(zip_path) as zf:
         manifest = json.loads(zf.read("manifest.json"))
 
-        session_data = _restore_datetimes(Session, manifest["session"])
+        session_data = _sanitize_restored_row(
+            Session, _restore_datetimes(Session, manifest["session"])
+        )
         session_data.pop("id", None)
         # project_id points outside the bundle (projects aren't archived) — drop it.
         session_data["project_id"] = None
         new_session = Session(**session_data)
         db.add(new_session)
-        db.commit()
-        db.refresh(new_session)
+        db.flush()
 
         restore_root = _restore_root(new_session.id)
+        new_session.folder_path = str(restore_root)
 
         image_id_map: dict[int, int] = {}
         for row in manifest["images"]:
             old_id = row["id"]
-            data = _restore_datetimes(Image, row)
+            data = _sanitize_restored_row(Image, _restore_datetimes(Image, row))
             data.pop("id", None)
             data["session_id"] = new_session.id
             for field in _IMAGE_PATH_FIELDS:
                 restored = _restore_artifact(zf, manifest, "images", old_id, field, restore_root)
                 if restored:
                     data[field] = restored
+            if not data.get("filepath"):
+                # filepath is NOT NULL, but the source file was absent when the archive
+                # was built (_bundle_artifacts skips non-files). Point at where it would
+                # have landed rather than keeping the source machine's untrusted path.
+                data["filepath"] = str(restore_root / "missing" / (data.get("filename") or ""))
             img = Image(**data)
             db.add(img)
             db.flush()
             image_id_map[old_id] = img.id
-        db.commit()
 
         for row in manifest["footprints"]:
             data = dict(row)
@@ -250,12 +280,11 @@ def restore_session_archive(zip_path: Path, db: DBSession) -> dict:
                 continue  # dropped: image outside the bundle
             data["image_id"] = image_id_map[old_image_id]
             db.add(Footprint(**data))
-        db.commit()
 
         flight_log_id_map: dict[int, int] = {}
         for row in manifest["flight_logs"]:
             old_id = row["id"]
-            data = _restore_datetimes(FlightLog, row)
+            data = _sanitize_restored_row(FlightLog, _restore_datetimes(FlightLog, row))
             data.pop("id", None)
             data["session_id"] = new_session.id
             for field in _FLIGHT_LOG_PATH_FIELDS:
@@ -268,7 +297,6 @@ def restore_session_archive(zip_path: Path, db: DBSession) -> dict:
             db.add(fl)
             db.flush()
             flight_log_id_map[old_id] = fl.id
-        db.commit()
 
         for row in manifest["flight_log_points"]:
             data = _restore_datetimes(FlightLogPoint, row)
@@ -278,27 +306,26 @@ def restore_session_archive(zip_path: Path, db: DBSession) -> dict:
                 continue
             data["flight_log_id"] = flight_log_id_map[old_flight_log_id]
             db.add(FlightLogPoint(**data))
-        db.commit()
 
         for row in manifest["flight_entries"]:
             data = _restore_datetimes(FlightEntry, row)
             data.pop("id", None)
             data["session_id"] = new_session.id
             db.add(FlightEntry(**data))
-        db.commit()
 
         for row in manifest["log_entries"]:
             data = _restore_datetimes(SessionLogEntry, row)
             data.pop("id", None)
             data["session_id"] = new_session.id
             db.add(SessionLogEntry(**data))
-        db.commit()
 
         rec_id_map: dict[int, int] = {}
         pending_parent: list[tuple[int, int | None]] = []
         for row in manifest["reconstructions"]:
             old_id = row["id"]
-            data = _restore_datetimes(Reconstruction, row)
+            data = _sanitize_restored_row(
+                Reconstruction, _restore_datetimes(Reconstruction, row)
+            )
             old_parent = data.pop("parent_reconstruction_id", None)
             data.pop("id", None)
             data["session_id"] = new_session.id
@@ -314,7 +341,6 @@ def restore_session_archive(zip_path: Path, db: DBSession) -> dict:
             db.flush()
             rec_id_map[old_id] = rec.id
             pending_parent.append((rec.id, old_parent))
-        db.commit()
 
         # Second pass: remap parent_reconstruction_id now that every new id is
         # known. Any parent outside the bundle is dropped (left as None).
@@ -322,7 +348,6 @@ def restore_session_archive(zip_path: Path, db: DBSession) -> dict:
             if old_parent is not None and old_parent in rec_id_map:
                 rec = db.query(Reconstruction).filter(Reconstruction.id == new_id).first()
                 rec.parent_reconstruction_id = rec_id_map[old_parent]
-        db.commit()
 
         for row in manifest["reconstruction_frames"]:
             old_rec_id = row["reconstruction_id"]
@@ -336,7 +361,6 @@ def restore_session_archive(zip_path: Path, db: DBSession) -> dict:
                     colmap_error_px=row.get("colmap_error_px"),
                 )
             )
-        db.commit()
 
         for row in manifest["annotations"]:
             data = _restore_datetimes(Annotation, row)
@@ -346,7 +370,6 @@ def restore_session_archive(zip_path: Path, db: DBSession) -> dict:
                 continue
             data["reconstruction_id"] = rec_id_map[old_rec_id]
             db.add(Annotation(**data))
-        db.commit()
 
         for row in manifest["measurements"]:
             data = _restore_datetimes(Measurement, row)
@@ -356,7 +379,6 @@ def restore_session_archive(zip_path: Path, db: DBSession) -> dict:
                 continue
             data["reconstruction_id"] = rec_id_map[old_rec_id]
             db.add(Measurement(**data))
-        db.commit()
 
         for row in manifest["frame_selections"]:
             old_image_id = row["image_id"]
@@ -367,7 +389,6 @@ def restore_session_archive(zip_path: Path, db: DBSession) -> dict:
                     session_id=new_session.id, image_id=image_id_map[old_image_id]
                 )
             )
-        db.commit()
 
         defect_id_map: dict[int, int] = {}
         for row in manifest["defects"]:
@@ -379,7 +400,6 @@ def restore_session_archive(zip_path: Path, db: DBSession) -> dict:
             db.add(d)
             db.flush()
             defect_id_map[old_id] = d.id
-        db.commit()
 
         for row in manifest["defect_images"]:
             old_defect_id = row["defect_id"]
@@ -391,6 +411,10 @@ def restore_session_archive(zip_path: Path, db: DBSession) -> dict:
                     defect_id=defect_id_map[old_defect_id], image_id=image_id_map[old_image_id]
                 )
             )
+
+        # Single commit: the restore reads an untrusted archive, so a failure part-way
+        # through must leave no rows behind. Previously each table committed as it went,
+        # so a malformed manifest stranded a half-restored session on every attempt.
         db.commit()
 
     return {

@@ -323,3 +323,62 @@ def test_reset_returns_full_response_shape(client, tmp_config):
     assert resp.status_code == 200
     data = resp.json()
     assert set(data.keys()) == {"general", "mission", "ingest", "reconstruction", "render"}
+
+
+# ---------------------------------------------------------------------------
+# Security regressions
+# ---------------------------------------------------------------------------
+
+
+def test_reset_preserves_security_and_deployment_sections(client, tmp_config):
+    """POST /settings/reset must not disable the PIN lock.
+
+    reset_settings rewrites config.yaml from defaults. It used to build that dict
+    without reading the existing file, so every section this router does not manage
+    — pin_lock, api_key, deployment, logging, backup, ... — was silently dropped and
+    the lock was gone on the next restart.
+    """
+    raw = yaml.safe_load(tmp_config.read_text()) or {}
+    raw["pin_lock"] = {"enabled": True, "hash_env": "DRONE_MAPPING_PIN_HASH"}
+    raw["api_key"] = {"enabled": True, "hash_env": "DRONE_MAPPING_API_KEY_HASH"}
+    raw["deployment"] = {"host": "192.168.1.50", "port": 8000, "cors_origins": ["http://x:5173"]}
+    raw["logging"] = {"enabled": True, "level": "DEBUG"}
+    raw["backup"] = {"local_destinations": ["E:/telemetry-backups"]}
+    tmp_config.write_text(yaml.safe_dump(raw))
+
+    resp = client.post("/settings/reset")
+    assert resp.status_code == 200
+
+    after = yaml.safe_load(tmp_config.read_text())
+    assert after["pin_lock"]["enabled"] is True
+    assert after["api_key"]["enabled"] is True
+    assert after["deployment"]["host"] == "192.168.1.50"
+    assert after["logging"]["level"] == "DEBUG"
+    assert after["backup"]["local_destinations"] == ["E:/telemetry-backups"]
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("exports_dir", str(Path.home() / ".ssh")),
+        ("data_dir", str(Path.home() / ".ssh" / "keys")),
+        ("imports_dir", str(Path.home() / ".aws")),
+        ("processed_dir", str(Path.home() / ".gnupg")),
+    ],
+)
+def test_patch_rejects_credential_directories(client, tmp_config, field, value):
+    """Storage roots widen every containment check, so they must not land on key stores.
+
+    The Windows blocklist matches the users directory exactly but deliberately not as a
+    prefix, because %LOCALAPPDATA% (where the installer keeps its data) lives inside
+    a user profile. That left ~/.ssh reachable.
+    """
+    resp = client.patch("/settings", json={"general": {field: value}})
+    assert resp.status_code == 422
+
+
+def test_patch_still_allows_app_data_inside_the_user_profile(client, tmp_config, tmp_path):
+    # The installer's own %LOCALAPPDATA%\Telemetry Frame Mapper layout must keep working.
+    target = tmp_path / "AppData" / "Local" / "Telemetry Frame Mapper" / "imports"
+    resp = client.patch("/settings", json={"general": {"imports_dir": str(target)}})
+    assert resp.status_code == 200

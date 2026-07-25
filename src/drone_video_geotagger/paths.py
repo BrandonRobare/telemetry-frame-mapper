@@ -27,7 +27,16 @@ def external_file_arg(path: Path, executable: str | Path) -> str:
 
     Resolves to absolute form to prevent dash-prefix injection where
     `-relative/path` could be parsed as an ExifTool option.
+
+    Rejects newlines outright: ExifTool's ``-@ argfile`` format is one argument per
+    line, so a frame named ``frame\\n-config\\n/tmp/evil.cfg\\n001.jpg`` would inject
+    ``-config`` — which loads a Perl file — into the argument list.
     """
-    if is_wsl() and is_windows_executable(executable):
-        return windows_path(path)
-    return str(path.resolve())
+    arg = (
+        windows_path(path)
+        if is_wsl() and is_windows_executable(executable)
+        else str(path.resolve())
+    )
+    if "\n" in arg or "\r" in arg:
+        raise ValueError(f"Refusing to pass a path containing a newline to {executable}: {arg!r}")
+    return arg

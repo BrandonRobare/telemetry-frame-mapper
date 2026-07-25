@@ -223,10 +223,39 @@ def _reject_unsafe_storage_path(value: str) -> None:
             "c:\\program files (x86)",
             "c:\\users",
         )
+        # c:\users is matched exactly but NOT as a prefix: the Windows installer keeps
+        # its data under %LOCALAPPDATA%, which lives inside a user profile. Sensitive
+        # profile subdirectories are named individually below instead.
         if win_text in blocked_windows or any(
             win_text.startswith(prefix + "\\") for prefix in blocked_windows[:3]
         ):
             raise ValueError("storage paths cannot point at Windows system directories")
+
+    _reject_sensitive_user_dir(resolved)
+
+
+# Credential stores and auto-run locations. Pointing a storage root at one of these lets
+# the app's own artifact writes land on keys or startup entries. Matched at any depth so
+# "~/.ssh/keys" is rejected along with "~/.ssh".
+_SENSITIVE_DIR_NAMES = frozenset(
+    {".ssh", ".aws", ".gnupg", ".gcloud", ".azure", ".kube", ".docker", ".config"}
+)
+_SENSITIVE_DIR_SEGMENTS = (
+    ("appdata", "roaming", "microsoft", "windows", "start menu", "programs", "startup"),
+    ("library", "keychains"),
+)
+
+
+def _reject_sensitive_user_dir(resolved: Path) -> None:
+    parts = [part.lower() for part in resolved.parts]
+    if _SENSITIVE_DIR_NAMES.intersection(parts):
+        raise ValueError("storage paths cannot point at credential or key directories")
+    for segments in _SENSITIVE_DIR_SEGMENTS:
+        window = len(segments)
+        if any(
+            tuple(parts[i : i + window]) == segments for i in range(len(parts) - window + 1)
+        ):
+            raise ValueError("storage paths cannot point at startup or keychain directories")
 
 
 def _load_raw(path: str) -> dict:
@@ -374,7 +403,13 @@ def patch_settings(body: SettingsPatch) -> dict:
 
 @router.post("/reset")
 def reset_settings() -> dict:
-    """Restore config.yaml to all defaults and return the full config."""
+    """Restore the settings this API manages to their defaults, and return the full config.
+
+    Only the sections exposed by this router are reset. Security- and deployment-critical
+    sections it never surfaces — ``deployment``, ``pin_lock``, ``api_key``, ``logging``,
+    ``webodm``, ``remote_worker``, ``auto_import``, ``backup`` — are preserved verbatim.
+    Resetting them here would silently disable the PIN lock on the next restart.
+    """
     cfg = AppConfig()
     init_fields = {name for name, fld in AppConfig.__dataclass_fields__.items() if fld.init}
     app_defaults = {name: getattr(cfg, name) for name in init_fields}
@@ -383,7 +418,9 @@ def reset_settings() -> dict:
     ingest_defaults = default_ingest_config()
     render_defaults = default_render_config()
 
+    # Seed from the file on disk so unmanaged sections survive the rewrite.
     fresh: dict = {
+        **_load_raw(CONFIG_PATH),
         **app_defaults,
         "reconstruction": recon_defaults,
         "ingest": ingest_defaults,

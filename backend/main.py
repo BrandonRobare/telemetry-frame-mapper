@@ -5,11 +5,13 @@ import os
 import shutil
 from contextlib import asynccontextmanager
 from pathlib import Path
+from urllib.parse import urlparse
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.responses import Response
 from starlette.routing import Match, Mount
 from starlette.types import Scope
@@ -135,6 +137,20 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# CORS does not stop DNS rebinding: an attacker page on a domain that re-resolves to
+# 127.0.0.1 becomes same-origin with a loopback-bound API, and every route here is
+# unauthenticated by default. Pinning the Host header closes that — browsers cannot set
+# Host, so only a request genuinely addressed to one of these names is served.
+if deployment_config["allowed_hosts"]:
+    _allowed_hosts = set(deployment_config["allowed_hosts"])
+else:
+    _allowed_hosts = {"localhost", "127.0.0.1", "::1", "testserver", deployment_config["host"]}
+    for _origin in deployment_config["cors_origins"]:
+        _origin_host = urlparse(_origin).hostname
+        if _origin_host:
+            _allowed_hosts.add(_origin_host)
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=sorted(_allowed_hosts))
 
 processed_dir = os.path.abspath(get_config().processed_dir)
 os.makedirs(processed_dir, exist_ok=True)
