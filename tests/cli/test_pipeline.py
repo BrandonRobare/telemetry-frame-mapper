@@ -58,7 +58,7 @@ steps:
   - kind: coverage
     target_geojson: '{"type":"Polygon","coordinates":[[[0,0],[1,0],[1,1],[0,1],[0,0]]]}'
   - kind: reconstruction
-    preset: dense
+    preset: full
   - kind: export
     format: georeferencing_csv
 """
@@ -88,7 +88,7 @@ steps:
     # Reconstruction
     assert job.steps[3].kind == StepKind.RECONSTRUCTION
     assert job.steps[3].reconstruction is not None
-    assert job.steps[3].reconstruction.preset == ReconstructionPreset.DENSE
+    assert job.steps[3].reconstruction.preset == ReconstructionPreset.FULL
 
     # Export
     assert job.steps[4].kind == StepKind.EXPORT
@@ -182,7 +182,7 @@ steps:
   - kind: coverage
     target_geojson: '{"type":"Point","coordinates":[0,0]}'
   - kind: reconstruction
-    preset: sparse
+    preset: quick
   - kind: export
     format: webodm_package
 """

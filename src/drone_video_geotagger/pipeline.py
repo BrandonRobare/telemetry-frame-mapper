@@ -37,8 +37,14 @@ class StepKind(str, Enum):
 
 
 class ReconstructionPreset(str, Enum):
-    SPARSE = "sparse"
-    DENSE = "dense"
+    """Reconstruction presets, named to match config.yaml and the backend.
+
+    These were once "sparse"/"dense", which matched nothing else in the project —
+    config.yaml, the REST API, and every user-facing doc say quick/full.
+    """
+
+    QUICK = "quick"
+    FULL = "full"
 
 
 class ExportFormat(str, Enum):
@@ -84,7 +90,7 @@ class CoverageSpec:
 
 @dataclass
 class ReconstructionSpec:
-    preset: ReconstructionPreset = ReconstructionPreset.SPARSE
+    preset: ReconstructionPreset = ReconstructionPreset.QUICK
     session_id: int | None = None  # if already ingested
 
 
@@ -320,7 +326,7 @@ def _parse_coverage(raw: dict) -> CoverageSpec:
 def _parse_reconstruction(raw: dict) -> ReconstructionSpec:
     rec = raw.get("reconstruction", raw)
     return ReconstructionSpec(
-        preset=ReconstructionPreset(rec.get("preset", "sparse")),
+        preset=ReconstructionPreset(rec.get("preset", "quick")),
         session_id=rec.get("session_id"),
     )
 

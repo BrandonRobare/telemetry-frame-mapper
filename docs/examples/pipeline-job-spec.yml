@@ -31,7 +31,7 @@ steps:
       }
 
   - kind: reconstruction
-    preset: sparse
+    preset: quick   # quick | full — same names as config.yaml and the REST API
     # session_id: 1  # optional: reference an ingested session
 
   - kind: export

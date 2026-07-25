@@ -58,6 +58,8 @@ backend/exports/*
 # vram_full_run.csv) — only the directory placeholder is tracked.
 data/*
 !data/.gitkeep
+# Headless pipeline run output (dvg-pipeline --output-root default).
+pipeline_output/
 
 # Frontend
 node_modules/
@@ -69,10 +71,17 @@ node_modules/
 .internal/
 internal/
 
-# AI skill installs (local tooling, never committed)
+# AI skill installs and agent tooling (local, never committed). These previously
+# lived only in .git/info/exclude, which is not cloned — so every fresh clone saw
+# them as untracked noise.
 .agents/
-.claude/skills/
+.claude/
+.superpowers/
+docs/superpowers/
 skills-lock.json
+
+# Dev dashboard (internal tool, not part of the public project)
+dashboard/
 
 # Editor config (keep local)
 .vscode/
