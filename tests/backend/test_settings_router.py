@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import pytest
@@ -357,13 +358,20 @@ def test_reset_preserves_security_and_deployment_sections(client, tmp_config):
     assert after["backup"]["local_destinations"] == ["E:/telemetry-backups"]
 
 
+# These use *relative* paths on purpose. An absolute POSIX path is already rejected
+# wholesale on Linux, because blocked_posix contains "/" and "/" is a parent of every
+# absolute path — so an absolute-path test would pass on CI without exercising the
+# credential-directory check at all, and would fail on Windows-shaped input.
+# Relative paths resolve against cwd identically on both platforms.
 @pytest.mark.parametrize(
     "field,value",
     [
-        ("exports_dir", str(Path.home() / ".ssh")),
-        ("data_dir", str(Path.home() / ".ssh" / "keys")),
-        ("imports_dir", str(Path.home() / ".aws")),
-        ("processed_dir", str(Path.home() / ".gnupg")),
+        ("exports_dir", "./storage/.ssh"),
+        ("data_dir", "./storage/.ssh/keys"),
+        ("imports_dir", "./storage/.aws"),
+        ("processed_dir", "./storage/.gnupg"),
+        ("exports_dir", "./storage/AppData/Roaming/Microsoft/Windows/"
+                        "Start Menu/Programs/Startup"),
     ],
 )
 def test_patch_rejects_credential_directories(client, tmp_config, field, value):
@@ -371,14 +379,37 @@ def test_patch_rejects_credential_directories(client, tmp_config, field, value):
 
     The Windows blocklist matches the users directory exactly but deliberately not as a
     prefix, because %LOCALAPPDATA% (where the installer keeps its data) lives inside
-    a user profile. That left ~/.ssh reachable.
+    a user profile. That left ~/.ssh reachable as an exports root.
     """
     resp = client.patch("/settings", json={"general": {field: value}})
     assert resp.status_code == 422
 
 
-def test_patch_still_allows_app_data_inside_the_user_profile(client, tmp_config, tmp_path):
-    # The installer's own %LOCALAPPDATA%\Telemetry Frame Mapper layout must keep working.
-    target = tmp_path / "AppData" / "Local" / "Telemetry Frame Mapper" / "imports"
-    resp = client.patch("/settings", json={"general": {"imports_dir": str(target)}})
+def test_patch_still_allows_app_data_style_layout(client, tmp_config):
+    # The installer's own %LOCALAPPDATA%\Telemetry Frame Mapper layout must keep working:
+    # the fix must not reject a path merely for sitting under a user profile.
+    target = "./storage/AppData/Local/Telemetry Frame Mapper/imports"
+    resp = client.patch("/settings", json={"general": {"imports_dir": target}})
+    assert resp.status_code == 200
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows-shaped absolute paths")
+@pytest.mark.parametrize(
+    "value",
+    [
+        r"C:\Users\pilot\.ssh",
+        r"C:\Users\pilot\.aws\credentials",
+        r"C:\Users\pilot\AppData\Roaming\Microsoft\Windows"
+        r"\Start Menu\Programs\Startup",
+    ],
+)
+def test_patch_rejects_windows_credential_directories(client, tmp_config, value):
+    resp = client.patch("/settings", json={"general": {"exports_dir": value}})
+    assert resp.status_code == 422
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows-shaped absolute paths")
+def test_patch_allows_windows_local_app_data(client, tmp_config):
+    value = r"C:\Users\pilot\AppData\Local\Telemetry Frame Mapper\imports"
+    resp = client.patch("/settings", json={"general": {"imports_dir": value}})
     assert resp.status_code == 200
