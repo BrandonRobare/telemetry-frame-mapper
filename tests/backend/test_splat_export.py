@@ -67,7 +67,8 @@ class TestCompactSplatExportRoute:
         db.commit()
         db.refresh(session)
 
-        splat_path = tmp_path / "splat.ply"
+        splat_path = exports_dir / "splat.ply"
+        splat_path.parent.mkdir(parents=True, exist_ok=True)
         _write_splat_ply(splat_path, 20)
         rec = _make_rec(db, session, splat_path=str(splat_path))
 
@@ -96,7 +97,8 @@ class TestCompactSplatExportRoute:
         db.commit()
         db.refresh(session)
 
-        splat_path = tmp_path / "splat.ply"
+        splat_path = exports_dir / "splat.ply"
+        splat_path.parent.mkdir(parents=True, exist_ok=True)
         _write_splat_ply(splat_path, 20)
         rec = _make_rec(db, session, splat_path=str(splat_path))
 

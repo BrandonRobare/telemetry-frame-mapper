@@ -475,5 +475,15 @@ def restore_session(req: RestoreRequest, db: DBSession = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Archive zip not found")
     try:
         return restore_session_archive(zip_path, db)
-    except (KeyError, ValueError, zipfile.BadZipFile, json.JSONDecodeError) as exc:
+    except (
+        KeyError,
+        TypeError,  # Model(**data) with a manifest key that isn't a column
+        ValueError,
+        zipfile.BadZipFile,
+        json.JSONDecodeError,
+    ) as exc:
+        db.rollback()
         raise HTTPException(status_code=422, detail=f"Invalid archive: {exc}") from exc
+    except Exception:
+        db.rollback()
+        raise

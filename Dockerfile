@@ -28,6 +28,9 @@ COPY pyproject.toml README.md LICENSE ./
 COPY src/ ./src/
 COPY backend/ ./backend/
 COPY config.yaml ./config.yaml
+# init_db() resolves alembic.ini relative to the repo root and runs `upgrade head`
+# against it at startup, so the container will not boot without this.
+COPY alembic.ini ./alembic.ini
 COPY --from=frontend-build /app/frontend/dist ./frontend/dist
 
 RUN pip install --upgrade pip \

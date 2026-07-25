@@ -402,7 +402,9 @@ def test_download_splat_still_running(client):
 def test_download_splat_complete(client, tmp_path):
     db = _get_db(client)
     s = _make_session_with_images(db)
-    splat_file = tmp_path / "splat.ply"
+    exports_dir = tmp_path / "exports"
+    splat_file = exports_dir / "1" / "splat.ply"
+    splat_file.parent.mkdir(parents=True)
     splat_file.write_bytes(b"ply data")
 
     rec = Reconstruction(
@@ -414,9 +416,39 @@ def test_download_splat_complete(client, tmp_path):
     db.commit()
     db.refresh(rec)
 
-    resp = client.get(f"/reconstruction/{rec.id}/splat?lod=full")
+    cfg = type("Cfg", (), {"exports_dir": str(exports_dir), "processed_dir": str(tmp_path)})()
+    with patch("backend.routers.reconstruction.get_config", return_value=cfg):
+        resp = client.get(f"/reconstruction/{rec.id}/splat?lod=full")
     assert resp.status_code == 200
     assert resp.content == b"ply data"
+
+
+def test_download_splat_rejects_path_outside_exports(client, tmp_path):
+    """splat_path is a DB column, and a crafted session-archive restore could once
+    point it anywhere. The download route must confine it the way its sibling in
+    share_links.py already does, not trust the stored value."""
+    db = _get_db(client)
+    s = _make_session_with_images(db)
+    secret = tmp_path / "id_rsa"
+    secret.write_bytes(b"PRIVATE KEY")
+
+    rec = Reconstruction(
+        session_id=s.id, preset="quick", status="complete",
+        progress_pct=100.0, frames_used=3,
+        splat_path=str(secret),
+    )
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+
+    exports_dir = tmp_path / "exports"
+    exports_dir.mkdir()
+    cfg = type("Cfg", (), {"exports_dir": str(exports_dir), "processed_dir": str(tmp_path)})()
+    with patch("backend.routers.reconstruction.get_config", return_value=cfg):
+        resp = client.get(f"/reconstruction/{rec.id}/splat?lod=full")
+
+    assert resp.status_code == 403
+    assert b"PRIVATE KEY" not in resp.content
 
 
 def test_download_splat_invalid_lod(client):
@@ -1005,25 +1037,57 @@ def test_coverage_gaps_returns_cached_json(client, tmp_path):
     db = _get_db(client)
     s = _make_session_with_images(db)
 
-    gaps_file = tmp_path / "gaps.json"
+    exports_dir = tmp_path / "exports"
+    exports_dir.mkdir()
+    gaps_file = exports_dir / "gaps.json"
     cells = [{"x": 1.0, "y": 2.0, "z": 3.0, "size": 0.5, "level": "sparse"}]
     gaps_file.write_text(json_module.dumps(cells))
 
     rec = Reconstruction(
         session_id=s.id, status="complete", preset="quick",
         progress_pct=100.0, frames_used=3, step="done",
-        splat_path=str(tmp_path / "splat.ply"),
+        splat_path=str(exports_dir / "splat.ply"),
         coverage_gaps_path=str(gaps_file),
     )
     db.add(rec)
     db.commit()
     db.refresh(rec)
 
-    resp = client.get(f"/reconstruction/{rec.id}/coverage-gaps")
+    cfg = type("Cfg", (), {"exports_dir": str(exports_dir), "processed_dir": str(tmp_path)})()
+    with patch("backend.routers.reconstruction.get_config", return_value=cfg):
+        resp = client.get(f"/reconstruction/{rec.id}/coverage-gaps")
     assert resp.status_code == 200
     data = resp.json()
     assert len(data) == 1
     assert data[0]["level"] == "sparse"
+
+
+def test_coverage_gaps_rejects_cache_path_outside_exports(client, tmp_path):
+    """coverage_gaps_path is read straight off the DB row and returned to the client,
+    so it needs the same containment as every other stored artifact path."""
+    db = _get_db(client)
+    s = _make_session_with_images(db)
+    exports_dir = tmp_path / "exports"
+    exports_dir.mkdir()
+    secret = tmp_path / "secrets.json"
+    secret.write_text('{"token": "leaked"}')
+
+    rec = Reconstruction(
+        session_id=s.id, status="complete", preset="quick",
+        progress_pct=100.0, frames_used=3, step="done",
+        splat_path=str(exports_dir / "splat.ply"),
+        coverage_gaps_path=str(secret),
+    )
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+
+    cfg = type("Cfg", (), {"exports_dir": str(exports_dir), "processed_dir": str(tmp_path)})()
+    with patch("backend.routers.reconstruction.get_config", return_value=cfg):
+        resp = client.get(f"/reconstruction/{rec.id}/coverage-gaps")
+
+    assert resp.status_code == 403
+    assert b"leaked" not in resp.content
 
 
 def test_coverage_gaps_computes_on_first_call(client, tmp_path):
@@ -1032,7 +1096,9 @@ def test_coverage_gaps_computes_on_first_call(client, tmp_path):
     db = _get_db(client)
     s = _make_session_with_images(db)
 
-    ply_path = tmp_path / "splat.ply"
+    exports_dir = tmp_path / "exports"
+    exports_dir.mkdir()
+    ply_path = exports_dir / "splat.ply"
     header = (
         b"ply\nformat binary_little_endian 1.0\n"
         b"element vertex 4\n"
@@ -1051,7 +1117,9 @@ def test_coverage_gaps_computes_on_first_call(client, tmp_path):
     db.commit()
     db.refresh(rec)
 
-    resp = client.get(f"/reconstruction/{rec.id}/coverage-gaps")
+    cfg = type("Cfg", (), {"exports_dir": str(exports_dir), "processed_dir": str(tmp_path)})()
+    with patch("backend.routers.reconstruction.get_config", return_value=cfg):
+        resp = client.get(f"/reconstruction/{rec.id}/coverage-gaps")
 
     assert resp.status_code == 200
     data = resp.json()
@@ -1071,7 +1139,9 @@ def test_coverage_gaps_returns_cells_when_cache_path_commit_fails(client, tmp_pa
     db = _get_db(client)
     s = _make_session_with_images(db)
 
-    ply_path = tmp_path / "splat.ply"
+    exports_dir = tmp_path / "exports"
+    exports_dir.mkdir()
+    ply_path = exports_dir / "splat.ply"
     header = (
         b"ply\nformat binary_little_endian 1.0\n"
         b"element vertex 4\n"
@@ -1090,7 +1160,11 @@ def test_coverage_gaps_returns_cells_when_cache_path_commit_fails(client, tmp_pa
     db.commit()
     db.refresh(rec)
 
-    with patch.object(db, "commit", side_effect=RuntimeError("commit failed")):
+    cfg = type("Cfg", (), {"exports_dir": str(exports_dir), "processed_dir": str(tmp_path)})()
+    with (
+        patch("backend.routers.reconstruction.get_config", return_value=cfg),
+        patch.object(db, "commit", side_effect=RuntimeError("commit failed")),
+    ):
         resp = client.get(f"/reconstruction/{rec.id}/coverage-gaps")
 
     assert resp.status_code == 200

@@ -591,6 +591,7 @@ def export_compact_splat(
     RGBA byte per gaussian. See ``ply_io.write_splat`` for the exact layout.
     """
     from ..services import ply_io
+    from ..services.reconstruction import _safe_export_path
 
     rec = db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).first()
     if not rec:
@@ -606,7 +607,12 @@ def export_compact_splat(
     else:
         raise HTTPException(status_code=422, detail=f"Unknown preset: {preset}")
 
-    cloud = ply_io.read_3dgs_ply(Path(rec.splat_path))
+    try:
+        splat_path = _safe_export_path(Path(rec.splat_path), Path(get_config().exports_dir))
+    except ValueError as exc:
+        raise HTTPException(status_code=403, detail="Invalid splat path") from exc
+
+    cloud = ply_io.read_3dgs_ply(splat_path)
     if cloud.means.shape[0] == 0:
         raise HTTPException(status_code=422, detail="Splat has no Gaussians")
 

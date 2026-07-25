@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import pytest
@@ -323,3 +324,92 @@ def test_reset_returns_full_response_shape(client, tmp_config):
     assert resp.status_code == 200
     data = resp.json()
     assert set(data.keys()) == {"general", "mission", "ingest", "reconstruction", "render"}
+
+
+# ---------------------------------------------------------------------------
+# Security regressions
+# ---------------------------------------------------------------------------
+
+
+def test_reset_preserves_security_and_deployment_sections(client, tmp_config):
+    """POST /settings/reset must not disable the PIN lock.
+
+    reset_settings rewrites config.yaml from defaults. It used to build that dict
+    without reading the existing file, so every section this router does not manage
+    — pin_lock, api_key, deployment, logging, backup, ... — was silently dropped and
+    the lock was gone on the next restart.
+    """
+    raw = yaml.safe_load(tmp_config.read_text()) or {}
+    raw["pin_lock"] = {"enabled": True, "hash_env": "DRONE_MAPPING_PIN_HASH"}
+    raw["api_key"] = {"enabled": True, "hash_env": "DRONE_MAPPING_API_KEY_HASH"}
+    raw["deployment"] = {"host": "192.168.1.50", "port": 8000, "cors_origins": ["http://x:5173"]}
+    raw["logging"] = {"enabled": True, "level": "DEBUG"}
+    raw["backup"] = {"local_destinations": ["E:/telemetry-backups"]}
+    tmp_config.write_text(yaml.safe_dump(raw))
+
+    resp = client.post("/settings/reset")
+    assert resp.status_code == 200
+
+    after = yaml.safe_load(tmp_config.read_text())
+    assert after["pin_lock"]["enabled"] is True
+    assert after["api_key"]["enabled"] is True
+    assert after["deployment"]["host"] == "192.168.1.50"
+    assert after["logging"]["level"] == "DEBUG"
+    assert after["backup"]["local_destinations"] == ["E:/telemetry-backups"]
+
+
+# These use *relative* paths on purpose. An absolute POSIX path is already rejected
+# wholesale on Linux, because blocked_posix contains "/" and "/" is a parent of every
+# absolute path — so an absolute-path test would pass on CI without exercising the
+# credential-directory check at all, and would fail on Windows-shaped input.
+# Relative paths resolve against cwd identically on both platforms.
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("exports_dir", "./storage/.ssh"),
+        ("data_dir", "./storage/.ssh/keys"),
+        ("imports_dir", "./storage/.aws"),
+        ("processed_dir", "./storage/.gnupg"),
+        ("exports_dir", "./storage/AppData/Roaming/Microsoft/Windows/"
+                        "Start Menu/Programs/Startup"),
+    ],
+)
+def test_patch_rejects_credential_directories(client, tmp_config, field, value):
+    """Storage roots widen every containment check, so they must not land on key stores.
+
+    The Windows blocklist matches the users directory exactly but deliberately not as a
+    prefix, because %LOCALAPPDATA% (where the installer keeps its data) lives inside
+    a user profile. That left ~/.ssh reachable as an exports root.
+    """
+    resp = client.patch("/settings", json={"general": {field: value}})
+    assert resp.status_code == 422
+
+
+def test_patch_still_allows_app_data_style_layout(client, tmp_config):
+    # The installer's own %LOCALAPPDATA%\Telemetry Frame Mapper layout must keep working:
+    # the fix must not reject a path merely for sitting under a user profile.
+    target = "./storage/AppData/Local/Telemetry Frame Mapper/imports"
+    resp = client.patch("/settings", json={"general": {"imports_dir": target}})
+    assert resp.status_code == 200
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows-shaped absolute paths")
+@pytest.mark.parametrize(
+    "value",
+    [
+        r"C:\Users\pilot\.ssh",
+        r"C:\Users\pilot\.aws\credentials",
+        r"C:\Users\pilot\AppData\Roaming\Microsoft\Windows"
+        r"\Start Menu\Programs\Startup",
+    ],
+)
+def test_patch_rejects_windows_credential_directories(client, tmp_config, value):
+    resp = client.patch("/settings", json={"general": {"exports_dir": value}})
+    assert resp.status_code == 422
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows-shaped absolute paths")
+def test_patch_allows_windows_local_app_data(client, tmp_config):
+    value = r"C:\Users\pilot\AppData\Local\Telemetry Frame Mapper\imports"
+    resp = client.patch("/settings", json={"general": {"imports_dir": value}})
+    assert resp.status_code == 200
