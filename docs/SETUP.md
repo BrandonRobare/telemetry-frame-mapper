@@ -62,7 +62,7 @@ On the validated RTX 3050 Ti target, a normal quick-preset survey should finish 
 under two minutes after kernels are warm, and `/reconstruction/RECONSTRUCTION_ID/semantic-labels`
 should report less than 30% `unlabeled` for a typical well-covered scene.
 
-Known issues (all hit during the v1.0 release validation):
+Known issues (all hit while validating a real GPU run):
 
 - The torch and `nvcc` CUDA **major versions must match**: CUDA Toolkit 13.2 pairs with
   `cu130` wheels, not `cu12x`.
@@ -82,7 +82,7 @@ Known issues (all hit during the v1.0 release validation):
   `where cl` compiler-ABI check on every load — a backend started without `cl.exe` fails
   the first training job at "loading COLMAP model" with
   `Command '['where', 'cl']' returned non-zero exit status 1` (COLMAP succeeds; only
-  training dies). Validated on the v1.0 full-preset run (gates doc step 8).
+  training dies).
 
 ## External Binaries
 
@@ -97,7 +97,7 @@ Optional/manual reconstruction tools:
 - **torch + gsplat** + CUDA-capable GPU — Gaussian splat training and optional server-side video rendering. Manual two-step install (see the GPU section above); intentionally not included in the Python `reconstruction` extra.
 - **SuGaR** (`sugar_scene`/`sugar`) — mesh export only. [SuGaR](https://github.com/Anttwo/SuGaR) has no pip-installable release; it must be installed manually by cloning that repo, and is not included in the Python `reconstruction` extra. Mesh export is optional — splat viewing and the rest of reconstruction work fine without it.
 
-CI should use fakes/mocks for external binaries and optional reconstruction libraries. Real `ffmpeg`/`exiftool` smoke is must-pass for v1.0; real COLMAP/gsplat/SuGaR/video-render smoke is optional/manual unless reconstruction is promoted to production-ready.
+CI mocks every external binary and optional reconstruction library, so none of this is needed to run the test suite — see [CONTRIBUTING.md](../CONTRIBUTING.md) for what is checked before a release.
 
 ## Optional remote GPU worker
 

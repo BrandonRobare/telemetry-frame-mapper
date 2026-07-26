@@ -1,4 +1,4 @@
-# Drone Video Geotagger — User Manual
+# Telemetry Frame Mapper — User Manual
 
 A complete pipeline that turns a DJI drone video into GPS-registered, explorable
 3D — geotagged frames, coverage maps, mission plans, and gaussian-splat
@@ -69,8 +69,12 @@ ingest, analysis, planning, reconstruction, and export.
   listed per-session in Session Log.
 - **Reconstruction jobs:** COLMAP structure-from-motion plus gaussian-splat
   training, run as cancellable background jobs with live progress and logs.
-- **Geo-registration:** a COLMAP↔UTM similarity transform so reconstructions
-  carry real-world coordinates.
+- **Geo-registration:** a COLMAP↔UTM similarity transform, solved in-process from
+  per-image camera centres and their EXIF GPS, so reconstructions carry real-world
+  coordinates. It can fail: fewer than three usable GPS frames, or a near-collinear
+  flight line, leaves the reconstruction **not georeferenced** rather than storing a
+  placeholder. Exports then carry a local frame with no CRS, and GPS-dependent viewer
+  features stay disabled.
 - **Exports:** WebODM georeferencing CSV-only zip, GeoJSON, LAS 1.4 point cloud, optional SuGaR mesh
   (GLB/OBJ/MTL), and flythrough video.
 - **Cesium 3D Tiles share bundle:** `POST /export/reconstructions/{id}/share-bundle` writes a real,
@@ -203,7 +207,7 @@ COLMAP SfM:  feature_extractor → matcher (exhaustive=full,         10–95%
    │         sequential=quick) → mapper → model_converter
    │         → sparse/0 model (cameras, images, points3D)
    ▼
-geo-transform: derive COLMAP→UTM similarity from frame GPS
+geo-transform: solve COLMAP→UTM similarity from frame GPS (may fail → not georeferenced)
    ▼
 gsplat training (running_gsplat):  see §3                          95–99.5%
    ▼
@@ -441,6 +445,177 @@ External binaries: `ffmpeg` and `exiftool` are required for the CLI; `colmap`
 plus a CUDA GPU with torch + gsplat are required for reconstruction (all optional
 and detected at runtime). See [INSTALL.md](INSTALL.md) and [SETUP.md](SETUP.md).
 
+
+## 5. Sharing a reconstruction
+
+The Export tab creates a revocable, opaque link to one completed reconstruction. Links default to
+seven days and can carry an optional password.
+
+The bearer token is returned once, in the creation response, and lives only in the viewer URL — it
+is never stored in plaintext and never appended to artifact URLs. Password unlock issues an
+`HttpOnly`, `SameSite=Lax` session cookie scoped to `/share` (marked `Secure` over HTTPS or behind a
+TLS proxy). A cookie unlocked for one link cannot be replayed against another reconstruction.
+
+Public responses distinguish the failure modes:
+
+| Status | Meaning |
+|---|---|
+| `401` | The link is password-protected and not yet unlocked |
+| `403` | Wrong password, or the token does not match this reconstruction |
+| `410` | Expired or revoked |
+
+Owners can inspect and revoke links:
+
+```bash
+GET  /export/reconstructions/{id}/share-links
+POST /export/reconstructions/{id}/share-links/{share_link_id}/revoke
+```
+
+Links signed before 2.0.0 keep working until their signed expiry, but the legacy query-token
+artifact format is no longer issued for new links.
+
+## 6. Backups
+
+`POST /storage/backup` takes an additive, versioned snapshot of the live SQLite database, a
+sanitized `config.yaml`, and whichever of `imports`, `processed`, and `exports` you select. Every
+copied file is SHA-256 recorded in `manifest.json`. The database is copied through SQLite's backup
+API, so the WAL and SHM sidecars are deliberately not included.
+
+Destinations must be allowlisted in `config.yaml` first — a local path has to match an entry
+exactly:
+
+```yaml
+backup:
+  local_destinations:
+    - "E:/telemetry-backups"
+  rclone_remote: "archive:telemetry-backups"   # credentials stay in the rclone config
+```
+
+Then submit `{"destination": "local", "local_destination": "E:/telemetry-backups"}` or
+`{"destination": "rclone"}`, optionally with an `artifacts` list (default
+`["processed", "exports"]`). Remote backups shell out to `rclone copy` — never `sync`, and never a
+deletion flag — and rclone credentials and command output are never written into the snapshot or
+returned by the API.
+
+For a scheduled backup, define a named target drawn from the same allowlist and select it by name.
+`daily_at` uses the server's local clock:
+
+```yaml
+backup:
+  local_destinations:
+    - "E:/telemetry-backups"
+  targets:
+    nightly_local:
+      destination: local
+      local_destination: "E:/telemetry-backups"
+      artifacts: ["processed", "exports"]
+  schedule:
+    enabled: true
+    target: nightly_local
+    daily_at: "02:00"
+```
+
+Only one backup runs at a time, so a slow remote copy is never overlapped by the next scheduled
+run. `GET /storage/backup-schedule` reports operational status only — last run, next run, result —
+never target credentials or command output. The scheduler is off unless `enabled: true`.
+
+## 7. Importing
+
+The Import dialog defaults to **Browser upload**: pick or drag a folder of frames and the app
+streams it to the backend in chunks, then runs the same import pipeline as any other source. This
+is the easiest route when the images are on your workstation but not already under `imports/`. The
+**Server path** mode remains for folders that already live there.
+
+**Upload / cloud drive** covers files a desktop client has already synced from OneDrive, Google
+Drive, Dropbox, or similar. The provider's own client and the operating system authorize access;
+the browser only submits the files you explicitly select, through the same chunked upload. There is
+deliberately no "import from URL" endpoint, and the backend never stores cloud-provider OAuth
+tokens — a direct provider integration would need a registered OAuth client and redirect URI,
+least-privilege scopes, an encrypted token lifecycle, and a redirect/DNS policy before it could be
+added safely.
+
+### SD-card and watch-folder auto-import
+
+Set `auto_import.enabled` and list each mounted card or staging folder explicitly, then restart the
+backend:
+
+```yaml
+auto_import:
+  enabled: true
+  roots:
+    - "E:/DCIM"
+  poll_interval_seconds: 10
+  stable_seconds: 30
+```
+
+The watcher polls, waits for a media directory to sit unchanged for `stable_seconds`, and then
+starts the normal image-import pipeline. It never discovers drives on its own and never imports
+outside `roots`. `GET /auto-import/status` reports which roots are watched, missing, or
+unsupported.
+
+It imports directories containing the configured image extensions (JPEG by default). It does not
+copy card contents, watch video-only folders, or revisit a folder once its media-manifest
+fingerprint has been claimed — that fingerprint is persisted, so a completed import is not repeated
+after a restart. Move or copy edited media into a new folder when you want it imported again.
+
+## 8. API-only workflows
+
+These endpoints have no button in the UI. They exist for scripting and for the batch pipeline, and
+they are live in `/docs` alongside everything else.
+
+**Reproducibility manifest** — records exactly how an artifact was produced, for audit trails.
+
+```bash
+curl -X POST "http://127.0.0.1:8000/export/reproducibility-manifest?workflow=reconstruction"
+```
+
+`workflow` is the stage to describe; add `artifact_path` to pin the manifest to one output file.
+
+**WebODM package** — a complete OpenDroneMap job: the images plus an options manifest, rather than
+the CSV-only georeferencing zip the Export tab produces.
+
+```bash
+curl -X POST "http://127.0.0.1:8000/export/webodm-package?session_id=1&mode=exif&include_images=true"
+```
+
+Set `mode=gcp` with `include_gcp=true` to drive it from ground control points instead of EXIF.
+
+**Reconstruction bundle** — the completed mesh GLB and its sidecars as a single download. Returns
+`202` while the reconstruction or its mesh export is still running, `404` if no GLB was produced.
+
+```bash
+curl -O -J "http://127.0.0.1:8000/reconstruction/1/download-bundle"
+```
+
+**Checkpoint validation** — scores a finished reconstruction against independently surveyed points,
+which is the honest way to measure accuracy (points used for registration cannot also validate it).
+Coordinates are in the reconstruction's **local frame**, not lat/lon, and at least one is required.
+
+```bash
+curl -X POST http://127.0.0.1:8000/reconstruction/1/validate-checkpoints \
+  -H "Content-Type: application/json" \
+  -d '{"points": [{"label": "CP1", "x": 12.40, "y": -3.15, "z": 0.87}]}'
+```
+
+**GCP list** — converts marked ground control points into a list for downstream tools. Each point
+ties a pixel in a named image to a world coordinate, so `image_filename`, `pixel_x`, `pixel_y`,
+`longitude` and `latitude` are all required; `altitude_m` and `label` are optional.
+
+```bash
+curl -X POST http://127.0.0.1:8000/georeferencing/gcp-list \
+  -H "Content-Type: application/json" \
+  -d '[{"image_filename": "frame_00042.jpg", "pixel_x": 2011, "pixel_y": 1488,
+        "longitude": -81.5, "latitude": 41.1, "altitude_m": 297.4, "label": "GCP1"}]'
+```
+
+**Duplicate import check** — advisory only. Flags a folder that looks like an already-imported
+session; it never blocks the import, so it is useful as a pre-flight step in a script.
+
+```bash
+curl -X POST http://127.0.0.1:8000/uploads/imports/check-duplicate \
+  -H "Content-Type: application/json" \
+  -d '{"folder_path": "incoming/flight-07"}'
+```
 
 ## Semantic labels
 

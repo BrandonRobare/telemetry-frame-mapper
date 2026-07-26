@@ -4,7 +4,8 @@
 
 | Version | Supported |
 |---------|-----------|
-| 1.0.x   | ✅        |
+| 2.0.x   | ✅        |
+| 1.0.x   | ❌        |
 | < 1.0   | ❌        |
 
 ## Reporting a vulnerability
@@ -15,7 +16,7 @@ for this repository. Do not open a public issue for a vulnerability.
 
 Include the affected component (CLI, backend, or frontend), a reproduction, and the
 impact you observed. Expect an initial response within 72 hours. If the report is
-confirmed, a fix is released as a patch version (e.g. 1.0.1) and the advisory is
+confirmed, a fix is released as a patch version (e.g. 2.0.1) and the advisory is
 published with credit unless you ask otherwise.
 
 ## Scope notes
