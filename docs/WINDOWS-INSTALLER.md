@@ -7,7 +7,7 @@ The installer bundles the FastAPI backend, built React frontend, and default `co
 Build on 64-bit Windows with:
 
 - Python 3.11–3.12 and a clean virtual environment
-- Node.js 18+ (to build `frontend/dist`)
+- Node.js 20.19+ (to build `frontend/dist`)
 - [PyInstaller](https://pyinstaller.org/) installed in that virtual environment
 - [Inno Setup 6](https://jrsoftware.org/isinfo.php) (`ISCC.exe`) on `PATH`
 
