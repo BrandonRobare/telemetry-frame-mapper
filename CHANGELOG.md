@@ -11,7 +11,7 @@ The major bump is driven by the platform surface rather than by API removals; th
 
 ### Breaking
 - **Python 3.10 is no longer supported.** `requires-python` is now `>=3.11` (3.10 reaches end of life in October 2026). `pyproj` is pinned to `>=3.7.2` as part of the same bump (#533).
-- The WebODM export is named for what it is — georeferencing CSV only — rather than implying a full ODM package (#196). The complete package export with an options manifest is the separate `/exports/webodm/package` route (#207).
+- The WebODM export is named for what it is — georeferencing CSV only — rather than implying a full ODM package (#196). The complete package export with an options manifest is the separate `POST /export/webodm-package` route (#207).
 
 ### Added
 
@@ -20,7 +20,7 @@ The major bump is driven by the platform surface rather than by API removals; th
 - **Persistent, crash-safe job queue** (#306): jobs survive a backend restart, with atomic claim semantics and a stale-job reaper.
 - **Remote/networked GPU worker** (#378): dispatch COLMAP and splat training to a separate GPU host over HTTP, with progress polling and artifact retrieval.
 - **API keys for automation** (#409) and **single-user PIN lock** (#412) for LAN-exposed instances; **self-hosted share links** with expiry and access control (#376) and **public read-only splat-viewer share links** (#301).
-- **Config-driven deployment profile** (#410): one `deployment.toml`-style profile selects bind address, auth mode, storage roots, and worker topology.
+- **Config-driven deployment profile** (#410): a `deployment:` block in `config.yaml` sets bind host/port, the CORS allowlist, and trusted hosts, validated at startup. Binding a non-loopback host with neither `pin_lock` nor `api_key` enabled is refused outright unless `allow_unauthenticated_lan` is set.
 - **Prometheus metrics** at `/metrics` (#411) and **structured logging with rotation** (#399).
 - **Windows installer** (#398): a packaged one-click install for the backend, frontend, and external binary checks.
 
@@ -64,7 +64,7 @@ The major bump is driven by the platform surface rather than by API removals; th
 
 #### Ingest & data management
 - **Browser upload / drag-drop import** (#213) with persisted upload state (#282); **SD-card watch-and-auto-import folder** (#371) and an **imports folder watcher** (#400); **cloud-drive import sources** (#405); **DroneDeploy/Pix4D project import** (#407).
-- **DJI flight-log import** (IMU / gimbal / battery via `dji-log-parser`, #343) and **Autel / Parrot / ArduPilot telemetry parsers** (#379).
+- **DJI flight-log import** (IMU / gimbal / battery via a `pydjirecord` subprocess wrapper, #343) and **Autel / Parrot / ArduPilot telemetry parsers** (#379). Encrypted v13+ logs require a DJI developer API key.
 - **Session archive/restore bundle** for machine moves (#370), **artifact backup** to an external drive or rclone remote (#381), **scheduled SQLite/config backup** (#393), and a **disk-space lifecycle policy / auto-archive** (#303).
 - **Cross-session search** (#390), **bulk session operations** (#391), **duplicate-import detection** (#392), and **session tagging with free-text notes** (#369).
 - **External binary and GPU health dashboard** (#212) and **configurable basemaps with offline map support** (#215).
@@ -73,7 +73,7 @@ The major bump is driven by the platform surface rather than by API removals; th
 ### Changed
 - Frontend: Button and Badge usage consolidated across every tab (#234), phone-sized responsive layout reworked (#235), and the remaining UI primitives brought in line with the warm-light redesign (#236).
 - CI runs a Python 3.11/3.12 matrix; Dependabot PRs are grouped and duplicate CI runs de-duplicated (#530).
-- Frame-rate handling: the CLI warns (or requires `--fps`) when frame numbering has gaps rather than silently inferring a wrong rate (#199).
+- Frame-rate handling: `infer_frame_rate` now fails with a gap summary and tells you to re-run with `--frame-rate` set to the extraction rate, rather than silently inferring a wrong rate (#199, #268).
 - Frontend bundle size reduced and the ineffective dynamic-import warning resolved (#202).
 - Documentation restructured: README, `docs/ARCHITECTURE.md`, and `docs/USER-MANUAL.md` refreshed for accurate counts and current feature coverage (#280, #508).
 

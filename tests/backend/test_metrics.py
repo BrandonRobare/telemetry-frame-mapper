@@ -6,11 +6,13 @@ from sqlalchemy.exc import SQLAlchemyError
 
 
 def test_metrics_uses_prometheus_text_format(client):
+    from backend.main import app
+
     response = client.get("/metrics")
 
     assert response.status_code == 200
     assert response.headers["content-type"] == "text/plain; version=0.0.4; charset=utf-8"
-    assert 'drone_mapping_build_info{version="1.0.0"} 1' in response.text
+    assert f'drone_mapping_build_info{{version="{app.version}"}} 1' in response.text
     assert "drone_mapping_process_start_time_seconds " in response.text
     assert "drone_mapping_database_up 1" in response.text
 
