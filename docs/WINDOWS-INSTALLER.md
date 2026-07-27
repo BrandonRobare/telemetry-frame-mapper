@@ -29,6 +29,6 @@ Pop-Location
 ISCC.exe .\packaging\telemetry-frame-mapper.iss
 ```
 
-The installer is written to `dist-installer\telemetry-frame-mapper-1.0.0-setup.exe`. Run it, launch **Telemetry Frame Mapper** from the Start menu, and open `http://127.0.0.1:8000`. Confirm `%LOCALAPPDATA%\Telemetry Frame Mapper\config.yaml` and its `data`, `imports`, `processed`, and `exports` directories exist, then check `http://127.0.0.1:8000/health` returns `{"status":"ok"}`.
+The installer is written to `dist-installer\telemetry-frame-mapper-2.0.0-setup.exe`. Run it, launch **Telemetry Frame Mapper** from the Start menu, and open `http://127.0.0.1:8000`. Confirm `%LOCALAPPDATA%\Telemetry Frame Mapper\config.yaml` and its `data`, `imports`, `processed`, and `exports` directories exist, then check `http://127.0.0.1:8000/health` returns `{"status":"ok"}`.
 
 The generated `build/`, `dist/`, and `dist-installer/` folders are release artifacts and are not committed.
