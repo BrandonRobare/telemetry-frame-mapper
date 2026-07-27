@@ -10,6 +10,7 @@ from drone_video_geotagger.audit import write_audit_csv
 from drone_video_geotagger.exiftool import write_exif
 from drone_video_geotagger.frames import build_frame_tags, collect_frames, infer_frame_rate
 from drone_video_geotagger.gps_quality import assess_gps_lock, samples_from_telemetry
+from drone_video_geotagger.paths import force_utf8_streams
 from drone_video_geotagger.telemetry import TelemetryPoint, parse_srt
 from drone_video_geotagger.video import extract_srt, read_video_start
 
@@ -128,15 +129,7 @@ def run(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    # Windows falls back to the ANSI code page for stdout/stderr whenever they are
-    # redirected to a pipe or file, so printing a path containing characters outside
-    # that code page raises UnicodeEncodeError *after* the frames have already been
-    # tagged — the command reports failure on work that succeeded.
-    for stream in (sys.stdout, sys.stderr):
-        reconfigure = getattr(stream, "reconfigure", None)
-        if reconfigure is not None:
-            reconfigure(encoding="utf-8")
-
+    force_utf8_streams()
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
