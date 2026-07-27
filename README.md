@@ -13,8 +13,6 @@ This project takes the telemetry back out, matches it to the extracted frames, a
 EXIF tags. From there a web app carries the same footage through coverage review, COLMAP
 reconstruction, gaussian-splat training, and export.
 
-![The Map tab showing footprint polygons and a coverage overlay for an imported flight](docs/images/map-coverage.png)
-
 ```
 DJI video ──ffmpeg──> frames ──CLI──> geotagged JPGs ──import──> map/review/plan
                                                                       │
