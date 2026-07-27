@@ -8,7 +8,7 @@ from drone_video_geotagger.frames import FrameTag
 
 def write_audit_csv(tags: list[FrameTag], csv_path: Path) -> None:
     csv_path.parent.mkdir(parents=True, exist_ok=True)
-    with csv_path.open("w", newline="") as file:
+    with csv_path.open("w", newline="", encoding="utf-8") as file:
         writer = csv.writer(file)
         writer.writerow(
             [

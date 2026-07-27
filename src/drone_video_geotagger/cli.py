@@ -128,6 +128,15 @@ def run(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Windows falls back to the ANSI code page for stdout/stderr whenever they are
+    # redirected to a pipe or file, so printing a path containing characters outside
+    # that code page raises UnicodeEncodeError *after* the frames have already been
+    # tagged — the command reports failure on work that succeeded.
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            reconfigure(encoding="utf-8")
+
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
