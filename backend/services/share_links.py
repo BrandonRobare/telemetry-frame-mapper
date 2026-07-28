@@ -120,8 +120,14 @@ def parse_share_token(token: str) -> ShareToken:
 
 
 def now_utc() -> datetime:
-    """Return a SQLite-friendly UTC timestamp."""
-    return datetime.now(timezone.utc).replace(tzinfo=None)
+    """Return a timezone-aware UTC timestamp.
+
+    This used to strip tzinfo to stay "SQLite-friendly", which is what the
+    ``UtcDateTime`` column type now handles: aware values are converted on write
+    and re-attached on read. Keeping it naive here would compare naive in-memory
+    values against aware ones loaded from the database.
+    """
+    return datetime.now(timezone.utc)
 
 
 def create_opaque_token() -> str:
