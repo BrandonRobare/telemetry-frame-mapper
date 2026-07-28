@@ -13,6 +13,7 @@ import logging
 import sys
 from pathlib import Path
 
+from drone_video_geotagger.paths import force_utf8_streams
 from drone_video_geotagger.pipeline import PipelineResult, load_and_run, plan_job
 
 
@@ -74,6 +75,7 @@ def _format_result(result: PipelineResult) -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
+    force_utf8_streams()
     parser = build_parser()
     args = parser.parse_args(argv)
 
