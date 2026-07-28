@@ -345,13 +345,13 @@ export default function JobsTab() {
   const hasNextHistoryPage = historyPageJobs.length > HISTORY_PAGE_SIZE
   const searchNeedle = search.trim().toLowerCase()
 
-  if (activeList.length === 0 && historyPageJobs.length === 0 && !searchNeedle && statusFilter === 'all') {
-    return (
-      <div className="flex-1 flex items-center justify-center" style={{ color: 'var(--text-muted)' }}>
-        No jobs yet. Start a reconstruction from the Reconstruct tab.
-      </div>
-    )
-  }
+  // Rendered inside the layout rather than returned early: System Health lives in
+  // <ResourceBar />, and it is the only place showing whether ffmpeg/exiftool/
+  // COLMAP/torch/gsplat were found, plus the install commands. Returning early
+  // here hid the first-run diagnostic screen until after a job had succeeded —
+  // exactly when it is no longer needed.
+  const noJobsAtAll =
+    activeList.length === 0 && historyPageJobs.length === 0 && !searchNeedle && statusFilter === 'all'
 
   const running = activeList.filter((j) => isLiveReconstructionStatus(j.status))
   const done = historyPageJobs
@@ -378,6 +378,15 @@ export default function JobsTab() {
       <ResourceBar />
       <div className="flex-1 overflow-y-auto p-6" style={{ color: 'var(--text)' }}>
         <div className="mx-auto" style={{ maxWidth: 800 }}>
+
+        {noJobsAtAll && (
+          <div
+            className="flex items-center justify-center"
+            style={{ color: 'var(--text-muted)', padding: '48px 0' }}
+          >
+            No jobs yet. Start a reconstruction from the Reconstruct tab.
+          </div>
+        )}
 
         {running.length > 0 && (
           <section style={{ marginBottom: 24 }}>
@@ -433,7 +442,7 @@ export default function JobsTab() {
           </section>
         )}
 
-        <section>
+        <section style={noJobsAtAll ? { display: 'none' } : undefined}>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12, flexWrap: 'wrap' }}>
             <h2 className="text-sm font-semibold" style={{ color: 'var(--text)', margin: 0, marginRight: 'auto' }}>
               History
