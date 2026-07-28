@@ -1,12 +1,13 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useProjects } from './useProjects'
 import { useMapStore } from '../../shared/stores/mapStore'
 import { Skeleton } from '../../shared/components/Skeleton'
+import { post } from '../../shared/api/client'
+import type { Project } from '../../types/api'
 
-interface ProjectPickerProps {
-  /** Called when the user clicks "+ New Project" */
-  onCreateProject?: () => void
-}
+/** Sentinel option value — real ids are numbers. */
+const NEW_PROJECT = '__new__'
 
 const SELECT_STYLE: React.CSSProperties = {
   background: 'var(--surface-2)',
@@ -21,16 +22,25 @@ const SELECT_STYLE: React.CSSProperties = {
   height: 28,
 }
 
-export default function ProjectPicker({ onCreateProject }: ProjectPickerProps) {
+const INPUT_STYLE: React.CSSProperties = {
+  ...SELECT_STYLE,
+  cursor: 'text',
+  width: 150,
+}
+
+export default function ProjectPicker() {
   const { data: projects, isLoading } = useProjects()
   const { selectedProjectId, setProject, setSession } = useMapStore()
   const prevProjectsLen = useRef(0)
+  const [creating, setCreating] = useState(false)
+  const [name, setName] = useState('')
+  const [error, setError] = useState<string | null>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
+  const queryClient = useQueryClient()
 
   // When projects load for the first time and nothing is selected, pick the most recent.
   useEffect(() => {
     if (!projects || projects.length === 0) return
-    // If we already had projects loaded (non-zero) and now have more,
-    // we still want to auto-select on first load only.
     const isFirstLoad = prevProjectsLen.current === 0
     prevProjectsLen.current = projects.length
     if (isFirstLoad && selectedProjectId === null) {
@@ -38,8 +48,45 @@ export default function ProjectPicker({ onCreateProject }: ProjectPickerProps) {
     }
   }, [projects, selectedProjectId, setProject])
 
-  const handleChange = (projectId: number) => {
-    setProject(projectId)
+  useEffect(() => {
+    if (creating) inputRef.current?.focus()
+  }, [creating])
+
+  const createProject = useMutation({
+    mutationFn: (projectName: string) => post<Project>('/projects/', { name: projectName }),
+    onSuccess: (project) => {
+      queryClient.invalidateQueries({ queryKey: ['projects'] })
+      setProject(project.id)
+      setSession(null)
+      setCreating(false)
+      setName('')
+      setError(null)
+    },
+    // The API returns 409 on a duplicate name; surface it rather than failing silently.
+    onError: (err: Error) => setError(err.message || 'Could not create project'),
+  })
+
+  const submit = () => {
+    const trimmed = name.trim()
+    if (!trimmed) {
+      setError('Name is required')
+      return
+    }
+    createProject.mutate(trimmed)
+  }
+
+  const cancel = () => {
+    setCreating(false)
+    setName('')
+    setError(null)
+  }
+
+  const handleChange = (value: string) => {
+    if (value === NEW_PROJECT) {
+      setCreating(true)
+      return
+    }
+    setProject(parseInt(value, 10))
     // Clear session selection when switching projects to avoid stale state.
     setSession(null)
   }
@@ -52,10 +99,51 @@ export default function ProjectPicker({ onCreateProject }: ProjectPickerProps) {
     )
   }
 
+  if (creating) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '0 8px' }}>
+        <input
+          ref={inputRef}
+          value={name}
+          onChange={(e) => { setName(e.target.value); setError(null) }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') submit()
+            if (e.key === 'Escape') cancel()
+          }}
+          placeholder="Project name"
+          aria-label="New project name"
+          style={INPUT_STYLE}
+          disabled={createProject.isPending}
+        />
+        <button
+          onClick={submit}
+          disabled={createProject.isPending}
+          className="text-xs cursor-pointer border-none bg-transparent"
+          style={{ color: 'var(--accent-strong)', fontFamily: 'inherit' }}
+        >
+          {createProject.isPending ? 'Creating…' : 'Create'}
+        </button>
+        <button
+          onClick={cancel}
+          className="text-xs cursor-pointer border-none bg-transparent"
+          style={{ color: 'var(--text-muted)', fontFamily: 'inherit' }}
+        >
+          Cancel
+        </button>
+        {error && (
+          <span className="text-xs" style={{ color: 'var(--danger, #b3261e)' }} role="alert">
+            {error}
+          </span>
+        )}
+      </div>
+    )
+  }
+
+  // No projects yet — a bare button reads better than a one-option select.
   if (!projects || projects.length === 0) {
     return (
       <button
-        onClick={onCreateProject}
+        onClick={() => setCreating(true)}
         className="text-xs cursor-pointer border-none bg-transparent"
         style={{ color: 'var(--accent-strong)', padding: '0 8px', fontFamily: 'inherit' }}
       >
@@ -67,7 +155,7 @@ export default function ProjectPicker({ onCreateProject }: ProjectPickerProps) {
   return (
     <select
       value={selectedProjectId ?? ''}
-      onChange={(e) => handleChange(parseInt(e.target.value, 10))}
+      onChange={(e) => handleChange(e.target.value)}
       style={SELECT_STYLE}
       title="Select project"
     >
@@ -81,6 +169,8 @@ export default function ProjectPicker({ onCreateProject }: ProjectPickerProps) {
           </option>
         )
       })}
+      {/* Without this the create affordance disappeared as soon as one project existed. */}
+      <option value={NEW_PROJECT}>+ New project…</option>
     </select>
   )
 }
