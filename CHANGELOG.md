@@ -3,6 +3,20 @@
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres to [Semantic Versioning](https://semver.org/).
 
 
+## [2.0.1] — 2026-07-28
+
+Fixes for defects the 2.0.0 verification walkthrough surfaced, plus the remainder
+found immediately after tagging. Two of these left v2.0 headline features
+unusable.
+
+### Fixed
+- **Orthomosaic export exhausted memory on an ordinary reconstruction** (#545). A completed 73-frame survey asked for a 26246×35183 grid and aborted with "Unable to allocate 20.6 GiB". This also blocked the tile server — `/tiles/{id}/wmts/...` returned `409 Orthomosaic export is not complete`, making WMS/WMTS unreachable. The raster extent now ignores splat floaters far outside the surveyed area (they were defining the bounds, both inflating the pixel count and shrinking the actual subject to a speck), and the output coarsens to a pixel budget instead of failing. The same guard #499 added for elevation exports.
+- **`+ New Project` did nothing** (#549). The handler was an empty function and no `POST /projects` existed in the frontend, so multi-project workspaces could only be used through the API. The button also disappeared once a project existed, so there was no way to create a second one. Creating a project is now an inline flow in the project picker, and a duplicate name surfaces the API's 409 rather than failing silently.
+- **System Health was unreachable on a fresh install** (#548). The Jobs tab returned early when there were no jobs, skipping the resource bar and the dashboard that reports whether ffmpeg, exiftool, COLMAP, torch and gsplat were detected — the first-run diagnostic screen only appeared *after* a reconstruction had succeeded.
+- Mission-plan KML/GPX were written beside the package instead of the configured `exports_dir` (#550), so `/storage/summary`, the disk-lifecycle policy and artifact backup never saw them and nothing cleaned them up. The same fix #195 applied to WebODM exports.
+- Split View opened on a hardcoded map centre roughly 680 km from the reconstruction, and only corrected itself once the 3D camera moved (#551). It now centres on the reconstruction's geo-transform.
+- The GPU/VRAM readout depended on `pynvml`, which was declared as a deprecated distribution that warns on import; switched to the maintained `nvidia-ml-py`, which provides the same module (#547).
+
 ## [2.0.0] — 2026-07-27
 
 1.0 shipped a working pipeline for one operator on one machine. 2.0 turns it into a platform: multi-project workspaces, authentication and share links, a crash-safe job queue that can dispatch to a remote GPU worker, first-class GIS/3D export formats, and a headless CLI that runs the whole video → splat pipeline with no UI. 121 issues across seven milestones.
