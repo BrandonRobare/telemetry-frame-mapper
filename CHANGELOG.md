@@ -114,6 +114,18 @@ The major bump is driven by the platform surface rather than by API removals; th
 - Thumbnail URLs were invalid when `processed_dir` was absolute (#201); FastAPI error details now render cleanly in the frontend API client (#203); WebODM exports honor the configured `exports_dir` (#195).
 - The test suite is portable across timezones and on Windows (#274).
 
+#### Found by the pre-release verification walkthrough
+
+An end-to-end pass against real DJI footage on real hardware, before tagging. Each
+of these was a path no test exercised.
+
+- **Every COLMAP reconstruction failed at 40%.** The `model_converter` step targeted `sparse/` while COLMAP's mapper writes into a numbered sub-model directory (`sparse/0`), so the run aborted with "rigs, cameras, frames, images, points3D files do not exist" and the queue retried into the same failure. Nothing downstream could run: no registered-image count, no geo-transform, no splat training, no exports (#541). The same commit fixes `_pick_best_submodel` returning the largest sub-model only when it was also the lowest-numbered.
+- **Both CLIs failed on Windows.** `dvg-pipeline` crashed with an unhandled traceback on *every* valid job spec whenever stdout was redirected — it prints `→`, which the ANSI code page cannot encode. Separately, `drone-video-geotagger` could not geotag at all into a path containing non-ASCII characters: the audit CSV, the exiftool argfile path, and the final `print()` each assumed the platform default encoding (#540, completing #503).
+- **Footprints were ~3.9× oversized on every video-derived session.** `Image.altitude_m` held height-above-ground from DJI XMP but height-above-sea-level from EXIF. The geotagger now writes `XMP-drone-dji:RelativeAltitude` alongside `GPSAltitude`, so video frames match camera stills. Coverage area, coverage %, gap polygons, and gap-derived re-fly plans all consumed the wrong value (#542, reopening #85).
+- **Timestamps lost their UTC offset.** `Column(DateTime)` dropped the tzinfo written by `datetime.now(timezone.utc)`, so the API served bare timestamps that clients parsed as local time — the Jobs tab showed a negative elapsed counter. A `UtcDateTime` column type now re-attaches UTC on read; the on-disk format is unchanged (#542).
+- **Semantic Splats was unreachable from the UI.** `pynvml` was undeclared in every extra, so `gpu_available` was false on all installs and gated the three GPU workflows — and the Splat Viewer disables "Compute semantic labels" from that flag. GPU capability now derives from `torch.cuda.is_available()`; pynvml is declared and kept for its actual job, live utilisation and VRAM telemetry (#544).
+- The GPU setup guide's `NVCC_APPEND_FLAGS` instruction had no effect — neither gsplat nor torch reads that variable — so readers hit the CUDA 13.x `C1189` error the docs claimed to prevent. Corrected with the flags that must be patched into gsplat directly, and the toolkit version that links against MSVC 14.44 (#543).
+
 ### Security
 - Closed an unauthenticated file read/write chain in session restore (#535).
 - `POST /sessions/restore` rglob-walked the entire data root on every call — a threadpool denial of service (#500).
