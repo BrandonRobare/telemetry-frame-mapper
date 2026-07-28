@@ -402,6 +402,67 @@ def test_run_colmap_returns_registered_image_count(tmp_path):
     assert result == 3
 
 
+def test_run_colmap_converts_the_submodel_not_the_sparse_root(tmp_path):
+    """model_converter must target sparse/<n>, never sparse/ itself.
+
+    COLMAP's mapper writes into a numbered sub-model directory. Pointing the
+    converter at the sparse root fails with "rigs, cameras, frames, images,
+    points3D files do not exist", which aborts every run at 40%. #319 introduced
+    _pick_best_submodel but this call site kept the hardcoded sparse path.
+    """
+    import threading
+    from unittest.mock import patch
+
+    from backend.services.reconstruction import _run_colmap
+
+    colmap_dir = tmp_path / "colmap"
+    colmap_dir.mkdir()
+    _write_fake_images_txt(colmap_dir, 3)
+    captured: list[list[str]] = []
+
+    def capture(cmd, **_kwargs):
+        captured.append(cmd)
+        return _fake_colmap_popen()
+
+    with patch("backend.services.reconstruction.subprocess.Popen", side_effect=capture):
+        _run_colmap(colmap_dir, lambda *_args: None, threading.Event())
+
+    converter = next(c for c in captured if "model_converter" in c)
+    input_path = Path(converter[converter.index("--input_path") + 1])
+    assert input_path == colmap_dir / "sparse" / "0"
+    assert input_path != colmap_dir / "sparse"
+
+
+def test_run_colmap_converts_the_largest_submodel_when_fragmented(tmp_path):
+    """With sparse/0 and sparse/1, the converter follows the larger sub-model."""
+    import threading
+    from unittest.mock import patch
+
+    from backend.services.reconstruction import _run_colmap
+
+    colmap_dir = tmp_path / "colmap"
+    colmap_dir.mkdir()
+    _write_fake_images_txt(colmap_dir, 2)  # sparse/0
+    bigger = colmap_dir / "sparse" / "1"
+    bigger.mkdir(parents=True)
+    lines = ["# header", "# header", "# header"]
+    for i in range(1, 6):
+        lines.append(f"{i} 1.0 0.0 0.0 0.0 0.0 0.0 0.0 1 frame_{i:04d}.jpg")
+        lines.append("100.0 200.0 -1")
+    (bigger / "images.txt").write_text("\n".join(lines) + "\n")
+    captured: list[list[str]] = []
+
+    def capture(cmd, **_kwargs):
+        captured.append(cmd)
+        return _fake_colmap_popen()
+
+    with patch("backend.services.reconstruction.subprocess.Popen", side_effect=capture):
+        _run_colmap(colmap_dir, lambda *_args: None, threading.Event())
+
+    converter = next(c for c in captured if "model_converter" in c)
+    assert Path(converter[converter.index("--input_path") + 1]) == bigger
+
+
 def test_run_colmap_zero_registered_images_raises(tmp_path):
     """COLMAP completing but registering zero images is still a failure."""
     import threading

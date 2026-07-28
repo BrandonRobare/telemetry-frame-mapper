@@ -266,7 +266,10 @@ def _pick_best_submodel(sparse_dir: Path) -> Path:
                 + ", ".join(f"{name}({count})" for name, count in sizes)
                 + f"; using largest: sparse/{sizes[0][0]}({sizes[0][1]})"
             )
-        return candidates[[int(s[0]) for s in sizes].index(int(sizes[0][0]))]
+        # sizes is ordered by image count, candidates by directory name — index
+        # one with the other and you get the largest only when it is also the
+        # lowest-numbered. Name the directory directly instead.
+        return sparse_dir / sizes[0][0]
 
     return candidates[0]
 
@@ -346,6 +349,24 @@ def _run_colmap(
         f"--Mapper.num_threads={cfg['colmap_threads']}",
     ]
 
+    def model_converter_cmd() -> list[str]:
+        """Build the model_converter command against the actual sub-model directory.
+
+        COLMAP's mapper writes into a numbered sub-model dir (``sparse/0``, and
+        ``sparse/1`` … when the reconstruction fragments), never into ``sparse``
+        itself. Pointing the converter at ``sparse`` makes it fail with "rigs,
+        cameras, frames, images, points3D files do not exist", which aborts every
+        run at this step.
+
+        Resolved lazily: ``steps`` is built before the mapper has run, so the
+        sub-model directory does not exist yet at that point.
+        """
+        submodel = _pick_best_submodel(colmap_dir / "sparse")
+        return ["colmap", "model_converter",
+                "--input_path", str(submodel),
+                "--output_path", str(submodel),
+                "--output_type", "TXT"]
+
     steps = [
         (
             ["colmap", "feature_extractor",
@@ -359,19 +380,14 @@ def _run_colmap(
         ),
         (matcher_cmd, "feature matching", 20.0),
         (mapper_cmd, "bundle adjustment", 38.0),
-        (
-            ["colmap", "model_converter",
-             "--input_path", str(colmap_dir / "sparse"),
-             "--output_path", str(colmap_dir / "sparse"),
-             "--output_type", "TXT"],
-            "model conversion",
-            40.0,
-        ),
+        (model_converter_cmd, "model conversion", 40.0),
     ]
 
     for cmd, step_name, pct in steps:
         if cancel.is_set():
             return None
+        if callable(cmd):
+            cmd = cmd()
         progress_cb(step_name, pct)
         try:
             proc = subprocess.Popen(
