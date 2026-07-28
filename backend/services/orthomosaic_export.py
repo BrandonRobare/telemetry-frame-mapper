@@ -13,6 +13,12 @@ _ERROR_MSG_MAX_CHARS = 5000
 _ortho_jobs: set[int] = set()
 _ortho_jobs_lock = threading.Lock()
 
+# Matches elevation_export.MAX_RASTER_PIXELS. Bounds the accumulator so an
+# unusually wide point cloud coarsens the output instead of exhausting memory.
+MAX_RASTER_PIXELS = 100_000_000
+# Percentile clip applied to each axis before deriving the raster extent.
+EXTENT_PERCENTILE = 0.5
+
 
 def _reconstruction_export_dir(reconstruction_id: int) -> Path:
     cfg = get_config()
@@ -84,19 +90,37 @@ def _rasterize_to_orthomosaic(
     else:
         colors = np.full((len(points_utm), 3), 200, dtype=np.uint8)
 
-    x_min, x_max = x.min(), x.max()
-    y_min, y_max = y.min(), y.max()
+    # Splat training leaves a scatter of low-opacity floaters far outside the
+    # surveyed area. Taking the raw min/max lets a handful of them define the
+    # raster extent, which both explodes the pixel count and renders the actual
+    # subject as a speck in a mostly-empty image. Clip to the bulk of the cloud.
+    x_min, x_max = (float(v) for v in np.percentile(x, [EXTENT_PERCENTILE, 100 - EXTENT_PERCENTILE]))
+    y_min, y_max = (float(v) for v in np.percentile(y, [EXTENT_PERCENTILE, 100 - EXTENT_PERCENTILE]))
 
     if x_max - x_min < resolution or y_max - y_min < resolution:
         raise RuntimeError(
             "Point cloud extent is smaller than one pixel — cannot produce orthomosaic"
         )
 
-    cols = max(1, int(math.ceil((x_max - x_min) / resolution)))
-    rows = max(1, int(math.ceil((y_max - y_min) / resolution)))
+    # Coarsen rather than fail: this runs as a background job with no
+    # user-supplied resolution, so "retry at a coarser resolution" would be a
+    # dead end. Without this an ordinary survey could ask for a 26k x 35k grid
+    # and abort with "Unable to allocate 20.6 GiB".
+    span_x, span_y = x_max - x_min, y_max - y_min
+    requested_px = math.ceil(span_x / resolution) * math.ceil(span_y / resolution)
+    if requested_px > MAX_RASTER_PIXELS:
+        # Aim slightly under the cap: each axis is rounded up independently
+        # afterwards, so landing exactly on the budget would overshoot it.
+        budget = MAX_RASTER_PIXELS * 0.99
+        resolution *= math.sqrt(requested_px / budget)
 
-    # Accumulate RGB in a float grid, then average
-    accum = np.zeros((rows, cols, 3), dtype=np.float64)
+    cols = max(1, int(math.ceil(span_x / resolution)))
+    rows = max(1, int(math.ceil(span_y / resolution)))
+
+    # float32 halves the accumulator versus float64. Colour sums stay exact up to
+    # ~65k points per pixel (255 * N within float32's 24-bit mantissa); beyond
+    # that the averaged 8-bit output rounds by at most a unit or two.
+    accum = np.zeros((rows, cols, 3), dtype=np.float32)
     counts = np.zeros((rows, cols), dtype=np.uint32)
 
     col_idx = ((x - x_min) / resolution).astype(np.int64)

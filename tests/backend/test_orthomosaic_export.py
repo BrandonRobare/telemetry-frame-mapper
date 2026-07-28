@@ -254,3 +254,50 @@ def _write_tiny_ply(path, n_points: int) -> None:
         for i in range(n_points):
             f.write(f"{x[i]:.6f} {y[i]:.6f} {z[i]:.6f} {r[i]} {g[i]} {b[i]} "
                      f"{nx[i]:.6f} {ny[i]:.6f} {nz[i]:.6f}\n")
+
+class TestRasterBudget:
+    """The raster must stay bounded regardless of point-cloud extent.
+
+    A completed 73-frame reconstruction asked for a 26246x35183 grid and died
+    with "Unable to allocate 20.6 GiB". #499 added exactly this guard to the
+    elevation export and the orthomosaic path was missed.
+    """
+
+    def _cloud(self, np, n=4000, spread=40.0, outliers=0):
+        rng = np.random.default_rng(0)
+        pts = np.zeros((n + outliers, 6))
+        pts[:n, 0] = rng.uniform(500000, 500000 + spread, n)
+        pts[:n, 1] = rng.uniform(4550000, 4550000 + spread, n)
+        pts[:n, 3:6] = 128
+        if outliers:
+            # A few floaters kilometres away, as splat training produces.
+            pts[n:, 0] = rng.uniform(500000 - 3000, 500000 + 3000, outliers)
+            pts[n:, 1] = rng.uniform(4550000 - 3000, 4550000 + 3000, outliers)
+            pts[n:, 3:6] = 128
+        return pts
+
+    def test_wide_cloud_coarsens_instead_of_exhausting_memory(self):
+        np = pytest.importorskip("numpy")
+        from backend.services import orthomosaic_export as oe
+
+        # 8 km across at 0.1 m would be 80000^2 = 6.4e9 px.
+        pts = self._cloud(np, n=20000, spread=8000.0)
+        image, _gt, _crs = oe._rasterize_to_orthomosaic(pts, {"utm_zone": "17N"}, resolution=0.1)
+
+        rows, cols = image.shape[:2]
+        assert rows * cols <= oe.MAX_RASTER_PIXELS, f"{rows}x{cols} exceeds the budget"
+        assert rows > 0 and cols > 0
+
+    def test_outliers_do_not_define_the_extent(self):
+        np = pytest.importorskip("numpy")
+        from backend.services import orthomosaic_export as oe
+
+        tight = self._cloud(np, n=4000, spread=40.0)
+        with_floaters = self._cloud(np, n=4000, spread=40.0, outliers=20)
+
+        a, _, _ = oe._rasterize_to_orthomosaic(tight, {"utm_zone": "17N"}, resolution=0.1)
+        b, _, _ = oe._rasterize_to_orthomosaic(with_floaters, {"utm_zone": "17N"}, resolution=0.1)
+
+        # Without percentile clipping the floaters stretch the raster ~150x per axis.
+        assert b.shape[0] < a.shape[0] * 3
+        assert b.shape[1] < a.shape[1] * 3
