@@ -52,6 +52,45 @@ def test_write_exiftool_args_file_non_ascii_path(tmp_path: Path) -> None:
     assert content.startswith("-charset\nfilename=UTF8\n")
 
 
+def test_write_exif_pipes_argfile_on_stdin(tmp_path: Path, monkeypatch) -> None:
+    """The argfile must reach exiftool on stdin, never as a command-line path.
+
+    On Windows a path crosses the ANSI argv boundary, which replaces characters
+    outside the active code page with "?" before exiftool sees it. That loss is
+    unrecoverable — `-charset filename=UTF8` cannot undo it — so any output
+    directory with non-ASCII characters failed to geotag at all.
+    """
+    import subprocess
+
+    from drone_video_geotagger.exiftool import write_exif
+
+    tag = FrameTag(
+        source=Path("frames/frame_00001.jpg"),
+        target=tmp_path / "日本語" / "frame_00001.jpg",
+        frame_index=1,
+        seconds=0,
+        lat=41.125,
+        lon=-81.25,
+        rel_alt_m=115.5,
+        abs_alt_m=352.438,
+        timestamp=None,
+    )
+    args_path = tmp_path / "日本語" / "args.txt"
+    captured: dict[str, object] = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        captured["input"] = kwargs.get("input")
+        return subprocess.CompletedProcess(cmd, 0, b"", b"")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    write_exif("exiftool", [tag], args_path)
+
+    assert captured["cmd"][1:] == ["-@", "-"], "argfile path must not be passed as an argument"
+    assert isinstance(captured["input"], bytes), "argfile must be piped as bytes"
+    assert "日本語".encode() in captured["input"]
+
+
 def test_external_file_arg_rejects_newline_in_path() -> None:
     """ExifTool's -@ argfile is one argument per line, so a newline in a filename
     injects options. ``-config`` loads a Perl file, i.e. code execution as the

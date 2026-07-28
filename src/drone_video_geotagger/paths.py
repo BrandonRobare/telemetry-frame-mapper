@@ -1,7 +1,26 @@
 from __future__ import annotations
 
 import platform
+import sys
 from pathlib import Path
+
+
+def force_utf8_streams() -> None:
+    """Make stdout/stderr UTF-8 so redirected output cannot raise UnicodeEncodeError.
+
+    Windows falls back to the ANSI code page for stdout/stderr whenever they are
+    redirected to a pipe or file rather than attached to a console. Printing
+    anything outside that code page then raises — including this project's own
+    output literals (``\\u2192``), not just non-ASCII paths. Because the failing
+    print happens after the work is done, the command reports failure on a run
+    that fully succeeded.
+
+    Call once at the top of every console-script entry point.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            reconfigure(encoding="utf-8")
 
 
 def is_wsl() -> bool:
