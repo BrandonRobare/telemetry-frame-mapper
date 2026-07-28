@@ -23,9 +23,20 @@ from ..services.mission_planner import (
 
 router = APIRouter(prefix="/plans", tags=["plans"])
 
-# Anchor exports dir to the package root so it resolves correctly regardless
-# of the working directory at runtime.
-EXPORTS_DIR = Path(__file__).parent.parent / "exports"
+def _exports_dir() -> Path:
+    """Directory for plan KML/GPX, honouring the configured ``exports_dir``.
+
+    This was previously anchored to the package root to be independent of the
+    working directory. That held, but it also put plan exports outside the
+    configured ``exports_dir``, so they were invisible to /storage/summary, the
+    disk-lifecycle policy, and artifact backup — nothing ever cleaned them up.
+
+    Config paths are already resolved to absolute at load, so the original
+    working-directory concern does not return.
+    """
+    path = Path(get_config().exports_dir)
+    path.mkdir(parents=True, exist_ok=True)
+    return path
 
 
 class PlanIn(BaseModel):
@@ -119,8 +130,8 @@ def generate_plan(body: PlanIn, db: DBSession = Depends(get_db)):
     db.commit()
     db.refresh(plan)
 
-    kml_path = write_kml(plan.id, result["lanes_geojson"], EXPORTS_DIR)
-    gpx_path = write_gpx(plan.id, result["lanes_geojson"], EXPORTS_DIR)
+    kml_path = write_kml(plan.id, result["lanes_geojson"], _exports_dir())
+    gpx_path = write_gpx(plan.id, result["lanes_geojson"], _exports_dir())
 
     plan.kml_path = str(kml_path)
     plan.gpx_path = str(gpx_path)
@@ -195,10 +206,10 @@ def get_plan_segments(plan_id: int, db: DBSession = Depends(get_db)):
     out: list[SegmentOut] = []
     for seg in segments:
         kml_path = write_kml(
-            plan.id, seg.lanes_geojson, EXPORTS_DIR, suffix=f"_seg_{seg.index}"
+            plan.id, seg.lanes_geojson, _exports_dir(), suffix=f"_seg_{seg.index}"
         )
         gpx_path = write_gpx(
-            plan.id, seg.lanes_geojson, EXPORTS_DIR, suffix=f"_seg_{seg.index}"
+            plan.id, seg.lanes_geojson, _exports_dir(), suffix=f"_seg_{seg.index}"
         )
         out.append(
             SegmentOut(
@@ -258,8 +269,8 @@ def generate_plan_from_gaps(body: PlanGenerateFromGapsIn, db: DBSession = Depend
     db.commit()
     db.refresh(plan)
 
-    kml_path = write_kml(plan.id, result["lanes_geojson"], EXPORTS_DIR)
-    gpx_path = write_gpx(plan.id, result["lanes_geojson"], EXPORTS_DIR)
+    kml_path = write_kml(plan.id, result["lanes_geojson"], _exports_dir())
+    gpx_path = write_gpx(plan.id, result["lanes_geojson"], _exports_dir())
 
     plan.kml_path = str(kml_path)
     plan.gpx_path = str(gpx_path)

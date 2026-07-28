@@ -94,8 +94,9 @@ def _rasterize_to_orthomosaic(
     # surveyed area. Taking the raw min/max lets a handful of them define the
     # raster extent, which both explodes the pixel count and renders the actual
     # subject as a speck in a mostly-empty image. Clip to the bulk of the cloud.
-    x_min, x_max = (float(v) for v in np.percentile(x, [EXTENT_PERCENTILE, 100 - EXTENT_PERCENTILE]))
-    y_min, y_max = (float(v) for v in np.percentile(y, [EXTENT_PERCENTILE, 100 - EXTENT_PERCENTILE]))
+    bounds = [EXTENT_PERCENTILE, 100 - EXTENT_PERCENTILE]
+    x_min, x_max = (float(v) for v in np.percentile(x, bounds))
+    y_min, y_max = (float(v) for v in np.percentile(y, bounds))
 
     if x_max - x_min < resolution or y_max - y_min < resolution:
         raise RuntimeError(
