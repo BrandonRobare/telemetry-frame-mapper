@@ -241,7 +241,13 @@ def _workflow_statuses(
     colmap = bool(binaries["colmap"]["available"])
     torch_cuda = bool(python_deps["torch"].get("cuda_available"))
     gsplat = bool(python_deps["gsplat"]["available"])
-    gpu_available = bool(gpu["available"])
+    # pynvml supplies live utilisation/VRAM telemetry and is optional. Whether a
+    # usable NVIDIA GPU exists is answered by torch.cuda.is_available(), which is
+    # what the training code actually requires. Gating capabilities on pynvml alone
+    # reported every GPU workflow as unavailable on any install lacking it — and
+    # that flag disables the "Compute semantic labels" button, so Semantic Splats
+    # was unreachable from the UI even on a working CUDA machine.
+    nvidia_gpu = bool(gpu["available"]) or torch_cuda
     sugar = bool(python_deps["sugar"]["available"])
     transformers = bool(python_deps["transformers"]["available"])
 
@@ -261,14 +267,14 @@ def _workflow_statuses(
         {
             "key": "gaussian_splat_training",
             "label": "Gaussian splat training",
-            "available": colmap and torch_cuda and gsplat and gpu_available,
+            "available": colmap and torch_cuda and gsplat and nvidia_gpu,
             "missing": [
                 key
                 for key, ok in (
                     ("colmap", colmap),
                     ("torch_cuda", torch_cuda),
                     ("gsplat", gsplat),
-                    ("nvidia_gpu", gpu_available),
+                    ("nvidia_gpu", nvidia_gpu),
                 )
                 if not ok
             ],
@@ -276,14 +282,14 @@ def _workflow_statuses(
         {
             "key": "sugar_refinement",
             "label": "SuGaR refinement",
-            "available": colmap and torch_cuda and sugar and gpu_available,
+            "available": colmap and torch_cuda and sugar and nvidia_gpu,
             "missing": [
                 key
                 for key, ok in (
                     ("colmap", colmap),
                     ("torch_cuda", torch_cuda),
                     ("sugar", sugar),
-                    ("nvidia_gpu", gpu_available),
+                    ("nvidia_gpu", nvidia_gpu),
                 )
                 if not ok
             ],
@@ -291,7 +297,7 @@ def _workflow_statuses(
         {
             "key": "semantic_labeling",
             "label": "Semantic labeling",
-            "available": colmap and torch_cuda and gsplat and transformers and gpu_available,
+            "available": colmap and torch_cuda and gsplat and transformers and nvidia_gpu,
             "missing": [
                 key
                 for key, ok in (
@@ -299,7 +305,7 @@ def _workflow_statuses(
                     ("torch_cuda", torch_cuda),
                     ("gsplat", gsplat),
                     ("transformers", transformers),
-                    ("nvidia_gpu", gpu_available),
+                    ("nvidia_gpu", nvidia_gpu),
                 )
                 if not ok
             ],
