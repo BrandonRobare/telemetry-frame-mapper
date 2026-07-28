@@ -61,8 +61,10 @@ reconstruction = [
   "rasterio>=1.4",
   # Live GPU utilisation / VRAM for the Jobs tab resource bar. Optional at runtime
   # (the readout degrades to blank), but it was previously undeclared, so that
-  # display never worked on any install.
-  "pynvml>=11.5"
+  # display never worked on any install. nvidia-ml-py is the maintained
+  # distribution providing the `pynvml` module; the `pynvml` distribution itself
+  # is deprecated and warns on import.
+  "nvidia-ml-py>=12"
 ]
 semantic = [
   "transformers>=4.48",
