@@ -58,7 +58,11 @@ dev = [
 # never resolve as advertised. GPU training install is a manual two-step — see docs/SETUP.md.
 reconstruction = [
   "laspy[lazrs]>=2.5",
-  "rasterio>=1.4"
+  "rasterio>=1.4",
+  # Live GPU utilisation / VRAM for the Jobs tab resource bar. Optional at runtime
+  # (the readout degrades to blank), but it was previously undeclared, so that
+  # display never worked on any install.
+  "pynvml>=11.5"
 ]
 semantic = [
   "transformers>=4.48",

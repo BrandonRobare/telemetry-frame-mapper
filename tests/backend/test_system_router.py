@@ -110,3 +110,49 @@ def test_system_resources_gpu_null_without_nvidia(client):
     assert resp.status_code == 200
     assert resp.json()["gpu_pct"] is None
     assert resp.json()["vram_used_gb"] is None
+
+
+def test_gpu_workflows_do_not_require_pynvml():
+    """A usable CUDA GPU must not be gated on optional telemetry.
+
+    pynvml is what supplies live utilisation/VRAM, and it was undeclared, so
+    _gpu_status() reported available=False on every install. That flag was ANDed
+    into all three GPU workflows, and the frontend disables the "Compute semantic
+    labels" button from the semantic_labeling flag — making Semantic Splats (#331)
+    unreachable from the UI even on a working CUDA machine.
+    """
+    from backend.routers.system import _workflow_statuses
+
+    binaries = {k: {"available": True} for k in ("ffmpeg", "exiftool", "colmap")}
+    python_deps = {
+        "torch": {"available": True, "cuda_available": True},
+        "gsplat": {"available": True},
+        "sugar": {"available": True},
+        "transformers": {"available": True},
+    }
+    no_pynvml = {"available": False, "name": None}
+
+    workflows = {w["key"]: w for w in _workflow_statuses(binaries, python_deps, no_pynvml)}
+
+    for key in ("gaussian_splat_training", "sugar_refinement", "semantic_labeling"):
+        assert workflows[key]["available"] is True, f"{key} gated on pynvml"
+        assert "nvidia_gpu" not in workflows[key]["missing"]
+
+
+def test_gpu_workflows_still_report_missing_without_cuda():
+    """With no CUDA device, nvidia_gpu must still be reported missing."""
+    from backend.routers.system import _workflow_statuses
+
+    binaries = {k: {"available": True} for k in ("ffmpeg", "exiftool", "colmap")}
+    python_deps = {
+        "torch": {"available": True, "cuda_available": False},
+        "gsplat": {"available": True},
+        "sugar": {"available": True},
+        "transformers": {"available": True},
+    }
+    no_pynvml = {"available": False, "name": None}
+
+    workflows = {w["key"]: w for w in _workflow_statuses(binaries, python_deps, no_pynvml)}
+
+    assert workflows["gaussian_splat_training"]["available"] is False
+    assert "nvidia_gpu" in workflows["gaussian_splat_training"]["missing"]
