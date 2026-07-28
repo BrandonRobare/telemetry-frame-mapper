@@ -52,6 +52,33 @@ def test_write_exiftool_args_file_non_ascii_path(tmp_path: Path) -> None:
     assert content.startswith("-charset\nfilename=UTF8\n")
 
 
+def test_build_exiftool_args_writes_relative_altitude() -> None:
+    """Frames must carry height-above-launch, not just GPSAltitude (MSL).
+
+    The backend sizes ground footprints from height above ground. It reads DJI's
+    XMP RelativeAltitude when present and otherwise falls back to GPSAltitude,
+    which is metres above sea level — so a frame tagged at a site 334 m above sea
+    level was treated as flying 334 m higher than it was, making every footprint
+    several times too large.
+    """
+    tag = FrameTag(
+        source=Path("frames/frame_00001.jpg"),
+        target=Path("geotagged/frame_00001.jpg"),
+        frame_index=1,
+        seconds=0,
+        lat=41.1509,
+        lon=-81.3382,
+        rel_alt_m=115.9,
+        abs_alt_m=449.9,
+        timestamp=None,
+    )
+
+    args = build_exiftool_args([tag])
+
+    assert "-XMP-drone-dji:RelativeAltitude=+115.900" in args
+    assert "-GPSAltitude=449.900" in args
+
+
 def test_write_exif_pipes_argfile_on_stdin(tmp_path: Path, monkeypatch) -> None:
     """The argfile must reach exiftool on stdin, never as a command-line path.
 

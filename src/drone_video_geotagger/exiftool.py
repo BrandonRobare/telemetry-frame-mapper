@@ -43,6 +43,12 @@ def build_exiftool_args(tags: list[FrameTag], exiftool: str | Path = "exiftool")
                 "-GPSAltitudeRef=Above Sea Level",
                 "-GPSMapDatum=WGS-84",
                 "-Make=DJI",
+                # Height above the launch point, matching what a DJI still writes.
+                # GPSAltitude alone is metres above sea level, and the backend sizes
+                # ground footprints from height above ground: without this tag a
+                # video-derived frame is treated as flying at its MSL altitude, which
+                # made footprints several times too large on any non-zero terrain.
+                f"-XMP-drone-dji:RelativeAltitude={tag.rel_alt_m:+.3f}",
             ]
         )
         if exif_time and gps_date and gps_time and subsec:
