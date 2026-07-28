@@ -69,12 +69,41 @@ Known issues (all hit while validating a real GPU run):
 - `TORCH_CUDA_ARCH_LIST` is `8.6` for an RTX 3050 Ti. Use the quoted `set "VAR=value"`
   form in cmd — a trailing space before `&&` becomes part of the value and torch fails
   with `Unknown CUDA arch ()`.
-- `NVCC_APPEND_FLAGS=-Xcompiler /Zc:preprocessor` is required with CUDA 13.x: its CCCL
-  headers reject MSVC's traditional preprocessor (`fatal error C1189`).
-- **gsplat 1.5.3 MSVC patch:** the build passes the GCC-only flag `-Wno-attributes` to
-  `cl.exe`, which fails with `error D8021`. Until fixed upstream, edit
-  `site-packages/gsplat/cuda/_backend.py` (~line 177):
-  `extra_cflags = [opt_level]` on Windows instead of `[opt_level, "-Wno-attributes"]`.
+- **gsplat 1.5.3 MSVC patches — both go in `site-packages/gsplat/cuda/_backend.py`**
+  (~line 177). gsplat hardcodes its compiler flags and reads no environment
+  variable, so `NVCC_APPEND_FLAGS` and friends have no effect here; the flags must
+  be edited into the file itself.
+
+  1. Drop the GCC-only `-Wno-attributes`, which `cl.exe` rejects with `error D8021`:
+     `extra_cflags = [opt_level]` on Windows instead of
+     `[opt_level, "-Wno-attributes"]`.
+  2. Add the conforming preprocessor to **both** compile passes — CUDA 13.x CCCL
+     headers hard-error on MSVC's traditional preprocessor (`fatal error C1189`):
+
+     ```python
+     if os.name == "nt":
+         extra_cflags += ["/Zc:preprocessor"]
+         extra_cuda_cflags += ["-Xcompiler", "/Zc:preprocessor"]
+     ```
+
+     It has to be on both. If only nvcc's host pass gets it, the two compilers
+     mangle the same signature differently and the link fails with 38 unresolved
+     `launch_rasterize_to_pixels_from_world_3dgs_fwd_kernel<N>` externals.
+
+- **Use the CUDA 13.2 toolkit, not 13.3.** With 13.3's nvcc, `gsplat_cuda.pyd` fails
+  to link against MSVC 14.44 (`_MSC_VER 1944`) even though that compiler is inside
+  13.3's supported range. The kernel symbols are present in the object file; the two
+  compilers just disagree on mangled-name back-reference compression, so the linker
+  never matches them. Point the build at 13.2:
+
+  ```bat
+  set "CUDA_HOME=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.2"
+  set "CUDA_PATH=%CUDA_HOME%"
+  set "PATH=%CUDA_HOME%\bin;%PATH%"
+  ```
+
+  A failed build leaves a populated cache under `%LOCALAPPDATA%\torch_extensions`;
+  delete `.../Cache/py312_cu130/gsplat_cuda` before retrying.
 - The compile takes ~5 minutes on a typical laptop; the cached build under
   `%LOCALAPPDATA%` is reused afterwards.
 - **Run the backend itself from a VS x64 Developer Command Prompt** (`cl.exe` on PATH),
