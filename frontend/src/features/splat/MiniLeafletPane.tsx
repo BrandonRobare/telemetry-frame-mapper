@@ -36,11 +36,18 @@ function SyncController() {
   return null
 }
 
-export default function MiniLeafletPane() {
+// Fallback only. Reached when a reconstruction has no solved geo-transform, in
+// which case there is no site to centre on.
+const FALLBACK_CENTER: [number, number] = [35.0, -80.0]
+
+export default function MiniLeafletPane({ center }: { center?: [number, number] | null }) {
   return (
     <div style={{ width: '40%', height: '100%', borderRight: '1px solid var(--border)', flexShrink: 0 }}>
       <MapContainer
-        center={[35.0, -80.0]}
+        // The pane only recentres once the 3D camera publishes a viewport, so
+        // without this it opened on the fallback — satellite imagery hundreds of
+        // kilometres from the reconstruction until the user happened to orbit.
+        center={center ?? FALLBACK_CENTER}
         zoom={15}
         style={{ width: '100%', height: '100%' }}
         zoomControl={false}
