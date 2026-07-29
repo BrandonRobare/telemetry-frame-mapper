@@ -290,7 +290,7 @@ export default function App() {
 
         {/* Project picker */}
         <div className="fm-project-slot flex items-center shrink-0" style={{ padding: '0 8px' }}>
-          <ProjectPicker onCreateProject={() => {}} />
+          <ProjectPicker />
         </div>
 
         {/* Session picker */}

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 
 def _make_target_area(client, name="Plan Area"):
     body = {
@@ -239,3 +241,26 @@ def test_generate_from_gaps_no_coverage_run(client):
         },
     )
     assert resp.status_code == 404
+
+
+def test_plan_exports_land_in_the_configured_exports_dir(client, tmp_path, monkeypatch):
+    """Plan KML/GPX must honour exports_dir, not a package-relative constant.
+
+    They were written to backend/exports/, outside the configured directory, so
+    /storage/summary never counted them, the disk-lifecycle policy never cleaned
+    them, and artifact backup never copied them. #195 fixed exactly this for
+    WebODM exports; the plans router was missed.
+    """
+    from backend.core.config import get_config
+    from backend.routers import plans as plans_router
+
+    configured = tmp_path / "configured_exports"
+    cfg = get_config()
+    monkeypatch.setattr(cfg, "exports_dir", str(configured), raising=False)
+
+    resolved = plans_router._exports_dir()
+
+    assert resolved == configured
+    assert resolved.exists()
+    package_relative = Path(plans_router.__file__).parent.parent / "exports"
+    assert resolved != package_relative

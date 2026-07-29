@@ -20,7 +20,7 @@ import type {
   SemanticClassName,
 } from '../../types/api'
 import { SEMANTIC_CLASS_COLORS } from '../../types/api'
-import { deriveGroundPlaneY, gpsToWorld, worldToGps, useRayCast } from './useViewerCoords'
+import { deriveGroundPlaneY, geoOriginLatLon, gpsToWorld, worldToGps, useRayCast } from './useViewerCoords'
 import { smoothstep } from './smoothstep'
 import { cleanupFlythroughRecording } from './flythroughRecording'
 import MiniLeafletPane from './MiniLeafletPane'
@@ -1761,6 +1761,10 @@ export default function SplatViewerTab() {
   const queryClient = useQueryClient()
   const semanticWorkflow = systemResources?.workflows.find((workflow) => workflow.key === 'semantic_labeling')
   const semanticAvailable = semanticWorkflow?.available ?? false
+  const splitPaneCenter = useMemo(() => {
+    const origin = geoOriginLatLon(geoTransform)
+    return origin ? ([origin.lat, origin.lon] as [number, number]) : null
+  }, [geoTransform])
   const semanticMutation = useMutation({
     mutationFn: () => post<SemanticStatus>(`/reconstruction/${activeId!}/semantic-labels`),
     onSuccess: () => {
@@ -2124,7 +2128,9 @@ export default function SplatViewerTab() {
 
       {/* Viewer */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'row', background: '#0a0a0a', overflow: 'hidden' }}>
-        {splitPaneActive && !presenting && activeId !== null && <MiniLeafletPane />}
+        {splitPaneActive && !presenting && activeId !== null && (
+          <MiniLeafletPane center={splitPaneCenter} />
+        )}
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
           {activeId !== null ? (
             <SplatCanvas

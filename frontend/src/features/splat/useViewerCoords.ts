@@ -72,6 +72,19 @@ function matTranspose(
   ]
 }
 
+/** Site centre in WGS-84, from the geo-transform's UTM origin.
+ *
+ * Used to open map panes over the reconstruction rather than a fixed default.
+ */
+export function geoOriginLatLon(
+  geo: GeoTransform | null | undefined,
+): { lat: number; lon: number } | null {
+  if (!geo?.utm_zone || !geo.utm_origin) return null
+  const parsed = parseUtmZone(geo.utm_zone)
+  if (!parsed) return null
+  return utmToLatLon(geo.utm_origin[0], geo.utm_origin[1], parsed.zone, parsed.north)
+}
+
 export function worldToGps(world: WorldPoint, geo: GeoTransform): GpsPoint | null {
   const parsed = parseUtmZone(geo.utm_zone)
   if (!parsed) return null
