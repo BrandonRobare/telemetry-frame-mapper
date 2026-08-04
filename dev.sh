@@ -14,6 +14,7 @@ else
   source .venv/Scripts/activate
 fi
 python -m pip install -e ".[backend,dev]"
+# Reload mode uses one API worker.
 # Run from the repo root: config.yaml and the ./processed static mount resolve from here
 uvicorn backend.main:app --reload --port 8000 &
 BACKEND_PID=$!

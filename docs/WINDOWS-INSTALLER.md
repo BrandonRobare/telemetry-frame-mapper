@@ -1,6 +1,6 @@
 # Windows installer release workflow
 
-The installer bundles the FastAPI backend, built React frontend, and default `config.yaml` into a Windows application directory. At first launch the app creates `%LOCALAPPDATA%\Telemetry Frame Mapper\` and copies the default config there. SQLite data, imports, processed files, exports, and logs stay in that writable per-user directory; uninstalling deliberately preserves them.
+The installer bundles one FastAPI API process, the built React frontend, and default `config.yaml` into a Windows application directory. At first launch the app creates `%LOCALAPPDATA%\Telemetry Frame Mapper\` and copies the default config there. SQLite data, imports, processed files, exports, and logs stay in that writable per-user directory; uninstalling deliberately preserves them.
 
 ## Build prerequisites
 
