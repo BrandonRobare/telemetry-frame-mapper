@@ -132,8 +132,9 @@ CI mocks every external binary and optional reconstruction library, so none of t
 
 Remote execution is off by default. It is intended for an operator-controlled worker on a private,
 authenticated network; this backend does not provision workers, copy image bytes, or expose a worker
-to the public internet. The API server and worker must see the same `imports_dir`, `data_dir`, and
-`exports_dir` paths (for example via a mounted shared volume).
+to the public internet. The remote GPU worker is not a second API process; run one API process on
+one host. The API server and worker must see the same `imports_dir`, `data_dir`, and `exports_dir`
+paths (for example via a mounted shared volume).
 
 Set only the endpoint settings in `config.yaml`, then place the bearer token in the environment named
 by `auth_token_env` before starting the backend. Do not put tokens in YAML, documentation, or shell

@@ -132,7 +132,7 @@ docs/             Documentation
 
 ## Docker
 
-A CPU-only image serves the backend and the built frontend from one container:
+A CPU-only image serves the backend and the built frontend from one container and one API process:
 
 ```bash
 docker build -t telemetry-frame-mapper .

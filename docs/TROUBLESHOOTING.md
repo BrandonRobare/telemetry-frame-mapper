@@ -28,7 +28,7 @@ The frame rate estimate is off. Pass the rate you actually used at extraction ex
 The import field takes a path **relative to the repo's `imports/` directory** — enter `2026-06-11-site-a`, not `C:\flights\site-a`. Absolute paths and `..` are rejected (path-traversal hardening). Move your folder under `imports/` first.
 
 **Frontend loads but every panel says it can't reach the API.**
-The backend isn't running or is on a different port. Start `python -m backend` from the **repo root**; it uses the `deployment` settings in `config.yaml`. The UI expects `http://localhost:8000` by default (override with `VITE_API_URL`). If the frontend is on another origin, add that exact `http://` or `https://` origin to `deployment.cors_origins` and restart.
+The backend isn't running or is on a different port. Start `python -m backend` from the **repo root**; it uses the `deployment` settings in `config.yaml` and starts one API process. The UI expects `http://localhost:8000` by default (override with `VITE_API_URL`). If the frontend is on another origin, add that exact `http://` or `https://` origin to `deployment.cors_origins` and restart.
 
 **Exports / Storage tab shows files somewhere unexpected.**
 Run uvicorn from the repo root. Directory settings in `config.yaml` resolve relative to the config file, but the `processed/` static mount resolves from the working directory.
