@@ -1673,6 +1673,14 @@ def test_safe_export_path_rejects_sibling_prefix(tmp_path):
         _safe_export_path(sibling, exports_dir)
 
 
+def test_safe_export_path_rejects_export_root(tmp_path):
+    from backend.services.reconstruction import _safe_export_path
+
+    exports_dir = tmp_path / "exports"
+    with pytest.raises(ValueError, match="outside exports directory"):
+        _safe_export_path(exports_dir, exports_dir)
+
+
 def test_run_sugar_missing_dependency_reports_optional_install(tmp_path):
     from unittest.mock import patch
 
