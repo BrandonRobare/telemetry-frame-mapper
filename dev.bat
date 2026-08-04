@@ -4,6 +4,7 @@ cd /d "%~dp0"
 
 echo Starting backend...
 if not exist .venv\ python -m venv .venv
+REM Reload mode uses one API worker.
 REM Run uvicorn from the repo root: config.yaml and the .\processed static mount resolve from here
 start "Backend" cmd /k ".venv\Scripts\activate && python -m pip install -e .[backend,dev] && uvicorn backend.main:app --reload --port 8000"
 

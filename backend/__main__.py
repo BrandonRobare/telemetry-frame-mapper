@@ -7,7 +7,7 @@ from backend.core.config import get_deployment_config
 
 def main() -> None:
     deployment = get_deployment_config()
-    uvicorn.run("backend.main:app", host=deployment["host"], port=deployment["port"])
+    uvicorn.run("backend.main:app", host=deployment["host"], port=deployment["port"], workers=1)
 
 
 if __name__ == "__main__":

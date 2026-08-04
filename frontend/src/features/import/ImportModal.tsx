@@ -329,7 +329,7 @@ export default function ImportModal({ open, onClose }: ImportModalProps) {
                     userSelect: 'all',
                   }}
                 >
-                  python -m uvicorn backend.main:app --reload --port 8000
+                  python -m backend
                 </code>
               </>
             ) : (

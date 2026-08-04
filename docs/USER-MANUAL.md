@@ -430,7 +430,7 @@ From **Overview** or **Map**, open **Import**. The default **Browser upload** mo
 
 ```bash
 # Backend (from the repo root)
-uvicorn backend.main:app --reload          # API at http://localhost:8000, docs at /docs
+python -m backend                           # one API process; API at http://localhost:8000, docs at /docs
 
 # Frontend
 cd frontend && npm install && npm run dev   # http://localhost:5173

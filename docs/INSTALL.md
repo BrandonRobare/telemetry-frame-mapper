@@ -81,7 +81,7 @@ Requires Node 20.19+ (Vite 8 declares `^20.19.0 || >=22.12.0`). The UI expects t
 From the **repo root** (paths in `config.yaml` resolve relative to it):
 
 ```bash
-uvicorn backend.main:app --reload    # API: http://localhost:8000, docs: /docs
+python -m backend    # one API process: http://localhost:8000, docs: /docs
 ```
 
 First run creates `data/drone_mapping.db` (SQLite — set `DATABASE_URL` to use PostgreSQL instead). Optional mission parameters (camera FOV, overlap targets, CRS, directories) live in [config.yaml](../config.yaml).
@@ -111,6 +111,13 @@ further attempt is delayed with exponential backoff, and after 10 the client is 
 15 minutes. Blocked attempts return `429` with a `Retry-After` header; a correct PIN clears the
 counter. The same limiter guards `POST /share/token/{token}/unlock`. Counters live in memory and
 reset when the backend restarts.
+
+### One API process only (v2.0.2)
+
+PIN unlock sessions, share-link unlock sessions, and PIN/share throttles are process-local. Run
+one API process on one host: do not add Uvicorn/Gunicorn workers or place multiple API containers
+or hosts behind a proxy. Multi-process and cross-host API serving are unsupported in v2.0.2; this
+limitation does not add cross-process coordination.
 
 ### Binding beyond loopback
 

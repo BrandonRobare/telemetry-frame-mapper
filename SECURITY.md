@@ -25,3 +25,7 @@ This is a local-first tool: the backend binds to localhost and invokes external 
 (ffmpeg, exiftool, COLMAP) as argv lists, never through a shell. Import, export, and
 storage paths are validated against traversal. Reports about these boundaries are
 especially welcome.
+
+PIN unlock sessions, share-link unlock sessions, and PIN/share throttles are process-local.
+In v2.0.2, run exactly one API process on one host; multi-process and cross-host API serving are
+unsupported. A remote GPU worker performs reconstruction work only and is not a second API process.
