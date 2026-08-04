@@ -1478,18 +1478,16 @@ def _reconstruction_export_dir(reconstruction_id: int) -> Path:
 
 
 def _safe_export_path(path: Path, exports_dir: Path) -> Path:
-    exports_root = os.path.normpath(os.path.realpath(exports_dir))
-    candidate = os.path.normpath(os.path.realpath(path))
-    exports_root_cmp = os.path.normcase(exports_root)
-    candidate_cmp = os.path.normcase(candidate)
+    exports_root = os.path.normcase(os.path.normpath(os.path.realpath(exports_dir)))
+    candidate = os.path.normcase(os.path.normpath(os.path.realpath(path)))
     exports_prefix = (
-        exports_root_cmp
-        if exports_root_cmp.endswith(os.sep)
-        else f"{exports_root_cmp}{os.sep}"
+        exports_root if exports_root.endswith(os.sep) else f"{exports_root}{os.sep}"
     )
-    if candidate_cmp != exports_root_cmp and not candidate_cmp.startswith(exports_prefix):
-        raise ValueError(f"Export path {path} is outside exports directory")
-    return Path(candidate)
+    if candidate == exports_root:
+        raise ValueError("Export path is outside exports directory")
+    if candidate.startswith(exports_prefix):
+        return Path(candidate)
+    raise ValueError("Export path is outside exports directory")
 
 
 def _load_geo_transform_for_reconstruction(rec: Reconstruction) -> dict:

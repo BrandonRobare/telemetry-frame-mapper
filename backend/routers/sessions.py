@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import datetime
 import json
-import os
 import re
 import zipfile
 from pathlib import Path, PurePosixPath
@@ -21,7 +20,7 @@ from ..db.session_search import install_session_search_schema
 from ..services.artifact_cleanup import cleanup_session_artifacts
 from ..services.ingest_orchestrator import get_progress, start_import
 from ..services.preflight_quality import build_quick_report
-from ..services.reconstruction import cancel_reconstruction
+from ..services.reconstruction import _safe_export_path, cancel_reconstruction
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 
@@ -453,25 +452,22 @@ def restore_session(req: RestoreRequest, db: DBSession = Depends(get_db)):
     """
     from ..services.session_bundle import restore_session_archive
 
-    # zip_path is user-supplied; confine it to the app's own data roots so it can't be
-    # used to read arbitrary files off the server filesystem.
+    # Resolve and confine the untrusted path before checking or opening the archive.
     cfg = get_config()
-    requested_path = os.path.normcase(os.path.normpath(os.path.realpath(req.zip_path)))
-    inside_root = False
+    requested_path = Path(req.zip_path)
     for root_value in (cfg.imports_dir, cfg.exports_dir, cfg.data_dir):
-        root = os.path.normcase(os.path.normpath(os.path.realpath(root_value)))
-        prefix = root if root.endswith(os.sep) else f"{root}{os.sep}"
-        if requested_path == root or requested_path.startswith(prefix):
-            inside_root = True
+        try:
+            zip_path = _safe_export_path(requested_path, Path(root_value))
             break
-    if not inside_root:
+        except (OSError, RuntimeError, ValueError):
+            continue
+    else:
         raise HTTPException(status_code=400, detail="Archive path is outside allowed directories")
-    # The realpath + prefix check above already confines requested_path to a trusted data root,
-    # so it is safe to use directly. We deliberately do NOT rglob the root to "re-discover" it:
-    # data roots hold 10^5+ reconstruction files, so the walk would be a DoS while adding no
-    # security. Any CodeQL path-injection flag here is a false positive: the prefix check guards it.
-    zip_path = Path(requested_path)
-    if not zip_path.is_file():
+    try:
+        archive_exists = zip_path.is_file()
+    except (OSError, RuntimeError, ValueError):
+        archive_exists = False
+    if not archive_exists:
         raise HTTPException(status_code=404, detail="Archive zip not found")
     try:
         return restore_session_archive(zip_path, db)
