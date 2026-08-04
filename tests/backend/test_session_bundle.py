@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import zipfile
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+from fastapi.testclient import TestClient
 
 from backend.db.models import (
     Annotation,
@@ -79,20 +81,94 @@ def test_restore_rejects_sibling_of_allowed_directory(client, tmp_path):
     assert resp.status_code == 400
 
 
-def test_restore_finds_nested_archive_from_allowed_root(client, tmp_path):
+@pytest.mark.parametrize("candidate_kind", ["outside", "traversal", "sibling"])
+def test_restore_rejects_untrusted_candidates_before_archive_open(client, tmp_path, candidate_kind):
     cfg = _cfg(tmp_path)
-    archive = tmp_path / "imports" / "incoming" / "bundle.zip"
-    archive.parent.mkdir(parents=True)
-    archive.write_bytes(b"zip")
+    imports = Path(cfg.imports_dir)
+    candidates = {
+        "outside": tmp_path.parent / "untrusted" / "bundle.zip",
+        "traversal": imports / ".." / "untrusted" / "bundle.zip",
+        "sibling": tmp_path / "imports2" / "bundle.zip",
+    }
+    archive_file_check = patch(
+        "pathlib.Path.is_file", side_effect=AssertionError("archive opened before rejection")
+    )
 
-    with patch(
-        "backend.services.session_bundle.restore_session_archive",
-        return_value={"session_id": 7},
-    ) as restore:
+    with (
+        patch("backend.services.session_bundle.restore_session_archive") as restore,
+        archive_file_check,
+    ):
+        resp = _restore(client, cfg, str(candidates[candidate_kind]))
+
+    assert resp.status_code == 400
+    restore.assert_not_called()
+
+
+def test_restore_rejects_symlinked_archive_before_archive_open(client, tmp_path):
+    cfg = _cfg(tmp_path)
+    target = tmp_path / "untrusted" / "bundle.zip"
+    target.parent.mkdir()
+    target.write_bytes(b"zip")
+    archive = Path(cfg.imports_dir) / "bundle.zip"
+    archive.parent.mkdir()
+    try:
+        archive.symlink_to(target)
+    except OSError:
+        pytest.skip("symlinks are unavailable")
+    archive_file_check = patch(
+        "pathlib.Path.is_file", side_effect=AssertionError("archive opened before rejection")
+    )
+
+    with (
+        patch("backend.services.session_bundle.restore_session_archive") as restore,
+        archive_file_check,
+    ):
         resp = _restore(client, cfg, str(archive))
 
+    assert resp.status_code == 400
+    restore.assert_not_called()
+
+
+def test_restore_symlink_resolution_failure_is_generic(client, tmp_path):
+    cfg = _cfg(tmp_path)
+    archive = Path(cfg.imports_dir) / "bundle.zip"
+    archive.parent.mkdir()
+    try:
+        archive.symlink_to(archive)
+    except OSError:
+        pytest.skip("symlinks are unavailable")
+
+    safe_client = TestClient(client.app, raise_server_exceptions=False)
+    resp = _restore(safe_client, cfg, str(archive))
+
+    assert resp.status_code in {400, 404}
+    assert resp.json()["detail"] in {
+        "Archive path is outside allowed directories",
+        "Archive zip not found",
+    }
+
+
+def test_restore_finds_nested_archive_from_allowed_root(client, tmp_path):
+    cfg = _cfg(tmp_path)
+    db = _db(client)
+    session = SessionModel(name="Nested archive", folder_path=str(tmp_path))
+    db.add(session)
+    db.commit()
+    db.refresh(session)
+
+    archive_resp = _archive(client, cfg, session.id)
+    assert archive_resp.status_code == 200
+    archive = Path(archive_resp.json()["bundle_path"])
+    nested = Path(cfg.imports_dir) / "incoming" / archive.name
+    nested.parent.mkdir(parents=True)
+    archive.replace(nested)
+
+    resp = _restore(client, cfg, str(nested))
+
     assert resp.status_code == 200
-    assert restore.call_args.args[0] == archive
+    restored = db.get(SessionModel, resp.json()["session_id"])
+    assert restored is not None
+    assert restored.id != session.id
 
 
 def test_restore_does_not_enumerate_data_root(client, tmp_path, monkeypatch):
