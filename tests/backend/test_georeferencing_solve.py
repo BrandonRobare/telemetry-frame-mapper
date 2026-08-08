@@ -15,6 +15,7 @@ import pytest
 
 from backend.services import colmap_io
 from backend.services.georeferencing_solve import (
+    _solve_with_trim,
     _utm_zone_str,
     compute_geo_transform,
     umeyama,
@@ -80,6 +81,22 @@ def test_umeyama_coincident_points_returns_none():
     assert umeyama(src, dst) is None
 
 
+def test_solve_with_trim_reports_applied_points():
+    rng = np.random.default_rng(4)
+    src = rng.standard_normal((11, 3))
+    dst = src.copy()
+    dst[-1] += 1_000.0
+
+    solved = _solve_with_trim(src, dst)
+
+    assert solved is not None
+    (scale, rotation, translation), trimmed_point_count = solved
+    assert trimmed_point_count == 1
+    assert scale == pytest.approx(1.0, rel=1e-6)
+    np.testing.assert_allclose(rotation, np.eye(3), atol=1e-6)
+    np.testing.assert_allclose(translation, np.zeros(3), atol=1e-6)
+
+
 # ---------------------------------------------------------------------------
 # compute_geo_transform
 # ---------------------------------------------------------------------------
@@ -140,6 +157,8 @@ def test_compute_geo_transform_writes_file_and_round_trips(tmp_path):
     assert geo is not None
     assert geo["utm_zone"] == zone == "17N"
     assert geo["scale"] == pytest.approx(1.0, rel=1e-6)
+    assert geo["rmse_m"] == pytest.approx(0.0, abs=1e-6)
+    assert geo["trimmed_point_count"] == 0
     np.testing.assert_allclose(geo["rotation"], np.eye(3), atol=1e-6)
     # File written for the reader.
     written = json.loads((colmap_dir / "geo_transform.json").read_text())
