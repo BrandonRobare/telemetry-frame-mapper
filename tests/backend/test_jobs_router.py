@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
@@ -66,7 +66,7 @@ def test_list_jobs_returns_reconstruction_shape(client):
 def test_list_jobs_orders_by_started_at_desc(client):
     db = _get_db(client)
     s = _make_session(db)
-    base = datetime.now(timezone.utc)
+    base = datetime.now(UTC)
     recs = []
     for i in range(3):
         rec = Reconstruction(
@@ -94,7 +94,7 @@ def test_list_jobs_orders_by_started_at_desc(client):
 def test_list_jobs_supports_skip_limit_and_status_filter(client):
     db = _get_db(client)
     s = _make_session(db)
-    base = datetime.now(timezone.utc)
+    base = datetime.now(UTC)
     recs = []
     for i, status in enumerate(["complete", "failed", "complete", "failed"]):
         rec = Reconstruction(

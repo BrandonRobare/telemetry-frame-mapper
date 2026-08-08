@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import shutil
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from sqlalchemy.orm import Session as DBSession
@@ -69,7 +69,7 @@ def _archive_destination(path: Path, cfg: AppConfig) -> Path:
     for root in _configured_roots(cfg):
         if resolved == root or resolved.is_relative_to(root):
             rel = resolved.relative_to(root)
-            stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+            stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
             return _archive_root(cfg) / stamp / root.name / rel
     raise ValueError("path is outside configured storage roots")
 
@@ -77,16 +77,16 @@ def _archive_destination(path: Path, cfg: AppConfig) -> Path:
 def _make_cutoff(rule: PolicyRule) -> datetime | None:
     if rule.age_days is None:
         return None
-    return datetime.now(timezone.utc) - timedelta(days=rule.age_days)
+    return datetime.now(UTC) - timedelta(days=rule.age_days)
 
 
 def _age_from_dt(dt: datetime) -> int:
-    return (datetime.now(timezone.utc) - dt.replace(tzinfo=timezone.utc)).days
+    return (datetime.now(UTC) - dt.replace(tzinfo=UTC)).days
 
 
 def _age_from_file(path: Path) -> int:
     mtime = path.stat().st_mtime
-    return (datetime.now(timezone.utc) - datetime.fromtimestamp(mtime, tz=timezone.utc)).days
+    return (datetime.now(UTC) - datetime.fromtimestamp(mtime, tz=UTC)).days
 
 
 def _discover_candidates(

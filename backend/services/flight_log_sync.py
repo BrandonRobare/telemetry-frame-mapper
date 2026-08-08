@@ -4,7 +4,7 @@ import bisect
 import csv
 import io
 from dataclasses import dataclass
-from datetime import timezone
+from datetime import UTC
 from typing import Any
 
 
@@ -163,7 +163,7 @@ def _image_timestamp_s(timestamp: Any) -> float:
     interprets naive datetimes in local time, so attach UTC first.
     """
     if timestamp.tzinfo is None:
-        return timestamp.replace(tzinfo=timezone.utc).timestamp()
+        return timestamp.replace(tzinfo=UTC).timestamp()
     return timestamp.timestamp()
 
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import calendar
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from sqlalchemy.orm import Session as DBSession
@@ -52,7 +52,7 @@ async def _read_upload_with_limit(file: UploadFile, max_bytes: int) -> bytes:
 
 def _utc_timestamp_to_naive(ts: float) -> datetime:
     """Convert a Unix epoch float to a naive UTC datetime for DB storage."""
-    return datetime.fromtimestamp(ts, tz=timezone.utc).replace(tzinfo=None)
+    return datetime.fromtimestamp(ts, tz=UTC).replace(tzinfo=None)
 
 
 def _naive_utc_to_timestamp(dt: datetime) -> float:

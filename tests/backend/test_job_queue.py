@@ -5,7 +5,7 @@ from __future__ import annotations
 import sys
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -494,7 +494,7 @@ def test_atomic_claim_lets_exactly_one_racer_win(setup_test_db):
 
     entry = enqueue(RECONSTRUCTION, rec.id)
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     results: list[bool] = []
     results_lock = threading.Lock()
     start = threading.Barrier(6)

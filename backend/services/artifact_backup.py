@@ -8,7 +8,7 @@ import shutil
 import sqlite3
 import subprocess
 import tempfile
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
@@ -108,7 +108,7 @@ def _manifest_files(snapshot: Path) -> list[dict]:
 
 
 def _snapshot_name() -> str:
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     return f"artifact-backup-v1-{stamp}-{uuid4().hex[:8]}"
 
 
@@ -159,7 +159,7 @@ def _build_snapshot(
     manifest = {
         "format": "telemetry-frame-mapper-artifact-backup",
         "version": 1,
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": datetime.now(UTC).isoformat(),
         "snapshot_id": snapshot.name,
         "artifacts": artifacts,
         "files": _manifest_files(snapshot),
