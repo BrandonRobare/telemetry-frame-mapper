@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import subprocess
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from drone_video_geotagger.frames import FrameTag
@@ -17,7 +17,7 @@ def timestamp_values(
 ) -> tuple[str | None, str | None, str | None, str | None]:
     if timestamp is None:
         return None, None, None, None
-    utc_timestamp = timestamp.astimezone(timezone.utc)
+    utc_timestamp = timestamp.astimezone(UTC)
     exif_time = utc_timestamp.strftime("%Y:%m:%d %H:%M:%S")
     gps_date = utc_timestamp.strftime("%Y:%m:%d")
     gps_time = utc_timestamp.strftime("%H:%M:%S.%f")[:-3]

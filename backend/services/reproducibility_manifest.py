@@ -7,7 +7,7 @@ import platform
 import shutil
 import subprocess
 from collections.abc import Iterable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 
@@ -72,7 +72,7 @@ def build_reproducibility_manifest(
             raise ValueError("artifact_path is outside configured safe directories")
     return {
         "manifest_version": 1,
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": datetime.now(UTC).isoformat(),
         "workflow": workflow,
         "dataset": dataset or {},
         "settings": settings,

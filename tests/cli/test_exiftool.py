@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from drone_video_geotagger.exiftool import build_exiftool_args, write_exiftool_args_file
@@ -17,7 +17,7 @@ def test_build_exiftool_args_contains_gps_tags() -> None:
         lon=-81.25,
         rel_alt_m=115.5,
         abs_alt_m=352.438,
-        timestamp=datetime(2025, 8, 6, 18, 28, 47, tzinfo=timezone.utc),
+        timestamp=datetime(2025, 8, 6, 18, 28, 47, tzinfo=UTC),
     )
 
     args = build_exiftool_args([tag])

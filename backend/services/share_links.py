@@ -9,7 +9,7 @@ import json
 import secrets
 import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -127,7 +127,7 @@ def now_utc() -> datetime:
     and re-attached on read. Keeping it naive here would compare naive in-memory
     values against aware ones loaded from the database.
     """
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def create_opaque_token() -> str:

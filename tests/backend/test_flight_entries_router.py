@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -102,8 +102,8 @@ def test_create_flight_entry_derives_duration_from_flight_log(client):
     db.add(log)
     db.commit()
     db.refresh(log)
-    t0 = datetime(2026, 7, 1, 14, 0, 0, tzinfo=timezone.utc)
-    t1 = datetime(2026, 7, 1, 14, 12, 30, tzinfo=timezone.utc)
+    t0 = datetime(2026, 7, 1, 14, 0, 0, tzinfo=UTC)
+    t1 = datetime(2026, 7, 1, 14, 12, 30, tzinfo=UTC)
     db.add_all([
         FlightLogPoint(flight_log_id=log.id, timestamp=t0, latitude=35.0, longitude=-80.0),
         FlightLogPoint(flight_log_id=log.id, timestamp=t1, latitude=35.001, longitude=-80.001),
@@ -130,8 +130,8 @@ def test_create_flight_entry_explicit_duration_wins_over_derived(client):
     db.add(log)
     db.commit()
     db.refresh(log)
-    t0 = datetime(2026, 7, 1, 14, 0, 0, tzinfo=timezone.utc)
-    t1 = datetime(2026, 7, 1, 14, 10, 0, tzinfo=timezone.utc)
+    t0 = datetime(2026, 7, 1, 14, 0, 0, tzinfo=UTC)
+    t1 = datetime(2026, 7, 1, 14, 10, 0, tzinfo=UTC)
     db.add_all([
         FlightLogPoint(flight_log_id=log.id, timestamp=t0, latitude=35.0, longitude=-80.0),
         FlightLogPoint(flight_log_id=log.id, timestamp=t1, latitude=35.001, longitude=-80.001),

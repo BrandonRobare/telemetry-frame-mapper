@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import relationship
@@ -12,7 +12,7 @@ from backend.db.database import Base
 class UtcDateTime(TypeDecorator):
     """DateTime that always reads back as timezone-aware UTC.
 
-    Every timestamp here is written as ``datetime.now(timezone.utc)``, but SQLite's
+    Every timestamp here is written as ``datetime.now(UTC)``, but SQLite's
     DATETIME drops the tzinfo, so values came back naive and FastAPI serialised them
     with no offset (``2026-07-28T13:19:53.466047``). A client cannot tell that is
     UTC — JavaScript parses a bare timestamp as *local* time, which placed running
@@ -34,12 +34,12 @@ class UtcDateTime(TypeDecorator):
             except ValueError:
                 return value
         if value is not None and value.tzinfo is not None:
-            return value.astimezone(timezone.utc).replace(tzinfo=None)
+            return value.astimezone(UTC).replace(tzinfo=None)
         return value
 
     def process_result_value(self, value, dialect):
         if value is not None and value.tzinfo is None:
-            return value.replace(tzinfo=timezone.utc)
+            return value.replace(tzinfo=UTC)
         return value
 
 
@@ -48,7 +48,7 @@ class Project(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, nullable=False, unique=True)
     description = Column(Text)
-    created_at = Column(UtcDateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UtcDateTime, default=lambda: datetime.now(UTC))
     sessions = relationship("Session", back_populates="project", cascade="all, delete-orphan")
 
 
@@ -59,7 +59,7 @@ class Session(Base):
     folder_path = Column(String)
     import_mode = Column(String, default="full")
     project_id = Column(Integer, ForeignKey("projects.id"), nullable=True)
-    imported_at = Column(UtcDateTime, default=lambda: datetime.now(timezone.utc))
+    imported_at = Column(UtcDateTime, default=lambda: datetime.now(UTC))
     photo_count = Column(Integer, default=0)
     usable_count = Column(Integer, default=0)
     notes = Column(Text)
@@ -156,7 +156,7 @@ class FlightLog(Base):
     aircraft_name = Column(String)
     aircraft_sn = Column(String)
     encrypted = Column(Boolean, default=False)
-    uploaded_at = Column(UtcDateTime, default=lambda: datetime.now(timezone.utc))
+    uploaded_at = Column(UtcDateTime, default=lambda: datetime.now(UTC))
     session = relationship("Session", back_populates="flight_logs")
     points = relationship(
         "FlightLogPoint", back_populates="flight_log", cascade="all, delete-orphan"
@@ -195,7 +195,7 @@ class FlightEntry(Base):
     end_pct = Column(Float)
     duration_s = Column(Float)
     notes = Column(Text)
-    created_at = Column(UtcDateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UtcDateTime, default=lambda: datetime.now(UTC))
     session = relationship("Session", back_populates="flight_entries")
 
 
@@ -204,7 +204,7 @@ class TargetArea(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String)
     geom_geojson = Column(Text)
-    created_at = Column(UtcDateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UtcDateTime, default=lambda: datetime.now(UTC))
     notes = Column(Text)
     coverage_runs = relationship(
         "CoverageRun", back_populates="target_area", cascade="all, delete-orphan"
@@ -224,7 +224,7 @@ class CoverageRun(Base):
     coverage_pct = Column(Float)
     gap_geojson = Column(Text)
     overlap_geojson = Column(Text)
-    run_at = Column(UtcDateTime, default=lambda: datetime.now(timezone.utc))
+    run_at = Column(UtcDateTime, default=lambda: datetime.now(UTC))
     target_area = relationship("TargetArea", back_populates="coverage_runs")
     mission_plans = relationship("MissionPlan", back_populates="coverage_run")
 
@@ -244,7 +244,7 @@ class MissionPlan(Base):
     lanes_geojson = Column(Text)
     kml_path = Column(String)
     gpx_path = Column(String)
-    created_at = Column(UtcDateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UtcDateTime, default=lambda: datetime.now(UTC))
     target_area = relationship("TargetArea", back_populates="mission_plans")
     coverage_run = relationship("CoverageRun", back_populates="mission_plans")
 
@@ -253,7 +253,7 @@ class SessionLogEntry(Base):
     __tablename__ = "session_log_entries"
     id = Column(Integer, primary_key=True, index=True)
     session_id = Column(Integer, ForeignKey("sessions.id"), nullable=True)
-    timestamp = Column(UtcDateTime, default=lambda: datetime.now(timezone.utc))
+    timestamp = Column(UtcDateTime, default=lambda: datetime.now(UTC))
     event_type = Column(String)
     coverage_pct = Column(Float)
     photo_count = Column(Integer)
@@ -297,7 +297,7 @@ class Reconstruction(Base):
     semantic_labels_path = Column(String)
     geo_transform = Column(Text)
     error_msg = Column(String)
-    started_at = Column(UtcDateTime, default=lambda: datetime.now(timezone.utc))
+    started_at = Column(UtcDateTime, default=lambda: datetime.now(UTC))
     completed_at = Column(UtcDateTime)
     duration_s = Column(Float)
     training_metrics = Column(Text)       # JSON: [{iter, psnr, ssim}, ...]
@@ -331,7 +331,7 @@ class ShareLink(Base):
     expires_at = Column(UtcDateTime, nullable=False)
     password_hash = Column(Text)
     revoked_at = Column(UtcDateTime)
-    created_at = Column(UtcDateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UtcDateTime, default=lambda: datetime.now(UTC))
     reconstruction = relationship("Reconstruction", back_populates="share_links")
     unlock_sessions = relationship(
         "ShareLinkUnlockSession", back_populates="share_link", cascade="all, delete-orphan"
@@ -346,7 +346,7 @@ class ShareLinkUnlockSession(Base):
     share_link_id = Column(Integer, ForeignKey("share_links.id"), nullable=False)
     token_hash = Column(String, nullable=False, unique=True, index=True)
     expires_at = Column(UtcDateTime, nullable=False)
-    created_at = Column(UtcDateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UtcDateTime, default=lambda: datetime.now(UTC))
     share_link = relationship("ShareLink", back_populates="unlock_sessions")
 
 
@@ -368,7 +368,7 @@ class Annotation(Base):
     lon = Column(Float, nullable=False)
     alt_m = Column(Float, nullable=False)
     color = Column(String, default="#ff6b35")
-    created_at = Column(UtcDateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UtcDateTime, default=lambda: datetime.now(UTC))
     reconstruction = relationship("Reconstruction", back_populates="annotations")
 
 
@@ -389,7 +389,7 @@ class Measurement(Base):
     value = Column(Float)
     unit = Column(String)
     label = Column(String)
-    created_at = Column(UtcDateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UtcDateTime, default=lambda: datetime.now(UTC))
     reconstruction = relationship("Reconstruction", back_populates="measurements")
 
 
@@ -405,7 +405,7 @@ class Defect(Base):
     category = Column(String, nullable=False)
     severity = Column(String)
     note = Column(Text)
-    created_at = Column(UtcDateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UtcDateTime, default=lambda: datetime.now(UTC))
     session = relationship("Session", back_populates="defects")
     image_links = relationship(
         "DefectImage", back_populates="defect", cascade="all, delete-orphan"
@@ -437,7 +437,7 @@ class SessionComparison(Base):
     status = Column(String, default="pending")
     diff_path = Column(String)
     error_msg = Column(String)
-    created_at = Column(UtcDateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UtcDateTime, default=lambda: datetime.now(UTC))
     completed_at = Column(UtcDateTime)
 
 
@@ -459,7 +459,7 @@ class JobQueueEntry(Base):
     error_msg = Column(String)
     attempt = Column(Integer, default=0)
     max_attempts = Column(Integer, default=1)
-    created_at = Column(UtcDateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UtcDateTime, default=lambda: datetime.now(UTC))
     started_at = Column(UtcDateTime)
     completed_at = Column(UtcDateTime)
 
@@ -472,4 +472,4 @@ class AutoImportRecord(Base):
     fingerprint = Column(String, nullable=False, unique=True, index=True)
     source_path = Column(String, nullable=False)
     session_id = Column(Integer, ForeignKey("sessions.id"), nullable=False)
-    created_at = Column(UtcDateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UtcDateTime, default=lambda: datetime.now(UTC))

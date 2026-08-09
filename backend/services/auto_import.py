@@ -4,7 +4,7 @@ import hashlib
 import threading
 import time
 from collections.abc import Callable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from sqlalchemy.exc import IntegrityError
@@ -114,7 +114,7 @@ class AutoImportWatcher:
             "enabled": config["enabled"],
             "running": self._thread is not None and self._thread.is_alive(),
             "roots": roots_status,
-            "last_scan_at": datetime.now(timezone.utc).isoformat(),
+            "last_scan_at": datetime.now(UTC).isoformat(),
         }
         with self._lock:
             self._status = status
@@ -179,7 +179,7 @@ class AutoImportWatcher:
             session = SessionModel(
                 name=folder.name,
                 folder_path=str(folder),
-                imported_at=datetime.now(timezone.utc),
+                imported_at=datetime.now(UTC),
                 photo_count=0,
                 usable_count=0,
             )

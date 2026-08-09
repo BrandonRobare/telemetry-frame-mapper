@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 
@@ -57,7 +57,7 @@ def write_usda_handoff(
     metadata = {
         "reconstruction_id": reconstruction_id,
         "session_id": session_id,
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": datetime.now(UTC).isoformat(),
         "source_assets": source_assets,
         "geo_transform": geo_transform,
         "transform_direction": (

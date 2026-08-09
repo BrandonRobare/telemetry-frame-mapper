@@ -9,8 +9,8 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from enum import Enum
+from datetime import UTC, datetime
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
@@ -28,7 +28,7 @@ logger = logging.getLogger("dvg-pipeline")
 # ── Models ──────────────────────────────────────────────────────────────────
 
 
-class StepKind(str, Enum):
+class StepKind(StrEnum):
     GEOTAG = "geotag"
     INGEST = "ingest"
     COVERAGE = "coverage"
@@ -36,7 +36,7 @@ class StepKind(str, Enum):
     EXPORT = "export"
 
 
-class ReconstructionPreset(str, Enum):
+class ReconstructionPreset(StrEnum):
     """Reconstruction presets, named to match config.yaml and the backend.
 
     These were once "sparse"/"dense", which matched nothing else in the project —
@@ -47,7 +47,7 @@ class ReconstructionPreset(str, Enum):
     FULL = "full"
 
 
-class ExportFormat(str, Enum):
+class ExportFormat(StrEnum):
     WEBODM_PACKAGE = "webodm_package"
     GEOREFERENCING_CSV = "georeferencing_csv"
     SHARE_BUNDLE = "share_bundle"
@@ -242,7 +242,7 @@ def _run_ingest(spec: IngestSpec, dry_run: bool, *, output_root: Path) -> str:
                     "total": len(jpegs),
                     "gps_valid": valid,
                     "gps_missing": no_gps,
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "timestamp": datetime.now(UTC).isoformat(),
                 },
                 indent=2,
             )
@@ -436,7 +436,7 @@ class PipelineRunner:
         log_dir.mkdir(parents=True, exist_ok=True)
 
     def run(self, dry_run: bool = False) -> PipelineResult:
-        started_at = datetime.now(timezone.utc)
+        started_at = datetime.now(UTC)
         results: list[StepResult] = []
 
         _STEP_RUNNERS = {
@@ -489,7 +489,7 @@ class PipelineRunner:
                 logger.exception("Step %d (%s) failed", i, step.kind.value)
                 results.append(StepResult(i, step.kind, False, "", str(exc)))
 
-        finished_at = datetime.now(timezone.utc)
+        finished_at = datetime.now(UTC)
         return PipelineResult(
             name=self.job.name,
             steps=results,
