@@ -3,6 +3,19 @@
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres to [Semantic Versioning](https://semver.org/).
 
 
+## [2.0.2] — Pending release
+
+Narrow security-maintenance release for the 2.0.1 source payload.
+
+### Fixed
+- Compatible frontend dependency remediation, reconciled Python package metadata, and session-archive restore path confinement (#566, #568, #569).
+
+### Changed
+- Documented the supported single-process API authentication topology (#567).
+
+### Upgrade
+- **Backend fixes require the v2.0.2 tag/source archive upgrade path.** `frontend-dist.zip` is a supplemental compiled frontend asset; replacing it alone does not update the backend.
+
 ## [2.0.1] — 2026-07-28
 
 Fixes for defects the 2.0.0 verification walkthrough surfaced, plus the remainder
