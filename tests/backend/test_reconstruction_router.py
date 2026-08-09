@@ -901,6 +901,8 @@ def test_get_geo_transform(client):
         "translation": [0.0, 0.0, 0.0],
         "utm_zone": "17N",
         "utm_origin": [500000.0, 3869000.0],
+        "rmse_m": 1.25,
+        "trimmed_point_count": 2,
     }
     rec = Reconstruction(
         session_id=s.id, preset="quick", status="complete",
@@ -916,6 +918,8 @@ def test_get_geo_transform(client):
     data = resp.json()
     assert data["utm_zone"] == "17N"
     assert data["scale"] == 1.0
+    assert data["rmse_m"] == 1.25
+    assert data["trimmed_point_count"] == 2
 
 
 def test_get_geo_transform_not_found(client):

@@ -76,8 +76,8 @@ def umeyama(src: np.ndarray, dst: np.ndarray) -> tuple[float, np.ndarray, np.nda
 
 def _solve_with_trim(
     src: np.ndarray, dst: np.ndarray
-) -> tuple[float, np.ndarray, np.ndarray] | None:
-    """Umeyama with one robustness pass: drop >3 sigma residuals and re-solve."""
+) -> tuple[tuple[float, np.ndarray, np.ndarray], int] | None:
+    """Umeyama with one robustness pass and its applied trim count."""
     solution = umeyama(src, dst)
     if solution is None:
         return None
@@ -86,13 +86,15 @@ def _solve_with_trim(
     residual = np.linalg.norm(dst - predicted, axis=1)
     sigma = float(residual.std())
     if sigma <= 0.0:
-        return solution
+        return solution, 0
     keep = np.abs(residual - np.median(residual)) <= _TRIM_SIGMA * sigma
     # ponytail: single trim pass — full RANSAC if flight GPS proves noisier than this.
     if keep.all() or keep.sum() < 4:
-        return solution
+        return solution, 0
     retried = umeyama(src[keep], dst[keep])
-    return retried or solution
+    if retried is None:
+        return solution, 0
+    return retried, int((~keep).sum())
 
 
 def _utm_zone_str(lon: float, lat: float) -> tuple[str, pyproj.Transformer]:
@@ -157,11 +159,14 @@ def compute_geo_transform(colmap_dir: Path, sparse_dir: Path, images: list) -> d
     origin_n = float(np.mean(northing))
     dst = np.column_stack([easting - origin_e, northing - origin_n, lonlatalt[:, 2]])
 
-    solution = _solve_with_trim(centres, dst)
-    if solution is None:
+    solved = _solve_with_trim(centres, dst)
+    if solved is None:
         logger.warning("Georeferencing failed: degenerate camera-centre geometry")
         return None
+    solution, trimmed_point_count = solved
     scale, rotation, translation = solution
+    predicted = scale * (centres @ rotation.T) + translation
+    rmse_m = float(np.sqrt(np.mean(np.sum((dst - predicted) ** 2, axis=1))))
 
     geo = {
         "scale": scale,
@@ -169,6 +174,8 @@ def compute_geo_transform(colmap_dir: Path, sparse_dir: Path, images: list) -> d
         "translation": translation.tolist(),
         "utm_zone": utm_zone,
         "utm_origin": [origin_e, origin_n],
+        "rmse_m": rmse_m,
+        "trimmed_point_count": trimmed_point_count,
     }
     (colmap_dir / "geo_transform.json").write_text(json.dumps(geo, indent=2), encoding="utf-8")
     return geo
