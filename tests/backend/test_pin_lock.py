@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
 import pytest
 
 import backend.main as main
 from backend.core.config import get_api_key_config, get_pin_lock_config
+from backend.services import job_queue
 from backend.services.share_links import hash_password
 
 
@@ -37,6 +39,19 @@ def enabled_api_key(enabled_pin_lock, monkeypatch):
 
 def test_pin_lock_disabled_leaves_routes_unlocked(client):
     assert client.get("/sessions").status_code != 401
+
+
+def test_pin_lock_refuses_a_second_api_process(enabled_pin_lock, monkeypatch):
+    monkeypatch.setattr(main, "configure_application_logging", lambda config: None)
+    monkeypatch.setattr(main, "init_db", lambda: None)
+    monkeypatch.setattr(job_queue, "start_worker", lambda: False)
+
+    async def open_lifespan():
+        async with main.lifespan(main.app):
+            pass
+
+    with pytest.raises(RuntimeError, match="single API process"):
+        asyncio.run(open_lifespan())
 
 
 def test_pin_lock_rejects_missing_or_malformed_hash(tmp_path, monkeypatch):

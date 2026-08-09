@@ -73,12 +73,15 @@ async def lifespan(app: FastAPI):
     from backend.services.auto_import import AutoImportWatcher
     from backend.services.job_queue import shutdown_worker, start_worker
 
+    if not start_worker() and pin_lock_config["enabled"]:
+        raise RuntimeError(
+            "PIN lock requires a single API process; another process already owns the job "
+            "queue lock."
+        )
+
     watcher = AutoImportWatcher()
     app.state.auto_import_watcher = watcher
     watcher.start()
-    # start_worker takes the single-drainer OS lock, reaps orphaned jobs, then
-    # runs the worker — all only in the lock-holding process.
-    start_worker()
     backup_scheduler = scheduled_backup_from_config(get_config())
     app.state.backup_scheduler = backup_scheduler
     backup_scheduler.start()
