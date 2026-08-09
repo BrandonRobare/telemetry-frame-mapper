@@ -37,4 +37,5 @@ jobs:
       - name: Upload frontend dist to release
         uses: softprops/action-gh-release@v3
         with:
+          body_path: release-notes/${{ github.ref_name }}.md
           files: frontend-dist.zip
