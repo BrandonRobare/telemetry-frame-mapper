@@ -370,6 +370,8 @@ export interface GeoTransform {
   translation: [number, number, number]
   utm_zone: string
   utm_origin: [number, number]
+  rmse_m?: number
+  trimmed_point_count?: number
 }
 
 export interface StorageFileItem {
