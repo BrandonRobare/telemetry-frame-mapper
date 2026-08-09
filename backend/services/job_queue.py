@@ -243,8 +243,8 @@ def _release_worker_lock() -> None:
         _lock_fh = None
 
 
-def start_worker() -> None:
-    """Launch the background drain loop (idempotent).
+def start_worker() -> bool:
+    """Launch the background drain loop and report whether this process owns it.
 
     Only the process that wins the OS drain lock runs a worker (and the
     startup reaper); others keep serving requests while the lock holder
@@ -254,19 +254,20 @@ def start_worker() -> None:
     # multi-worker job execution is ever needed
     global _worker
     if _worker is not None and _worker.is_alive():
-        return
+        return True
     if not _acquire_worker_lock():
         logger.warning(
             "JobQueue: drain-worker lock held by another process; not starting a "
             "worker here (jobs run in the lock-holding process)."
         )
-        return
+        return False
     reaped = claim_stale_jobs()
     if reaped:
         logger.info("JobQueue: recovered %d orphaned running jobs on startup", reaped)
     _shutdown.clear()
     _worker = threading.Thread(target=_drain_loop, daemon=True, name="jobq-worker")
     _worker.start()
+    return True
 
 
 def shutdown_worker(timeout: float = 5.0) -> None:
