@@ -27,10 +27,10 @@ classifiers = [
 
 [project.optional-dependencies]
 backend = [
-  "fastapi==0.139.2",
-  "uvicorn[standard]==0.51.0",
+  "fastapi==0.141.1",
+  "uvicorn[standard]==0.52.1",
   "sqlalchemy==2.0.51",
-  "alembic==1.18.5",
+  "alembic==1.19.0",
   "pyyaml==6.0.3",
   "pillow==12.3.0",
   "piexif==1.1.3",
