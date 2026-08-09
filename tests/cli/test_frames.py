@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -19,7 +19,7 @@ def test_build_frame_tags_aligns_frames_and_adds_takeoff_altitude() -> None:
         TelemetryPoint(0, 1, 41.0, -81.0, 100.0),
         TelemetryPoint(1, 2, 41.2, -80.8, 102.0),
     ]
-    start = datetime(2025, 8, 6, 18, 28, 47, tzinfo=timezone.utc)
+    start = datetime(2025, 8, 6, 18, 28, 47, tzinfo=UTC)
 
     tags = build_frame_tags(
         frames=frames,
@@ -38,7 +38,7 @@ def test_build_frame_tags_aligns_frames_and_adds_takeoff_altitude() -> None:
     assert tags[1].lon == pytest.approx(-80.9)
     assert tags[1].rel_alt_m == pytest.approx(101.0)
     assert tags[1].abs_alt_m == pytest.approx(337.5)
-    assert tags[2].timestamp == datetime(2025, 8, 6, 18, 28, 48, tzinfo=timezone.utc)
+    assert tags[2].timestamp == datetime(2025, 8, 6, 18, 28, 48, tzinfo=UTC)
 
 
 def test_build_frame_tags_rejects_zero_frame_rate() -> None:

@@ -9,7 +9,7 @@ import shutil
 import subprocess
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path, PureWindowsPath
 
 from shapely.geometry import Point, shape
@@ -115,7 +115,7 @@ _REMOTE_POLL_FAILURE_WINDOW_S = 600  # 10 minutes since the last successful poll
 def _log_rec(rec_id: int, msg: str) -> None:
     with _rec_logs_lock:
         buf = _rec_logs.setdefault(rec_id, [])
-        buf.append(f"{datetime.now(timezone.utc).strftime('%H:%M:%S')} {msg}")
+        buf.append(f"{datetime.now(UTC).strftime('%H:%M:%S')} {msg}")
         if len(buf) > 500:
             _rec_logs[rec_id] = buf[-500:]
 
@@ -1508,7 +1508,7 @@ def _mesh_georef_metadata(rec: Reconstruction, geo: dict) -> dict:
     return {
         "reconstruction_id": rec.id,
         "session_id": rec.session_id,
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": datetime.now(UTC).isoformat(),
         "geo_transform": geo,
     }
 
@@ -2005,14 +2005,14 @@ def _run_comparison_job(entry, db, cancel: threading.Event) -> None:
         _compute_voxel_diff(rec_a, rec_b, output_path, voxel_size_m=voxel_size_m)
         comparison.diff_path = str(output_path)
         comparison.status = "complete"
-        comparison.completed_at = datetime.now(timezone.utc)
+        comparison.completed_at = datetime.now(UTC)
         db.commit()
         mark_complete(entry.id)
     except Exception as exc:
         db.query(SessionComparison).filter(SessionComparison.id == comparison_id).update({
             "status": "failed",
             "error_msg": str(exc)[:_ERROR_MSG_MAX_CHARS],
-            "completed_at": datetime.now(timezone.utc),
+            "completed_at": datetime.now(UTC),
         })
         db.commit()
         raise
@@ -2178,9 +2178,9 @@ def _duration_seconds(started_at: datetime | None, completed_at: datetime | None
     if started_at is None or completed_at is None:
         return None
     if started_at.tzinfo is not None and completed_at.tzinfo is None:
-        completed_at = completed_at.replace(tzinfo=timezone.utc)
+        completed_at = completed_at.replace(tzinfo=UTC)
     elif started_at.tzinfo is None and completed_at.tzinfo is not None:
-        started_at = started_at.replace(tzinfo=timezone.utc)
+        started_at = started_at.replace(tzinfo=UTC)
     return max(0.0, (completed_at - started_at).total_seconds())
 
 
@@ -2237,7 +2237,7 @@ def _run_pipeline(entry, db, cancel: threading.Event) -> None:
                 status="cancelled",
                 step="cancelled",
                 error_msg="Cancelled by user",
-                completed_at=datetime.now(timezone.utc),
+                completed_at=datetime.now(UTC),
             )
             return
 
@@ -2266,7 +2266,7 @@ def _run_pipeline(entry, db, cancel: threading.Event) -> None:
                 status="cancelled",
                 step="cancelled",
                 error_msg="Cancelled by user",
-                completed_at=datetime.now(timezone.utc),
+                completed_at=datetime.now(UTC),
             )
             return
 
@@ -2299,7 +2299,7 @@ def _run_pipeline(entry, db, cancel: threading.Event) -> None:
             generated_thumb = _generate_thumbnail(splat_path, thumb_candidate)
             _log_rec(reconstruction_id, "Thumbnail generation: complete")
 
-            completed_at = datetime.now(timezone.utc)
+            completed_at = datetime.now(UTC)
             _update_rec(
                 db, reconstruction_id,
                 status="complete",
@@ -2334,7 +2334,7 @@ def _run_pipeline(entry, db, cancel: threading.Event) -> None:
                     f"Cancelled by user; checkpoint saved to {splat_path}"
                     if checkpoint_saved else "Cancelled by user"
                 ),
-                completed_at=datetime.now(timezone.utc),
+                completed_at=datetime.now(UTC),
             )
         except RuntimeError as exc:
             if "CUDA out of memory" in str(exc):
@@ -2344,7 +2344,7 @@ def _run_pipeline(entry, db, cancel: threading.Event) -> None:
                     error_msg=(
                         "GPU ran out of memory — switch to 'quick' preset or reduce frame count"
                     ),
-                    completed_at=datetime.now(timezone.utc),
+                    completed_at=datetime.now(UTC),
                 )
             else:
                 _log_rec(reconstruction_id, f"Gaussian Splatting skipped: {exc}")
@@ -2353,7 +2353,7 @@ def _run_pipeline(entry, db, cancel: threading.Event) -> None:
                     status="complete",
                     step="colmap_only",
                     progress_pct=100.0,
-                    completed_at=datetime.now(timezone.utc),
+                    completed_at=datetime.now(UTC),
                 )
                 _log_rec(reconstruction_id, "Pipeline complete (COLMAP only)")
 
@@ -2362,7 +2362,7 @@ def _run_pipeline(entry, db, cancel: threading.Event) -> None:
             db, reconstruction_id,
             status="failed",
             error_msg=str(exc)[:_ERROR_MSG_MAX_CHARS],
-            completed_at=datetime.now(timezone.utc),
+            completed_at=datetime.now(UTC),
         )
         raise
     else:
@@ -2458,7 +2458,7 @@ def _run_remote_pipeline(
                     psnr=result.get("psnr"),
                     ssim=result.get("ssim"),
                     geo_transform=json.dumps(geo) if geo else None,
-                    completed_at=datetime.now(timezone.utc),
+                    completed_at=datetime.now(UTC),
                 )
                 _log_rec(reconstruction_id, "Remote worker: complete")
                 return
@@ -2472,10 +2472,10 @@ def _run_remote_pipeline(
                     status="cancelled",
                     step="cancelled",
                     error_msg=message,
-                    completed_at=datetime.now(timezone.utc),
+                    completed_at=datetime.now(UTC),
                 )
                 entry.status = "cancelled"
-                entry.completed_at = datetime.now(timezone.utc)
+                entry.completed_at = datetime.now(UTC)
                 db.commit()
                 return
             if state == "failed":
@@ -2486,7 +2486,7 @@ def _run_remote_pipeline(
                     status=state,
                     step=state,
                     error_msg=message,
-                    completed_at=datetime.now(timezone.utc),
+                    completed_at=datetime.now(UTC),
                 )
                 raise JobNonRetryableError(message)
             raise RemoteWorkerError("Remote worker returned an unknown job status")
@@ -2497,7 +2497,7 @@ def _run_remote_pipeline(
             status="failed",
             step="remote worker error",
             error_msg=str(exc)[:_ERROR_MSG_MAX_CHARS],
-            completed_at=datetime.now(timezone.utc),
+            completed_at=datetime.now(UTC),
         )
         _cancel_remote_best_effort(config, remote_job_id, reconstruction_id)
         raise JobNonRetryableError(str(exc)) from exc
@@ -2509,7 +2509,7 @@ def _run_remote_pipeline(
             status="cancelled",
             step="cancelled",
             error_msg="Cancelled by user",
-            completed_at=datetime.now(timezone.utc),
+            completed_at=datetime.now(UTC),
         )
 
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC
 from pathlib import Path
 
 import pytest
@@ -69,7 +70,7 @@ steps:
 
 
 def test_format_result_success() -> None:
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     result = PipelineResult(
         name="test",
@@ -77,8 +78,8 @@ def test_format_result_success() -> None:
             StepResult(0, StepKind.GEOTAG, True, "geotag done"),
             StepResult(1, StepKind.INGEST, True, "ingest done"),
         ],
-        started_at=datetime(2025, 1, 1, 0, 0, tzinfo=timezone.utc),
-        finished_at=datetime(2025, 1, 1, 0, 1, tzinfo=timezone.utc),
+        started_at=datetime(2025, 1, 1, 0, 0, tzinfo=UTC),
+        finished_at=datetime(2025, 1, 1, 0, 1, tzinfo=UTC),
         dry_run=False,
     )
     formatted = _format_result(result)
@@ -88,15 +89,15 @@ def test_format_result_success() -> None:
 
 
 def test_format_result_failure() -> None:
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     result = PipelineResult(
         name="fail-job",
         steps=[
             StepResult(0, StepKind.GEOTAG, False, "", "ffmpeg not found"),
         ],
-        started_at=datetime(2025, 1, 1, 0, 0, tzinfo=timezone.utc),
-        finished_at=datetime(2025, 1, 1, 0, 0, tzinfo=timezone.utc),
+        started_at=datetime(2025, 1, 1, 0, 0, tzinfo=UTC),
+        finished_at=datetime(2025, 1, 1, 0, 0, tzinfo=UTC),
         dry_run=False,
     )
     formatted = _format_result(result)

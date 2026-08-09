@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy.orm import Session as DBSession
 
@@ -49,7 +49,7 @@ def build_survey_report(session_id: int, db: DBSession) -> dict:
         preflight = None
 
     # Report timestamp
-    generated_at = datetime.now(timezone.utc).isoformat()
+    generated_at = datetime.now(UTC).isoformat()
 
     # Build structured report -------------------------------------------------
     report: dict = {

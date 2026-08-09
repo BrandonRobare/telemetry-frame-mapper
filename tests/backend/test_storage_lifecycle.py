@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -164,7 +164,7 @@ class _Query:
         return SessionModel(
             name="old",
             folder_path="/tmp/old_session",
-            imported_at=datetime.now(timezone.utc) - timedelta(days=1),
+            imported_at=datetime.now(UTC) - timedelta(days=1),
         )
 
 
@@ -259,7 +259,7 @@ def test_apply_policy_uses_session_import_date_for_dry_run(tmp_path):
             return SessionModel(
                 name="old",
                 folder_path="/tmp/old_session",
-                imported_at=datetime.now(timezone.utc) - timedelta(days=10),
+                imported_at=datetime.now(UTC) - timedelta(days=10),
             )
 
     class Db:

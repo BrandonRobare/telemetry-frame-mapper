@@ -90,7 +90,7 @@ def _dir_size(path: Path) -> int:
 
 
 def _cleanup_old_uploads(root: Path, cleanup_after_hours: int) -> None:
-    cutoff = datetime.datetime.now(datetime.timezone.utc).timestamp() - cleanup_after_hours * 3600
+    cutoff = datetime.datetime.now(datetime.UTC).timestamp() - cleanup_after_hours * 3600
     for child in root.iterdir():
         if child.is_dir() and child.stat().st_mtime < cutoff:
             shutil.rmtree(child, ignore_errors=True)
@@ -330,7 +330,7 @@ def complete_browser_import_upload(upload_id: str, db: DBSession = Depends(get_d
         session = SessionModel(
             name=state["name"],
             folder_path=str(state["root"]),
-            imported_at=datetime.datetime.now(datetime.timezone.utc),
+            imported_at=datetime.datetime.now(datetime.UTC),
             photo_count=0,
             usable_count=0,
         )

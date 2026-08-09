@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import math
 import tempfile
+from datetime import UTC
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -184,7 +185,7 @@ def test_session_reconstructions_relationship(setup_test_db):
 
 
 def test_update_rec_sets_duration_when_completed_at_is_written(setup_test_db):
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     from backend.db.database import get_db
     from backend.db.models import Reconstruction
@@ -198,7 +199,7 @@ def test_update_rec_sets_duration_when_completed_at_is_written(setup_test_db):
         preset="quick",
         status="running_gsplat",
         frames_used=1,
-        started_at=datetime(2026, 1, 1, 0, 0, 0, tzinfo=timezone.utc),
+        started_at=datetime(2026, 1, 1, 0, 0, 0, tzinfo=UTC),
     )
     db.add(rec)
     db.commit()
@@ -208,7 +209,7 @@ def test_update_rec_sets_duration_when_completed_at_is_written(setup_test_db):
         db,
         rec.id,
         status="complete",
-        completed_at=datetime(2026, 1, 1, 0, 0, 2, 250000, tzinfo=timezone.utc),
+        completed_at=datetime(2026, 1, 1, 0, 0, 2, 250000, tzinfo=UTC),
     )
 
     db.refresh(rec)
@@ -216,7 +217,7 @@ def test_update_rec_sets_duration_when_completed_at_is_written(setup_test_db):
 
 
 def test_update_rec_clamps_negative_duration_to_zero(setup_test_db):
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     from backend.db.database import get_db
     from backend.db.models import Reconstruction
@@ -230,7 +231,7 @@ def test_update_rec_clamps_negative_duration_to_zero(setup_test_db):
         preset="quick",
         status="running_colmap",
         frames_used=1,
-        started_at=datetime(2026, 1, 1, 0, 0, 10, tzinfo=timezone.utc),
+        started_at=datetime(2026, 1, 1, 0, 0, 10, tzinfo=UTC),
     )
     db.add(rec)
     db.commit()
@@ -240,7 +241,7 @@ def test_update_rec_clamps_negative_duration_to_zero(setup_test_db):
         db,
         rec.id,
         status="failed",
-        completed_at=datetime(2026, 1, 1, 0, 0, 5, tzinfo=timezone.utc),
+        completed_at=datetime(2026, 1, 1, 0, 0, 5, tzinfo=UTC),
     )
 
     db.refresh(rec)

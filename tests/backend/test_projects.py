@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from backend.db.models import CoverageRun, Project, Reconstruction, TargetArea
 from backend.db.models import Session as SessionModel
@@ -102,7 +102,7 @@ def test_project_trends_are_time_ordered_and_project_scoped(client):
         name="Later flight",
         folder_path="/tmp/later",
         project_id=project.id,
-        imported_at=datetime(2026, 7, 2, tzinfo=timezone.utc),
+        imported_at=datetime(2026, 7, 2, tzinfo=UTC),
         photo_count=10,
         usable_count=9,
     )
@@ -110,7 +110,7 @@ def test_project_trends_are_time_ordered_and_project_scoped(client):
         name="Earlier flight",
         folder_path="/tmp/earlier",
         project_id=project.id,
-        imported_at=datetime(2026, 7, 1, tzinfo=timezone.utc),
+        imported_at=datetime(2026, 7, 1, tzinfo=UTC),
         photo_count=0,
         usable_count=0,
     )
@@ -118,7 +118,7 @@ def test_project_trends_are_time_ordered_and_project_scoped(client):
         name="Same-day flight",
         folder_path="/tmp/same-day",
         project_id=project.id,
-        imported_at=datetime(2026, 7, 1, tzinfo=timezone.utc),
+        imported_at=datetime(2026, 7, 1, tzinfo=UTC),
         photo_count=4,
         usable_count=4,
     )
@@ -126,7 +126,7 @@ def test_project_trends_are_time_ordered_and_project_scoped(client):
         name="Foreign flight",
         folder_path="/tmp/foreign",
         project_id=other_project.id,
-        imported_at=datetime(2026, 6, 1, tzinfo=timezone.utc),
+        imported_at=datetime(2026, 6, 1, tzinfo=UTC),
         photo_count=50,
         usable_count=50,
     )
@@ -142,7 +142,7 @@ def test_project_trends_are_time_ordered_and_project_scoped(client):
             frames_registered=8,
             psnr=29.0,
             ssim=0.89,
-            completed_at=datetime(2026, 7, 2, 12, tzinfo=timezone.utc),
+            completed_at=datetime(2026, 7, 2, 12, tzinfo=UTC),
         ),
         Reconstruction(
             session_id=later.id,
@@ -152,7 +152,7 @@ def test_project_trends_are_time_ordered_and_project_scoped(client):
             frames_registered=9,
             psnr=31.5,
             ssim=0.93,
-            completed_at=datetime(2026, 7, 3, 12, tzinfo=timezone.utc),
+            completed_at=datetime(2026, 7, 3, 12, tzinfo=UTC),
         ),
         Reconstruction(
             session_id=foreign.id,
@@ -162,25 +162,25 @@ def test_project_trends_are_time_ordered_and_project_scoped(client):
             frames_registered=50,
             psnr=99.0,
             ssim=0.99,
-            completed_at=datetime(2026, 7, 4, tzinfo=timezone.utc),
+            completed_at=datetime(2026, 7, 4, tzinfo=UTC),
         ),
         CoverageRun(
             target_area_id=target.id,
             session_ids=str(later.id),
             coverage_pct=71.0,
-            run_at=datetime(2026, 7, 2, tzinfo=timezone.utc),
+            run_at=datetime(2026, 7, 2, tzinfo=UTC),
         ),
         CoverageRun(
             target_area_id=target.id,
             session_ids=str(later.id),
             coverage_pct=84.5,
-            run_at=datetime(2026, 7, 3, tzinfo=timezone.utc),
+            run_at=datetime(2026, 7, 3, tzinfo=UTC),
         ),
         CoverageRun(
             target_area_id=target.id,
             session_ids=str(foreign.id),
             coverage_pct=100.0,
-            run_at=datetime(2026, 7, 4, tzinfo=timezone.utc),
+            run_at=datetime(2026, 7, 4, tzinfo=UTC),
         ),
     ])
     db.commit()

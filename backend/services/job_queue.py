@@ -17,7 +17,7 @@ import logging
 import sys
 import threading
 from collections.abc import Callable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from backend.db.database import SessionLocal
@@ -141,7 +141,7 @@ def cancel_job(job_id: int) -> bool:
         if entry.status not in ("pending", "running"):
             return False
         entry.status = "cancelled"
-        entry.completed_at = datetime.now(timezone.utc)
+        entry.completed_at = datetime.now(UTC)
         db.commit()
         return True
     finally:
@@ -291,7 +291,7 @@ def claim_stale_jobs() -> int:
 
     db = _make_session()
     try:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         acted = 0
         for entry in db.query(JobQueueEntry).filter(JobQueueEntry.status == "running").all():
             remote_alive = False
@@ -385,13 +385,13 @@ def _drain_loop() -> None:
                     logger.warning("No handler registered for job_type=%s", entry.job_type)
                     entry.status = "failed"
                     entry.error_msg = f"No handler for {entry.job_type}"
-                    entry.completed_at = datetime.now(timezone.utc)
+                    entry.completed_at = datetime.now(UTC)
                     db.commit()
                     continue
 
                 # Atomic claim: flip pending→running in one conditional UPDATE so
                 # two drainers can never both grab the same row (double dispatch).
-                if not _claim_pending(db, entry.id, datetime.now(timezone.utc)):
+                if not _claim_pending(db, entry.id, datetime.now(UTC)):
                     continue  # Lost the race — another claim won this row.
                 db.refresh(entry)
 
@@ -492,7 +492,7 @@ def _mark_failed(job_id: int, error: str, *, db=None) -> None:
         ).update({
             "status": "failed",
             "error_msg": error,
-            "completed_at": datetime.now(timezone.utc),
+            "completed_at": datetime.now(UTC),
         })
         db.commit()
     finally:
@@ -508,7 +508,7 @@ def mark_complete(job_id: int) -> None:
             JobQueueEntry.id == job_id, JobQueueEntry.status != "cancelled"
         ).update({
             "status": "completed",
-            "completed_at": datetime.now(timezone.utc),
+            "completed_at": datetime.now(UTC),
         })
         db.commit()
     finally:

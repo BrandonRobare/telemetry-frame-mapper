@@ -87,7 +87,7 @@ def create_project(req: ProjectCreate, db: DBSession = Depends(get_db)):
     p = ProjectModel(
         name=req.name,
         description=req.description,
-        created_at=datetime.datetime.now(datetime.timezone.utc),
+        created_at=datetime.datetime.now(datetime.UTC),
     )
     db.add(p)
     db.commit()
@@ -281,7 +281,7 @@ def create_project_session(
         name=req.name,
         folder_path=str(folder),
         project_id=project_id,
-        imported_at=datetime.datetime.now(datetime.timezone.utc),
+        imported_at=datetime.datetime.now(datetime.UTC),
         photo_count=0,
         usable_count=0,
     )
