@@ -30,12 +30,16 @@ def test_ci_uses_locked_uv_environment_and_audits_runtime_groups() -> None:
     assert '"pip-audit==2.10.1"' in pyproject
 
 
-def test_docker_uses_locked_uv_runtime_environment() -> None:
+def test_docker_uses_locked_uv_runtime_environment_and_ci_smokes_health() -> None:
     dockerfile = DOCKERFILE.read_text(encoding="utf-8")
+    ci = CI_WORKFLOW.read_text(encoding="utf-8")
 
     assert "COPY pyproject.toml uv.lock README.md LICENSE ./" in dockerfile
     assert "uv sync --frozen --no-dev --group backend --group reconstruction" in dockerfile
     assert "pip install" not in dockerfile
+    assert "docker run --detach" in ci
+    assert "http://127.0.0.1:8000/health" in ci
+    assert "docker logs telemetry-frame-mapper-ci" in ci
 
 
 def test_release_actions_are_immutable_and_write_scope_is_publication_job_only() -> None:
@@ -65,6 +69,6 @@ def test_dependabot_keeps_github_actions_updates_enabled() -> None:
 
 if __name__ == "__main__":
     test_ci_uses_locked_uv_environment_and_audits_runtime_groups()
-    test_docker_uses_locked_uv_runtime_environment()
+    test_docker_uses_locked_uv_runtime_environment_and_ci_smokes_health()
     test_release_actions_are_immutable_and_write_scope_is_publication_job_only()
     test_dependabot_keeps_github_actions_updates_enabled()
