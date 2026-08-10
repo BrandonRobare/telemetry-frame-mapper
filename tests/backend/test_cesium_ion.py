@@ -104,10 +104,9 @@ def test_cesium_client_rejects_unsafe_bundle_filename(monkeypatch):
 
 
 def _db(client):
-    from backend.db.database import get_db
     from backend.main import app
 
-    return next(app.dependency_overrides[get_db]())
+    return app.state.test_db_session
 
 
 def test_cesium_route_builds_existing_bundle_and_returns_only_asset_status(

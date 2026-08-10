@@ -50,10 +50,9 @@ def _add_image(
 
 
 def test_preflight_report_flags_missing_gps_duplicate_timestamps_and_gaps(client):
-    from backend.db.database import get_db
     from backend.main import app
 
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
     session = _make_session(db)
     t0 = datetime(2026, 1, 1, 12, 0, 0)
     _add_image(db, session.id, 0, timestamp=t0, latitude=35.0, sharpness=20.0, flag="blurry")
@@ -85,10 +84,9 @@ def test_preflight_report_flags_missing_gps_duplicate_timestamps_and_gaps(client
 
 
 def test_preflight_report_estimates_overlap_from_footprints(client):
-    from backend.db.database import get_db
     from backend.main import app
 
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
     session = _make_session(db)
     t0 = datetime(2026, 1, 1, 12, 0, 0)
     images = [
@@ -117,10 +115,9 @@ def test_preflight_report_404_for_missing_session(client):
 
 
 def test_preflight_report_flags_frozen_gps_coordinates(client):
-    from backend.db.database import get_db
     from backend.main import app
 
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
     session = _make_session(db)
     t0 = datetime(2026, 1, 1, 12, 0, 0)
     for index in range(12):
@@ -141,10 +138,9 @@ def test_preflight_report_flags_frozen_gps_coordinates(client):
 
 
 def test_preflight_report_flags_implausible_gps_jump(client):
-    from backend.db.database import get_db
     from backend.main import app
 
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
     session = _make_session(db)
     t0 = datetime(2026, 1, 1, 12, 0, 0)
     for index in range(4):
@@ -173,10 +169,9 @@ def test_preflight_report_flags_implausible_gps_jump(client):
 
 
 def test_preflight_report_clean_track_has_no_gps_lock_warnings(client):
-    from backend.db.database import get_db
     from backend.main import app
 
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
     session = _make_session(db)
     t0 = datetime(2026, 1, 1, 12, 0, 0)
     for index in range(12):

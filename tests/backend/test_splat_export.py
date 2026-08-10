@@ -10,10 +10,9 @@ from backend.services.ply_io import GaussianCloud, write_3dgs_ply
 
 
 def _db(client):
-    from backend.db.database import get_db
     from backend.main import app
 
-    return next(app.dependency_overrides[get_db]())
+    return app.state.test_db_session
 
 
 def _make_rec(db, session, *, splat_path=None):

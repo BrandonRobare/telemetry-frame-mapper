@@ -51,10 +51,9 @@ def _inject_test_session(setup_test_db):
 # ---------------------------------------------------------------------------
 
 def test_enqueue_creates_persistent_entry(setup_test_db):
-    from backend.db.database import get_db
     from backend.main import app
 
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
     s = _make_session(db)
     rec = Reconstruction(session_id=s.id, preset="quick", status="pending", frames_used=3)
     db.add(rec)
@@ -74,10 +73,9 @@ def test_enqueue_creates_persistent_entry(setup_test_db):
 
 
 def test_enqueue_persists_across_session_reopen(setup_test_db):
-    from backend.db.database import get_db
     from backend.main import app
 
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
     s = _make_session(db)
     rec = Reconstruction(session_id=s.id, preset="quick", status="pending", frames_used=1)
     db.add(rec)
@@ -87,7 +85,7 @@ def test_enqueue_persists_across_session_reopen(setup_test_db):
     enqueue(RECONSTRUCTION, rec.id)
 
     db.close()
-    db2 = next(app.dependency_overrides[get_db]())
+    db2 = app.state.test_db_session
     try:
         entry = db2.query(JobQueueEntry).filter(JobQueueEntry.target_id == rec.id).first()
         assert entry is not None
@@ -101,10 +99,9 @@ def test_enqueue_persists_across_session_reopen(setup_test_db):
 # ---------------------------------------------------------------------------
 
 def test_list_jobs_returns_all_entries(setup_test_db):
-    from backend.db.database import get_db
     from backend.main import app
 
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
     s = _make_session(db)
     for i in range(3):
         rec = Reconstruction(session_id=s.id, preset="quick", status="pending", frames_used=1)
@@ -119,10 +116,9 @@ def test_list_jobs_returns_all_entries(setup_test_db):
 
 
 def test_list_jobs_filters_by_status(setup_test_db):
-    from backend.db.database import get_db
     from backend.main import app
 
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
     s = _make_session(db)
     rec = Reconstruction(session_id=s.id, preset="quick", status="pending", frames_used=1)
     db.add(rec)
@@ -143,10 +139,9 @@ def test_list_jobs_filters_by_status(setup_test_db):
 
 
 def test_get_job_returns_single_entry(setup_test_db):
-    from backend.db.database import get_db
     from backend.main import app
 
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
     s = _make_session(db)
     rec = Reconstruction(session_id=s.id, preset="quick", status="pending", frames_used=1)
     db.add(rec)
@@ -163,10 +158,9 @@ def test_get_job_returns_single_entry(setup_test_db):
 
 
 def test_update_payload_preserves_existing_queue_payload(setup_test_db):
-    from backend.db.database import get_db
     from backend.main import app
 
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
     s = _make_session(db)
     rec = Reconstruction(session_id=s.id, preset="quick", status="pending", frames_used=1)
     db.add(rec)
@@ -186,10 +180,9 @@ def test_update_payload_preserves_existing_queue_payload(setup_test_db):
 # ---------------------------------------------------------------------------
 
 def test_cancel_job_marks_cancelled(setup_test_db):
-    from backend.db.database import get_db
     from backend.main import app
 
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
     s = _make_session(db)
     rec = Reconstruction(session_id=s.id, preset="quick", status="pending", frames_used=1)
     db.add(rec)
@@ -206,10 +199,9 @@ def test_cancel_job_marks_cancelled(setup_test_db):
 
 
 def test_cancel_completed_job_returns_false(setup_test_db):
-    from backend.db.database import get_db
     from backend.main import app
 
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
     s = _make_session(db)
     rec = Reconstruction(session_id=s.id, preset="quick", status="pending", frames_used=1)
     db.add(rec)
@@ -227,10 +219,9 @@ def test_cancel_completed_job_returns_false(setup_test_db):
 # ---------------------------------------------------------------------------
 
 def test_claim_stale_jobs_marks_running_as_failed(setup_test_db):
-    from backend.db.database import get_db
     from backend.main import app
 
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
     s = _make_session(db)
     rec = Reconstruction(session_id=s.id, preset="quick", status="pending", frames_used=1)
     db.add(rec)
@@ -255,10 +246,9 @@ def test_claim_stale_jobs_marks_running_as_failed(setup_test_db):
 
 
 def test_claim_stale_jobs_requeues_running_remote_without_touching_attempts(setup_test_db):
-    from backend.db.database import get_db
     from backend.main import app
 
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
     s = _make_session(db)
     rec = Reconstruction(
         session_id=s.id, preset="quick", status="running_remote", frames_used=1
@@ -286,10 +276,9 @@ def test_claim_stale_jobs_requeues_running_remote_without_touching_attempts(setu
 
 
 def test_claim_stale_jobs_does_not_touch_completed(setup_test_db):
-    from backend.db.database import get_db
     from backend.main import app
 
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
     s = _make_session(db)
     rec = Reconstruction(session_id=s.id, preset="quick", status="pending", frames_used=1)
     db.add(rec)
@@ -317,10 +306,9 @@ def test_claim_stale_jobs_does_not_touch_completed(setup_test_db):
 # ---------------------------------------------------------------------------
 
 def test_mark_complete_updates_status_and_timestamp(setup_test_db):
-    from backend.db.database import get_db
     from backend.main import app
 
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
     s = _make_session(db)
     rec = Reconstruction(session_id=s.id, preset="quick", status="pending", frames_used=1)
     db.add(rec)
@@ -342,11 +330,10 @@ def test_mark_complete_updates_status_and_timestamp(setup_test_db):
 # ---------------------------------------------------------------------------
 
 def test_handler_dispatched_by_worker(setup_test_db):
-    from backend.db.database import get_db
     from backend.main import app
     from backend.services import job_queue as jq
 
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
     s = _make_session(db)
     rec = Reconstruction(session_id=s.id, preset="quick", status="pending", frames_used=1)
     db.add(rec)
@@ -390,11 +377,10 @@ def test_handler_dispatched_by_worker(setup_test_db):
 # ---------------------------------------------------------------------------
 
 def test_no_handler_marks_as_failed(setup_test_db):
-    from backend.db.database import get_db
     from backend.main import app
     from backend.services import job_queue as jq
 
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
     s = _make_session(db)
     rec = Reconstruction(session_id=s.id, preset="quick", status="pending", frames_used=1)
     db.add(rec)
@@ -420,11 +406,10 @@ def test_no_handler_marks_as_failed(setup_test_db):
 # ---------------------------------------------------------------------------
 
 def test_gpu_concurrency_is_honored(setup_test_db):
-    from backend.db.database import get_db
     from backend.main import app
     from backend.services import job_queue as jq
 
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
     s = _make_session(db)
 
     barrier = threading.Barrier(2, timeout=5)
@@ -481,11 +466,10 @@ def test_gpu_concurrency_is_honored(setup_test_db):
 # ---------------------------------------------------------------------------
 
 def test_atomic_claim_lets_exactly_one_racer_win(setup_test_db):
-    from backend.db.database import get_db
     from backend.main import app
     from backend.services import job_queue as jq
 
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
     s = _make_session(db)
     rec = Reconstruction(session_id=s.id, preset="quick", status="pending", frames_used=1)
     db.add(rec)
@@ -534,11 +518,10 @@ def test_atomic_claim_lets_exactly_one_racer_win(setup_test_db):
 # ---------------------------------------------------------------------------
 
 def test_mark_failed_does_not_overwrite_cancelled(setup_test_db):
-    from backend.db.database import get_db
     from backend.main import app
     from backend.services import job_queue as jq
 
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
     s = _make_session(db)
     rec = Reconstruction(session_id=s.id, preset="quick", status="pending", frames_used=1)
     db.add(rec)

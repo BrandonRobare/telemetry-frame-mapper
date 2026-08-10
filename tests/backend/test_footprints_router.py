@@ -4,11 +4,10 @@ _POLYGON = '{"type":"Polygon","coordinates":[[[0,0],[1,0],[1,1],[0,1],[0,0]]]}'
 
 
 def _make_session(name: str = "live-coverage"):
-    from backend.db.database import get_db
     from backend.db.models import Session as SM
     from backend.main import app
 
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
     session = SM(name=name, folder_path="/tmp", photo_count=0, usable_count=0)
     db.add(session)
     db.commit()
@@ -19,11 +18,10 @@ def _make_session(name: str = "live-coverage"):
 def _add_footprint(session_id: int, filename: str) -> int:
     """Insert one image + footprint the way ingest_orchestrator does, one at a time
     (mirrors incremental per-image commits during import) and return the footprint id."""
-    from backend.db.database import get_db
     from backend.db.models import Footprint, Image
     from backend.main import app
 
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
     image = Image(session_id=session_id, filename=filename, filepath=f"/tmp/{filename}")
     db.add(image)
     db.commit()

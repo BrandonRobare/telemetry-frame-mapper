@@ -59,7 +59,6 @@ def test_slope_overlay_writes_cached_png_with_transparent_no_data(tmp_path: Path
 def test_slope_route_returns_png_bounds_and_422_when_dsm_is_missing(client, monkeypatch, tmp_path):
     _require_rasterio()
     import backend.routers.export as export_router
-    from backend.db.database import get_db
     from backend.main import app
 
     monkeypatch.setattr(
@@ -67,7 +66,7 @@ def test_slope_route_returns_png_bounds_and_422_when_dsm_is_missing(client, monk
         "get_config",
         lambda: type("Cfg", (), {"exports_dir": str(tmp_path / "exports")})(),
     )
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
     session = SessionModel(name="S", folder_path=str(tmp_path))
     db.add(session)
     db.commit()

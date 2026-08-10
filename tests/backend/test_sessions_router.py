@@ -11,9 +11,8 @@ from backend.routers.sessions import _ensure_session_search_schema
 
 
 def _make_session(client, name="Test Session"):
-    from backend.db.database import get_db
     from backend.main import app
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
     s = SessionModel(name=name, folder_path="/tmp/test", photo_count=0, usable_count=0)
     db.add(s)
     db.commit()
@@ -54,9 +53,8 @@ def test_delete_session_not_found(client):
 
 
 def test_delete_session_removes_thumbnails_and_reconstruction_artifacts(client, tmp_path):
-    from backend.db.database import get_db
     from backend.main import app
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
 
     exports_dir = tmp_path / "exports"
     processed_dir = tmp_path / "processed"
@@ -324,10 +322,9 @@ def test_search_sessions_indexes_metadata_logs_and_defects(client):
     assert "solar" in tag_hit["matches"][0]["snippet"].lower()
     assert client.get("/sessions/search", params={"q": "windy"}).json()[0]["id"] == s.id
 
-    from backend.db.database import get_db
     from backend.main import app
 
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
     db.add(
         SessionLogEntry(session_id=s.id, event_type="import_complete", message="Tree obstruction")
     )
@@ -356,10 +353,9 @@ def test_search_sessions_groups_results_and_rejects_punctuation_only_query(clien
 
 
 def test_project_sessions_include_tags_and_notes(client):
-    from backend.db.database import get_db
     from backend.db.models import Project
     from backend.main import app
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
     p = Project(name="TagProj")
     db.add(p)
     db.commit()
