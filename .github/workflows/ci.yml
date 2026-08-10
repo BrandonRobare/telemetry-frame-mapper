@@ -89,3 +89,41 @@ jobs:
 
       - name: Build single-container image
         run: docker build -t telemetry-frame-mapper:ci .
+
+  windows-package:
+    runs-on: windows-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          version: "0.11.16"
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install locked packaging environment
+        run: uv sync --frozen --group backend --group windows-package
+
+      - name: Build frontend
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Build Windows bundle
+        run: uv run --frozen --no-sync powershell -ExecutionPolicy Bypass -File packaging/build-windows.ps1
+
+      - name: Smoke Windows startup and migrations
+        run: uv run --frozen --no-sync powershell -ExecutionPolicy Bypass -File packaging/smoke-windows.ps1
