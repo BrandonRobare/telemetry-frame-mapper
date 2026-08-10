@@ -22,31 +22,35 @@ jobs:
       - name: Check out code
         uses: actions/checkout@v7
 
-      - name: Set up Python
-        uses: actions/setup-python@v7
-        with:
-          python-version: ${{ matrix.python-version }}
-          cache: pip
-
       - name: Set up uv
         uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
         with:
           version: "0.11.16"
 
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Validate locked Python supply chain configuration
+        run: python tests/test_supply_chain_configuration.py
+
       - name: Check Python lock metadata
         run: uv lock --check
 
-      - name: Install source development groups
-        run: uv sync --frozen --group backend --group dev
+      - name: Install locked test environment
+        run: uv sync --frozen --group backend --group reconstruction --group dev --group audit
 
-      - name: Audit installed Python dependencies
-        run: uv pip install --python .venv/bin/python pip==26.2.1 pip-audit==2.10.1 setuptools==83.0.0 && .venv/bin/python -m pip_audit --local
+      - name: Audit locked runtime dependencies
+        run: |
+          uv export --frozen --no-dev --no-emit-project --group backend --group reconstruction --format requirements-txt --output-file /tmp/runtime-requirements.txt
+          uv run --frozen --no-sync pip-audit -r /tmp/runtime-requirements.txt
 
       - name: Lint
-        run: .venv/bin/ruff check .
+        run: uv run --frozen --no-sync ruff check .
 
       - name: Test
-        run: .venv/bin/pytest
+        run: uv run --frozen --no-sync pytest
 
   frontend:
     runs-on: ubuntu-latest

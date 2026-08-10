@@ -11,7 +11,7 @@ FROM python:3.12-slim-bookworm AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1 \
+    PATH="/app/.venv/bin:$PATH" \
     HOST=0.0.0.0 \
     PORT=8000
 
@@ -24,6 +24,7 @@ RUN apt-get update \
 
 WORKDIR /app
 
+COPY --from=ghcr.io/astral-sh/uv:0.11.16 /uv /uvx /bin/
 COPY pyproject.toml uv.lock README.md LICENSE ./
 COPY src/ ./src/
 COPY backend/ ./backend/
@@ -33,11 +34,7 @@ COPY config.yaml ./config.yaml
 COPY alembic.ini ./alembic.ini
 COPY --from=frontend-build /app/frontend/dist ./frontend/dist
 
-RUN pip install --upgrade pip \
-    && pip install "uv==0.11.16" \
-    && uv sync --frozen --no-dev --group backend --group reconstruction
-
-ENV PATH="/app/.venv/bin:$PATH"
+RUN uv sync --frozen --no-dev --group backend --group reconstruction
 
 RUN mkdir -p data imports processed exports
 
