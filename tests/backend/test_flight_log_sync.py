@@ -10,7 +10,6 @@ from __future__ import annotations
 import json
 import subprocess
 
-from backend.db.database import get_db
 from backend.db.models import FlightLog, FlightLogPoint
 from backend.main import app
 
@@ -75,7 +74,7 @@ _PRE_V13 = b"\x00" * 10 + b"\x0d" + b"\x00" * 5  # version 13
 def _make_session(client):
     from backend.db.models import Session as SM
 
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
     s = SM(name="dji_test", folder_path="/tmp", photo_count=0, usable_count=0)
     db.add(s)
     db.commit()
@@ -123,7 +122,7 @@ def test_upload_dji_binary_v12(client, monkeypatch):
     assert "id" in data
 
     # Verify DB rows
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
     log = db.query(FlightLog).filter(FlightLog.id == data["id"]).one()
     assert log.format == "dji_binary"
     assert log.log_version == 12

@@ -5,7 +5,6 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from fastapi.testclient import TestClient
 
-from backend.db.database import get_db
 from backend.db.models import Reconstruction
 from backend.db.models import Session as SessionModel
 from backend.main import app
@@ -18,7 +17,7 @@ def client(setup_test_db):
 
 
 def _get_db(client):  # noqa: ARG001
-    return next(app.dependency_overrides[get_db]())
+    return app.state.test_db_session
 
 
 def _make_session(db):

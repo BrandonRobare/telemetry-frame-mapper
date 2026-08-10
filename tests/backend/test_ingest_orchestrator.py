@@ -135,14 +135,13 @@ def _db_factory_for_test():
 
 def test_run_accepts_png_when_configured(tmp_path, setup_test_db):
     """_run picks up .png files when accepted_extensions includes .png."""
-    from backend.db.database import get_db
     from backend.db.models import Image as ImageModel
     from backend.db.models import Session as SessionModel
     from backend.main import app
     from backend.services.ingest_orchestrator import _run
     from tests.conftest import TestSessionLocal
 
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
     session = SessionModel(name="png-test", folder_path=str(tmp_path), photo_count=0,
                            usable_count=0)
     db.add(session)
@@ -185,14 +184,13 @@ def test_run_accepts_png_when_configured(tmp_path, setup_test_db):
 
 def test_run_filter_zero_gps_skips_zero_coord_image(tmp_path, setup_test_db):
     """When filter_zero_gps=True, images with (lat=0, lon=0) must not be inserted."""
-    from backend.db.database import get_db
     from backend.db.models import Image as ImageModel
     from backend.db.models import Session as SessionModel
     from backend.main import app
     from backend.services.ingest_orchestrator import _run
     from tests.conftest import TestSessionLocal
 
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
     session = SessionModel(name="zero-gps-test", folder_path=str(tmp_path),
                            photo_count=0, usable_count=0)
     db.add(session)
@@ -230,14 +228,13 @@ def test_run_filter_zero_gps_skips_zero_coord_image(tmp_path, setup_test_db):
 
 def test_run_filter_zero_gps_false_keeps_zero_coord_image(tmp_path, setup_test_db):
     """When filter_zero_gps=False, even (0,0) GPS images must be inserted."""
-    from backend.db.database import get_db
     from backend.db.models import Image as ImageModel
     from backend.db.models import Session as SessionModel
     from backend.main import app
     from backend.services.ingest_orchestrator import _run
     from tests.conftest import TestSessionLocal
 
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
     session = SessionModel(name="zero-gps-disabled", folder_path=str(tmp_path),
                            photo_count=0, usable_count=0)
     db.add(session)
@@ -271,14 +268,13 @@ def test_run_filter_zero_gps_false_keeps_zero_coord_image(tmp_path, setup_test_d
 
 def test_run_filter_zero_gps_keeps_no_gps_images(tmp_path, setup_test_db):
     """filter_zero_gps must NOT skip images that have no GPS at all (lat/lon = None)."""
-    from backend.db.database import get_db
     from backend.db.models import Image as ImageModel
     from backend.db.models import Session as SessionModel
     from backend.main import app
     from backend.services.ingest_orchestrator import _run
     from tests.conftest import TestSessionLocal
 
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
     session = SessionModel(name="no-gps-preserved", folder_path=str(tmp_path),
                            photo_count=0, usable_count=0)
     db.add(session)
@@ -313,7 +309,6 @@ def test_run_filter_zero_gps_keeps_no_gps_images(tmp_path, setup_test_db):
 
 
 def test_run_creates_footprint_when_longitude_is_zero(tmp_path, setup_test_db):
-    from backend.db.database import get_db
     from backend.db.models import Footprint
     from backend.db.models import Image as ImageModel
     from backend.db.models import Session as SessionModel
@@ -321,7 +316,7 @@ def test_run_creates_footprint_when_longitude_is_zero(tmp_path, setup_test_db):
     from backend.services.ingest_orchestrator import _run
     from tests.conftest import TestSessionLocal
 
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
     session = SessionModel(name="zero-lon-footprint", folder_path=str(tmp_path),
                            photo_count=0, usable_count=0)
     db.add(session)
@@ -355,7 +350,6 @@ def test_run_creates_footprint_when_longitude_is_zero(tmp_path, setup_test_db):
 
 
 def test_run_creates_footprint_when_altitude_is_zero(tmp_path, setup_test_db):
-    from backend.db.database import get_db
     from backend.db.models import Footprint
     from backend.db.models import Image as ImageModel
     from backend.db.models import Session as SessionModel
@@ -363,7 +357,7 @@ def test_run_creates_footprint_when_altitude_is_zero(tmp_path, setup_test_db):
     from backend.services.ingest_orchestrator import _run
     from tests.conftest import TestSessionLocal
 
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
     session = SessionModel(name="zero-alt-footprint", folder_path=str(tmp_path),
                            photo_count=0, usable_count=0)
     db.add(session)
@@ -404,14 +398,13 @@ def test_run_creates_footprint_when_altitude_is_zero(tmp_path, setup_test_db):
 
 def test_run_zero_denominator_gps_image_lands_without_gps(tmp_path, setup_test_db):
     """A zero-denominator-GPS image must import (without GPS), not kill the batch."""
-    from backend.db.database import get_db
     from backend.db.models import Image as ImageModel
     from backend.db.models import Session as SessionModel
     from backend.main import app
     from backend.services.ingest_orchestrator import _run, get_progress
     from tests.conftest import TestSessionLocal
 
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
     session = SessionModel(name="zero-denom-gps", folder_path=str(tmp_path),
                            photo_count=0, usable_count=0)
     db.add(session)
@@ -453,7 +446,6 @@ def test_run_zero_denominator_gps_image_lands_without_gps(tmp_path, setup_test_d
 
 def test_run_extract_failure_skips_image_not_batch(tmp_path, setup_test_db):
     """If extract_exif raises for one image, that image is skipped, batch survives."""
-    from backend.db.database import get_db
     from backend.db.models import Image as ImageModel
     from backend.db.models import Session as SessionModel
     from backend.db.models import SessionLogEntry
@@ -462,7 +454,7 @@ def test_run_extract_failure_skips_image_not_batch(tmp_path, setup_test_db):
     from backend.services.ingest_orchestrator import _run, get_progress
     from tests.conftest import TestSessionLocal
 
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
     session = SessionModel(name="extract-raises", folder_path=str(tmp_path),
                            photo_count=0, usable_count=0)
     db.add(session)

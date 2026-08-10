@@ -33,9 +33,8 @@ def _make_session_with_images(db, count=3):
 
 
 def _get_db(client):
-    from backend.db.database import get_db
     from backend.main import app
-    return next(app.dependency_overrides[get_db]())
+    return app.state.test_db_session
 
 
 def test_start_reconstruction(client):

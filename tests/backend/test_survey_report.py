@@ -52,11 +52,10 @@ def _add_image(
 
 
 def test_survey_report_builds_json(client):
-    from backend.db.database import get_db
     from backend.main import app
     from backend.services.survey_report import build_survey_report
 
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
     session = _make_session(db)
     t0 = datetime(2026, 1, 1, 12, 0, 0)
 
@@ -77,11 +76,10 @@ def test_survey_report_builds_json(client):
 
 
 def test_survey_report_with_reconstructions(client):
-    from backend.db.database import get_db
     from backend.main import app
     from backend.services.survey_report import build_survey_report
 
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
     session = _make_session(db)
     t0 = datetime(2026, 1, 1, 12, 0, 0)
 
@@ -125,10 +123,9 @@ def test_survey_report_with_reconstructions(client):
 
 
 def test_survey_report_endpoint_json(client):
-    from backend.db.database import get_db
     from backend.main import app
 
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
     session = _make_session(db)
     t0 = datetime(2026, 1, 1, 12, 0, 0)
 
@@ -143,10 +140,9 @@ def test_survey_report_endpoint_json(client):
 
 
 def test_survey_report_endpoint_html(client):
-    from backend.db.database import get_db
     from backend.main import app
 
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
     session = _make_session(db)
     t0 = datetime(2026, 1, 1, 12, 0, 0)
 
@@ -168,10 +164,9 @@ def test_survey_report_404(client):
 def test_survey_report_endpoint_pdf_requires_optional_backend(client):
     from unittest.mock import patch
 
-    from backend.db.database import get_db
     from backend.main import app
 
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
     session = _make_session(db)
     for i in range(3):
         _add_image(db, session.id, i)
@@ -191,10 +186,9 @@ def test_survey_report_endpoint_pdf_requires_optional_backend(client):
 
 
 def test_survey_report_endpoint_rejects_unknown_format(client):
-    from backend.db.database import get_db
     from backend.main import app
 
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
     session = _make_session(db)
     for i in range(3):
         _add_image(db, session.id, i)

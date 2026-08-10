@@ -54,10 +54,9 @@ def _add_image(
 
 
 def test_match_density_returns_none_for_empty_images(client):
-    from backend.db.database import get_db
     from backend.main import app
 
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
     session = _make_session(db)
 
     result = _match_density_diagnostics([])
@@ -71,10 +70,9 @@ def test_match_density_returns_none_for_empty_images(client):
 
 
 def test_match_density_handles_missing_files_gracefully(client):
-    from backend.db.database import get_db
     from backend.main import app
 
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
     session = _make_session(db)
     t0 = datetime(2026, 1, 1, 12, 0, 0)
 
@@ -91,7 +89,6 @@ def test_match_density_handles_missing_files_gracefully(client):
 
 def test_match_density_runs_on_real_image(client, tmp_path):
     """Write a small real image pair so ORB can actually run."""
-    from backend.db.database import get_db
     from backend.main import app
 
     try:
@@ -99,7 +96,7 @@ def test_match_density_runs_on_real_image(client, tmp_path):
     except ImportError:
         return  # skip if opencv unavailable (shouldn't happen in backend env)
 
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
     session = _make_session(db)
     t0 = datetime(2026, 1, 1, 12, 0, 0)
 
@@ -127,10 +124,9 @@ def test_match_density_runs_on_real_image(client, tmp_path):
 
 
 def test_quick_report_endpoint(client):
-    from backend.db.database import get_db
     from backend.main import app
 
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
     session = _make_session(db)
     t0 = datetime(2026, 1, 1, 12, 0, 0)
 
@@ -155,10 +151,9 @@ def test_quick_report_endpoint(client):
 
 
 def test_preflight_flags_variable_lighting(client):
-    from backend.db.database import get_db
     from backend.main import app
 
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
     session = _make_session(db)
     t0 = datetime(2026, 1, 1, 12, 0, 0)
 
@@ -178,10 +173,9 @@ def test_quick_report_404(client):
 
 
 def test_preflight_report_includes_match_density(client):
-    from backend.db.database import get_db
     from backend.main import app
 
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
     session = _make_session(db)
     t0 = datetime(2026, 1, 1, 12, 0, 0)
 
@@ -198,7 +192,6 @@ def test_weak_texture_warning_in_report(client, tmp_path):
     """Build a preflight report with images that exist but have noise texture
     that should produce low ORB matches. The warning appears only when
     weak_ratio >= threshold."""
-    from backend.db.database import get_db
     from backend.main import app
 
     try:
@@ -208,7 +201,7 @@ def test_weak_texture_warning_in_report(client, tmp_path):
 
     import numpy as np
 
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
     session = _make_session(db)
     t0 = datetime(2026, 1, 1, 12, 0, 0)
 

@@ -23,11 +23,10 @@ def _make_session(db):
 
 
 def test_new_model_columns_exist(setup_test_db):
-    from backend.db.database import get_db
     from backend.db.models import Image
     from backend.main import app
 
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
     s = _make_session(db)
 
     rec = Reconstruction(session_id=s.id, preset="quick", status="pending", frames_used=0)
@@ -116,9 +115,8 @@ def test_new_model_columns_exist(setup_test_db):
 
 
 def test_reconstruction_model_fields(setup_test_db):
-    from backend.db.database import get_db
     from backend.main import app
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
 
     s = _make_session(db)
     rec = Reconstruction(
@@ -143,10 +141,9 @@ def test_reconstruction_model_fields(setup_test_db):
 
 
 def test_reconstruction_frame_join(setup_test_db):
-    from backend.db.database import get_db
     from backend.db.models import Image
     from backend.main import app
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
 
     s = _make_session(db)
     img = Image(session_id=s.id, filename="f.jpg", filepath="/f.jpg", usable=True)
@@ -169,9 +166,8 @@ def test_reconstruction_frame_join(setup_test_db):
 
 
 def test_session_reconstructions_relationship(setup_test_db):
-    from backend.db.database import get_db
     from backend.main import app
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
 
     s = _make_session(db)
     rec = Reconstruction(session_id=s.id, preset="full", status="pending", frames_used=5)
@@ -187,12 +183,11 @@ def test_session_reconstructions_relationship(setup_test_db):
 def test_update_rec_sets_duration_when_completed_at_is_written(setup_test_db):
     from datetime import datetime
 
-    from backend.db.database import get_db
     from backend.db.models import Reconstruction
     from backend.main import app
     from backend.services.reconstruction import _update_rec
 
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
     s = _make_session(db)
     rec = Reconstruction(
         session_id=s.id,
@@ -219,12 +214,11 @@ def test_update_rec_sets_duration_when_completed_at_is_written(setup_test_db):
 def test_update_rec_clamps_negative_duration_to_zero(setup_test_db):
     from datetime import datetime
 
-    from backend.db.database import get_db
     from backend.db.models import Reconstruction
     from backend.main import app
     from backend.services.reconstruction import _update_rec
 
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
     s = _make_session(db)
     rec = Reconstruction(
         session_id=s.id,
@@ -576,7 +570,6 @@ def test_cancel_during_colmap_terminates_subprocess_and_marks_cancelled(setup_te
     import time
     from unittest.mock import MagicMock, patch
 
-    from backend.db.database import get_db
     from backend.main import app
     from backend.services import reconstruction as recon
     from backend.services.reconstruction import (
@@ -586,7 +579,7 @@ def test_cancel_during_colmap_terminates_subprocess_and_marks_cancelled(setup_te
     from backend.services.reconstruction import _run_pipeline_legacy as _run_pipeline
     from tests.conftest import TestSessionLocal
 
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
     with tempfile.TemporaryDirectory() as tmp:
         rec, img, colmap_dir = _pipeline_fixture(db, tmp)
         cancel = threading.Event()
@@ -633,12 +626,11 @@ def test_cancel_during_colmap_terminates_subprocess_and_marks_cancelled(setup_te
 
 
 def test_build_reconstruction_diagnostics_reports_unregistered_frames(setup_test_db, tmp_path):
-    from backend.db.database import get_db
     from backend.db.models import Image
     from backend.main import app
     from backend.services.reconstruction import build_reconstruction_diagnostics
 
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
     session = _make_session(db)
     images = []
     for idx in range(3):
@@ -831,13 +823,12 @@ def test_run_pipeline_calls_generate_thumbnail(setup_test_db):
     import tempfile
     from unittest.mock import MagicMock, patch
 
-    from backend.db.database import get_db
     from backend.db.models import Image as ImageModel
     from backend.main import app
     from backend.services.reconstruction import _run_pipeline_legacy as _run_pipeline
     from tests.conftest import TestSessionLocal
 
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
     s = _make_session(db)
     img = ImageModel(session_id=s.id, filename="f.jpg", filepath="/tmp/f.jpg", usable=True,
                      latitude=35.0, longitude=-80.0, altitude_m=100.0)
@@ -927,10 +918,9 @@ def _run_pipeline_with_gsplat(db, tmp, rec, img, colmap_dir, gsplat_mock, colmap
 
 
 def test_run_pipeline_gsplat_missing_completes_colmap_only(setup_test_db):
-    from backend.db.database import get_db
     from backend.main import app
 
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
     with tempfile.TemporaryDirectory() as tmp:
         rec, img, colmap_dir = _pipeline_fixture(db, tmp)
         guidance = MagicMock(side_effect=RuntimeError(
@@ -949,12 +939,11 @@ def test_run_pipeline_cancel_before_colmap_marks_cancelled(setup_test_db):
     import threading
     from unittest.mock import MagicMock, patch
 
-    from backend.db.database import get_db
     from backend.main import app
     from backend.services.reconstruction import _run_pipeline_legacy as _run_pipeline
     from tests.conftest import TestSessionLocal
 
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
     with tempfile.TemporaryDirectory() as tmp:
         rec, img, colmap_dir = _pipeline_fixture(db, tmp)
         cancel = threading.Event()
@@ -979,12 +968,11 @@ def test_run_pipeline_cancel_after_colmap_marks_cancelled(setup_test_db):
     import threading
     from unittest.mock import MagicMock, patch
 
-    from backend.db.database import get_db
     from backend.main import app
     from backend.services.reconstruction import _run_pipeline_legacy as _run_pipeline
     from tests.conftest import TestSessionLocal
 
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
     with tempfile.TemporaryDirectory() as tmp:
         rec, img, colmap_dir = _pipeline_fixture(db, tmp)
         cancel = threading.Event()
@@ -1012,11 +1000,10 @@ def test_run_pipeline_cancel_after_colmap_marks_cancelled(setup_test_db):
 
 
 def test_run_pipeline_cancel_during_training_marks_cancelled(setup_test_db):
-    from backend.db.database import get_db
     from backend.main import app
     from backend.services.splat_trainer import ReconstructionCancelled
 
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
     with tempfile.TemporaryDirectory() as tmp:
         rec, img, colmap_dir = _pipeline_fixture(db, tmp)
         cancelled = MagicMock(side_effect=ReconstructionCancelled("Cancelled by user"))
@@ -1028,11 +1015,10 @@ def test_run_pipeline_cancel_during_training_marks_cancelled(setup_test_db):
 
 
 def test_run_pipeline_cancel_during_training_persists_checkpoint_path(setup_test_db):
-    from backend.db.database import get_db
     from backend.main import app
     from backend.services.splat_trainer import ReconstructionCancelled
 
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
     with tempfile.TemporaryDirectory() as tmp:
         rec, img, colmap_dir = _pipeline_fixture(db, tmp)
 
@@ -1055,10 +1041,9 @@ def test_run_pipeline_cancel_during_training_persists_checkpoint_path(setup_test
 
 
 def test_run_pipeline_oom_maps_to_preset_hint(setup_test_db):
-    from backend.db.database import get_db
     from backend.main import app
 
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
     with tempfile.TemporaryDirectory() as tmp:
         rec, img, colmap_dir = _pipeline_fixture(db, tmp)
         oom = MagicMock(side_effect=RuntimeError("CUDA out of memory: tried to allocate 2 GiB"))
@@ -1072,10 +1057,9 @@ def test_run_pipeline_persists_frames_registered_from_colmap(setup_test_db):
     """The count _run_colmap returns should land on the reconstruction record."""
     from unittest.mock import MagicMock
 
-    from backend.db.database import get_db
     from backend.main import app
 
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
     with tempfile.TemporaryDirectory() as tmp:
         rec, img, colmap_dir = _pipeline_fixture(db, tmp)
         gsplat_missing = MagicMock(side_effect=RuntimeError(
@@ -1096,13 +1080,12 @@ def test_run_pipeline_trainer_result_persisted_and_lod_generated(setup_test_db):
 
     import numpy as np
 
-    from backend.db.database import get_db
     from backend.main import app
     from backend.services import ply_io
     from backend.services.reconstruction import _run_pipeline_legacy as _run_pipeline
     from tests.conftest import TestSessionLocal
 
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
     metrics = [
         {"iter": 250, "psnr": 21.0, "ssim": 0.80},
         {"iter": 1000, "psnr": 25.5, "ssim": 0.91},
@@ -1155,13 +1138,12 @@ def test_run_pipeline_trainer_result_persisted_and_lod_generated(setup_test_db):
 # ---------------------------------------------------------------------------
 
 def test_store_reprojection_errors_writes_mean(setup_test_db, tmp_path):
-    from backend.db.database import get_db
     from backend.db.models import Image, Reconstruction, ReconstructionFrame
     from backend.db.models import Session as SessionModel
     from backend.main import app
     from backend.services.reconstruction import _store_reprojection_errors
 
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
     s = SessionModel(name="T", folder_path="/tmp/t", photo_count=0, usable_count=0)
     db.add(s)
     db.commit()
@@ -1224,11 +1206,10 @@ def test_store_reprojection_errors_writes_mean(setup_test_db, tmp_path):
 
 
 def test_store_reprojection_errors_missing_dir_is_noop(setup_test_db, tmp_path):
-    from backend.db.database import get_db
     from backend.main import app
     from backend.services.reconstruction import _store_reprojection_errors
 
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
     # Should not raise even if sparse/0/ is absent
     _store_reprojection_errors(db, 9999, tmp_path)
 
@@ -1349,13 +1330,12 @@ def test_compute_coverage_gaps_empty_ply_returns_empty(tmp_path, monkeypatch):
 
 
 def test_store_reprojection_errors_rejected_frame_stays_null(setup_test_db, tmp_path):
-    from backend.db.database import get_db
     from backend.db.models import Image, Reconstruction, ReconstructionFrame
     from backend.db.models import Session as SessionModel
     from backend.main import app
     from backend.services.reconstruction import _store_reprojection_errors
 
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
     s = SessionModel(name="T2", folder_path="/tmp/t2", photo_count=0, usable_count=0)
     db.add(s)
     db.commit()
@@ -1743,12 +1723,11 @@ def test_export_mesh_assets_writes_georef_sidecar(tmp_path):
 def test_mesh_job_success_updates_status(setup_test_db, tmp_path):
     from unittest.mock import patch
 
-    from backend.db.database import get_db
     from backend.main import app
     from backend.services.reconstruction import _run_mesh_export_job_legacy as _run_mesh_export_job
     from tests.conftest import TestSessionLocal
 
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
     s = _make_session(db)
     rec = Reconstruction(
         session_id=s.id,
@@ -1782,12 +1761,11 @@ def test_mesh_job_success_updates_status(setup_test_db, tmp_path):
 def test_mesh_job_failure_updates_error(setup_test_db):
     from unittest.mock import patch
 
-    from backend.db.database import get_db
     from backend.main import app
     from backend.services.reconstruction import _run_mesh_export_job_legacy as _run_mesh_export_job
     from tests.conftest import TestSessionLocal
 
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
     s = _make_session(db)
     rec = Reconstruction(
         session_id=s.id,
@@ -1816,12 +1794,11 @@ def test_mesh_job_failure_updates_error(setup_test_db):
 def test_mesh_job_failure_keeps_long_error_unclipped(setup_test_db):
     from unittest.mock import patch
 
-    from backend.db.database import get_db
     from backend.main import app
     from backend.services.reconstruction import _run_mesh_export_job_legacy as _run_mesh_export_job
     from tests.conftest import TestSessionLocal
 
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
     s = _make_session(db)
     rec = Reconstruction(
         session_id=s.id,
@@ -1853,13 +1830,12 @@ def test_mesh_job_failure_keeps_long_error_unclipped(setup_test_db):
 def test_mesh_job_failure_caps_very_long_error(setup_test_db):
     from unittest.mock import patch
 
-    from backend.db.database import get_db
     from backend.main import app
     from backend.services.reconstruction import _ERROR_MSG_MAX_CHARS
     from backend.services.reconstruction import _run_mesh_export_job_legacy as _run_mesh_export_job
     from tests.conftest import TestSessionLocal
 
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
     s = _make_session(db)
     rec = Reconstruction(
         session_id=s.id,
@@ -1915,12 +1891,11 @@ def test_run_video_renderer_missing_dependency_reports_browser_fallback(tmp_path
 def test_flythrough_job_success_updates_status(setup_test_db, tmp_path):
     from unittest.mock import patch
 
-    from backend.db.database import get_db
     from backend.main import app
     from backend.services.reconstruction import _run_flythrough_job_legacy as _run_flythrough_job
     from tests.conftest import TestSessionLocal
 
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
     s = _make_session(db)
     splat = tmp_path / "splat.ply"
     splat.write_bytes(b"ply")
@@ -2174,10 +2149,9 @@ def test_generate_thumbnail_uses_configured_size_and_quality(tmp_path):
 
 
 def test_new_model_columns_include_semantic_fields(setup_test_db):
-    from backend.db.database import get_db
     from backend.main import app
 
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
     s = _make_session(db)
     rec = Reconstruction(session_id=s.id, preset="quick", status="complete", frames_used=0)
     db.add(rec)
@@ -2198,12 +2172,11 @@ def test_new_model_columns_include_semantic_fields(setup_test_db):
 def test_semantic_job_success_updates_status_and_invalidates_las(setup_test_db, tmp_path):
     from unittest.mock import patch
 
-    from backend.db.database import get_db
     from backend.main import app
     from backend.services.reconstruction import _run_semantic_job
     from tests.conftest import TestSessionLocal
 
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
     s = _make_session(db)
     splat = tmp_path / "splat.ply"
     splat.write_bytes(b"ply")
