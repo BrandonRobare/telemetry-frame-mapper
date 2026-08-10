@@ -46,7 +46,7 @@ At this point the frames already work in WebODM/OpenDroneMap, which reads GPS EX
 From the repo root, in two terminals:
 
 ```bash
-python -m backend                          # one API process on http://localhost:8000 (docs at /docs)
+uv run --no-sync python -m backend          # one API process on http://localhost:8000 (docs at /docs)
 cd frontend && npm run dev                 # UI on  http://localhost:5173
 ```
 
@@ -143,7 +143,7 @@ When a job finishes (complete, failed, or cancelled) the app shows a toast from 
 ffmpeg -i DJI_0081.MP4 -vf fps=2 frames/frame_%05d.jpg
 drone-video-geotagger --video DJI_0081.MP4 --frames frames --takeoff-altitude 334.0
 mv frames_geotagged imports/tower-site
-python -m backend                    # terminal 1: one API process
+uv run --no-sync python -m backend    # terminal 1: one API process
 cd frontend && npm run dev          # terminal 2
 # UI: import "tower-site" → Review → Reconstruct (quick) → Splat Viewer → Export
 ```

@@ -20,7 +20,8 @@ From the repository root in PowerShell:
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
-python -m pip install -e ".[backend]" pyinstaller
+uv sync --group backend --group reconstruction
+uv pip install pyinstaller
 Push-Location frontend
 npm ci
 npm run build

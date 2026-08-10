@@ -13,23 +13,23 @@ sparse cloud (`colmap_only`). To train gaussian splats on an NVIDIA GPU:
 
 ### Install (verified 2026-06-12 on RTX 3050 Ti / Windows 11 / CUDA Toolkit 13.2 / VS 2022)
 
-torch and gsplat are intentionally **not** part of the `[reconstruction]` extra:
+torch and gsplat are intentionally **not** part of the `reconstruction` dependency group:
 CUDA-enabled torch wheels are not on the default PyPI index, and gsplat's sdist requires
 torch already installed at build time.
 
 ```bash
-# 1. Pin the torch version. gsplat 1.5.3 uses a private torch JIT API that changed in
-#    newer torch; torch 2.12 fails with "_jit_compile() missing ... 'with_sycl'".
-pip install "torch==2.9.1" --index-url https://download.pytorch.org/whl/cu130
+# 1. Install the source-only backend and reconstruction groups. The published wheel is CLI-only.
+uv sync --group backend --group reconstruction
 
-# 2. gsplat installs from sdist. No prebuilt wheel matches modern stacks (the official
+# 2. Pin the torch version. gsplat 1.5.3 uses a private torch JIT API that changed in
+#    newer torch; torch 2.12 fails with "_jit_compile() missing ... 'with_sycl'".
+uv pip install "torch==2.9.1" --index-url https://download.pytorch.org/whl/cu130
+
+# 3. gsplat installs from sdist. No prebuilt wheel matches modern stacks (the official
 #    wheel index tops out at Python 3.10 / torch 2.4 / cu124 for Windows), and the sdist
 #    must see the venv's torch, hence --no-build-isolation.
-pip install ninja
-pip install gsplat --no-build-isolation
-
-# 3. The rest of the optional extras
-pip install -e ".[backend,reconstruction]"
+uv pip install ninja
+uv pip install gsplat --no-build-isolation
 ```
 
 The CUDA kernels JIT-compile on the **first rasterization call** (not on `import gsplat`,
@@ -123,8 +123,8 @@ Required for the CLI release gate:
 Optional/manual reconstruction tools:
 
 - **colmap** — Structure from Motion for Reconstruct tab jobs. Missing COLMAP should fail the reconstruction job with clear install/PATH guidance, not break backend import.
-- **torch + gsplat** + CUDA-capable GPU — Gaussian splat training and optional server-side video rendering. Manual two-step install (see the GPU section above); intentionally not included in the Python `reconstruction` extra.
-- **SuGaR** (`sugar_scene`/`sugar`) — mesh export only. [SuGaR](https://github.com/Anttwo/SuGaR) has no pip-installable release; it must be installed manually by cloning that repo, and is not included in the Python `reconstruction` extra. Mesh export is optional — splat viewing and the rest of reconstruction work fine without it.
+- **torch + gsplat** + CUDA-capable GPU — Gaussian splat training and optional server-side video rendering. Manual two-step install (see the GPU section above); intentionally not included in the `reconstruction` dependency group.
+- **SuGaR** (`sugar_scene`/`sugar`) — mesh export only. [SuGaR](https://github.com/Anttwo/SuGaR) has no pip-installable release; it must be installed manually by cloning that repo, and is not included in the `reconstruction` dependency group. Mesh export is optional — splat viewing and the rest of reconstruction work fine without it.
 
 CI mocks every external binary and optional reconstruction library, so none of this is needed to run the test suite — see [CONTRIBUTING.md](../CONTRIBUTING.md) for what is checked before a release.
 
