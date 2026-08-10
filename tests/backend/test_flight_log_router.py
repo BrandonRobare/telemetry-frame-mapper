@@ -39,11 +39,10 @@ VENDOR_CSVS = [
 
 
 def _make_session(client):
-    from backend.db.database import get_db
     from backend.db.models import Session as SM
     from backend.main import app
 
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
     s = SM(name="fl_test", folder_path="/tmp", photo_count=0, usable_count=0)
     db.add(s)
     db.commit()
@@ -172,12 +171,11 @@ def test_match_preview_returns_list(client):
 
 
 def test_match_preview_uses_offset_and_interpolation(client):
-    from backend.db.database import get_db
     from backend.db.models import Image
     from backend.main import app
 
     s = _make_session(client)
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
     img = Image(
         session_id=s.id,
         filename="frame.jpg",
@@ -236,12 +234,11 @@ def test_apply_sync_returns_applied_count(client):
 
 
 def test_apply_sync_preserves_stale_footprint(client):
-    from backend.db.database import get_db
     from backend.db.models import Footprint, Image
     from backend.main import app
 
     s = _make_session(client)
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
     img = Image(
         session_id=s.id,
         filename="frame.jpg",
@@ -285,12 +282,11 @@ def test_apply_sync_preserves_stale_footprint(client):
 
 
 def test_apply_sync_does_not_create_missing_footprint(client):
-    from backend.db.database import get_db
     from backend.db.models import Footprint, Image
     from backend.main import app
 
     s = _make_session(client)
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
     img = Image(
         session_id=s.id,
         filename="frame.jpg",

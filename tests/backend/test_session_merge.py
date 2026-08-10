@@ -37,9 +37,8 @@ def _make_session(db, name="Test", count=3, *, gps=True):
 
 
 def test_validate_sessions_all_valid(setup_test_db):
-    from backend.db.database import get_db
     from backend.main import app
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
 
     s1 = _make_session(db, "Session 1", count=3)
     s2 = _make_session(db, "Session 2", count=3)
@@ -49,9 +48,8 @@ def test_validate_sessions_all_valid(setup_test_db):
 
 
 def test_validate_sessions_missing(setup_test_db):
-    from backend.db.database import get_db
     from backend.main import app
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
 
     s1 = _make_session(db, "Session 1", count=3)
 
@@ -60,9 +58,8 @@ def test_validate_sessions_missing(setup_test_db):
 
 
 def test_validate_sessions_no_images(setup_test_db):
-    from backend.db.database import get_db
     from backend.main import app
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
 
     s1 = _make_session(db, "Session 1", count=3)
     s2 = _make_session(db, "Session 2", count=0)
@@ -72,9 +69,8 @@ def test_validate_sessions_no_images(setup_test_db):
 
 
 def test_validate_sessions_no_gps(setup_test_db):
-    from backend.db.database import get_db
     from backend.main import app
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
 
     s1 = _make_session(db, "Session 1", count=3, gps=False)
     s2 = _make_session(db, "Session 2", count=3, gps=False)
@@ -84,9 +80,8 @@ def test_validate_sessions_no_gps(setup_test_db):
 
 
 def test_validate_sessions_far_apart(setup_test_db):
-    from backend.db.database import get_db
     from backend.main import app
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
 
     s1 = _make_session(db, "Session 1", count=3)  # lat ~35.0
     # Make session 2's images far away (>10km)
@@ -120,9 +115,8 @@ def test_validate_sessions_far_apart(setup_test_db):
 
 
 def test_validate_sessions_with_frame_selection(setup_test_db):
-    from backend.db.database import get_db
     from backend.main import app
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
 
     s1 = _make_session(db, "Session 1", count=5)
     s2 = _make_session(db, "Session 2", count=5)
@@ -137,9 +131,8 @@ def test_validate_sessions_with_frame_selection(setup_test_db):
 
 
 def test_merge_session_workspace_creates_manifest(setup_test_db, tmp_path):
-    from backend.db.database import get_db
     from backend.main import app
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
 
     s1 = _make_session(db, "Session 1", count=2)
     s2 = _make_session(db, "Session 2", count=3)
@@ -172,9 +165,8 @@ def test_merge_session_workspace_creates_manifest(setup_test_db, tmp_path):
 
 
 def test_merge_session_workspace_no_images(setup_test_db):
-    from backend.db.database import get_db
     from backend.main import app
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
 
     s1 = _make_session(db, "Session 1", count=0)
 
@@ -183,9 +175,8 @@ def test_merge_session_workspace_no_images(setup_test_db):
 
 
 def test_merge_session_workspace_respects_frame_selection(setup_test_db, tmp_path):
-    from backend.db.database import get_db
     from backend.main import app
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
 
     s1 = _make_session(db, "Session 1", count=5)
     s2 = _make_session(db, "Session 2", count=3)

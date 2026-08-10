@@ -88,10 +88,9 @@ def test_list_project_sessions_empty(client):
 
 
 def test_project_trends_are_time_ordered_and_project_scoped(client):
-    from backend.db.database import get_db
     from backend.main import app
 
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
     project = Project(name="Trend site")
     other_project = Project(name="Other site")
     target = TargetArea(name="Trend target")

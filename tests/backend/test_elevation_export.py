@@ -98,7 +98,6 @@ def test_elevation_route_returns_422_below_resolution_floor(
     client, classified_las: Path, monkeypatch, tmp_path
 ):
     import backend.routers.export as export_router
-    from backend.db.database import get_db
     from backend.main import app
 
     monkeypatch.setattr(
@@ -111,7 +110,7 @@ def test_elevation_route_returns_422_below_resolution_floor(
     pointcloud = exports / "pointcloud.las"
     pointcloud.write_bytes(classified_las.read_bytes())
 
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
     session = SessionModel(name="S", folder_path=str(tmp_path))
     db.add(session)
     db.commit()
@@ -133,7 +132,6 @@ def test_dem_route_returns_422_without_ground_labels(
     client, classified_las: Path, monkeypatch, tmp_path
 ):
     import backend.routers.export as export_router
-    from backend.db.database import get_db
     from backend.main import app
 
     monkeypatch.setattr(
@@ -151,7 +149,7 @@ def test_dem_route_returns_422_without_ground_labels(
     cloud.classification = [1, 1, 1]
     cloud.write(pointcloud)
 
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
     session = SessionModel(name="S", folder_path=str(tmp_path))
     db.add(session)
     db.commit()

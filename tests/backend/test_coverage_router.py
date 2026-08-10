@@ -10,12 +10,11 @@ _POLYGON = '{"type":"Polygon","coordinates":[[[0,0],[1,0],[1,1],[0,1],[0,0]]]}'
 
 
 def _make_session_with_footprint():
-    from backend.db.database import get_db
     from backend.db.models import Footprint, Image
     from backend.db.models import Session as SM
     from backend.main import app
 
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
     session = SM(name="exportable", folder_path="/tmp", photo_count=1, usable_count=1)
     db.add(session)
     db.commit()
@@ -39,11 +38,10 @@ def _make_session_with_footprint():
 
 
 def _make_coverage_run(session_id: int):
-    from backend.db.database import get_db
     from backend.db.models import CoverageRun, TargetArea
     from backend.main import app
 
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
     target = TargetArea(name="field", geom_geojson=_POLYGON)
     db.add(target)
     db.commit()
@@ -91,10 +89,9 @@ def test_delete_target_area(client):
 def test_coverage_run_no_footprints(client):
     body = {"name": "Empty", "geom_geojson": _POLYGON}
     area_id = client.post("/target-areas", json=body).json()["id"]
-    from backend.db.database import get_db
     from backend.db.models import Session as SM
     from backend.main import app
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
     s = SM(name="empty", folder_path="/tmp", photo_count=0, usable_count=0)
     db.add(s)
     db.commit()

@@ -6,12 +6,11 @@ import pytest
 
 
 def _insert_session_and_image(client, flag="good"):
-    from backend.db.database import get_db
     from backend.db.models import Image
     from backend.db.models import Session as SM
     from backend.main import app
 
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
     s = SM(name="img_s", folder_path="/tmp", photo_count=1, usable_count=1)
     db.add(s)
     db.commit()
@@ -57,11 +56,10 @@ def test_patch_image_not_found(client):
 
 
 def _add_second_image(client, session_id, flag="good"):
-    from backend.db.database import get_db
     from backend.db.models import Image
     from backend.main import app
 
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
     img = Image(
         session_id=session_id,
         filename="b.jpg",
@@ -142,12 +140,11 @@ def test_webodm_georeferencing_csv_export_uses_configured_exports_dir(client, tm
 
 
 def test_image_list_includes_colmap_error_when_reconstruction_complete(client):
-    from backend.db.database import get_db
     from backend.db.models import Image, Reconstruction, ReconstructionFrame
     from backend.db.models import Session as SessionModel
     from backend.main import app
 
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
     s = SessionModel(name="ReprojTest", folder_path="/tmp/rp", photo_count=1, usable_count=1)
     db.add(s)
     db.commit()
@@ -184,12 +181,11 @@ def test_image_list_includes_colmap_error_when_reconstruction_complete(client):
 
 
 def test_image_list_colmap_error_null_when_no_reconstruction(client):
-    from backend.db.database import get_db
     from backend.db.models import Image
     from backend.db.models import Session as SessionModel
     from backend.main import app
 
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
     s = SessionModel(name="NoRecTest", folder_path="/tmp/nr", photo_count=1, usable_count=1)
     db.add(s)
     db.commit()
@@ -208,11 +204,10 @@ def test_image_list_colmap_error_null_when_no_reconstruction(client):
 def test_get_thumb_redirects_relative_thumb_path_unchanged(client):
     _, img = _insert_session_and_image(client)
 
-    from backend.db.database import get_db
     from backend.db.models import Image
     from backend.main import app
 
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
     db.query(Image).filter(Image.id == img.id).update({"thumb_path": "processed/1/thumbs/a.jpg"})
     db.commit()
 
@@ -227,7 +222,6 @@ def test_get_thumb_redirects_absolute_processed_path_under_processed(client, tmp
     processed_dir = tmp_path / "processed-root"
     thumb = processed_dir / "42" / "thumbs" / "frame.jpg"
 
-    from backend.db.database import get_db
     from backend.db.models import Image
     from backend.main import app
 
@@ -236,7 +230,7 @@ def test_get_thumb_redirects_absolute_processed_path_under_processed(client, tmp
         lambda: type("Cfg", (), {"processed_dir": str(processed_dir)})(),
     )
 
-    db = next(app.dependency_overrides[get_db]())
+    db = app.state.test_db_session
     db.query(Image).filter(Image.id == img.id).update({"thumb_path": str(thumb)})
     db.commit()
 

@@ -23,10 +23,9 @@ geopandas = pytest.importorskip("geopandas")
 
 
 def _db(client):
-    from backend.db.database import get_db
     from backend.main import app
 
-    return next(app.dependency_overrides[get_db]())
+    return app.state.test_db_session
 
 
 def test_geopackage_export_writes_available_layers_in_target_crs(client, monkeypatch, tmp_path):

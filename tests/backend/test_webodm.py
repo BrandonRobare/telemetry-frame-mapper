@@ -163,10 +163,9 @@ def test_reconstruction_backends_make_webodm_opt_in_and_secret_free(client, monk
 
 
 def _db(client):
-    from backend.db.database import get_db
     from backend.main import app
 
-    return next(app.dependency_overrides[get_db]())
+    return app.state.test_db_session
 
 
 def test_submit_session_task_and_status_are_explicit(client, tmp_path, monkeypatch):

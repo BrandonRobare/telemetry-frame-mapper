@@ -10,10 +10,9 @@ from backend.db.models import Session as SessionModel
 
 
 def _db(client):
-    from backend.db.database import get_db
     from backend.main import app
 
-    return next(app.dependency_overrides[get_db]())
+    return app.state.test_db_session
 
 
 def _complete_mesh_reconstruction(client, exports_dir: Path, *, obj_path: Path | None = None):

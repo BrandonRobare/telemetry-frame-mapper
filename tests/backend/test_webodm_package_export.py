@@ -10,10 +10,9 @@ from backend.services.webodm_package import WebodmPackageOptions, build_webodm_p
 
 
 def _db(client):
-    from backend.db.database import get_db
     from backend.main import app
 
-    return next(app.dependency_overrides[get_db]())
+    return app.state.test_db_session
 
 
 def test_webodm_package_includes_images_and_manifest(client, tmp_path, monkeypatch):

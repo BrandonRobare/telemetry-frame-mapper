@@ -11,9 +11,8 @@ MIGRATION = Path("backend/db/migrations/versions/0010_reconstruction_lineage.py"
 
 
 def _get_db(client):
-    from backend.db.database import get_db
     from backend.main import app
-    return next(app.dependency_overrides[get_db]())
+    return app.state.test_db_session
 
 
 def _make_session_with_image(db, count=1):
