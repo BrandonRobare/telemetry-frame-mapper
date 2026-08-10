@@ -14,6 +14,22 @@ def test_default_database_url_is_repo_rooted(monkeypatch):
     assert database_module._default_database_url() == f"sqlite:///{expected.as_posix()}"
 
 
+def test_frozen_bundle_uses_embedded_migrations_and_writable_working_data(
+    monkeypatch, tmp_path
+):
+    bundle_root = tmp_path / "bundle"
+    app_data = tmp_path / "app-data"
+    app_data.mkdir()
+    monkeypatch.setattr(database_module.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(database_module.sys, "_MEIPASS", str(bundle_root), raising=False)
+    monkeypatch.chdir(app_data)
+
+    assert database_module._alembic_ini_path() == bundle_root / "alembic.ini"
+    assert database_module._default_database_url() == (
+        f"sqlite:///{(app_data / 'data' / 'drone_mapping.db').as_posix()}"
+    )
+
+
 @pytest.fixture
 def isolated_engine(monkeypatch, tmp_path):
     """Bind backend.db.database's module-level `engine`/`DATABASE_URL` to an
