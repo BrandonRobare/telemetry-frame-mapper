@@ -94,6 +94,20 @@ jobs:
       - name: Build single-container image
         run: docker build -t telemetry-frame-mapper:ci .
 
+      - name: Smoke container health
+        run: |
+          set -euo pipefail
+          docker run --detach --publish 127.0.0.1:8000:8000 --name telemetry-frame-mapper-ci telemetry-frame-mapper:ci
+          trap 'docker rm --force telemetry-frame-mapper-ci >/dev/null 2>&1 || true' EXIT
+          for attempt in {1..45}; do
+            if curl --fail --silent http://127.0.0.1:8000/health >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs telemetry-frame-mapper-ci
+          exit 1
+
   windows-package:
     runs-on: windows-latest
     steps:
