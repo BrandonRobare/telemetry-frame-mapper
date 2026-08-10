@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 
 from alembic import command
@@ -9,10 +10,21 @@ from sqlalchemy import create_engine, event, inspect
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-ALEMBIC_INI_PATH = REPO_ROOT / "alembic.ini"
+
+
+def _resource_root() -> Path:
+    return Path(getattr(sys, "_MEIPASS", REPO_ROOT))
+
+
+def _runtime_root() -> Path:
+    return Path.cwd() if getattr(sys, "frozen", False) else REPO_ROOT
+
+
+def _alembic_ini_path() -> Path:
+    return _resource_root() / "alembic.ini"
 
 def _default_database_url() -> str:
-    return f"sqlite:///{(REPO_ROOT / 'data' / 'drone_mapping.db').as_posix()}"
+    return f"sqlite:///{(_runtime_root() / 'data' / 'drone_mapping.db').as_posix()}"
 
 
 DATABASE_URL = os.environ.get("DATABASE_URL", _default_database_url())
@@ -44,7 +56,7 @@ def get_db():
 
 
 def _alembic_config() -> Config:
-    cfg = Config(str(ALEMBIC_INI_PATH))
+    cfg = Config(str(_alembic_ini_path()))
     cfg.set_main_option("sqlalchemy.url", DATABASE_URL)
     return cfg
 

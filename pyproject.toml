@@ -72,6 +72,9 @@ semantic = [
   "transformers>=4.48",
   "safetensors",
 ]
+windows-package = [
+  "pyinstaller>=6.22.0",
+]
 
 [project.scripts]
 drone-video-geotagger = "drone_video_geotagger.cli:main"
