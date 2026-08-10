@@ -4,19 +4,14 @@ set -e
 cd "$(dirname "$0")"
 
 echo "Starting backend..."
-if [ ! -d .venv ]; then
-  python3 -m venv .venv 2>/dev/null || python -m venv .venv
+if ! command -v uv >/dev/null 2>&1; then
+  echo "uv is required for source development. See docs/INSTALL.md."
+  exit 1
 fi
-# Git Bash on Windows puts the activate script in Scripts/, Linux/macOS in bin/
-if [ -f .venv/bin/activate ]; then
-  source .venv/bin/activate
-else
-  source .venv/Scripts/activate
-fi
-python -m pip install -e ".[backend,dev]"
+uv sync --group backend --group dev
 # Reload mode uses one API worker.
 # Run from the repo root: config.yaml and the ./processed static mount resolve from here
-uvicorn backend.main:app --reload --port 8000 &
+uv run --no-sync uvicorn backend.main:app --reload --port 8000 &
 BACKEND_PID=$!
 echo "Backend PID: $BACKEND_PID (http://localhost:8000)"
 

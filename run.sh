@@ -13,7 +13,7 @@ elif [ -f .venv-windows/Scripts/activate ]; then
   source .venv-windows/Scripts/activate
 else
   echo "No virtualenv found. Run ./dev.sh once, or:"
-  echo "    python -m venv .venv && source .venv/bin/activate && pip install -e \".[backend]\""
+  echo "    uv sync --group backend --group dev"
   exit 1
 fi
 

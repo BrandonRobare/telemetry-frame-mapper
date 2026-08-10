@@ -33,7 +33,8 @@ def export_elevation_geotiff(
     except ImportError as exc:
         raise ImportError(
             "Elevation export requires optional laspy and rasterio dependencies. "
-            "Install them with: pip install '.[reconstruction]'"
+            "Install them from a source checkout with: "
+            "uv sync --group backend --group reconstruction"
         ) from exc
 
     cloud = laspy.read(pointcloud_path)

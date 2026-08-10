@@ -8,6 +8,9 @@ version = "2.0.2"
 description = "Geotags DJI drone video frames with GPS EXIF metadata for WebODM/OpenDroneMap processing."
 readme = "README.md"
 requires-python = ">=3.11"
+dependencies = [
+  "pyyaml==6.0.3"
+]
 license = "MIT"
 authors = [
   { name = "Brandon" }
@@ -25,13 +28,12 @@ classifiers = [
   "Topic :: Scientific/Engineering :: GIS"
 ]
 
-[project.optional-dependencies]
+[dependency-groups]
 backend = [
   "fastapi==0.141.1",
   "uvicorn[standard]==0.52.1",
   "sqlalchemy==2.0.51",
   "alembic==1.19.0",
-  "pyyaml==6.0.3",
   "pillow==12.3.0",
   "piexif==1.1.3",
   "opencv-python-headless==5.0.0.93",
@@ -54,7 +56,7 @@ dev = [
   "ruff>=0.4"
 ]
 # torch and gsplat are intentionally NOT listed here: CUDA-enabled torch is not on the
-# default PyPI index, and gsplat's sdist requires torch at build time, so the extra could
+# default PyPI index, and gsplat's sdist requires torch at build time, so the dependency group could
 # never resolve as advertised. GPU training install is a manual two-step — see docs/SETUP.md.
 reconstruction = [
   "laspy[lazrs]>=2.5",

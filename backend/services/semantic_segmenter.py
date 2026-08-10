@@ -2,7 +2,7 @@
 
 Lazy-imports ``transformers`` and ``safetensors`` at call time so the backend
 can start without them.  When they are missing the error message points the
-user at ``pip install -e '.[semantic]'`` and ``docs/SETUP.md``.
+user at ``uv sync --group backend --group semantic`` and ``docs/SETUP.md``.
 
 Model default is ``nvidia/segformer-b0-finetuned-ade-512-512``, configurable via
 ``semantic.model_id`` in ``config.yaml``.  Set ``semantic.hf_home`` to relocate
@@ -102,7 +102,7 @@ def _import_segmentation_deps():
     except ImportError as exc:
         raise RuntimeError(
             "Semantic segmentation dependencies (transformers + safetensors) are not "
-            "installed — run `pip install -e '.[semantic]'` and see docs/SETUP.md for "
+            "installed — run `uv sync --group backend --group semantic` and see docs/SETUP.md for "
             "the GPU setup. Segmentation will be skipped."
         ) from exc
 

@@ -143,8 +143,11 @@ wheels = [
 name = "drone-video-geotagger"
 version = "2.0.2"
 source = { editable = "." }
+dependencies = [
+    { name = "pyyaml" },
+]
 
-[package.optional-dependencies]
+[package.dev-dependencies]
 backend = [
     { name = "aiofiles" },
     { name = "alembic" },
@@ -162,7 +165,6 @@ backend = [
     { name = "pydjirecord" },
     { name = "pyproj" },
     { name = "python-multipart" },
-    { name = "pyyaml" },
     { name = "shapely" },
     { name = "simplekml" },
     { name = "sqlalchemy" },
@@ -185,37 +187,44 @@ semantic = [
 ]
 
 [package.metadata]
-requires-dist = [
-    { name = "aiofiles", marker = "extra == 'backend'", specifier = "==25.1.0" },
-    { name = "alembic", marker = "extra == 'backend'", specifier = "==1.19.0" },
-    { name = "fastapi", marker = "extra == 'backend'", specifier = "==0.141.1" },
-    { name = "geopandas", marker = "extra == 'backend'", specifier = "==1.1.4" },
-    { name = "gpxpy", marker = "extra == 'backend'", specifier = "==1.6.2" },
-    { name = "httpx", marker = "extra == 'backend'", specifier = "==0.28.1" },
-    { name = "laspy", extras = ["lazrs"], marker = "extra == 'reconstruction'", specifier = ">=2.5" },
-    { name = "lxml", marker = "extra == 'backend'", specifier = "==6.1.1" },
-    { name = "numpy", marker = "extra == 'backend'", specifier = ">=2" },
-    { name = "nvidia-ml-py", marker = "extra == 'reconstruction'", specifier = ">=12" },
-    { name = "opencv-python-headless", marker = "extra == 'backend'", specifier = "==5.0.0.93" },
-    { name = "piexif", marker = "extra == 'backend'", specifier = "==1.1.3" },
-    { name = "pillow", marker = "extra == 'backend'", specifier = "==12.3.0" },
-    { name = "psutil", marker = "extra == 'backend'", specifier = ">=5.9" },
-    { name = "pydjirecord", marker = "extra == 'backend'", specifier = ">=1.3.0" },
-    { name = "pyproj", marker = "extra == 'backend'", specifier = "==3.7.2" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
-    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = "==1.4.0" },
-    { name = "python-multipart", marker = "extra == 'backend'", specifier = "==0.0.32" },
-    { name = "pyyaml", marker = "extra == 'backend'", specifier = "==6.0.3" },
-    { name = "rasterio", marker = "extra == 'reconstruction'", specifier = ">=1.4" },
-    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.4" },
-    { name = "safetensors", marker = "extra == 'semantic'" },
-    { name = "shapely", marker = "extra == 'backend'", specifier = "==2.1.2" },
-    { name = "simplekml", marker = "extra == 'backend'", specifier = "==1.3.6" },
-    { name = "sqlalchemy", marker = "extra == 'backend'", specifier = "==2.0.51" },
-    { name = "transformers", marker = "extra == 'semantic'", specifier = ">=4.48" },
-    { name = "uvicorn", extras = ["standard"], marker = "extra == 'backend'", specifier = "==0.52.1" },
+requires-dist = [{ name = "pyyaml", specifier = "==6.0.3" }]
+
+[package.metadata.requires-dev]
+backend = [
+    { name = "aiofiles", specifier = "==25.1.0" },
+    { name = "alembic", specifier = "==1.19.0" },
+    { name = "fastapi", specifier = "==0.141.1" },
+    { name = "geopandas", specifier = "==1.1.4" },
+    { name = "gpxpy", specifier = "==1.6.2" },
+    { name = "httpx", specifier = "==0.28.1" },
+    { name = "lxml", specifier = "==6.1.1" },
+    { name = "numpy", specifier = ">=2" },
+    { name = "opencv-python-headless", specifier = "==5.0.0.93" },
+    { name = "piexif", specifier = "==1.1.3" },
+    { name = "pillow", specifier = "==12.3.0" },
+    { name = "psutil", specifier = ">=5.9" },
+    { name = "pydjirecord", specifier = ">=1.3.0" },
+    { name = "pyproj", specifier = "==3.7.2" },
+    { name = "python-multipart", specifier = "==0.0.32" },
+    { name = "shapely", specifier = "==2.1.2" },
+    { name = "simplekml", specifier = "==1.3.6" },
+    { name = "sqlalchemy", specifier = "==2.0.51" },
+    { name = "uvicorn", extras = ["standard"], specifier = "==0.52.1" },
 ]
-provides-extras = ["backend", "dev", "reconstruction", "semantic"]
+dev = [
+    { name = "pytest", specifier = ">=8.0" },
+    { name = "pytest-asyncio", specifier = "==1.4.0" },
+    { name = "ruff", specifier = ">=0.4" },
+]
+reconstruction = [
+    { name = "laspy", extras = ["lazrs"], specifier = ">=2.5" },
+    { name = "nvidia-ml-py", specifier = ">=12" },
+    { name = "rasterio", specifier = ">=1.4" },
+]
+semantic = [
+    { name = "safetensors" },
+    { name = "transformers", specifier = ">=4.48" },
+]
 
 [[package]]
 name = "fastapi"

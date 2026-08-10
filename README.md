@@ -27,8 +27,18 @@ New here? Start with the [end-to-end workflow tutorial](docs/WORKFLOW.md).
 
 ## Quickstart
 
+The published Python wheel is CLI-only:
+
 ```bash
-pip install -e ".[backend,dev]"
+pip install drone-video-geotagger
+```
+
+For the web app, use a cloned source checkout, the [Docker image](#docker), or the
+[Windows installer](docs/WINDOWS-INSTALLER.md). From a source checkout, install its
+source-only dependencies with:
+
+```bash
+uv sync --group backend --group dev
 ```
 
 `ffmpeg` and `exiftool` must be on your `PATH` (or passed with `--ffmpeg` / `--exiftool`). COLMAP
@@ -52,7 +62,7 @@ run.bat       # Windows
 ```
 
 Then open `http://localhost:5173`. (`dev.sh` / `dev.bat` do the same, but also create the virtualenv
-and install dependencies on first run.)
+and install source-only dependencies on first run.)
 
 ## The CLI
 
