@@ -83,7 +83,7 @@ PYTHON_DEPENDENCIES = {
     },
     "transformers": {
         "label": "transformers",
-        "install": {"pip": "uv pip install -e '.[semantic]'"},
+        "install": {"pip": "uv sync --group backend --group semantic"},
     },
 }
 

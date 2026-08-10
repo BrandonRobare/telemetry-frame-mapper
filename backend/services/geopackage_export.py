@@ -37,7 +37,8 @@ def write_geopackage(
         import geopandas as gpd
     except ImportError as exc:
         raise RuntimeError(
-            "GeoPackage export requires geopandas; install the backend extra"
+            "GeoPackage export requires geopandas; "
+            "run uv sync --group backend from a source checkout"
         ) from exc
 
     output_path.parent.mkdir(parents=True, exist_ok=True)

@@ -24,7 +24,7 @@ RUN apt-get update \
 
 WORKDIR /app
 
-COPY pyproject.toml README.md LICENSE ./
+COPY pyproject.toml uv.lock README.md LICENSE ./
 COPY src/ ./src/
 COPY backend/ ./backend/
 COPY config.yaml ./config.yaml
@@ -34,7 +34,10 @@ COPY alembic.ini ./alembic.ini
 COPY --from=frontend-build /app/frontend/dist ./frontend/dist
 
 RUN pip install --upgrade pip \
-    && pip install -e ".[backend,reconstruction]"
+    && pip install "uv==0.11.16" \
+    && uv sync --frozen --no-dev --group backend --group reconstruction
+
+ENV PATH="/app/.venv/bin:$PATH"
 
 RUN mkdir -p data imports processed exports
 

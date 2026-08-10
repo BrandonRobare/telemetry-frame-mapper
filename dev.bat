@@ -3,10 +3,9 @@ REM dev.bat — start backend + frontend for local development (run from the rep
 cd /d "%~dp0"
 
 echo Starting backend...
-if not exist .venv\ python -m venv .venv
 REM Reload mode uses one API worker.
 REM Run uvicorn from the repo root: config.yaml and the .\processed static mount resolve from here
-start "Backend" cmd /k ".venv\Scripts\activate && python -m pip install -e .[backend,dev] && uvicorn backend.main:app --reload --port 8000"
+start "Backend" cmd /k "uv sync --group backend --group dev && uv run --no-sync uvicorn backend.main:app --reload --port 8000"
 
 where node >nul 2>nul
 if errorlevel 1 (

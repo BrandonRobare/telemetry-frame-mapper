@@ -3,11 +3,12 @@
 ## Development setup
 
 ```bash
-python -m pip install -e ".[backend,dev]"
+uv sync --group backend --group dev
 cd frontend && npm install
 ```
 
-For CLI-only development, `python -m pip install -e ".[dev]"` is enough.
+For CLI-only development, `uv sync --group dev` is enough. Dependency groups are source-checkout
+tooling, not wheel extras; the published wheel contains only the CLI package.
 
 ## External tools and optional dependencies
 
@@ -19,8 +20,8 @@ Required for the CLI:
 Optional, for reconstruction:
 
 - `colmap`: required only for Reconstruct tab SfM jobs.
-- `gsplat` plus a CUDA-capable GPU: required for Gaussian splat training and optional server-side rendering hooks. Install with `pip install -e ".[backend,reconstruction,dev]"` when validating reconstruction locally. Missing thumbnail renderer support should not break backend import or COLMAP-only setup.
-- SuGaR (`sugar_scene`/`sugar`): required only for mesh export. It is not included in the Python `reconstruction` extra because there is no installable `sugar`/`sugar-scene` PyPI package; install it from the upstream SuGaR project for manual mesh-export smoke.
+- `gsplat` plus a CUDA-capable GPU: required for Gaussian splat training and optional server-side rendering hooks. Run `uv sync --group backend --group reconstruction --group dev` when validating reconstruction locally. Missing thumbnail renderer support should not break backend import or COLMAP-only setup.
+- SuGaR (`sugar_scene`/`sugar`): required only for mesh export. It is not included in the `reconstruction` dependency group because there is no installable `sugar`/`sugar-scene` PyPI package; install it from the upstream SuGaR project for manual mesh-export smoke.
 - Server-side flythrough rendering is optional; when the gsplat video renderer is unavailable, users can use browser recording.
 
 CI mocks every external binary and optional reconstruction library, so no test needs a real ffmpeg, exiftool, COLMAP, or GPU. Before a release, run the CLI once against real `ffmpeg`/`exiftool`; COLMAP, gsplat, SuGaR and video-render checks stay manual.

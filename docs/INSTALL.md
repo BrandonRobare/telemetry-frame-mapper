@@ -5,26 +5,29 @@ What you need depends on how much of the pipeline you use:
 | You want to… | You need |
 |---|---|
 | Geotag video frames (CLI only) | Python 3.11+, `ffmpeg`, `exiftool` |
-| Use the web app (map, review, plan, export) | + Node 20.19+, the `[backend]` Python extra |
+| Use the web app (map, review, plan, export) | A source checkout with `uv`, Docker, or the Windows installer; + Node 20.19+ for the source frontend |
 | Run 3D reconstruction | + COLMAP on PATH |
 | Train gaussian splats / render server-side | + NVIDIA GPU (4 GB+ VRAM), CUDA toolkit, torch + gsplat (see [SETUP.md](SETUP.md)) |
 
 **Hardware guidance:** any modern machine handles the CLI and web app. COLMAP benefits from a GPU but runs CPU-only (slowly). Splat training requires an NVIDIA GPU; 4 GB VRAM works with the `quick` preset and capped scene sizes, 8 GB+ is comfortable for `full`. 16 GB system RAM recommended when training (frame cache).
 
-## 1. Python package
+## 1. CLI package or source checkout
 
 ```bash
+# CLI only: this is the complete published wheel contract.
+pip install drone-video-geotagger
+
+# Web app / source development: clone first, then install source-only groups.
 git clone https://github.com/BrandonRobare/telemetry-frame-mapper.git
 cd telemetry-frame-mapper
-python -m venv .venv
-# Windows:  .venv\Scripts\activate     Linux/macOS:  source .venv/bin/activate
-
-pip install -e ".[backend,dev]"   # CLI + web backend + test tools
-# or, CLI only:
-pip install -e ".[dev]"
+uv sync --group backend --group dev
 ```
 
-Verify: `drone-video-geotagger --help` and `pytest` (all tests should pass without any external binaries installed).
+The Python wheel intentionally contains only the CLI package. The backend, migrations, config, and
+frontend are available from a source checkout, the Docker image, or the Windows installer — they are
+not installed by any wheel extra. Verify the source checkout with
+`uv run --no-sync drone-video-geotagger --help` and `uv run --no-sync pytest` (all tests should pass
+without any external binaries installed).
 
 For a packaged Windows application instead of a developer checkout, see the
 [Windows installer workflow](WINDOWS-INSTALLER.md).
@@ -81,7 +84,7 @@ Requires Node 20.19+ (Vite 8 declares `^20.19.0 || >=22.12.0`). The UI expects t
 From the **repo root** (paths in `config.yaml` resolve relative to it):
 
 ```bash
-python -m backend    # one API process: http://localhost:8000, docs: /docs
+uv run --no-sync python -m backend    # one API process: http://localhost:8000, docs: /docs
 ```
 
 First run creates `data/drone_mapping.db` (SQLite — set `DATABASE_URL` to use PostgreSQL instead). Optional mission parameters (camera FOV, overlap targets, CRS, directories) live in [config.yaml](../config.yaml).
@@ -213,7 +216,7 @@ startup or the test suite.
 
 ## 6. GPU splat training (optional)
 
-Torch and gsplat are **deliberately not** in the pip extras — CUDA-enabled torch is not on the default PyPI index, and gsplat must compile against your torch/CUDA combination. Follow the step-by-step in [SETUP.md](SETUP.md). Without them, everything still works except splat training itself: reconstructions complete in `colmap_only` mode.
+Torch and gsplat are **deliberately not** in the dependency groups — CUDA-enabled torch is not on the default PyPI index, and gsplat must compile against your torch/CUDA combination. Follow the step-by-step in [SETUP.md](SETUP.md). Without them, everything still works except splat training itself: reconstructions complete in `colmap_only` mode.
 
 ## Uninstall / clean state
 

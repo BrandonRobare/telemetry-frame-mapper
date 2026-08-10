@@ -12,7 +12,7 @@ if exist ".venv\Scripts\activate.bat" (
     call ".venv-windows\Scripts\activate.bat"
 ) else (
     echo No virtualenv found. Run dev.bat once, or:
-    echo     python -m venv .venv ^&^& .venv\Scripts\activate ^&^& pip install -e ".[backend]"
+    echo     uv sync --group backend --group dev
     exit /b 1
 )
 

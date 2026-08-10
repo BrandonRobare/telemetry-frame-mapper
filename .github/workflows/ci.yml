@@ -36,17 +36,17 @@ jobs:
       - name: Check Python lock metadata
         run: uv lock --check
 
-      - name: Install package
-        run: python -m pip install ".[backend,dev]"
+      - name: Install source development groups
+        run: uv sync --frozen --group backend --group dev
 
       - name: Audit installed Python dependencies
-        run: python -m pip install pip==26.2.1 pip-audit==2.10.1 setuptools==83.0.0 && python -m pip_audit --local
+        run: uv pip install --python .venv/bin/python pip==26.2.1 pip-audit==2.10.1 setuptools==83.0.0 && .venv/bin/python -m pip_audit --local
 
       - name: Lint
-        run: ruff check .
+        run: .venv/bin/ruff check .
 
       - name: Test
-        run: pytest
+        run: .venv/bin/pytest
 
   frontend:
     runs-on: ubuntu-latest
