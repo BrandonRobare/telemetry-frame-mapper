@@ -3,7 +3,8 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useProjects } from './useProjects'
 import { useMapStore } from '../../shared/stores/mapStore'
 import { Skeleton } from '../../shared/components/Skeleton'
-import { post } from '../../shared/api/client'
+import ConfirmDialog from '../../shared/components/ConfirmDialog'
+import { del, post } from '../../shared/api/client'
 import type { Project } from '../../types/api'
 
 /** Sentinel option value — real ids are numbers. */
@@ -35,6 +36,7 @@ export default function ProjectPicker() {
   const [creating, setCreating] = useState(false)
   const [name, setName] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const [projectToDelete, setProjectToDelete] = useState<Project | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const queryClient = useQueryClient()
 
@@ -64,6 +66,18 @@ export default function ProjectPicker() {
     },
     // The API returns 409 on a duplicate name; surface it rather than failing silently.
     onError: (err: Error) => setError(err.message || 'Could not create project'),
+  })
+
+  const deleteProject = useMutation({
+    mutationFn: (project: Project) => del(`/projects/${project.id}`),
+    onSuccess: (_, deleted) => {
+      queryClient.invalidateQueries({ queryKey: ['projects'] })
+      queryClient.invalidateQueries({ queryKey: ['sessions'] })
+      setProject(projects?.find((project) => project.id !== deleted.id)?.id ?? null)
+      setSession(null)
+      setProjectToDelete(null)
+    },
+    onError: (err: Error) => setError(err.message || 'Could not delete project'),
   })
 
   const submit = () => {
@@ -153,24 +167,48 @@ export default function ProjectPicker() {
   }
 
   return (
-    <select
-      value={selectedProjectId ?? ''}
-      onChange={(e) => handleChange(e.target.value)}
-      style={SELECT_STYLE}
-      title="Select project"
-    >
-      {projects.map((p) => {
-        const date = p.created_at
-          ? new Date(p.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
-          : null
-        return (
-          <option key={p.id} value={p.id}>
-            {p.name}{date ? ` [${date}]` : ''}
-          </option>
-        )
-      })}
-      {/* Without this the create affordance disappeared as soon as one project existed. */}
-      <option value={NEW_PROJECT}>+ New project…</option>
-    </select>
+    <>
+      <div className="flex items-center gap-1" style={{ padding: '0 8px' }}>
+        <select
+          value={selectedProjectId ?? ''}
+          onChange={(e) => handleChange(e.target.value)}
+          style={SELECT_STYLE}
+          title="Select project"
+        >
+          {projects.map((p) => {
+            const date = p.created_at
+              ? new Date(p.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+              : null
+            return (
+              <option key={p.id} value={p.id}>
+                {p.name}{date ? ` [${date}]` : ''}
+              </option>
+            )
+          })}
+          {/* Without this the create affordance disappeared as soon as one project existed. */}
+          <option value={NEW_PROJECT}>+ New project…</option>
+        </select>
+        <button
+          onClick={() => setProjectToDelete(projects.find((project) => project.id === selectedProjectId) ?? null)}
+          aria-label="Delete selected project"
+          title="Delete selected project"
+          disabled={selectedProjectId === null}
+          className="text-xs cursor-pointer border-none bg-transparent"
+          style={{ color: 'var(--danger)', fontFamily: 'inherit' }}
+        >
+          Delete
+        </button>
+      </div>
+      <ConfirmDialog
+        open={projectToDelete !== null}
+        title="Delete project?"
+        description={<>Delete <strong>{projectToDelete?.name}</strong>, all its sessions, and their on-disk thumbnails, reconstruction outputs, and exports. Running reconstruction jobs will be cancelled. This cannot be undone.</>}
+        confirmLabel="Delete project"
+        danger
+        loading={deleteProject.isPending}
+        onCancel={() => setProjectToDelete(null)}
+        onConfirm={() => { if (projectToDelete) deleteProject.mutate(projectToDelete) }}
+      />
+    </>
   )
 }

@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from unittest.mock import patch
 
-from backend.db.models import CoverageRun, Project, Reconstruction, TargetArea
+import pytest
+
+from backend.db.models import CoverageRun, Image, Project, Reconstruction, TargetArea
 from backend.db.models import Session as SessionModel
 
 
@@ -20,6 +23,34 @@ def test_create_project(client):
     assert data["description"] == "A test project"
     assert data["session_count"] == 0
     assert "id" in data
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "",
+        "   ",
+        "/absolute",
+        "..",
+        "./dot",
+        "site/name",
+        r"site\\name",
+        "C:site",
+        r"C:\\site",
+        r"\\\\server\\share",
+    ],
+)
+def test_create_project_rejects_unsafe_filesystem_names(client, name):
+    response = client.post("/projects/", json={"name": name})
+
+    assert response.status_code == 422
+
+
+def test_create_project_keeps_human_readable_name(client):
+    response = client.post("/projects/", json={"name": "North Field — Phase 2"})
+
+    assert response.status_code == 201
+    assert response.json()["name"] == "North Field — Phase 2"
 
 
 def test_list_projects_after_create(client):
@@ -66,6 +97,143 @@ def test_delete_project(client):
 
     resp = client.get(f"/projects/{pid}")
     assert resp.status_code == 404
+
+
+def test_delete_project_cancels_every_child_job_and_removes_artifacts(client, tmp_path):
+    from backend.main import app
+
+    db = app.state.test_db_session
+    processed_dir = tmp_path / "processed"
+    exports_dir = tmp_path / "exports"
+    data_dir = tmp_path / "data"
+    project = Project(name="Delete artifacts")
+    db.add(project)
+    db.commit()
+
+    sessions = [
+        SessionModel(name="First", folder_path="/tmp/first", project_id=project.id),
+        SessionModel(name="Second", folder_path="/tmp/second", project_id=project.id),
+    ]
+    db.add_all(sessions)
+    db.commit()
+    for session in sessions:
+        db.refresh(session)
+    session_ids = [session.id for session in sessions]
+
+    paths = []
+    rec_ids = []
+    for session in sessions:
+        thumb = processed_dir / str(session.id) / "thumbs" / "frame.jpg"
+        thumb.parent.mkdir(parents=True, exist_ok=True)
+        thumb.write_bytes(b"thumb")
+        workspace = data_dir / "colmap" / str(session.id)
+        workspace.mkdir(parents=True)
+        export = exports_dir / str(session.id) / "splat.ply"
+        export.parent.mkdir(parents=True)
+        export.write_bytes(b"splat")
+        db.add(
+            Image(
+                session_id=session.id,
+                filename="frame.jpg",
+                filepath="/tmp/frame.jpg",
+                thumb_path=str(thumb),
+            )
+        )
+        rec = Reconstruction(
+            session_id=session.id,
+            status="running",
+            preset="quick",
+            colmap_dir=str(workspace),
+            splat_path=str(export),
+        )
+        db.add(rec)
+        db.commit()
+        db.refresh(rec)
+        rec_ids.append(rec.id)
+        paths.extend([thumb, workspace, export.parent])
+
+    cfg = type("Cfg", (), {
+        "processed_dir": str(processed_dir),
+        "exports_dir": str(exports_dir),
+        "data_dir": str(data_dir),
+    })()
+    with patch("backend.routers.sessions.get_config", return_value=cfg), patch(
+        "backend.routers.sessions.cancel_reconstruction"
+    ) as cancel:
+        response = client.delete(f"/projects/{project.id}")
+
+    assert response.status_code == 200
+    assert cancel.call_args_list == [((rec_id,),) for rec_id in rec_ids]
+    assert all(not path.exists() for path in paths)
+    assert db.query(Project).filter(Project.id == project.id).first() is None
+    assert db.query(SessionModel).filter(SessionModel.id.in_(session_ids)).count() == 0
+
+
+def test_delete_project_keeps_database_rows_when_child_cleanup_fails(client):
+    from backend.main import app
+
+    db = app.state.test_db_session
+    project = Project(name="Cleanup failure")
+    db.add(project)
+    db.commit()
+    session = SessionModel(name="Child", folder_path="/tmp/child", project_id=project.id)
+    db.add(session)
+    db.commit()
+
+    with patch(
+        "backend.routers.sessions.cleanup_session_artifacts", side_effect=OSError("disk failed")
+    ):
+        response = client.delete(f"/projects/{project.id}")
+
+    assert response.status_code == 500
+    assert "database unchanged" in response.json()["detail"]
+    assert db.query(Project).filter(Project.id == project.id).first() is not None
+    assert db.query(SessionModel).filter(SessionModel.id == session.id).first() is not None
+
+
+def test_project_import_rejects_unsafe_legacy_project_name_before_path_use(client, tmp_path):
+    from backend.main import app
+
+    db = app.state.test_db_session
+    project = Project(name="../legacy")
+    db.add(project)
+    db.commit()
+
+    cfg = type("Cfg", (), {"imports_dir": str(tmp_path / "imports")})()
+    with patch("backend.routers.projects.get_config", return_value=cfg), patch(
+        "backend.routers.projects.start_import"
+    ):
+        response = client.post(
+            f"/projects/{project.id}/sessions/import",
+            json={"folder_path": "flight", "name": "Unsafe legacy"},
+        )
+
+    assert response.status_code == 400
+    assert "Project name" in response.json()["detail"]
+
+
+def test_project_import_preserves_confined_flat_legacy_fallback(client, tmp_path):
+    from backend.main import app
+
+    db = app.state.test_db_session
+    project = Project(name="Safe project")
+    db.add(project)
+    db.commit()
+    imports_dir = tmp_path / "imports"
+    legacy_folder = imports_dir / "legacy" / "flight"
+    legacy_folder.mkdir(parents=True)
+
+    cfg = type("Cfg", (), {"imports_dir": str(imports_dir)})()
+    with patch("backend.routers.projects.get_config", return_value=cfg), patch(
+        "backend.routers.projects.start_import"
+    ):
+        response = client.post(
+            f"/projects/{project.id}/sessions/import",
+            json={"folder_path": "legacy/flight", "name": "Legacy import"},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["folder_path"] == str(legacy_folder.resolve())
 
 
 def test_project_session_count(client):
