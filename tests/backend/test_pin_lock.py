@@ -20,10 +20,12 @@ def enabled_pin_lock(monkeypatch):
     )
     monkeypatch.setenv("TEST_PIN_HASH", hash_password("1234"))
     main.app.state.pin_lock_sessions.clear()
-    main.app.state.unlock_attempts.clear()
+    main.app.state.pin_unlock_attempts.clear()
+    main.app.state.share_unlock_attempts.clear()
     yield
     main.app.state.pin_lock_sessions.clear()
-    main.app.state.unlock_attempts.clear()
+    main.app.state.pin_unlock_attempts.clear()
+    main.app.state.share_unlock_attempts.clear()
 
 
 @pytest.fixture
@@ -74,8 +76,12 @@ def test_pin_lock_rejects_invalid_session_ttl(tmp_path, ttl):
 
 
 def test_pin_lock_rejects_then_unlocks_all_protected_routes(client, enabled_pin_lock):
-    for path in ("/", "/sessions", "/processed/thumbnail.jpg", "/share/token/example"):
+    for path in ("/", "/sessions", "/processed/thumbnail.jpg", "/export/reconstructions/1"):
         assert client.get(path).status_code == 401
+    # Public share views reach their own token/password authorization instead of the
+    # operator PIN gate; the SPA route may be 404 when frontend/dist is not built.
+    assert client.get("/share/token/example").status_code == 403
+    assert client.get("/view/share/example").status_code != 401
     assert client.get("/health").status_code == 200
     assert client.get("/metrics").status_code == 200
     assert client.get("/pin-lock/status").json() == {"enabled": True}
@@ -134,11 +140,11 @@ def test_unlock_throttles_repeated_failures_then_resets(client, enabled_pin_lock
     assert int(blocked.headers["retry-after"]) > 0
 
     # Expire the backoff window; a correct PIN then unlocks and clears the counter.
-    for entry in main.app.state.unlock_attempts.values():
+    for entry in main.app.state.pin_unlock_attempts.values():
         entry[1] = 0
     unlocked = client.post("/pin-lock/unlock", json={"pin": "1234"})
     assert unlocked.status_code == 204
-    assert main.app.state.unlock_attempts == {}
+    assert main.app.state.pin_unlock_attempts == {}
 
 
 def test_pin_lock_cookie_is_secure_for_https_proxy(client, enabled_pin_lock):
