@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import datetime
-from pathlib import Path, PurePosixPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from sqlalchemy.orm import Session as DBSession
 
 from ..core.config import get_config
@@ -13,7 +13,7 @@ from ..db.models import CoverageRun, Reconstruction
 from ..db.models import Project as ProjectModel
 from ..db.models import Session as SessionModel
 from ..services.ingest_orchestrator import start_import
-from .sessions import SessionOut
+from .sessions import SessionOut, _delete_session
 
 router = APIRouter(prefix="/projects", tags=["projects"])
 
@@ -21,6 +21,33 @@ router = APIRouter(prefix="/projects", tags=["projects"])
 class ProjectCreate(BaseModel):
     name: str
     description: str | None = None
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, value: str) -> str:
+        error = _project_name_error(value)
+        if error:
+            raise ValueError(error)
+        return value
+
+
+def _project_name_error(name: str) -> str | None:
+    if not name.strip():
+        return "Project name must not be empty or whitespace"
+    if name in (".", ".."):
+        return "Project name must not be a dot segment"
+    if "/" in name or "\\" in name:
+        return "Project name must not contain path separators"
+    if PureWindowsPath(name).drive:
+        return "Project name must not be drive-qualified"
+    return None
+
+
+def _safe_project_name(name: str) -> str:
+    error = _project_name_error(name)
+    if error:
+        raise HTTPException(status_code=400, detail=f"Project name is unsafe: {error}")
+    return name
 
 
 class ProjectOut(BaseModel):
@@ -123,9 +150,21 @@ def delete_project(project_id: int, db: DBSession = Depends(get_db)):
     p = db.query(ProjectModel).filter(ProjectModel.id == project_id).first()
     if not p:
         raise HTTPException(status_code=404, detail="Project not found")
-    # Cascade delete sessions via SQLAlchemy relationship.
-    db.delete(p)
-    db.commit()
+    sessions = db.query(SessionModel).filter(SessionModel.project_id == p.id).all()
+    try:
+        for session in sessions:
+            _delete_session(session, db, commit=False)
+        db.delete(p)
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "Project deletion stopped; database unchanged. Some child jobs may have been "
+                "cancelled or artifacts removed before the failure."
+            ),
+        ) from exc
     return {"ok": True}
 
 
@@ -250,6 +289,7 @@ def create_project_session(
     if not p:
         raise HTTPException(status_code=404, detail="Project not found")
 
+    project_name = _safe_project_name(str(p.name))
     cfg = get_config()
     imports_root = Path(cfg.imports_dir).resolve()
     raw = req.folder_path.strip()
@@ -262,7 +302,12 @@ def create_project_session(
         raise HTTPException(status_code=400, detail="Folder path contains invalid segments")
 
     # Per-project subtree: imports/<project_name>/<folder_path>
-    project_subtree = imports_root.joinpath(p.name)
+    project_subtree = imports_root.joinpath(project_name).resolve()
+    if not project_subtree.is_relative_to(imports_root):
+        raise HTTPException(
+            status_code=400,
+            detail="Project imports directory must be inside the imports root",
+        )
     folder = project_subtree.joinpath(*user_path.parts).resolve()
     if not folder.is_relative_to(project_subtree):
         raise HTTPException(
