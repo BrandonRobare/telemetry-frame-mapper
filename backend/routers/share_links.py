@@ -169,7 +169,7 @@ def unlock_share_link(
     db: DBSession = Depends(get_db),
 ):
     """Verify a link password and issue a scoped HttpOnly unlock session."""
-    attempts = request.app.state.unlock_attempts
+    attempts = request.app.state.share_unlock_attempts
     client = request.client.host if request.client else "unknown"
     retry_after = unlock_retry_after(attempts, client)
     if retry_after:
