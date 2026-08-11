@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import threading
 from pathlib import Path
 
 import pytest
@@ -199,6 +200,60 @@ def test_patch_general_field(client, tmp_config):
     resp = client.patch("/settings", json={"general": {"target_crs": "EPSG:4326"}})
     assert resp.status_code == 200
     assert resp.json()["general"]["target_crs"] == "EPSG:4326"
+
+
+def test_concurrent_disjoint_patches_preserve_both_changes(tmp_config, monkeypatch):
+    """A settings mutation cannot overwrite another mutation's fresh read."""
+    dump = settings_mod.yaml.safe_dump
+    rendezvous = threading.Barrier(2, timeout=0.2)
+
+    def pause_both_writers(*args, **kwargs):
+        try:
+            rendezvous.wait()
+        except threading.BrokenBarrierError:
+            pass
+        return dump(*args, **kwargs)
+
+    monkeypatch.setattr(settings_mod.yaml, "safe_dump", pause_both_writers)
+    errors = []
+    patches = (
+        settings_mod.SettingsPatch(mission=settings_mod.MissionSettings(altitude_ft=301)),
+        settings_mod.SettingsPatch(general=settings_mod.GeneralSettings(target_crs="EPSG:4326")),
+    )
+
+    def patch(body):
+        try:
+            settings_mod.patch_settings(body)
+        except Exception as exc:  # pragma: no cover - assertion below reports failures
+            errors.append(exc)
+
+    threads = [threading.Thread(target=patch, args=(body,)) for body in patches]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert not errors
+    after = yaml.safe_load(tmp_config.read_text())
+    assert after["altitude_ft"] == 301
+    assert after["target_crs"] == "EPSG:4326"
+
+
+def test_failed_serialization_preserves_previous_parseable_config(tmp_config, monkeypatch):
+    before = tmp_config.read_text()
+
+    def fail_dump(*args, **kwargs):
+        raise TypeError("simulated serialization failure")
+
+    monkeypatch.setattr(settings_mod.yaml, "safe_dump", fail_dump)
+    with pytest.raises(TypeError, match="simulated serialization failure"):
+        settings_mod.patch_settings(
+            settings_mod.SettingsPatch(mission=settings_mod.MissionSettings(altitude_ft=301))
+        )
+
+    assert tmp_config.read_text() == before
+    assert yaml.safe_load(tmp_config.read_text())["altitude_ft"] == 200
+    assert not list(tmp_config.parent.glob(f".{tmp_config.name}.*.tmp"))
 
 
 # ---------------------------------------------------------------------------
