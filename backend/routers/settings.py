@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import os
+import tempfile
+import threading
+from collections.abc import Callable
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
 
@@ -23,6 +27,7 @@ router = APIRouter(prefix="/settings", tags=["settings"])
 
 # Overridable for tests — point at a tmp file via monkeypatch.
 CONFIG_PATH: str = "config.yaml"
+_SETTINGS_MUTATION_LOCK = threading.RLock()
 
 # ---------------------------------------------------------------------------
 # The set of derived (read-only) field names that MUST NOT be settable via API.
@@ -268,9 +273,37 @@ def _load_raw(path: str) -> dict:
 
 
 def _write_raw(path: str, data: dict) -> None:
-    """Write dict to config.yaml using yaml.safe_dump with sort_keys=False."""
-    with open(path, "w") as f:
-        yaml.safe_dump(data, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
+    """Atomically replace config.yaml after its complete YAML reaches disk."""
+    target = Path(path)
+    temp_name: str | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=target.parent,
+            prefix=f".{target.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as temp:
+            temp_name = temp.name
+            yaml.safe_dump(
+                data, temp, default_flow_style=False, sort_keys=False, allow_unicode=True
+            )
+            temp.flush()
+            os.fsync(temp.fileno())
+        os.replace(temp_name, target)
+    finally:
+        if temp_name:
+            Path(temp_name).unlink(missing_ok=True)
+
+
+def _mutate_raw(path: str, mutation: Callable[[dict], dict]) -> dict:
+    """Serialize a managed read/merge/write and invalidate cached app settings."""
+    with _SETTINGS_MUTATION_LOCK:
+        updated = mutation(_load_raw(path))
+        _write_raw(path, updated)
+        get_config.cache_clear()
+        return updated
 
 
 def _deep_merge(base: dict, override: dict) -> dict:
@@ -347,7 +380,6 @@ def get_settings() -> dict:
 @router.patch("")
 def patch_settings(body: SettingsPatch) -> dict:
     """Deep-merge the partial body into config.yaml and return the full config."""
-    raw = _load_raw(CONFIG_PATH)
 
     # Build override dict from the validated body sections.
     override: dict = {}
@@ -394,9 +426,7 @@ def patch_settings(body: SettingsPatch) -> dict:
         if render_patch:
             override["render"] = render_patch
 
-    merged = _deep_merge(raw, override)
-    _write_raw(CONFIG_PATH, merged)
-    get_config.cache_clear()
+    _mutate_raw(CONFIG_PATH, lambda raw: _deep_merge(raw, override))
 
     return _build_full_response()
 
@@ -418,16 +448,15 @@ def reset_settings() -> dict:
     ingest_defaults = default_ingest_config()
     render_defaults = default_render_config()
 
-    # Seed from the file on disk so unmanaged sections survive the rewrite.
-    fresh: dict = {
-        **_load_raw(CONFIG_PATH),
-        **app_defaults,
-        "reconstruction": recon_defaults,
-        "ingest": ingest_defaults,
-        "render": render_defaults,
-    }
+    def reset(raw: dict) -> dict:
+        return {
+            **raw,
+            **app_defaults,
+            "reconstruction": recon_defaults,
+            "ingest": ingest_defaults,
+            "render": render_defaults,
+        }
 
-    _write_raw(CONFIG_PATH, fresh)
-    get_config.cache_clear()
+    _mutate_raw(CONFIG_PATH, reset)
 
     return _build_full_response()

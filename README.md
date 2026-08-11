@@ -142,11 +142,17 @@ docs/             Documentation
 
 ## Docker
 
-A CPU-only image serves the backend and the built frontend from one container and one API process:
+A CPU-only image serves the backend and the built frontend from one container and one API process.
+The Docker launcher uses the same validated deployment profile as `python -m backend`; its
+non-loopback container bind is intentionally rejected unless PIN/API-key auth is enabled or the
+explicit `deployment.allow_unauthenticated_lan` override is set. Enable auth in a mounted
+`config.yaml` before launching:
 
 ```bash
 docker build -t telemetry-frame-mapper .
-docker run --rm -p 8000:8000 \
+docker run --rm -p 127.0.0.1:8000:8000 \
+  -v "$PWD/config.yaml:/app/config.yaml:ro" \
+  -e DRONE_MAPPING_PIN_HASH \
   -v "$PWD/data:/app/data" \
   -v "$PWD/imports:/app/imports" \
   -v "$PWD/processed:/app/processed" \
@@ -154,8 +160,10 @@ docker run --rm -p 8000:8000 \
   telemetry-frame-mapper
 ```
 
-Open `http://localhost:8000`. The image bundles `ffmpeg`, `exiftool`, and COLMAP. GPU training is
-out of scope for it — use the manual setup in [docs/SETUP.md](docs/SETUP.md).
+Open `http://localhost:8000`. `-p 127.0.0.1:8000:8000` is deliberate: when auth is disabled
+(and you have explicitly set `deployment.allow_unauthenticated_lan: true`), never publish the
+container with `-p 8000:8000`; keep it loopback-only. The image bundles `ffmpeg`, `exiftool`, and
+COLMAP. GPU training is out of scope for it — use the manual setup in [docs/SETUP.md](docs/SETUP.md).
 
 ## Testing
 

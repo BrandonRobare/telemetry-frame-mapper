@@ -469,8 +469,10 @@ def get_deployment_config(path: str = "config.yaml") -> dict:
     }
     deployment = data.get("deployment", {})
     if not isinstance(deployment, dict):
-        return defaults
+        deployment = {}
     result = {**defaults, **deployment}
+    if "DEPLOYMENT_HOST" in os.environ:
+        result["host"] = os.environ["DEPLOYMENT_HOST"]
     if not isinstance(result["host"], str):
         raise ValueError("deployment.host must be an IP address or hostname")
     host = result["host"].strip()
