@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import zipfile
 from pathlib import Path
 from unittest.mock import patch
@@ -638,3 +639,67 @@ def test_restore_rejects_unknown_column_without_committing_partial_rows(client, 
     db.rollback()
     assert db.query(SessionModel).count() == before
     assert db.query(SessionModel).filter(SessionModel.name == "crafted").count() == 0
+
+
+def test_restore_rejects_zip_entries_over_configured_budgets(client, tmp_path, monkeypatch):
+    from backend.services import session_bundle
+
+    cfg = _cfg(tmp_path)
+    cases = (
+        ("MAX_ZIP_ENTRY_COUNT", 1, {"ignored": b"x"}),
+        ("MAX_ZIP_ENTRY_SIZE", 512, {"ignored": b"x" * 513}),
+        ("MAX_ZIP_TOTAL_SIZE", 512, {"first": b"x" * 300, "second": b"x" * 300}),
+        ("MAX_ZIP_COMPRESSION_RATIO", 2, {"ignored": b"x" * 2_000}),
+    )
+    defaults = {
+        "MAX_ZIP_ENTRY_COUNT": 100,
+        "MAX_ZIP_ENTRY_SIZE": 10_000,
+        "MAX_ZIP_TOTAL_SIZE": 10_000,
+        "MAX_ZIP_COMPRESSION_RATIO": 1_000,
+    }
+    for limit, value, entries in cases:
+        with monkeypatch.context() as scoped:
+            for name, default in defaults.items():
+                scoped.setattr(session_bundle, name, value if name == limit else default)
+            zip_path = _crafted_bundle(tmp_path)
+            with zipfile.ZipFile(zip_path, "a", compression=zipfile.ZIP_DEFLATED) as zf:
+                for name, data in entries.items():
+                    zf.writestr(name, data)
+
+            response = _restore(client, cfg, str(zip_path))
+
+            assert response.status_code == 422
+
+
+def test_restore_cleans_staging_after_truncated_artifact(client, tmp_path, monkeypatch):
+    cfg = _cfg(tmp_path)
+    zip_path = _crafted_bundle(
+        tmp_path,
+        images=[{"id": 1, "filename": "a.jpg", "usable": True}],
+        artifacts=[
+            {
+                "table": "images",
+                "row_id": 1,
+                "field": "filepath",
+                "archive_path": "artifacts/images/1/filepath/a.jpg",
+            }
+        ],
+    )
+    artifact_path = "artifacts/images/1/filepath/a.jpg"
+    with zipfile.ZipFile(zip_path, "a") as zf:
+        zf.writestr(artifact_path, b"expected artifact bytes")
+
+    real_open = zipfile.ZipFile.open
+
+    def truncated_open(self, name, *args, **kwargs):
+        if getattr(name, "filename", name) == artifact_path:
+            return io.BytesIO(b"truncated")
+        return real_open(self, name, *args, **kwargs)
+
+    monkeypatch.setattr(zipfile.ZipFile, "open", truncated_open)
+    response = _restore(client, cfg, str(zip_path))
+
+    assert response.status_code == 422
+    assert _db(client).query(SessionModel).filter(SessionModel.name == "crafted").count() == 0
+    restored_root = Path(cfg.imports_dir) / "restored_sessions"
+    assert not list(restored_root.iterdir())
