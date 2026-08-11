@@ -253,7 +253,7 @@ def patch_session(session_id: int, body: SessionPatch, db: DBSession = Depends(g
     return s
 
 
-def _delete_session(s: SessionModel, db: DBSession) -> None:
+def _delete_session(s: SessionModel, db: DBSession, *, commit: bool = True) -> None:
     """Delete one session using the same cleanup path as the single-session API."""
     reconstructions = db.query(Reconstruction).filter(Reconstruction.session_id == s.id).all()
     images = db.query(Image).filter(Image.session_id == s.id).all()
@@ -261,7 +261,8 @@ def _delete_session(s: SessionModel, db: DBSession) -> None:
         cancel_reconstruction(rec.id)
     cleanup_session_artifacts(s.id, images, reconstructions, get_config())
     db.delete(s)
-    db.commit()
+    if commit:
+        db.commit()
 
 
 @router.post("/bulk", response_model=BulkSessionResponse)
