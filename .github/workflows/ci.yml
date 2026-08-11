@@ -94,10 +94,25 @@ jobs:
       - name: Build single-container image
         run: docker build -t telemetry-frame-mapper:ci .
 
+      - name: Reject the default unauthenticated LAN bind
+        run: |
+          set -euo pipefail
+          if docker run --name telemetry-frame-mapper-default telemetry-frame-mapper:ci; then
+            echo "Expected the default unauthenticated non-loopback bind to be rejected"
+            exit 1
+          fi
+          docker logs telemetry-frame-mapper-default 2>&1 | grep --fixed-strings "not loopback but no authentication"
+          docker rm telemetry-frame-mapper-default
+
       - name: Smoke container health
         run: |
           set -euo pipefail
-          docker run --detach --publish 127.0.0.1:8000:8000 --name telemetry-frame-mapper-ci telemetry-frame-mapper:ci
+          printf 'deployment:\n  allow_unauthenticated_lan: true\n' > "$RUNNER_TEMP/telemetry-frame-mapper-ci.yaml"
+          docker run --detach \
+            --publish 127.0.0.1:8000:8000 \
+            --volume "$RUNNER_TEMP/telemetry-frame-mapper-ci.yaml:/app/config.yaml:ro" \
+            --name telemetry-frame-mapper-ci \
+            telemetry-frame-mapper:ci
           trap 'docker rm --force telemetry-frame-mapper-ci >/dev/null 2>&1 || true' EXIT
           for attempt in {1..45}; do
             if curl --fail --silent http://127.0.0.1:8000/health >/dev/null; then
