@@ -35,7 +35,7 @@ def session_is_valid(sessions: MutableMapping[str, float], token: str | None) ->
     return bool(token and sessions.get(token_hash(token), 0) > now)
 
 
-# Shared failed-unlock throttle for the PIN and share-link unlock endpoints.
+# Failed-unlock throttle state is passed in by each authentication surface.
 # ponytail: in-memory per-process counter — single-process deployment only;
 # move to DB if multi-worker ever ships.
 _BACKOFF_THRESHOLD = 5  # consecutive failures before backoff starts

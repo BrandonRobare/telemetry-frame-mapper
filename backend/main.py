@@ -132,7 +132,8 @@ deployment_config = get_deployment_config()
 pin_lock_config = get_pin_lock_config()
 api_key_config = get_api_key_config()
 app.state.pin_lock_sessions = {}
-app.state.unlock_attempts = {}
+app.state.pin_unlock_attempts = {}
+app.state.share_unlock_attempts = {}
 app.add_middleware(
     CORSMiddleware,
     allow_origins=deployment_config["cors_origins"],
@@ -178,7 +179,15 @@ PIN_LOCK_OPEN_PATHS = {
 
 
 def _pin_lock_open_path(path: str) -> bool:
-    return path in PIN_LOCK_OPEN_PATHS or path.startswith("/docs/") or path.startswith("/redoc/")
+    return (
+        path in PIN_LOCK_OPEN_PATHS
+        or path.startswith("/docs/")
+        or path.startswith("/redoc/")
+        or path == "/share"
+        or path.startswith("/share/")
+        or path == "/view/share"
+        or path.startswith("/view/share/")
+    )
 
 
 def _cookie_secure(request: Request) -> bool:
@@ -220,7 +229,7 @@ def unlock_pin_lock(body: dict[str, str], request: Request, response: Response):
     if not pin_lock_config["enabled"]:
         raise HTTPException(status_code=404, detail="PIN lock is not enabled")
     client = request.client.host if request.client else "unknown"
-    retry_after = unlock_retry_after(app.state.unlock_attempts, client)
+    retry_after = unlock_retry_after(app.state.pin_unlock_attempts, client)
     if retry_after:
         raise HTTPException(
             status_code=429,
@@ -230,9 +239,9 @@ def unlock_pin_lock(body: dict[str, str], request: Request, response: Response):
     pin = body.get("pin")
     pin_hash = os.environ[pin_lock_config["pin_hash_env"]]
     if not isinstance(pin, str) or not valid_pin(pin, pin_hash):
-        record_unlock_failure(app.state.unlock_attempts, client)
+        record_unlock_failure(app.state.pin_unlock_attempts, client)
         raise HTTPException(status_code=403, detail="Incorrect PIN")
-    reset_unlock_attempts(app.state.unlock_attempts, client)
+    reset_unlock_attempts(app.state.pin_unlock_attempts, client)
     token = create_session(app.state.pin_lock_sessions, pin_lock_config["session_ttl"])
     response.set_cookie(
         PIN_LOCK_COOKIE_NAME,

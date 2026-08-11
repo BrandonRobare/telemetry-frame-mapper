@@ -5,13 +5,33 @@ from datetime import timedelta
 
 import pytest
 
+import backend.main as main
 from backend.services.share_links import (
     SHARE_LINK_PREFIX,
     ShareToken,
     build_public_viewer_payload,
     create_share_token,
+    hash_password,
+    now_utc,
     parse_share_token,
 )
+
+
+@pytest.fixture
+def enabled_pin_lock(monkeypatch):
+    monkeypatch.setattr(
+        main,
+        "pin_lock_config",
+        {"enabled": True, "pin_hash_env": "TEST_PIN_HASH", "session_ttl": 60},
+    )
+    monkeypatch.setenv("TEST_PIN_HASH", hash_password("1234"))
+    main.app.state.pin_lock_sessions.clear()
+    main.app.state.pin_unlock_attempts.clear()
+    main.app.state.share_unlock_attempts.clear()
+    yield
+    main.app.state.pin_lock_sessions.clear()
+    main.app.state.pin_unlock_attempts.clear()
+    main.app.state.share_unlock_attempts.clear()
 
 
 class TestShareTokenCreateAndParse:
@@ -374,6 +394,58 @@ class TestPersistedShareLinks:
         assert revoked.status_code == 200
         assert revoked.json()["revoked_at"]
         assert client.get(f"/share/token/{fresh['share_token']}").status_code == 410
+
+    def test_pin_lock_preserves_public_share_authorization_and_rate_limits(
+        self, client, tmp_path, monkeypatch, enabled_pin_lock
+    ):
+        import backend.routers.share_links as share_router
+        from backend.db.models import ShareLink
+
+        exports_dir = tmp_path / "exports"
+        exports_dir.mkdir()
+        pointcloud = exports_dir / "cloud.las"
+        pointcloud.write_bytes(b"LAS")
+        monkeypatch.setattr(
+            share_router,
+            "get_config",
+            lambda: type(
+                "Cfg",
+                (),
+                {"exports_dir": str(exports_dir), "processed_dir": str(tmp_path / "processed")},
+            )(),
+        )
+        assert client.post("/pin-lock/unlock", json={"pin": "1234"}).status_code == 204
+        rec = self._completed_reconstruction(client, pointcloud_path=pointcloud)
+        valid = self._create(client, rec)
+        protected = self._create(client, rec, password="secret")
+        expired = self._create(client, rec)
+        revoked = self._create(client, rec)
+        db = _db(client)
+        db.query(ShareLink).filter(ShareLink.id == expired["share_link_id"]).one().expires_at = (
+            now_utc() - timedelta(seconds=1)
+        )
+        revoked_link = db.query(ShareLink).filter(ShareLink.id == revoked["share_link_id"]).one()
+        revoked_link.revoked_at = now_utc()
+        db.commit()
+        client.cookies.clear()
+
+        assert client.get("/share/token/not-a-share-token").status_code == 403
+        assert client.get(f"/share/token/{expired['share_token']}").status_code == 410
+        assert client.get(f"/share/token/{revoked['share_token']}").status_code == 410
+        assert client.get(f"/share/{rec.id}/pointcloud").status_code == 401
+        assert client.get(f"/share/token/{valid['share_token']}").status_code == 200
+        assert client.get(f"/share/{rec.id}/pointcloud").content == b"LAS"
+        assert client.get(f"/share/token/{protected['share_token']}").status_code == 401
+
+        for _ in range(5):
+            assert client.post("/pin-lock/unlock", json={"pin": "wrong"}).status_code == 403
+        unlocked = client.post(
+            f"/share/token/{protected['share_token']}/unlock", json={"password": "secret"}
+        )
+        assert unlocked.status_code == 204
+        assert client.get(f"/share/token/{protected['share_token']}").status_code == 200
+        assert main.app.state.share_unlock_attempts == {}
+        assert main.app.state.pin_unlock_attempts
 
     def test_artifact_access_uses_cookie_not_token_url(self, client, tmp_path, monkeypatch):
         import backend.routers.share_links as share_router
