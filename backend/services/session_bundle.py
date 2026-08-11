@@ -5,6 +5,7 @@ import shutil
 import zipfile
 from datetime import datetime
 from pathlib import Path, PureWindowsPath
+from uuid import uuid4
 
 from sqlalchemy import DateTime
 from sqlalchemy.orm import Session as DBSession
@@ -56,6 +57,14 @@ _PATH_COLUMNS = {
     FlightLog: _FLIGHT_LOG_PATH_FIELDS,
     Reconstruction: _RECONSTRUCTION_PATH_FIELDS + ("colmap_dir", "coverage_gaps_path"),
 }
+
+# Archive contents are untrusted even when the archive file itself is confined to a
+# configured data root. Keep the ceiling high enough for real session artifacts while
+# bounding the disk and CPU a single restore can consume.
+MAX_ZIP_ENTRY_COUNT = 10_000
+MAX_ZIP_ENTRY_SIZE = 2 * 1024**3
+MAX_ZIP_TOTAL_SIZE = 8 * 1024**3
+MAX_ZIP_COMPRESSION_RATIO = 100
 
 
 def _sanitize_restored_row(model_cls, data: dict) -> dict:
@@ -201,10 +210,56 @@ def _restore_root(new_session_id: int) -> Path:
     return Path(get_config().imports_dir) / "restored_sessions" / str(new_session_id)
 
 
+def _staging_root() -> Path:
+    return Path(get_config().imports_dir) / "restored_sessions" / f".staging-{uuid4().hex}"
+
+
+def _validate_archive_budget(zf: zipfile.ZipFile) -> None:
+    infos = zf.infolist()
+    if len(infos) > MAX_ZIP_ENTRY_COUNT:
+        raise ValueError("Archive has too many entries")
+
+    total_size = 0
+    for info in infos:
+        if info.file_size > MAX_ZIP_ENTRY_SIZE:
+            raise ValueError("Archive entry exceeds size limit")
+        total_size += info.file_size
+        if total_size > MAX_ZIP_TOTAL_SIZE:
+            raise ValueError("Archive exceeds uncompressed size limit")
+        if info.file_size and (
+            not info.compress_size
+            or info.file_size / info.compress_size > MAX_ZIP_COMPRESSION_RATIO
+        ):
+            raise ValueError("Archive entry has suspicious compression ratio")
+
+
+def _copy_zip_entry(zf: zipfile.ZipFile, info: zipfile.ZipInfo, dest: Path) -> None:
+    copied = 0
+    try:
+        with zf.open(info) as src, open(dest, "wb") as out:
+            while chunk := src.read(1024 * 1024):
+                copied += len(chunk)
+                if copied > info.file_size:
+                    raise zipfile.BadZipFile("Archive entry exceeds declared size")
+                out.write(chunk)
+    except Exception:
+        dest.unlink(missing_ok=True)
+        raise
+    if copied != info.file_size:
+        dest.unlink(missing_ok=True)
+        raise zipfile.BadZipFile("Archive entry is truncated")
+
+
 def _restore_artifact(
-    zf: zipfile.ZipFile, manifest: dict, table: str, old_row_id: int, field: str, restore_root: Path
+    zf: zipfile.ZipFile,
+    manifest: dict,
+    table: str,
+    old_row_id: int,
+    field: str,
+    staging_root: Path,
+    restore_root: Path | None = None,
 ) -> str | None:
-    """Copy a bundled artifact back to disk under ``restore_root`` and return its new path."""
+    """Copy an artifact into staging and return its eventual path in ``restore_root``."""
     entry = next(
         (
             a
@@ -218,23 +273,24 @@ def _restore_artifact(
     from backend.services.reconstruction import _safe_export_path
 
     archive_path = entry["archive_path"]
-    dest = restore_root / Path(archive_path).relative_to("artifacts")
+    relative_path = Path(archive_path).relative_to("artifacts")
+    dest = staging_root / relative_path
     # A crafted bundle can carry an archive_path like "artifacts/../../etc/foo" that
-    # escapes restore_root (zip-slip). Reject anything that resolves outside it.
+    # escapes staging_root (zip-slip). Reject anything that resolves outside it.
     try:
-        dest = _safe_export_path(dest, restore_root)
+        dest = _safe_export_path(dest, staging_root)
     except ValueError as exc:
         raise ValueError(f"Archive entry escapes restore directory: {archive_path}") from exc
     dest.parent.mkdir(parents=True, exist_ok=True)
-    with zf.open(archive_path) as src, open(dest, "wb") as out:
-        shutil.copyfileobj(src, out)
-    return str(dest)
+    _copy_zip_entry(zf, zf.getinfo(archive_path), dest)
+    return str((restore_root or staging_root) / relative_path)
 
 
-def restore_session_archive(zip_path: Path, db: DBSession) -> dict:
+def _restore_session_archive(zip_path: Path, db: DBSession, staging_root: Path) -> dict:
     """Restore a session archive as a brand-new session (fresh IDs). Never
     touches or clobbers any existing session."""
     with zipfile.ZipFile(zip_path) as zf:
+        _validate_archive_budget(zf)
         manifest = json.loads(zf.read("manifest.json"))
 
         session_data = _sanitize_restored_row(
@@ -249,6 +305,7 @@ def restore_session_archive(zip_path: Path, db: DBSession) -> dict:
 
         restore_root = _restore_root(new_session.id)
         new_session.folder_path = str(restore_root)
+        staging_root.mkdir(parents=True, exist_ok=False)
 
         image_id_map: dict[int, int] = {}
         for row in manifest["images"]:
@@ -257,7 +314,9 @@ def restore_session_archive(zip_path: Path, db: DBSession) -> dict:
             data.pop("id", None)
             data["session_id"] = new_session.id
             for field in _IMAGE_PATH_FIELDS:
-                restored = _restore_artifact(zf, manifest, "images", old_id, field, restore_root)
+                restored = _restore_artifact(
+                    zf, manifest, "images", old_id, field, staging_root, restore_root
+                )
                 if restored:
                     data[field] = restored
             if not data.get("filepath"):
@@ -287,7 +346,7 @@ def restore_session_archive(zip_path: Path, db: DBSession) -> dict:
             data["session_id"] = new_session.id
             for field in _FLIGHT_LOG_PATH_FIELDS:
                 restored = _restore_artifact(
-                    zf, manifest, "flight_logs", old_id, field, restore_root
+                    zf, manifest, "flight_logs", old_id, field, staging_root, restore_root
                 )
                 if restored:
                     data[field] = restored
@@ -330,7 +389,7 @@ def restore_session_archive(zip_path: Path, db: DBSession) -> dict:
             data["parent_reconstruction_id"] = None
             for field in _RECONSTRUCTION_PATH_FIELDS:
                 restored = _restore_artifact(
-                    zf, manifest, "reconstructions", old_id, field, restore_root
+                    zf, manifest, "reconstructions", old_id, field, staging_root, restore_root
                 )
                 if restored:
                     data[field] = restored
@@ -414,6 +473,14 @@ def restore_session_archive(zip_path: Path, db: DBSession) -> dict:
         # through must leave no rows behind. Previously each table committed as it went,
         # so a malformed manifest stranded a half-restored session on every attempt.
         db.commit()
+        try:
+            if restore_root.exists():
+                raise ValueError("Restore destination already exists")
+            staging_root.replace(restore_root)
+        except Exception:
+            db.delete(new_session)
+            db.commit()
+            raise
 
     return {
         "session_id": new_session.id,
@@ -422,3 +489,14 @@ def restore_session_archive(zip_path: Path, db: DBSession) -> dict:
         "reconstruction_count": len(rec_id_map),
         "defect_count": len(defect_id_map),
     }
+
+
+def restore_session_archive(zip_path: Path, db: DBSession) -> dict:
+    """Restore an archive transactionally, publishing files only after the DB commit."""
+    staging_root = _staging_root()
+    try:
+        return _restore_session_archive(zip_path, db, staging_root)
+    except Exception:
+        db.rollback()
+        shutil.rmtree(staging_root, ignore_errors=True)
+        raise
