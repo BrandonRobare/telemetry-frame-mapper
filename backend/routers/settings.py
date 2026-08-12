@@ -426,9 +426,9 @@ def patch_settings(body: SettingsPatch) -> dict:
         if render_patch:
             override["render"] = render_patch
 
-    _mutate_raw(CONFIG_PATH, lambda raw: _deep_merge(raw, override))
-
-    return _build_full_response()
+    with _SETTINGS_MUTATION_LOCK:
+        _mutate_raw(CONFIG_PATH, lambda raw: _deep_merge(raw, override))
+        return _build_full_response()
 
 
 @router.post("/reset")
@@ -457,6 +457,6 @@ def reset_settings() -> dict:
             "render": render_defaults,
         }
 
-    _mutate_raw(CONFIG_PATH, reset)
-
-    return _build_full_response()
+    with _SETTINGS_MUTATION_LOCK:
+        _mutate_raw(CONFIG_PATH, reset)
+        return _build_full_response()
