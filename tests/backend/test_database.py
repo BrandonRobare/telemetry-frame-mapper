@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import sqlite3
+
 import pytest
 import sqlalchemy as sa
 
@@ -84,7 +86,6 @@ def test_init_db_upgrades_legacy_shimmed_db(isolated_engine):
     # pre-job-queue state; the Alembic migration will recreate it properly.
     # The engine's NullPool (check_same_thread=False) makes it tricky to drop
     # across connections, so drop via a raw sqlite3 connection directly.
-    import sqlite3
     db_path = str(isolated_engine.url).split("///")[1]
     raw_conn = sqlite3.connect(db_path)
     raw_conn.execute("DROP TABLE IF EXISTS job_queue")
@@ -107,6 +108,31 @@ def test_init_db_upgrades_legacy_shimmed_db(isolated_engine):
     for col in shim_columns_to_drop:
         assert col in existing_after
     assert "alembic_version" in inspector.get_table_names()
+
+
+def test_legacy_upgrade_covers_every_model_column(isolated_engine):
+    """An upgraded legacy database must satisfy the complete current model schema."""
+    database_module.Base.metadata.create_all(bind=isolated_engine)
+    db_path = str(isolated_engine.url).split("///")[1]
+    raw_conn = sqlite3.connect(db_path)
+    try:
+        for table, column in (
+            ("footprints", "pitch_oblique"),
+            ("reconstructions", "ortho_path"),
+            ("reconstructions", "ortho_status"),
+            ("reconstructions", "ortho_error"),
+        ):
+            raw_conn.execute(f"ALTER TABLE {table} DROP COLUMN {column}")
+        raw_conn.commit()
+    finally:
+        raw_conn.close()
+
+    database_module.init_db()
+
+    inspector = sa.inspect(isolated_engine)
+    for table in database_module.Base.metadata.sorted_tables:
+        actual_columns = {column["name"] for column in inspector.get_columns(table.name)}
+        assert {column.name for column in table.columns} <= actual_columns
 
 
 def test_init_db_is_idempotent(isolated_engine):
