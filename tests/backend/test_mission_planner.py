@@ -67,6 +67,52 @@ def test_forward_overlap_must_be_less_than_one():
         )
 
 
+@pytest.mark.parametrize("altitude_ft", [0, -1])
+def test_non_positive_altitude_is_rejected_before_lane_generation(monkeypatch, altitude_ft):
+    from backend.services import mission_planner
+
+    class EmptyPolygon:
+        bounds = (1, 0, 0, 1)
+
+        class centroid:
+            y = 0
+
+    monkeypatch.setattr(mission_planner, "shape", lambda _: EmptyPolygon())
+    with pytest.raises(ValueError, match="lane spacing"):
+        generate_lawnmower(
+            target_geojson=_POLY,
+            altitude_ft=altitude_ft,
+            side_overlap=0.7,
+            forward_overlap=0.8,
+        )
+
+
+def test_near_zero_lane_spacing_is_rejected_before_millions_of_lanes(monkeypatch):
+    from backend.services import mission_planner
+
+    monkeypatch.setattr(mission_planner, "_MAX_LANES", 1)
+    with pytest.raises(ValueError, match="too many lanes"):
+        generate_lawnmower(
+            target_geojson=_POLY,
+            altitude_ft=200,
+            side_overlap=0.9999999,
+            forward_overlap=0.8,
+        )
+
+
+def test_lane_limit_is_enforced_during_generation(monkeypatch):
+    from backend.services import mission_planner
+
+    monkeypatch.setattr(mission_planner, "_MAX_LANES", 1)
+    with pytest.raises(ValueError, match="too many lanes"):
+        generate_lawnmower(
+            target_geojson=_POLY,
+            altitude_ft=200,
+            side_overlap=0.7,
+            forward_overlap=0.8,
+        )
+
+
 # ---------------------------------------------------------------------------
 # Terrain-following tests
 # ---------------------------------------------------------------------------

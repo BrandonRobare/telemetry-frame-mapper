@@ -4,7 +4,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session as DBSession
 
 from ..core.config import get_config
@@ -39,9 +39,16 @@ def _exports_dir() -> Path:
     return path
 
 
+def _plan_generation_or_422(generator, **kwargs):
+    try:
+        return generator(**kwargs)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
 class PlanIn(BaseModel):
     target_area_id: int
-    altitude_ft: float
+    altitude_ft: float = Field(gt=0)
     side_overlap_pct: float
     forward_overlap_pct: float
 
@@ -64,7 +71,7 @@ class PlanOut(BaseModel):
 
 class PlanGenerateFromGapsIn(BaseModel):
     coverage_run_id: int
-    altitude_ft: float
+    altitude_ft: float = Field(gt=0)
     side_overlap_pct: float
     forward_overlap_pct: float
 
@@ -105,7 +112,8 @@ def generate_plan(body: PlanIn, db: DBSession = Depends(get_db)):
     if not area:
         raise HTTPException(status_code=404, detail="Target area not found")
 
-    result = generate_lawnmower(
+    result = _plan_generation_or_422(
+        generate_lawnmower,
         target_geojson=area.geom_geojson,
         altitude_ft=body.altitude_ft,
         side_overlap=body.side_overlap_pct,
@@ -241,7 +249,8 @@ def generate_plan_from_gaps(body: PlanGenerateFromGapsIn, db: DBSession = Depend
     if not cov_run.gap_geojson:
         raise HTTPException(status_code=422, detail="Coverage run has no gap geometry")
 
-    result = generate_lawnmower_from_gaps(
+    result = _plan_generation_or_422(
+        generate_lawnmower_from_gaps,
         gap_geojson=cov_run.gap_geojson,
         altitude_ft=body.altitude_ft,
         side_overlap=body.side_overlap_pct,
