@@ -7,9 +7,10 @@ from unittest.mock import patch
 
 import pytest
 
-from backend.db.models import Image, Reconstruction, ReconstructionFrame
+from backend.db.models import Image, JobQueueEntry, Reconstruction, ReconstructionFrame
 from backend.db.models import Session as SessionModel
 from backend.routers.reconstruction import _status_sse_payload
+from backend.services.job_queue import RECONSTRUCTION, claim_stale_jobs, enqueue
 
 
 def _make_session_with_images(db, count=3):
@@ -208,6 +209,43 @@ def test_cancel_reconstruction_rejects_stopped_jobs(client):
         resp = client.post(f"/reconstruction/{rec.id}/cancel")
     assert resp.status_code == 409
     mock_cancel.assert_not_called()
+
+
+def test_cancel_pending_reconstruction_is_terminal_and_can_be_deleted(client):
+    db = _get_db(client)
+    s = _make_session_with_images(db)
+    rec = Reconstruction(session_id=s.id, preset="quick", status="pending", frames_used=3)
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+    enqueue(RECONSTRUCTION, rec.id)
+
+    response = client.post(f"/reconstruction/{rec.id}/cancel")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "cancelled"
+    assert client.delete(f"/reconstruction/{rec.id}").status_code == 200
+
+
+def test_recovered_stale_reconstruction_can_restart_and_be_deleted(client):
+    db = _get_db(client)
+    s = _make_session_with_images(db)
+    rec = Reconstruction(
+        session_id=s.id, preset="quick", status="running_colmap", frames_used=3
+    )
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+    db.add(JobQueueEntry(job_type=RECONSTRUCTION, target_id=rec.id, status="running"))
+    db.commit()
+
+    claim_stale_jobs()
+
+    status = client.get(f"/reconstruction/{rec.id}/status")
+    assert status.json()["status"] == "failed"
+    restart = client.post("/reconstruction/start", json={"session_id": s.id, "preset": "quick"})
+    assert restart.status_code == 201
+    assert client.delete(f"/reconstruction/{rec.id}").status_code == 200
 
 
 def test_delete_reconstruction_rejects_running_jobs_without_cleanup(client, tmp_path):
