@@ -3,7 +3,33 @@
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres to [Semantic Versioning](https://semver.org/).
 
 
-## [2.0.2] — Pending release
+## [2.0.3] — 2026-08-13
+
+Maintenance release for blocking correctness, data-integrity, deployment, and release-verification defects found after v2.0.2.
+
+### Fixed
+
+- Existing databases now migrate the missing orthomosaic and footprint columns; worker crashes and queued cancellations no longer strand reconstruction rows; invalid mission altitude cannot hang lane generation (#621, #622, #623).
+- Settings writes and response reads are serialized on Windows; project import/deletion and session restore paths are confined and cleaned up safely (#584, #587, #600, #603, #653).
+- Nested browser imports, GPS flight-log uploads, and selected battery-segment KML/GPX downloads complete with the correct backend contracts and data (#595, #596, #597).
+- The frontend uses a same-origin-aware API resolver; public share views boot under PIN lock without exposing non-share routes; Docker rejects an unauthenticated LAN bind by default (#586, #598, #604, #631).
+- Malformed mission geometry, cancelling jobs, edited storage rules, Review-tab Escape, and insecure-origin toast IDs no longer crash, mislead, or discard work (#605, #654, #657, #658, #659).
+- CLI geotagging preserves no-fix intervals, signed altitude, real video/frame timing, and creation times with negative or compact UTC offsets (#670, #671, #672, #673).
+- Pytest databases are isolated; the Windows bundle includes Alembic assets; the wheel contract and PEP 735 development instructions are explicit (#591, #599, #608, #660).
+- Locked runtime dependencies, pinned release actions, and complete reusable release verification now gate publication (#592, #607, #609).
+
+### Changed
+
+- PIN/share documentation now matches the implemented public-share trust boundary (#661).
+- Compatible pinned Python and frontend dependencies were refreshed (PR #581).
+
+### Upgrade
+
+- Upgrade the complete source checkout or Windows installation; `frontend-dist.zip` alone does not install backend, CLI, migration, or packaging fixes.
+- Back up the SQLite database, configuration, and required artifacts before restart. Startup applies additive migration `0015`.
+- See [release-notes/v2.0.3.md](release-notes/v2.0.3.md) for the verified upgrade and full-backup rollback procedure.
+
+## [2.0.2] — 2026-08-09
 
 Narrow security-maintenance release for the 2.0.1 source payload.
 
