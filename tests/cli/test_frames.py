@@ -72,6 +72,24 @@ def test_infer_frame_rate_returns_default_without_telemetry() -> None:
     assert infer_frame_rate(frames, telemetry_end_s=0) == 8.0
 
 
+def test_build_frame_tags_rejects_frames_after_telemetry_ends() -> None:
+    frames = [(Path("frame_00001.jpg"), 1), (Path("frame_00003.jpg"), 3)]
+    telemetry = [
+        TelemetryPoint(0, 1, 41.0, -81.0, 100.0),
+        TelemetryPoint(1, 2, 41.2, -80.8, 102.0),
+    ]
+
+    with pytest.raises(ValueError, match=r"telemetry ends.*complete telemetry"):
+        build_frame_tags(
+            frames=frames,
+            telemetry=telemetry,
+            output_dir=Path("geotagged"),
+            frame_rate=1,
+            takeoff_altitude_m=236.5,
+            video_start=None,
+        )
+
+
 def test_infer_frame_rate_requires_explicit_rate_for_numbering_gaps() -> None:
     frames = [(Path("frame_00001.jpg"), 1), (Path("frame_00005.jpg"), 5)]
 

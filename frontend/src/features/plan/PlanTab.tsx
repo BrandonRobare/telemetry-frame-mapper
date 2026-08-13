@@ -9,6 +9,7 @@ import ShutterIntervalPanel from './ShutterIntervalPanel'
 import WeatherAdvisorPanel from './WeatherAdvisorPanel'
 import PlanMap from './PlanMap'
 import { computeCentroid, type CentroidGeometry } from './weatherAdvisor'
+import { parseRenderableGeoJSON } from '../../shared/utils/geojson'
 
 
 interface TargetAreaOut {
@@ -160,12 +161,7 @@ export default function PlanTab() {
   })
 
   const lanesGeoJSON = useMemo(() => {
-    if (!plan?.lanes_geojson) return null
-    try {
-      return JSON.parse(plan.lanes_geojson)
-    } catch {
-      return null
-    }
+    return parseRenderableGeoJSON(plan?.lanes_geojson)
   }, [plan])
   const isBusy = createArea.isPending || generatePlan.isPending
 

@@ -7,8 +7,17 @@ import { ErrorBoundary } from '../../ErrorBoundary'
 import { useToast } from '../../shared/hooks/useToast'
 
 vi.mock('./PlanMap', () => ({
-  default: ({ onPolygonDrawn }: { onPolygonDrawn: (geojson: string) => void }) => (
-    <button onClick={() => onPolygonDrawn('{"type":"Polygon","coordinates":[]}')}>Draw area</button>
+  default: ({
+    lanesGeoJSON,
+    onPolygonDrawn,
+  }: {
+    lanesGeoJSON: object | null
+    onPolygonDrawn: (geojson: string) => void
+  }) => (
+    <>
+      <button onClick={() => onPolygonDrawn('{"type":"Polygon","coordinates":[[[0,0],[1,0],[0,1],[0,0]]]}')}>Draw area</button>
+      {lanesGeoJSON && <div data-testid="lanes-overlay" />}
+    </>
   ),
 }))
 
@@ -68,11 +77,14 @@ afterEach(() => {
 })
 
 describe('PlanTab malformed lane geometry', () => {
-  it('skips a malformed lanes overlay without firing the root ErrorBoundary', async () => {
+  it.each([
+    '{not valid JSON',
+    '{"type":"LineString","coordinates":[["not-a-number",null]]}',
+  ])('skips an unrenderable lanes overlay without firing the root ErrorBoundary', async (lanesGeoJSON) => {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       if (url.endsWith('/target-areas/')) return jsonResponse({ id: 7 })
       if (url.endsWith('/plans/generate')) {
-        return jsonResponse({ ...plan, lanes_geojson: '{not valid JSON' })
+        return jsonResponse({ ...plan, lanes_geojson: lanesGeoJSON })
       }
       throw new Error(`Unexpected request: ${url}`)
     }))
@@ -84,6 +96,7 @@ describe('PlanTab malformed lane geometry', () => {
 
     expect(await screen.findByText('Plan Summary')).toBeTruthy()
     expect(screen.queryByText('Render error. Check console for details')).toBeNull()
+    expect(screen.queryByTestId('lanes-overlay')).toBeNull()
   })
 })
 

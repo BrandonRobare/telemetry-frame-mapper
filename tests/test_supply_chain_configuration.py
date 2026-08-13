@@ -74,11 +74,13 @@ def test_docker_uses_locked_uv_runtime_environment_and_ci_smokes_health() -> Non
     assert "docker logs telemetry-frame-mapper-ci" in ci
 
 
-def test_release_actions_are_immutable_and_write_scope_is_publication_job_only() -> None:
+def test_ci_and_release_actions_are_immutable_and_write_scope_is_publication_job_only() -> None:
+    ci = CI_WORKFLOW.read_text(encoding="utf-8")
     release = RELEASE_WORKFLOW.read_text(encoding="utf-8")
-    action_refs = re.findall(r"^\s*uses:\s+[^@\s]+@([^\s#]+)", release, flags=re.MULTILINE)
+    workflows = ci + "\n" + release
+    action_refs = re.findall(r"^\s*uses:\s+[^@\s]+@([^\s#]+)", workflows, flags=re.MULTILINE)
     pinned_actions = re.findall(
-        r"^\s*uses:\s+[^@\s]+@[0-9a-f]{40}\s+# v\d+", release, flags=re.MULTILINE
+        r"^\s*uses:\s+[^@\s]+@[0-9a-f]{40}\s+# v[^\s]+", workflows, flags=re.MULTILINE
     )
 
     assert action_refs
@@ -104,5 +106,5 @@ if __name__ == "__main__":
     test_reusable_ci_builds_and_smokes_the_wheel_distribution()
     test_tag_release_invokes_reusable_full_verification_before_publication()
     test_docker_uses_locked_uv_runtime_environment_and_ci_smokes_health()
-    test_release_actions_are_immutable_and_write_scope_is_publication_job_only()
+    test_ci_and_release_actions_are_immutable_and_write_scope_is_publication_job_only()
     test_dependabot_keeps_github_actions_updates_enabled()
