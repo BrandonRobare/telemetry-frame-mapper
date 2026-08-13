@@ -146,8 +146,15 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
-      - name: Install locked packaging environment
-        run: uv sync --frozen --group backend --group windows-package
+      - name: Install locked packaging and test environment
+        run: uv sync --frozen --group backend --group windows-package --group dev
+
+      - name: Test settings atomic writes on Windows
+        run: >-
+          uv run --frozen --no-sync pytest
+          tests/backend/test_settings_router.py::test_concurrent_disjoint_patches_preserve_both_changes
+          tests/backend/test_settings_router.py::test_patch_response_read_does_not_overlap_another_promote
+          tests/backend/test_settings_router.py::test_reset_response_read_does_not_overlap_another_promote
 
       - name: Build frontend
         working-directory: frontend

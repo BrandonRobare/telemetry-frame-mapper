@@ -239,6 +239,116 @@ def test_concurrent_disjoint_patches_preserve_both_changes(tmp_config, monkeypat
     assert after["target_crs"] == "EPSG:4326"
 
 
+def test_patch_response_read_does_not_overlap_another_promote(tmp_config, monkeypatch):
+    """Windows cannot replace config.yaml while a response is reading it."""
+    load_config = settings_mod.load_config
+    replace = settings_mod.os.replace
+    reader_active = threading.Event()
+    release_reader = threading.Event()
+    promote_during_read = threading.Event()
+    hold_once = threading.Lock()
+    errors = []
+
+    def pause_first_response_read(path):
+        if hold_once.acquire(blocking=False):
+            reader_active.set()
+            assert release_reader.wait(timeout=1)
+            reader_active.clear()
+        return load_config(path)
+
+    def reject_windows_conflicting_promote(source, destination):
+        if Path(destination) == tmp_config and reader_active.is_set():
+            promote_during_read.set()
+            raise PermissionError(13, "Access is denied", str(destination))
+        return replace(source, destination)
+
+    monkeypatch.setattr(settings_mod, "load_config", pause_first_response_read)
+    monkeypatch.setattr(settings_mod.os, "replace", reject_windows_conflicting_promote)
+
+    def patch(body):
+        try:
+            settings_mod.patch_settings(body)
+        except Exception as exc:  # pragma: no cover - assertion below reports failures
+            errors.append(exc)
+
+    first = threading.Thread(
+        target=patch,
+        args=(settings_mod.SettingsPatch(mission=settings_mod.MissionSettings(altitude_ft=301)),),
+    )
+    first.start()
+    assert reader_active.wait(timeout=1)
+
+    second = threading.Thread(
+        target=patch,
+        args=(settings_mod.SettingsPatch(general=settings_mod.GeneralSettings(target_crs="EPSG:4326")),),
+    )
+    second.start()
+    promote_during_read.wait(timeout=0.2)
+    release_reader.set()
+    first.join(timeout=1)
+    second.join(timeout=1)
+
+    assert not first.is_alive()
+    assert not second.is_alive()
+    assert not promote_during_read.is_set()
+    assert not errors
+
+
+def test_reset_response_read_does_not_overlap_another_promote(tmp_config, monkeypatch):
+    """reset_settings keeps its response read under the mutation lock too."""
+    load_config = settings_mod.load_config
+    replace = settings_mod.os.replace
+    reader_active = threading.Event()
+    release_reader = threading.Event()
+    promote_during_read = threading.Event()
+    errors = []
+
+    def pause_response_read(path):
+        reader_active.set()
+        assert release_reader.wait(timeout=1)
+        reader_active.clear()
+        return load_config(path)
+
+    def reject_windows_conflicting_promote(source, destination):
+        if Path(destination) == tmp_config and reader_active.is_set():
+            promote_during_read.set()
+            raise PermissionError(13, "Access is denied", str(destination))
+        return replace(source, destination)
+
+    monkeypatch.setattr(settings_mod, "load_config", pause_response_read)
+    monkeypatch.setattr(settings_mod.os, "replace", reject_windows_conflicting_promote)
+
+    def reset():
+        try:
+            settings_mod.reset_settings()
+        except Exception as exc:  # pragma: no cover - assertion below reports failures
+            errors.append(exc)
+
+    first = threading.Thread(target=reset)
+    first.start()
+    assert reader_active.wait(timeout=1)
+
+    def patch():
+        try:
+            settings_mod.patch_settings(
+                settings_mod.SettingsPatch(general=settings_mod.GeneralSettings(target_crs="EPSG:4326"))
+            )
+        except Exception as exc:  # pragma: no cover - assertion below reports failures
+            errors.append(exc)
+
+    second = threading.Thread(target=patch)
+    second.start()
+    promote_during_read.wait(timeout=0.2)
+    release_reader.set()
+    first.join(timeout=1)
+    second.join(timeout=1)
+
+    assert not first.is_alive()
+    assert not second.is_alive()
+    assert not promote_during_read.is_set()
+    assert not errors
+
+
 def test_failed_serialization_preserves_previous_parseable_config(tmp_config, monkeypatch):
     before = tmp_config.read_text()
 
