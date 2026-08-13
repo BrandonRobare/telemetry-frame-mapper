@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import hashlib
 import logging
-import os
 import platform
 import shutil
 import subprocess
 from collections.abc import Iterable
 from datetime import UTC, datetime
 from pathlib import Path
+
+from backend.core.paths import confine_path
 
 
 def sha256_file(path: str | Path) -> str:
@@ -47,27 +48,23 @@ def build_reproducibility_manifest(
     artifact_roots: Iterable[Path],
     dataset: dict | None = None,
 ) -> dict:
-    safe_roots = tuple(
-        os.path.normcase(os.path.normpath(os.path.realpath(root))) for root in artifact_roots
-    )
+    roots = tuple(Path(root) for root in artifact_roots)
     entries = []
     for artifact in artifacts:
-        resolved = os.path.normcase(os.path.normpath(os.path.realpath(artifact)))
-        for root in safe_roots:
-            if resolved.startswith(root):
-                suffix = resolved[len(root) :]
-                if suffix and not root.endswith(os.sep) and not suffix.startswith(os.sep):
-                    continue
-                p = Path(resolved)
-                entry = {"path": str(p), "exists": p.exists()}
-                if p.is_file():
-                    h = hashlib.sha256()
-                    with open(p, "rb") as f:
-                        for chunk in iter(lambda: f.read(1024 * 1024), b""):
-                            h.update(chunk)
-                    entry.update({"size_bytes": p.stat().st_size, "sha256": h.hexdigest()})
-                entries.append(entry)
-                break
+        for root in roots:
+            try:
+                path = confine_path(artifact, root, allow_root=True)
+            except ValueError:
+                continue
+            entry = {"path": str(path), "exists": path.exists()}
+            if path.is_file():
+                h = hashlib.sha256()
+                with open(path, "rb") as f:
+                    for chunk in iter(lambda: f.read(1024 * 1024), b""):
+                        h.update(chunk)
+                entry.update({"size_bytes": path.stat().st_size, "sha256": h.hexdigest()})
+            entries.append(entry)
+            break
         else:
             raise ValueError("artifact_path is outside configured safe directories")
     return {

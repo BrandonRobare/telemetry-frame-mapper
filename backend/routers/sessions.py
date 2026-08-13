@@ -13,6 +13,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session as DBSession
 
 from ..core.config import get_config
+from ..core.paths import confine_path
 from ..db.database import SessionLocal, get_db
 from ..db.models import Image, Project, Reconstruction
 from ..db.models import Session as SessionModel
@@ -20,7 +21,7 @@ from ..db.session_search import install_session_search_schema
 from ..services.artifact_cleanup import cleanup_session_artifacts
 from ..services.ingest_orchestrator import get_progress, start_import
 from ..services.preflight_quality import build_quick_report
-from ..services.reconstruction import _safe_export_path, cancel_reconstruction
+from ..services.reconstruction import cancel_reconstruction
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 
@@ -345,9 +346,12 @@ def import_session(req: ImportRequest, db: DBSession = Depends(get_db)):
         raise HTTPException(status_code=400, detail="Folder path must be relative")
     if any(part in ("", ".", "..") for part in user_path.parts):
         raise HTTPException(status_code=400, detail="Folder path contains invalid segments")
-    folder = imports_root.joinpath(*user_path.parts).resolve()
-    if not folder.is_relative_to(imports_root):
-        raise HTTPException(status_code=400, detail="Folder must be inside the imports directory")
+    try:
+        folder = confine_path(imports_root.joinpath(*user_path.parts), imports_root)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400, detail="Folder must be inside the imports directory"
+        ) from exc
     if not folder.is_dir():
         raise HTTPException(status_code=400, detail=f"Folder not found: {raw}")
     s = SessionModel(
@@ -458,7 +462,7 @@ def restore_session(req: RestoreRequest, db: DBSession = Depends(get_db)):
     requested_path = Path(req.zip_path)
     for root_value in (cfg.imports_dir, cfg.exports_dir, cfg.data_dir):
         try:
-            zip_path = _safe_export_path(requested_path, Path(root_value))
+            zip_path = confine_path(requested_path, Path(root_value))
             break
         except (OSError, RuntimeError, ValueError):
             continue

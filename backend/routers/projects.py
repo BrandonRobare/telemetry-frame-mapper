@@ -8,6 +8,7 @@ from pydantic import BaseModel, field_validator
 from sqlalchemy.orm import Session as DBSession
 
 from ..core.config import get_config
+from ..core.paths import confine_path
 from ..db.database import SessionLocal, get_db
 from ..db.models import CoverageRun, Reconstruction
 from ..db.models import Project as ProjectModel
@@ -302,22 +303,20 @@ def create_project_session(
         raise HTTPException(status_code=400, detail="Folder path contains invalid segments")
 
     # Per-project subtree: imports/<project_name>/<folder_path>
-    project_subtree = imports_root.joinpath(project_name).resolve()
-    if not project_subtree.is_relative_to(imports_root):
+    try:
+        project_subtree = confine_path(imports_root / project_name, imports_root)
+        folder = confine_path(project_subtree.joinpath(*user_path.parts), project_subtree)
+    except ValueError as exc:
         raise HTTPException(
-            status_code=400,
-            detail="Project imports directory must be inside the imports root",
-        )
-    folder = project_subtree.joinpath(*user_path.parts).resolve()
-    if not folder.is_relative_to(project_subtree):
-        raise HTTPException(
-            status_code=400,
-            detail="Folder must be inside the project's imports directory",
-        )
+            status_code=400, detail="Folder must be inside the project's imports directory"
+        ) from exc
     if not folder.is_dir():
         # Also try the flat imports dir for backward compat
-        flat = imports_root.joinpath(*user_path.parts).resolve()
-        if flat.is_relative_to(imports_root) and flat.is_dir():
+        try:
+            flat = confine_path(imports_root.joinpath(*user_path.parts), imports_root)
+        except ValueError:
+            flat = None
+        if flat is not None and flat.is_dir():
             folder = flat
         else:
             raise HTTPException(status_code=400, detail=f"Folder not found: {raw}")

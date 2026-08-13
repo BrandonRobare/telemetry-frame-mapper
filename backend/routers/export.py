@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session as DBSession
 from starlette.background import BackgroundTask
 
 from ..core.config import get_cesium_ion_config, get_config
+from ..core.paths import confine_path
 from ..db.database import get_db
 from ..db.models import (
     FlightLog,
@@ -37,7 +38,7 @@ router = APIRouter(prefix="/export", tags=["export"])
 @router.get("/reconstructions/{reconstruction_id}/usd")
 def export_usd_handoff(reconstruction_id: int, db: DBSession = Depends(get_db)):
     """Download a self-contained USDA mesh and georeferencing handoff ZIP."""
-    from ..services.reconstruction import _load_geo_transform_for_reconstruction, _safe_export_path
+    from ..services.reconstruction import _load_geo_transform_for_reconstruction
     from ..services.usd_export import write_usda_handoff
 
     rec = db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).first()
@@ -54,15 +55,19 @@ def export_usd_handoff(reconstruction_id: int, db: DBSession = Depends(get_db)):
 
     exports_dir = Path(get_config().exports_dir)
     try:
-        obj_path = _safe_export_path(Path(rec.mesh_obj_path), exports_dir)
+        obj_path = confine_path(
+            Path(rec.mesh_obj_path), exports_dir, boundary_name="exports directory"
+        )
         if not obj_path.is_file():
             raise ValueError("OBJ mesh file not found on disk")
         glb_path = None
         if rec.mesh_glb_path:
-            glb_path = _safe_export_path(Path(rec.mesh_glb_path), exports_dir)
+            glb_path = confine_path(
+                Path(rec.mesh_glb_path), exports_dir, boundary_name="exports directory"
+            )
             if not glb_path.is_file():
                 raise ValueError("GLB mesh file not found on disk")
-        output_dir = _safe_export_path(exports_dir / str(rec.id), exports_dir)
+        output_dir = confine_path(exports_dir / str(rec.id), exports_dir)
         usda_path, sidecar_path = write_usda_handoff(
             output_dir,
             obj_path,
@@ -149,10 +154,9 @@ def _write_mapped_products_geopackage(
     reconstruction: Reconstruction, comparison_id: int | None, db: DBSession
 ) -> Path:
     from ..services.geopackage_export import write_geopackage
-    from ..services.reconstruction import _safe_export_path
 
     exports_dir = Path(get_config().exports_dir)
-    output_dir = _safe_export_path(exports_dir / str(reconstruction.id), exports_dir)
+    output_dir = confine_path(exports_dir / str(reconstruction.id), exports_dir)
     output_path = output_dir / "mapped_products.gpkg"
     temporary_path = output_path.with_name(f"{output_path.stem}.tmp{output_path.suffix}")
     write_geopackage(
@@ -437,7 +441,6 @@ def export_reproducibility_manifest(workflow: str, artifact_path: str | None = N
 def export_reconstruction_share_bundle(reconstruction_id: int, db: DBSession = Depends(get_db)):
     """Create a static share bundle for a completed reconstruction."""
     from ..db.models import Reconstruction
-    from ..services.reconstruction import _safe_export_path
     from ..services.share_bundle import build_share_bundle
 
     rec = db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).first()
@@ -445,7 +448,7 @@ def export_reconstruction_share_bundle(reconstruction_id: int, db: DBSession = D
         raise HTTPException(status_code=404, detail="Reconstruction not found")
     try:
         exports_dir = Path(get_config().exports_dir)
-        bundle_path = _safe_export_path(
+        bundle_path = confine_path(
             exports_dir / f"reconstruction_{reconstruction_id}_share.zip", exports_dir
         )
         return build_share_bundle(bundle_path, rec, exports_dir)
@@ -457,14 +460,13 @@ def export_reconstruction_share_bundle(reconstruction_id: int, db: DBSession = D
 def upload_reconstruction_to_cesium_ion(reconstruction_id: int, db: DBSession = Depends(get_db)):
     """Publish the existing Cesium-ready 3D Tiles share bundle to Cesium ion."""
     from ..services.cesium_ion import CesiumIonError, upload_tileset
-    from ..services.reconstruction import _safe_export_path
     from ..services.share_bundle import build_share_bundle
 
     rec = db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).first()
     if not rec:
         raise HTTPException(status_code=404, detail="Reconstruction not found")
     exports_dir = Path(get_config().exports_dir)
-    bundle = _safe_export_path(exports_dir / f"reconstruction_{rec.id}_share.zip", exports_dir)
+    bundle = confine_path(exports_dir / f"reconstruction_{rec.id}_share.zip", exports_dir)
     try:
         build_share_bundle(bundle, rec, exports_dir)
         name = f"Reconstruction {rec.id}"
@@ -515,7 +517,6 @@ def export_elevation(
 ):
     """Create a DSM or ground-classified DEM GeoTIFF from a cached LAS point cloud."""
     from ..services.elevation_export import export_elevation_geotiff
-    from ..services.reconstruction import _safe_export_path
 
     rec = db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).first()
     if not rec:
@@ -536,8 +537,8 @@ def export_elevation(
 
     exports_dir = Path(get_config().exports_dir)
     try:
-        pointcloud_path = _safe_export_path(Path(rec.pointcloud_path), exports_dir)
-        output_path = _safe_export_path(
+        pointcloud_path = confine_path(Path(rec.pointcloud_path), exports_dir)
+        output_path = confine_path(
             exports_dir / str(rec.id) / f"{product}.tif", exports_dir
         )
         if not pointcloud_path.exists():
@@ -552,7 +553,6 @@ def export_elevation(
 @router.get("/reconstructions/{reconstruction_id}/slope")
 def get_slope_overlay(reconstruction_id: int, db: DBSession = Depends(get_db)):
     """Return a cached transparent PNG slope overlay for an existing DSM export."""
-    from ..services.reconstruction import _safe_export_path
     from ..services.slope_overlay import build_slope_overlay
 
     rec = db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).first()
@@ -561,7 +561,7 @@ def get_slope_overlay(reconstruction_id: int, db: DBSession = Depends(get_db)):
 
     exports_dir = Path(get_config().exports_dir)
     try:
-        export_dir = _safe_export_path(exports_dir / str(rec.id), exports_dir)
+        export_dir = confine_path(exports_dir / str(rec.id), exports_dir)
         result = build_slope_overlay(export_dir / "dsm.tif", export_dir / "slope.png")
     except (ValueError, ImportError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -591,7 +591,6 @@ def export_compact_splat(
     RGBA byte per gaussian. See ``ply_io.write_splat`` for the exact layout.
     """
     from ..services import ply_io
-    from ..services.reconstruction import _safe_export_path
 
     rec = db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).first()
     if not rec:
@@ -608,7 +607,7 @@ def export_compact_splat(
         raise HTTPException(status_code=422, detail=f"Unknown preset: {preset}")
 
     try:
-        splat_path = _safe_export_path(Path(rec.splat_path), Path(get_config().exports_dir))
+        splat_path = confine_path(Path(rec.splat_path), Path(get_config().exports_dir))
     except ValueError as exc:
         raise HTTPException(status_code=403, detail="Invalid splat path") from exc
 
@@ -628,20 +627,15 @@ def export_compact_splat(
             quats=cloud.quats[order],
         )
 
-    exports_dir = os.path.normcase(os.path.normpath(os.path.realpath(get_config().exports_dir)))
-    out_path = os.path.normcase(
-        os.path.normpath(
-            os.path.realpath(
-                os.path.join(exports_dir, f"reconstruction_{rec.id}_{output_preset}.splat")
-            )
+    exports_dir = Path(get_config().exports_dir)
+    try:
+        out_path = confine_path(
+            exports_dir / f"reconstruction_{rec.id}_{output_preset}.splat", exports_dir
         )
-    )
-    exports_prefix = exports_dir if exports_dir.endswith(os.sep) else f"{exports_dir}{os.sep}"
-    if not out_path.startswith(exports_prefix):
+    except ValueError as exc:
         raise HTTPException(
             status_code=422, detail="Splat export path is outside exports directory"
-        )
-    out_path = Path(out_path)
+        ) from exc
     ply_io.write_splat(cloud, out_path, exports_dir)
     return {
         "splat_path": str(out_path),
@@ -801,7 +795,6 @@ def export_webodm_package(
     db: DBSession = Depends(get_db),
 ):
     """Build a complete WebODM/OpenDroneMap package with images and options manifest."""
-    from ..services.reconstruction import _safe_export_path
     from ..services.webodm_package import (
         WebodmPackageOptions,
         build_webodm_package,
@@ -819,7 +812,7 @@ def export_webodm_package(
         # Validate before the value contributes to an output filename.
         odm_options_for(options.mode, has_gcp=options.include_gcp)
         exports_dir = Path(get_config().exports_dir)
-        zip_path = _safe_export_path(
+        zip_path = confine_path(
             exports_dir / f"webodm_package_{session.id}_{options.mode}.zip", exports_dir
         )
         return build_webodm_package(

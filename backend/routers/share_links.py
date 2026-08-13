@@ -10,10 +10,10 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session as DBSession
 
 from ..core.config import get_config
+from ..core.paths import confine_path
 from ..db.database import get_db
 from ..db.models import Reconstruction, ShareLink, ShareLinkUnlockSession
 from ..services.pin_lock import record_unlock_failure, reset_unlock_attempts, unlock_retry_after
-from ..services.reconstruction import _safe_export_path
 from ..services.share_links import (
     SHARE_LINK_PREFIX,
     UNLOCK_COOKIE_NAME,
@@ -154,7 +154,7 @@ def _safe_artifact_access(path_str: str) -> Path:
     cfg = get_config()
     for root in (cfg.exports_dir, cfg.processed_dir):
         try:
-            return _safe_export_path(Path(path_str), Path(root))
+            return confine_path(Path(path_str), Path(root))
         except ValueError:
             continue
     raise HTTPException(status_code=403, detail="Artifact access denied")

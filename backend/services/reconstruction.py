@@ -21,6 +21,7 @@ from backend.core.config import (
     get_remote_worker_config,
     get_render_config,
 )
+from backend.core.paths import confine_path
 from backend.db.database import SessionLocal
 from backend.db.models import (
     Image,
@@ -1227,7 +1228,7 @@ def _export_point_cloud(
     from pyproj import CRS
 
     cfg = get_config()
-    output_path = _safe_export_path(output_path, Path(cfg.exports_dir))
+    output_path = confine_path(output_path, Path(cfg.exports_dir))
 
     points_xyz, colmap_rgb = _read_colmap_points3d(
         _pick_best_submodel(colmap_dir / "sparse") / "points3D.txt"
@@ -1475,19 +1476,6 @@ def semantic_overlay_bytes(rec: Reconstruction, lod: str = "preview") -> bytes:
 def _reconstruction_export_dir(reconstruction_id: int) -> Path:
     cfg = get_config()
     return Path(cfg.exports_dir) / str(reconstruction_id)
-
-
-def _safe_export_path(path: Path, exports_dir: Path) -> Path:
-    exports_root = os.path.normcase(os.path.normpath(os.path.realpath(exports_dir)))
-    candidate = os.path.normcase(os.path.normpath(os.path.realpath(path)))
-    exports_prefix = (
-        exports_root if exports_root.endswith(os.sep) else f"{exports_root}{os.sep}"
-    )
-    if candidate == exports_root:
-        raise ValueError("Export path is outside exports directory")
-    if candidate.startswith(exports_prefix):
-        return Path(candidate)
-    raise ValueError("Export path is outside exports directory")
 
 
 def _load_geo_transform_for_reconstruction(rec: Reconstruction) -> dict:
@@ -1864,7 +1852,7 @@ def _compute_voxel_diff(
     voxel_size_m: float = 0.5,
 ) -> dict:
     cfg = get_config()
-    output_path = _safe_export_path(output_path, Path(cfg.exports_dir))
+    output_path = confine_path(output_path, Path(cfg.exports_dir))
     points_a, geo_a = _load_reconstruction_points_utm(rec_a)
     points_b, geo_b = _load_reconstruction_points_utm(rec_b, target_geo=geo_a)
     voxels_a = _voxelize_points(points_a, voxel_size_m)

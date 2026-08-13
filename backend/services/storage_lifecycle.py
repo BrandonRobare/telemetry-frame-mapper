@@ -7,6 +7,7 @@ from pathlib import Path
 from sqlalchemy.orm import Session as DBSession
 
 from backend.core.config import AppConfig
+from backend.core.paths import confine_path
 from backend.db.models import Reconstruction
 from backend.db.models import Session as SessionModel
 
@@ -45,11 +46,13 @@ def _configured_roots(cfg: AppConfig) -> tuple[Path, ...]:
 
 
 def _is_relative_to_any(path: Path, roots: tuple[Path, ...]) -> bool:
-    try:
-        resolved = path.resolve()
-    except OSError:
-        resolved = path.absolute()
-    return any(resolved == root or resolved.is_relative_to(root) for root in roots)
+    for root in roots:
+        try:
+            confine_path(path, root, allow_root=True)
+        except (OSError, RuntimeError, ValueError):
+            continue
+        return True
+    return False
 
 
 def _size_of(path: Path) -> int:
@@ -65,12 +68,14 @@ def _archive_root(cfg: AppConfig) -> Path:
 
 
 def _archive_destination(path: Path, cfg: AppConfig) -> Path:
-    resolved = path.resolve()
     for root in _configured_roots(cfg):
-        if resolved == root or resolved.is_relative_to(root):
-            rel = resolved.relative_to(root)
-            stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-            return _archive_root(cfg) / stamp / root.name / rel
+        try:
+            resolved = confine_path(path, root, allow_root=True)
+        except ValueError:
+            continue
+        rel = resolved.relative_to(root)
+        stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+        return _archive_root(cfg) / stamp / root.name / rel
     raise ValueError("path is outside configured storage roots")
 
 

@@ -11,6 +11,7 @@ from sqlalchemy import DateTime
 from sqlalchemy.orm import Session as DBSession
 
 from backend.core.config import get_config
+from backend.core.paths import confine_path
 from backend.db.models import (
     Annotation,
     Defect,
@@ -126,11 +127,10 @@ def _bundle_artifacts(
 def build_session_archive(zip_path: Path, session: Session, db: DBSession) -> dict:
     """Build a portable .zip of a session: its row, every cascaded child row
     (serialized to JSON), and any artifact files that exist on disk."""
-    from backend.services.reconstruction import _safe_export_path
 
     exports_root = Path(get_config().exports_dir).resolve()
     try:
-        zip_path = _safe_export_path(zip_path, exports_root)
+        zip_path = confine_path(zip_path, exports_root)
     except ValueError as exc:
         raise ValueError("Session archive path is outside exports directory") from exc
 
@@ -270,7 +270,6 @@ def _restore_artifact(
     )
     if entry is None:
         return None
-    from backend.services.reconstruction import _safe_export_path
 
     archive_path = entry["archive_path"]
     relative_path = Path(archive_path).relative_to("artifacts")
@@ -278,7 +277,7 @@ def _restore_artifact(
     # A crafted bundle can carry an archive_path like "artifacts/../../etc/foo" that
     # escapes staging_root (zip-slip). Reject anything that resolves outside it.
     try:
-        dest = _safe_export_path(dest, staging_root)
+        dest = confine_path(dest, staging_root)
     except ValueError as exc:
         raise ValueError(f"Archive entry escapes restore directory: {archive_path}") from exc
     dest.parent.mkdir(parents=True, exist_ok=True)

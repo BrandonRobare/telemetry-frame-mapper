@@ -8,9 +8,9 @@ from fastapi.responses import Response
 from sqlalchemy.orm import Session as DBSession
 
 from ..core.config import get_config
+from ..core.paths import confine_path
 from ..db.database import get_db
 from ..db.models import Reconstruction
-from ..services.reconstruction import _safe_export_path
 
 router = APIRouter(prefix="/tiles", tags=["tiles"])
 _MAX_IMAGE_SIZE = 4096
@@ -23,7 +23,7 @@ def _orthomosaic_path(rec: Reconstruction) -> Path:
     if not rec.ortho_path:
         raise HTTPException(status_code=404, detail="Orthomosaic file path not recorded")
     try:
-        path = _safe_export_path(Path(rec.ortho_path), Path(get_config().exports_dir))
+        path = confine_path(Path(rec.ortho_path), Path(get_config().exports_dir))
     except ValueError as exc:
         raise HTTPException(status_code=403, detail="Invalid orthomosaic export path") from exc
     if not path.is_file():

@@ -4,6 +4,7 @@ import shutil
 from pathlib import Path
 
 from backend.core.config import AppConfig
+from backend.core.paths import confine_path
 from backend.db.models import Image, Reconstruction
 
 
@@ -16,11 +17,13 @@ def _configured_roots(cfg: AppConfig) -> tuple[Path, ...]:
 
 
 def _is_relative_to_any(path: Path, roots: tuple[Path, ...]) -> bool:
-    try:
-        resolved = path.resolve()
-    except OSError:
-        resolved = path.absolute()
-    return any(resolved == root or resolved.is_relative_to(root) for root in roots)
+    for root in roots:
+        try:
+            confine_path(path, root, allow_root=True)
+        except (OSError, RuntimeError, ValueError):
+            continue
+        return True
+    return False
 
 
 def _remove_path(path: Path, roots: tuple[Path, ...]) -> bool:
