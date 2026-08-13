@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import datetime
 import json
-import os
 import re
 import shutil
 import threading
@@ -15,6 +14,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session as DBSession
 
 from ..core.config import get_browser_upload_config, get_config
+from ..core.paths import confine_path
 from ..db.database import SessionLocal, get_db
 from ..db.models import Session as SessionModel
 from ..services.duplicate_detection import find_duplicate_matches
@@ -145,14 +145,10 @@ def _validate_plan(req: StartUploadRequest, limits: dict) -> dict[str, UploadFil
 
 
 def _safe_child_path(root: Path, rel: PurePosixPath) -> Path:
-    root_path = os.path.normpath(os.path.realpath(root))
-    candidate = os.path.normpath(os.path.realpath(os.path.join(root_path, *rel.parts)))
-    root_cmp = os.path.normcase(root_path)
-    candidate_cmp = os.path.normcase(candidate)
-    root_prefix = root_cmp if root_cmp.endswith(os.sep) else f"{root_cmp}{os.sep}"
-    if candidate_cmp != root_cmp and not candidate_cmp.startswith(root_prefix):
-        raise HTTPException(status_code=400, detail="Invalid upload path")
-    return Path(candidate)
+    try:
+        return confine_path(root.joinpath(*rel.parts), root, allow_root=True)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid upload path") from exc
 
 
 def _manifest_path(root: Path) -> Path:

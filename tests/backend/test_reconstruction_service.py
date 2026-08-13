@@ -1645,21 +1645,21 @@ def test_export_point_cloud_treats_stale_v1_sidecar_as_absent(tmp_path):
 
 
 def test_safe_export_path_rejects_sibling_prefix(tmp_path):
-    from backend.services.reconstruction import _safe_export_path
+    from backend.core.paths import confine_path
 
     exports_dir = tmp_path / "exports"
     sibling = tmp_path / "exports2" / "pointcloud.las"
 
-    with pytest.raises(ValueError, match="outside exports directory"):
-        _safe_export_path(sibling, exports_dir)
+    with pytest.raises(ValueError, match="outside allowed directory"):
+        confine_path(sibling, exports_dir, allow_root=False)
 
 
 def test_safe_export_path_rejects_export_root(tmp_path):
-    from backend.services.reconstruction import _safe_export_path
+    from backend.core.paths import confine_path
 
     exports_dir = tmp_path / "exports"
-    with pytest.raises(ValueError, match="outside exports directory"):
-        _safe_export_path(exports_dir, exports_dir)
+    with pytest.raises(ValueError, match="outside allowed directory"):
+        confine_path(exports_dir, exports_dir, allow_root=False)
 
 
 def test_run_sugar_missing_dependency_reports_optional_install(tmp_path):
@@ -1971,7 +1971,7 @@ def test_compute_voxel_diff_rejects_path_outside_exports(tmp_path, monkeypatch):
     rec_a = MagicMock()
     rec_b = MagicMock()
 
-    with pytest.raises(ValueError, match="outside exports directory"):
+    with pytest.raises(ValueError, match="outside allowed directory"):
         _compute_voxel_diff(rec_a, rec_b, evil_path)
 
 

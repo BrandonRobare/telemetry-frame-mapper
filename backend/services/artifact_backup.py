@@ -15,6 +15,7 @@ from uuid import uuid4
 import yaml
 
 from backend.core.config import AppConfig, get_backup_config
+from backend.core.paths import confine_path
 from backend.db.database import engine
 
 ARTIFACT_DIRECTORIES = frozenset({"imports", "processed", "exports"})
@@ -87,8 +88,9 @@ def _copy_artifacts(source: Path, destination: Path) -> None:
     for candidate in source.rglob("*"):
         if candidate.is_symlink() or not candidate.is_file():
             continue
-        resolved = candidate.resolve()
-        if not resolved.is_relative_to(source_root):
+        try:
+            confine_path(candidate, source_root)
+        except ValueError:
             continue
         target = destination / candidate.relative_to(source)
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -208,7 +210,11 @@ def create_backup(
         selected_roots = [
             Path(getattr(cfg, f"{name}_dir")).resolve() for name in artifacts
         ]
-        if any(target == root or target.is_relative_to(root) for root in selected_roots):
+        for root in selected_roots:
+            try:
+                confine_path(target, root, allow_root=True)
+            except ValueError:
+                continue
             raise ValueError("local_destination cannot be inside selected artifact storage")
         target.mkdir(parents=True, exist_ok=True)
         staging = target / f"{snapshot_name}.partial"
