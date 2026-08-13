@@ -33,6 +33,7 @@ from backend.db.models import (
 )
 from backend.services import ply_io, splat_trainer
 from backend.services.camera_calibration import calibration_profile_for_images
+from backend.services.colmap_io import _pick_best_submodel
 from backend.services.job_queue import (
     FLYTHROUGH_RENDER,
     MESH_EXPORT,
@@ -231,48 +232,6 @@ def _colmap_matcher_command(matcher_key: str) -> tuple[str, bool]:
         "exhaustive_guided": ("exhaustive_matcher", True),
     }
     return presets.get(matcher_key, presets["exhaustive"])
-
-
-def _pick_best_submodel(sparse_dir: Path) -> Path:
-    """Return the sub-model directory with the most registered images.
-
-    COLMAP may produce multiple sub-models (sparse/0, sparse/1, ...) when
-    the reconstruction fragments.  Return the largest one and set the
-    module-level log buffer entry so the pipeline log reflects the split.
-    Returns sparse/0 when the directory doesn't exist or is empty (graceful
-    fallback for mocked pipelines and not-yet-run model_converter output).
-    """
-    if not sparse_dir.exists():
-        return sparse_dir / "0"
-    candidates = sorted(
-        (d for d in sparse_dir.iterdir() if d.is_dir() and d.name.isdigit()),
-        key=lambda d: int(d.name),
-    )
-    if not candidates:
-        # Graceful fallback when sparse/ dir exists but has no sub-models
-        # (e.g. mocked pipeline runs, or model_converter not yet run).
-        return sparse_dir / "0"
-
-    if len(candidates) > 1:
-        with _rec_logs_lock:
-            log_lines = _rec_logs.setdefault(-1, [])
-            sizes = []
-            for d in candidates:
-                images_txt = d / "images.txt"
-                c = _count_registered_images(images_txt) if images_txt.exists() else 0
-                sizes.append((d.name, c))
-            sizes.sort(key=lambda t: t[1], reverse=True)
-            log_lines.append(
-                f"COLMAP produced {len(candidates)} sub-models: "
-                + ", ".join(f"{name}({count})" for name, count in sizes)
-                + f"; using largest: sparse/{sizes[0][0]}({sizes[0][1]})"
-            )
-        # sizes is ordered by image count, candidates by directory name — index
-        # one with the other and you get the largest only when it is also the
-        # lowest-numbered. Name the directory directly instead.
-        return sparse_dir / sizes[0][0]
-
-    return candidates[0]
 
 
 def _run_colmap(

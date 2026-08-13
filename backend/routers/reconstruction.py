@@ -25,7 +25,7 @@ from ..db.models import (
 from ..db.models import Session as SessionModel
 from ..services.artifact_cleanup import cleanup_reconstruction_artifacts
 from ..services.camera_calibration import build_calibration_drift_report
-from ..services.colmap_io import read_model
+from ..services.colmap_io import _pick_best_submodel, read_model
 from ..services.preflight_quality import build_preflight_quality_report
 from ..services.quality_report import (
     build_quality_scorecard,
@@ -1347,7 +1347,7 @@ def get_calibration_drift_report(reconstruction_id: int, db: DBSession = Depends
     if rec.status != "complete":
         raise HTTPException(status_code=202, detail="Reconstruction still in progress")
 
-    sparse_dir = Path(rec.colmap_dir or "") / "sparse" / "0"
+    sparse_dir = _pick_best_submodel(Path(rec.colmap_dir or "") / "sparse")
     try:
         cameras = list(read_model(sparse_dir).cameras.values()) if rec.colmap_dir else []
     except (OSError, RuntimeError, ValueError):
