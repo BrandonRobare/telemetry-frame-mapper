@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { apiUrl, post, get } from '../../shared/api/client'
 import { useToast } from '../../shared/hooks/useToast'
@@ -159,7 +159,14 @@ export default function PlanTab() {
     onError: (e: Error) => addToast(e.message || 'Re-fly generation failed', 'error'),
   })
 
-  const lanesGeoJSON = plan?.lanes_geojson ? JSON.parse(plan.lanes_geojson) : null
+  const lanesGeoJSON = useMemo(() => {
+    if (!plan?.lanes_geojson) return null
+    try {
+      return JSON.parse(plan.lanes_geojson)
+    } catch {
+      return null
+    }
+  }, [plan])
   const isBusy = createArea.isPending || generatePlan.isPending
 
   function handlePolygonDrawn(geojsonStr: string) {
