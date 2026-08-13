@@ -46,8 +46,9 @@ describe('GpsSyncTab flight-log upload', () => {
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
-    expect(url).toBe('http://localhost:8000/flight-logs/upload')
+    expect(url).toBe('/flight-logs/upload')
     expect(init.method).toBe('POST')
+    expect(init.credentials).toBe('include')
     expect(init.body).toBeInstanceOf(FormData)
     const body = init.body as FormData
     expect(body.get('file')).toBe(file)

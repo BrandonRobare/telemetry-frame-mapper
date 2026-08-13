@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { get, post } from '../../shared/api/client'
+import { apiUrl, get, post } from '../../shared/api/client'
 import { Button } from '../../shared/components/Button'
 import { useToast } from '../../shared/hooks/useToast'
 import { useMapStore } from '../../shared/stores/mapStore'
@@ -18,7 +18,6 @@ import { comparisonGridJobs } from './comparisonGrid'
 import CompareMapPane from './CompareMapPane'
 import TabHeader from '../../shared/components/TabHeader'
 
-const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
 
 function useSessions() {
   return useQuery<Session[]>({
@@ -376,7 +375,7 @@ export default function CompareTab() {
               </label>
               {comparison?.status === 'complete' && (
                 <a
-                  href={`${BASE_URL}/comparisons/${comparison.id}/diff.geojson`}
+                  href={apiUrl(`/comparisons/${comparison.id}/diff.geojson`)}
                   download={`comparison_${comparison.id}.geojson`}
                   style={{ color: 'var(--accent-strong)', textDecoration: 'none' }}
                 >

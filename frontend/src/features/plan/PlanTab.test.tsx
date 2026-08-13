@@ -89,8 +89,8 @@ describe('PlanTab segment downloads', () => {
     fireEvent.click(gpxButtons[2])
 
     await waitFor(() => {
-      expect(open).toHaveBeenCalledWith('http://localhost:8000/plans/42/segments/0/kml', '_blank')
-      expect(open).toHaveBeenCalledWith('http://localhost:8000/plans/42/segments/1/gpx', '_blank')
+      expect(open).toHaveBeenCalledWith('/plans/42/segments/0/kml', '_blank')
+      expect(open).toHaveBeenCalledWith('/plans/42/segments/1/gpx', '_blank')
     })
   })
 })

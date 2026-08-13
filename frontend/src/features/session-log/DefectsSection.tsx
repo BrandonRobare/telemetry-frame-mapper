@@ -1,9 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { del, get } from '../../shared/api/client'
+import { apiUrl, del, get } from '../../shared/api/client'
 import type { Defect } from '../../types/api'
 import { formatCategoryLabel, severityColorVar } from './defects'
 
-const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
 
 function useDefects(sessionId: number) {
   return useQuery<Defect[]>({
@@ -14,7 +13,7 @@ function useDefects(sessionId: number) {
 
 function thumbUrl(thumbPath: string | null): string | null {
   if (!thumbPath) return null
-  return `${BASE_URL}/${thumbPath.replace(/\\/g, '/')}`
+  return apiUrl(`/${thumbPath.replace(/\\/g, '/')}`)
 }
 
 export default function DefectsSection({ sessionId }: { sessionId: number }) {

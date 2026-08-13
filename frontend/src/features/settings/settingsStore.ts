@@ -30,7 +30,6 @@ interface SettingsStore {
   coordFormat: CoordFormat
   coordPrecision: number
   reducedMotion: boolean
-  apiBaseUrl: string
 
   setDefaultTab: (tab: SettingsTab) => void
   setLastActiveTab: (tab: SettingsTab) => void
@@ -38,7 +37,6 @@ interface SettingsStore {
   setCoordFormat: (fmt: CoordFormat) => void
   setCoordPrecision: (n: number) => void
   setReducedMotion: (v: boolean) => void
-  setApiBaseUrl: (url: string) => void
 }
 
 const STORAGE_KEY = 'gui-settings'
@@ -50,7 +48,6 @@ interface StoredPrefs {
   coordFormat?: CoordFormat
   coordPrecision?: number
   reducedMotion?: boolean
-  apiBaseUrl?: string
 }
 
 function loadPrefs(): StoredPrefs {
@@ -79,7 +76,6 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
   coordFormat: saved.coordFormat ?? 'decimal',
   coordPrecision: saved.coordPrecision ?? 6,
   reducedMotion: saved.reducedMotion ?? false,
-  apiBaseUrl: saved.apiBaseUrl ?? '',
 
   setDefaultTab: (defaultTab) => {
     set({ defaultTab })
@@ -104,9 +100,5 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
   setReducedMotion: (reducedMotion) => {
     set({ reducedMotion })
     savePrefs({ ...get(), reducedMotion })
-  },
-  setApiBaseUrl: (apiBaseUrl) => {
-    set({ apiBaseUrl })
-    savePrefs({ ...get(), apiBaseUrl })
   },
 }))

@@ -7,9 +7,7 @@ import { Button } from '../../shared/components/Button'
 import TabHeader from '../../shared/components/TabHeader'
 import EmptyState from '../../shared/components/EmptyState'
 import InfoHint from '../../shared/components/InfoHint'
-import { get } from '../../shared/api/client'
-
-const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
+import { apiUrl, get } from '../../shared/api/client'
 
 interface MatchPreviewRow {
   image_id: number
@@ -72,9 +70,10 @@ export default function GpsSyncTab() {
     formData.append('session_id', String(selectedSessionId))
 
     try {
-      const res = await fetch(`${BASE_URL}/flight-logs/upload`, {
+      const res = await fetch(apiUrl('/flight-logs/upload'), {
         method: 'POST',
         body: formData,
+        credentials: 'include',
       })
       if (!res.ok) {
         const text = await res.text()
