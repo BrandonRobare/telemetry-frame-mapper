@@ -236,6 +236,23 @@ def get_plan_segments(plan_id: int, db: DBSession = Depends(get_db)):
     return out
 
 
+def _get_plan_segment(plan_id: int, segment_index: int, db: DBSession):
+    plan = db.query(MissionPlan).filter(MissionPlan.id == plan_id).first()
+    if not plan:
+        raise HTTPException(status_code=404, detail="Plan not found")
+    if not plan.lanes_geojson:
+        raise HTTPException(status_code=404, detail="Plan has no lane geometry")
+
+    segments = segment_plan(
+        lanes_geojson=plan.lanes_geojson,
+        total_distance_m=plan.total_distance_m or 0,
+        battery_range_m=get_config().battery_range_m,
+    )
+    if segment_index < 0 or segment_index >= len(segments):
+        raise HTTPException(status_code=404, detail="Segment not found")
+    return plan, segments[segment_index]
+
+
 # ---------------------------------------------------------------------------
 # Gap-based re-fly plan
 # ---------------------------------------------------------------------------
@@ -292,6 +309,32 @@ def generate_plan_from_gaps(body: PlanGenerateFromGapsIn, db: DBSession = Depend
 # ---------------------------------------------------------------------------
 # KML / GPX downloads
 # ---------------------------------------------------------------------------
+
+
+@router.get("/{plan_id}/segments/{segment_index}/kml")
+def download_segment_kml(plan_id: int, segment_index: int, db: DBSession = Depends(get_db)):
+    plan, segment = _get_plan_segment(plan_id, segment_index, db)
+    kml_file = write_kml(
+        plan.id, segment.lanes_geojson, _exports_dir(), suffix=f"_seg_{segment.index}"
+    )
+    return FileResponse(
+        str(kml_file),
+        media_type="application/vnd.google-earth.kml+xml",
+        filename=f"plan_{plan_id}_seg_{segment.index}.kml",
+    )
+
+
+@router.get("/{plan_id}/segments/{segment_index}/gpx")
+def download_segment_gpx(plan_id: int, segment_index: int, db: DBSession = Depends(get_db)):
+    plan, segment = _get_plan_segment(plan_id, segment_index, db)
+    gpx_file = write_gpx(
+        plan.id, segment.lanes_geojson, _exports_dir(), suffix=f"_seg_{segment.index}"
+    )
+    return FileResponse(
+        str(gpx_file),
+        media_type="application/gpx+xml",
+        filename=f"plan_{plan_id}_seg_{segment.index}.gpx",
+    )
 
 
 @router.get("/{plan_id}/kml")

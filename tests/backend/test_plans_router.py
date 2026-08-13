@@ -303,6 +303,69 @@ def test_get_segments_not_found(client):
     assert resp.status_code == 404
 
 
+def test_segment_downloads_are_distinct_and_confined_to_selected_geometry(client, monkeypatch):
+    """A segment-labelled download must never return the full mission export."""
+    from backend.core.config import get_config
+
+    monkeypatch.setattr(get_config(), "battery_range_m", 1_000, raising=False)
+    area = _make_target_area(client, name="Segment Download Area")
+    plan = client.post(
+        "/plans/generate",
+        json={
+            "target_area_id": area["id"],
+            "altitude_ft": 200,
+            "side_overlap_pct": 0.7,
+            "forward_overlap_pct": 0.8,
+        },
+    ).json()
+
+    segments = client.get(f"/plans/{plan['id']}/segments").json()
+    assert len(segments) >= 2
+
+    full_kml = client.get(f"/plans/{plan['id']}/kml")
+    first_kml = client.get(f"/plans/{plan['id']}/segments/0/kml")
+    second_kml = client.get(f"/plans/{plan['id']}/segments/1/kml")
+    full_gpx = client.get(f"/plans/{plan['id']}/gpx")
+    first_gpx = client.get(f"/plans/{plan['id']}/segments/0/gpx")
+    second_gpx = client.get(f"/plans/{plan['id']}/segments/1/gpx")
+
+    for response, filename in (
+        (first_kml, f"plan_{plan['id']}_seg_0.kml"),
+        (second_kml, f"plan_{plan['id']}_seg_1.kml"),
+        (first_gpx, f"plan_{plan['id']}_seg_0.gpx"),
+        (second_gpx, f"plan_{plan['id']}_seg_1.gpx"),
+    ):
+        assert response.status_code == 200
+        assert filename in response.headers["content-disposition"]
+
+    assert first_kml.content != second_kml.content
+    assert first_kml.content != full_kml.content
+    assert second_kml.content != full_kml.content
+    assert first_gpx.content != second_gpx.content
+    assert first_gpx.content != full_gpx.content
+    assert second_gpx.content != full_gpx.content
+
+
+def test_segment_download_rejects_an_index_outside_the_plan(client, monkeypatch):
+    from backend.core.config import get_config
+
+    monkeypatch.setattr(get_config(), "battery_range_m", 1_000, raising=False)
+    area = _make_target_area(client, name="Invalid Segment Download Area")
+    plan = client.post(
+        "/plans/generate",
+        json={
+            "target_area_id": area["id"],
+            "altitude_ft": 200,
+            "side_overlap_pct": 0.7,
+            "forward_overlap_pct": 0.8,
+        },
+    ).json()
+
+    response = client.get(f"/plans/{plan['id']}/segments/99999/kml")
+
+    assert 400 <= response.status_code < 500
+
+
 # ---------------------------------------------------------------------------
 # Gap re-fly
 # ---------------------------------------------------------------------------
