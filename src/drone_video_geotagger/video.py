@@ -73,9 +73,16 @@ def read_video_start(ffmpeg: str | Path, video: Path) -> datetime | None:
         ) from exc
     text = result.stdout + "\n" + result.stderr
     # Accept optional Z or numeric offset (+HH:MM, -HH:MM, +HHMM, -HHMM).
-    # Bare timestamps without any suffix are treated as UTC.
-    match = re.search(r"creation_time\s*:\s*([0-9T:.\-]+)(Z|[+-]\d{2}:?\d{2})?", text)
+    # Bare timestamps without any suffix are treated as UTC. Match the time of
+    # day explicitly so a negative offset cannot be consumed as part of it.
+    match = re.search(
+        r"creation_time\s*:\s*([0-9]{4}-[0-9]{2}-[0-9]{2}[T ][0-9:.]+)"
+        r"(Z|[+-]\d{2}:?\d{2})?",
+        text,
+    )
     if not match:
+        if re.search(r"creation_time\s*:", text):
+            raise ValueError("ffmpeg reported a creation_time without a time of day")
         return None
     ts = match.group(1)
     suffix = match.group(2)

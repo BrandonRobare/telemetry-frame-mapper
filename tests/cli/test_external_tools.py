@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import subprocess
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -65,6 +66,43 @@ def test_read_video_duration_returns_none_when_ffmpeg_omits_duration(
     )
 
     assert read_video_duration("ffmpeg", tmp_path / "flight.mp4") is None
+
+
+@pytest.mark.parametrize(
+    ("creation_time", "expected"),
+    [
+        ("2024-06-01T12:00:00.000000-04:00", "2024-06-01T12:00:00-04:00"),
+        ("2024-06-01T12:00:00.000000-0700", "2024-06-01T12:00:00-07:00"),
+        ("2024-06-01 12:00:00.000000-04:00", "2024-06-01T12:00:00-04:00"),
+    ],
+)
+def test_read_video_start_parses_ffmpeg_creation_time_offsets(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, creation_time: str, expected: str
+) -> None:
+    ffmpeg_output = f"""\
+Input #0, mov,mp4,m4a,3gp,3g2,mj2, from 'flight.mp4':
+  Metadata:
+    creation_time   : {creation_time}
+"""
+    monkeypatch.setattr(
+        "drone_video_geotagger.video.subprocess.run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 1, "", ffmpeg_output),
+    )
+
+    assert read_video_start("ffmpeg", tmp_path / "flight.mp4") == datetime.fromisoformat(expected)
+
+
+def test_read_video_start_rejects_ffmpeg_creation_time_without_time_of_day(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    ffmpeg_output = "    creation_time   : 2024-06-01\n"
+    monkeypatch.setattr(
+        "drone_video_geotagger.video.subprocess.run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 1, "", ffmpeg_output),
+    )
+
+    with pytest.raises(ValueError, match="creation_time.*time of day"):
+        read_video_start("ffmpeg", tmp_path / "flight.mp4")
 
 
 def test_cli_run_reads_video_start_from_video_argument(monkeypatch, tmp_path: Path) -> None:
