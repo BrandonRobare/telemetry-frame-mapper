@@ -2,6 +2,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
+from backend.db.models import CoverageRun, TargetArea
+from backend.main import app
+
 
 def _make_target_area(client, name="Plan Area"):
     body = {
@@ -105,6 +110,79 @@ def test_generate_plan_invalid_forward_overlap(client):
     }
     resp = client.post("/plans/generate", json=body)
     assert resp.status_code == 422
+
+
+@pytest.mark.parametrize("altitude_ft", [0, -1])
+def test_generate_plan_rejects_non_positive_altitude(client, altitude_ft):
+    response = client.post(
+        "/plans/generate",
+        json={
+            "target_area_id": 999999,
+            "altitude_ft": altitude_ft,
+            "side_overlap_pct": 0.7,
+            "forward_overlap_pct": 0.8,
+        },
+    )
+    assert response.status_code == 422
+
+
+@pytest.mark.parametrize("altitude_ft", [0, -1])
+def test_generate_from_gaps_rejects_non_positive_altitude(client, altitude_ft):
+    response = client.post(
+        "/plans/generate-from-gaps",
+        json={
+            "coverage_run_id": 999999,
+            "altitude_ft": altitude_ft,
+            "side_overlap_pct": 0.7,
+            "forward_overlap_pct": 0.8,
+        },
+    )
+    assert response.status_code == 422
+
+
+def test_generate_plan_rejects_near_zero_lane_spacing(client):
+    area = _make_target_area(client, name="Near Zero Spacing")
+    response = client.post(
+        "/plans/generate",
+        json={
+            "target_area_id": area["id"],
+            "altitude_ft": 200,
+            "side_overlap_pct": 0.9999999,
+            "forward_overlap_pct": 0.8,
+        },
+    )
+    assert response.status_code == 422
+    assert "too many lanes" in response.json()["detail"]
+
+
+def test_generate_from_gaps_rejects_near_zero_lane_spacing(client):
+    db = app.state.test_db_session
+    target = TargetArea(
+        name="Near Zero Gap Spacing",
+        geom_geojson=(
+            '{"type":"Polygon","coordinates":[[[-80.5,35.0],[-80.4,35.0],'
+            '[-80.4,35.1],[-80.5,35.1],[-80.5,35.0]]]}'
+        ),
+    )
+    db.add(target)
+    db.commit()
+    db.refresh(target)
+    run = CoverageRun(target_area_id=target.id, session_ids="", gap_geojson=target.geom_geojson)
+    db.add(run)
+    db.commit()
+    db.refresh(run)
+
+    response = client.post(
+        "/plans/generate-from-gaps",
+        json={
+            "coverage_run_id": run.id,
+            "altitude_ft": 200,
+            "side_overlap_pct": 0.9999999,
+            "forward_overlap_pct": 0.8,
+        },
+    )
+    assert response.status_code == 422
+    assert "too many lanes" in response.json()["detail"]
 
 
 # ---------------------------------------------------------------------------

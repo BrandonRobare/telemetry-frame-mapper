@@ -9,6 +9,8 @@ from shapely.geometry import shape
 
 from .terrain import TerrainService, get_terrain_service
 
+_MAX_LANES = 10_000
+
 
 def generate_lawnmower(
     target_geojson: str,
@@ -57,12 +59,16 @@ def generate_lawnmower(
     if meters_per_deg_lon < 1_000:
         meters_per_deg_lon = 1_000
     lane_spacing_deg = lane_spacing / meters_per_deg_lon
+    if not math.isfinite(lane_spacing_deg) or lane_spacing_deg <= 0:
+        raise ValueError("Altitude and overlap produce a non-positive lane spacing")
 
     minx, miny, maxx, maxy = bounds
     lanes = []
     x = minx + lane_spacing_deg / 2
     direction = 1
     while x <= maxx:
+        if len(lanes) >= _MAX_LANES:
+            raise ValueError(f"Plan would produce too many lanes (maximum {_MAX_LANES})")
         if direction == 1:
             lanes.append([[x, miny], [x, maxy]])
         else:

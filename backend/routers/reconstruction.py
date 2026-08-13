@@ -743,11 +743,11 @@ def request_cancel(reconstruction_id: int, db: DBSession = Depends(get_db)):
     if rec.status not in LIVE_RECONSTRUCTION_STATUSES:
         raise HTTPException(status_code=409, detail="Reconstruction is not running")
 
-    cancel_reconstruction(reconstruction_id)
     rec.status = "cancelling"
     rec.step = "cancelling"
     rec.error_msg = None
     db.commit()
+    cancel_reconstruction(reconstruction_id)
     db.refresh(rec)
     return rec
 

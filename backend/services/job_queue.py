@@ -46,6 +46,14 @@ _lock_fh = None  # OS file lock guaranteeing a single drain worker across proces
 # Configurable caps
 _max_concurrent_gpu: int = 1  # Only one GPU job at a time
 
+_LIVE_RECONSTRUCTION_STATUSES = (
+    "pending",
+    "running_colmap",
+    "running_gsplat",
+    "running_remote",
+    "cancelling",
+)
+
 
 class JobNonRetryableError(RuntimeError):
     """A handler failure that should be recorded without re-queuing the job."""
@@ -140,8 +148,12 @@ def cancel_job(job_id: int) -> bool:
             return False
         if entry.status not in ("pending", "running"):
             return False
+        was_pending = entry.status == "pending"
         entry.status = "cancelled"
-        entry.completed_at = datetime.now(UTC)
+        now = datetime.now(UTC)
+        entry.completed_at = now
+        if was_pending:
+            _terminalize_reconstruction(entry, "cancelled", None, now, db)
         db.commit()
         return True
     finally:
@@ -309,8 +321,10 @@ def claim_stale_jobs() -> int:
                 entry.error_msg = None
             else:
                 entry.status = "failed"
-                entry.error_msg = "Worker restart — job was orphaned by previous shutdown"
+                error = "Worker restart — job was orphaned by previous shutdown"
+                entry.error_msg = error
                 entry.completed_at = now
+                _terminalize_reconstruction(entry, "failed", error, now, db)
             acted += 1
         db.commit()
         return acted
@@ -384,10 +398,7 @@ def _drain_loop() -> None:
 
                 if entry.job_type not in _handlers:
                     logger.warning("No handler registered for job_type=%s", entry.job_type)
-                    entry.status = "failed"
-                    entry.error_msg = f"No handler for {entry.job_type}"
-                    entry.completed_at = datetime.now(UTC)
-                    db.commit()
+                    _mark_failed(entry.id, f"No handler for {entry.job_type}", db=db)
                     continue
 
                 # Atomic claim: flip pending→running in one conditional UPDATE so
@@ -488,17 +499,40 @@ def _mark_failed(job_id: int, error: str, *, db=None) -> None:
     if own_db:
         db = _make_session()
     try:
-        db.query(JobQueueEntry).filter(
+        entry = db.query(JobQueueEntry).filter(
             JobQueueEntry.id == job_id, JobQueueEntry.status != "cancelled"
-        ).update({
-            "status": "failed",
-            "error_msg": error,
-            "completed_at": datetime.now(UTC),
-        })
+        ).first()
+        if entry is None:
+            return
+        now = datetime.now(UTC)
+        entry.status = "failed"
+        entry.error_msg = error
+        entry.completed_at = now
+        _terminalize_reconstruction(entry, "failed", error, now, db)
         db.commit()
     finally:
         if own_db:
             db.close()
+
+
+def _terminalize_reconstruction(entry, status: str, error: str | None, now: datetime, db) -> None:
+    """Finish a live reconstruction when its queue entry reaches a terminal state."""
+    if entry.job_type != RECONSTRUCTION:
+        return
+    from backend.db.models import Reconstruction
+
+    db.query(Reconstruction).filter(
+        Reconstruction.id == entry.target_id,
+        Reconstruction.status.in_(_LIVE_RECONSTRUCTION_STATUSES),
+    ).update(
+        {
+            "status": status,
+            "step": status,
+            "error_msg": error,
+            "completed_at": now,
+        },
+        synchronize_session=False,
+    )
 
 
 def mark_complete(job_id: int) -> None:
