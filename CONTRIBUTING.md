@@ -7,8 +7,9 @@ uv sync --group backend --group dev
 cd frontend && npm install
 ```
 
-For CLI-only development, `uv sync --group dev` is enough. Dependency groups are source-checkout
-tooling, not wheel extras; the published wheel contains only the CLI package.
+For CLI-only development, `uv sync --group dev` is enough. These are PEP 735 dependency groups for
+a source checkout, not wheel extras: pip's extra syntax cannot install them. The published wheel
+contains only the CLI package.
 
 ## External tools and optional dependencies
 
@@ -42,7 +43,7 @@ To add a schema change:
 ## Test gates
 
 ```bash
-pytest
+uv run --no-sync pytest
 ruff check .
 cd frontend && npm test -- --run
 ```

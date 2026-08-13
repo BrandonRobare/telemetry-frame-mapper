@@ -23,9 +23,10 @@ cd telemetry-frame-mapper
 uv sync --group backend --group dev
 ```
 
-The Python wheel intentionally contains only the CLI package. The backend, migrations, config, and
-frontend are available from a source checkout, the Docker image, or the Windows installer — they are
-not installed by any wheel extra. Verify the source checkout with
+The Python wheel intentionally contains only the CLI package. `backend` and `dev` are PEP 735
+dependency groups for a source checkout, not pip-installable wheel extras. The backend, migrations,
+config, and frontend are available from a source checkout, the Docker image, or the Windows installer
+— they are not installed by any wheel extra. Verify the source checkout with
 `uv run --no-sync drone-video-geotagger --help` and `uv run --no-sync pytest` (all tests should pass
 without any external binaries installed).
 
