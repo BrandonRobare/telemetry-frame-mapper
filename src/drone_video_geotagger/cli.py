@@ -12,7 +12,7 @@ from drone_video_geotagger.frames import build_frame_tags, collect_frames, infer
 from drone_video_geotagger.gps_quality import assess_gps_lock, samples_from_telemetry
 from drone_video_geotagger.paths import force_utf8_streams
 from drone_video_geotagger.telemetry import TelemetryPoint, parse_srt
-from drone_video_geotagger.video import extract_srt, read_video_start
+from drone_video_geotagger.video import extract_srt, read_video_duration, read_video_start
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -95,7 +95,11 @@ def run(args: argparse.Namespace) -> int:
     telemetry = parse_srt(srt_path)
     warn_gps_lock(telemetry)
     frames = collect_frames(args.frames)
-    frame_rate = args.frame_rate or infer_frame_rate(frames, telemetry[-1].end_s)
+    if args.frame_rate is None:
+        video_duration_s = read_video_duration(args.ffmpeg, args.video)
+        frame_rate = infer_frame_rate(frames, telemetry[-1].end_s, video_duration_s)
+    else:
+        frame_rate = args.frame_rate
     video_start = read_video_start(args.ffmpeg, args.video)
     if video_start is None:
         print(

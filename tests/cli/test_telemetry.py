@@ -176,6 +176,7 @@ GPS (-81.0000, 41.2000, 102)
     frame.touch()
     monkeypatch.setattr(cli, "collect_frames", lambda _: [(frame, 1)])
     monkeypatch.setattr(cli, "infer_frame_rate", lambda *_: 1.0)
+    monkeypatch.setattr(cli, "read_video_duration", lambda *_: None)
     monkeypatch.setattr(cli, "read_video_start", lambda *_: None)
 
     args = argparse.Namespace(
