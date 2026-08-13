@@ -66,8 +66,7 @@ def parse_srt_text(text: str) -> list[TelemetryPoint]:
             lat = float(gps_match.group(2))
             height_match = height_re.search(line)
             rel_alt_m = float(height_match.group(1)) if height_match else float(gps_match.group(3))
-            if lat != 0 and lon != 0:
-                points.append(TelemetryPoint(current_start, current_end, lat, lon, rel_alt_m))
+            points.append(TelemetryPoint(current_start, current_end, lat, lon, rel_alt_m))
             continue
 
         key_values: dict[str, float] = {}
@@ -87,7 +86,7 @@ def parse_srt_text(text: str) -> list[TelemetryPoint]:
             lat = key_values.get("lat")
             lon = key_values.get("lon")
             rel_alt_m = key_values.get("rel_alt", 0.0)
-            if lat is not None and lon is not None and lat != 0 and lon != 0:
+            if lat is not None and lon is not None:
                 points.append(TelemetryPoint(current_start, current_end, lat, lon, rel_alt_m))
 
     if len(points) < 2:
@@ -109,16 +108,36 @@ def parse_srt(srt_path: Path) -> list[TelemetryPoint]:
         raise ValueError(f"{exc}: {srt_path}") from exc
 
 
+def _has_gps_fix(point: TelemetryPoint) -> bool:
+    return abs(point.lat) > 0.001 or abs(point.lon) > 0.001
+
+
+def _no_fix_error(seconds: float) -> ValueError:
+    return ValueError(f"Cannot interpolate telemetry at {seconds:g}s: no GPS fix was recorded.")
+
+
 def interpolate(points: list[TelemetryPoint], seconds: float) -> tuple[float, float, float]:
     if not points:
         raise ValueError("telemetry points are required")
 
+    for point in points:
+        if point.start_s <= seconds < point.end_s and not _has_gps_fix(point):
+            raise _no_fix_error(seconds)
+
     if seconds <= points[0].start_s:
         first = points[0]
+        if not _has_gps_fix(first):
+            raise _no_fix_error(seconds)
         return first.lat, first.lon, first.rel_alt_m
 
     for previous, current in zip(points, points[1:], strict=False):
-        if previous.start_s <= seconds <= current.start_s:
+        if seconds == current.start_s:
+            if not _has_gps_fix(current):
+                raise _no_fix_error(seconds)
+            return current.lat, current.lon, current.rel_alt_m
+        if previous.start_s < seconds < current.start_s:
+            if not _has_gps_fix(previous) or not _has_gps_fix(current):
+                raise _no_fix_error(seconds)
             span = current.start_s - previous.start_s
             if span <= 0:
                 return previous.lat, previous.lon, previous.rel_alt_m
@@ -129,4 +148,6 @@ def interpolate(points: list[TelemetryPoint], seconds: float) -> tuple[float, fl
             return lat, lon, rel_alt_m
 
     last = points[-1]
+    if not _has_gps_fix(last):
+        raise _no_fix_error(seconds)
     return last.lat, last.lon, last.rel_alt_m
