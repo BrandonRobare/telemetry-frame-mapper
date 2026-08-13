@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+from pathlib import Path
 
 import pytest
 import sqlalchemy as sa
@@ -111,18 +112,14 @@ def test_init_db_upgrades_legacy_shimmed_db(isolated_engine):
 
 
 def test_legacy_upgrade_covers_every_model_column(isolated_engine):
-    """An upgraded legacy database must satisfy the complete current model schema."""
-    database_module.Base.metadata.create_all(bind=isolated_engine)
+    """An immutable v2.0.2 schema must upgrade to the complete current model schema."""
+    schema = (
+        Path(__file__).parent / "db" / "v2_0_2_schema.sql"
+    ).read_text(encoding="utf-8")
     db_path = str(isolated_engine.url).split("///")[1]
     raw_conn = sqlite3.connect(db_path)
     try:
-        for table, column in (
-            ("footprints", "pitch_oblique"),
-            ("reconstructions", "ortho_path"),
-            ("reconstructions", "ortho_status"),
-            ("reconstructions", "ortho_error"),
-        ):
-            raw_conn.execute(f"ALTER TABLE {table} DROP COLUMN {column}")
+        raw_conn.executescript(schema)
         raw_conn.commit()
     finally:
         raw_conn.close()
