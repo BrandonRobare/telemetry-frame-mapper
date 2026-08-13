@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import os
 import threading
+from collections import Counter
+from hashlib import sha256
 from pathlib import Path
 
 from sqlalchemy.orm import Session as DBSession
@@ -26,6 +28,16 @@ def get_progress(session_id: int) -> dict:
         )
 
 
+def _unique_filename(path: Path, root: Path, duplicate_basenames: set[str]) -> str:
+    """Return a collision-free display/storage name for an imported image."""
+    if os.path.normcase(path.name) not in duplicate_basenames:
+        return path.name
+    relative = path.relative_to(root).as_posix()
+    suffix = path.suffix
+    digest = sha256(relative.encode()).hexdigest()[:12]
+    return f"{path.stem}__{digest}{suffix}"
+
+
 def _run(session_id: int, folder: Path, db_factory) -> None:
     from ..core.config import get_ingest_config, load_config  # lazy import to avoid circular
 
@@ -40,14 +52,25 @@ def _run(session_id: int, folder: Path, db_factory) -> None:
 
     filter_zero_gps: bool = bool(ingest_cfg.get("filter_zero_gps", True))
 
+    root = folder.resolve()
     seen: set[str] = set()
     accepted_files: list[Path] = []
-    for p in sorted(folder.iterdir()):
-        if p.is_file() and p.suffix.lower() in _ACCEPTED_SUFFIXES:
-            key = os.path.normcase(str(p.resolve()))
-            if key not in seen:
-                seen.add(key)
-                accepted_files.append(p)
+    try:
+        candidates = sorted(folder.rglob("*"))
+    except OSError:
+        candidates = []
+    for p in candidates:
+        try:
+            resolved = p.resolve()
+            if not resolved.is_relative_to(root):
+                continue
+            if p.is_file() and p.suffix.lower() in _ACCEPTED_SUFFIXES:
+                key = os.path.normcase(str(resolved))
+                if key not in seen:
+                    seen.add(key)
+                    accepted_files.append(p)
+        except OSError:
+            continue
     total = len(accepted_files)
     with _progress_lock:
         _progress[session_id] = {
@@ -56,6 +79,18 @@ def _run(session_id: int, folder: Path, db_factory) -> None:
             "skipped": 0,
             "status": "running",
         }
+    if not accepted_files:
+        with _progress_lock:
+            _progress[session_id].update(
+                status="error", error="No importable files found in the selected folder"
+            )
+        return
+
+    duplicate_basenames = {
+        name
+        for name, count in Counter(os.path.normcase(path.name) for path in accepted_files).items()
+        if count > 1
+    }
 
     db: DBSession = db_factory()
     try:
@@ -66,6 +101,7 @@ def _run(session_id: int, folder: Path, db_factory) -> None:
         ingest_thumbnail_size: int = int(ingest_cfg.get("thumbnail_size_px", cfg.thumbnail_size_px))
 
         for i, accepted_file in enumerate(accepted_files):
+            filename = _unique_filename(accepted_file, root, duplicate_basenames)
             try:
                 exif = extract_exif(str(accepted_file))
             except Exception as exc:
@@ -101,7 +137,7 @@ def _run(session_id: int, folder: Path, db_factory) -> None:
             try:
                 thumb_dir = Path(cfg.processed_dir) / str(session_id) / "thumbs"
                 thumb_dir.mkdir(parents=True, exist_ok=True)
-                dest = thumb_dir / accepted_file.name
+                dest = thumb_dir / filename
                 generate_thumbnail(str(accepted_file), str(dest), size=ingest_thumbnail_size)
                 thumb_path = str(dest)
             except Exception:
@@ -109,7 +145,7 @@ def _run(session_id: int, folder: Path, db_factory) -> None:
 
             img = Image(
                 session_id=session_id,
-                filename=accepted_file.name,
+                filename=filename,
                 filepath=str(accepted_file),
                 thumb_path=thumb_path,
                 timestamp=exif.get("timestamp"),
