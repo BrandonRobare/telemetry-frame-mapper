@@ -178,6 +178,129 @@ def test_run_accepts_png_when_configured(tmp_path, setup_test_db):
     assert "frame.jpg" in filenames
 
 
+def test_run_imports_nested_browser_style_paths(tmp_path, setup_test_db):
+    """The shared importer descends into the paths preserved from webkitRelativePath."""
+    from backend.db.models import Image as ImageModel
+    from backend.db.models import Session as SessionModel
+    from backend.main import app
+    from backend.services.ingest_orchestrator import _run
+    from tests.conftest import TestSessionLocal
+
+    nested = tmp_path / "DCIM" / "100MEDIA"
+    nested.mkdir(parents=True)
+    frame = _make_no_gps_jpg(nested, "DJI_0001.jpg")
+    db = app.state.test_db_session
+    session = SessionModel(
+        name="nested upload",
+        folder_path=str(tmp_path),
+        photo_count=0,
+        usable_count=0,
+    )
+    db.add(session)
+    db.commit()
+    db.refresh(session)
+    ingest_cfg = {
+        "accepted_extensions": [".jpg", ".jpeg"],
+        "filter_zero_gps": False,
+        "thumbnail_size_px": 64,
+        "thumbnail_jpeg_quality": 75,
+    }
+
+    with patch("backend.core.config.get_ingest_config", return_value=ingest_cfg), patch(
+        "backend.core.config.load_config"
+    ) as mock_load_cfg:
+        mock_load_cfg.return_value.processed_dir = str(tmp_path / "processed")
+        mock_load_cfg.return_value.thumbnail_size_px = 64
+        mock_load_cfg.return_value.fov_horizontal_deg = 83
+        mock_load_cfg.return_value.fov_vertical_deg = 53
+        mock_load_cfg.return_value.target_crs = "EPSG:32617"
+        _run(session.id, tmp_path, TestSessionLocal)
+
+    db.expire_all()
+    image = db.query(ImageModel).filter(ImageModel.session_id == session.id).one()
+    assert image.filepath == str(frame)
+    assert image.filename == "DJI_0001.jpg"
+
+
+def test_run_disambiguates_duplicate_nested_basenames_and_thumbnails(tmp_path, setup_test_db):
+    """Recursive imports retain distinct records and thumbnails for duplicate leaf names."""
+    from backend.db.models import Image as ImageModel
+    from backend.db.models import Session as SessionModel
+    from backend.main import app
+    from backend.services.ingest_orchestrator import _run
+    from tests.conftest import TestSessionLocal
+
+    first_folder = tmp_path / "flight-a"
+    second_folder = tmp_path / "flight-b"
+    first_folder.mkdir()
+    second_folder.mkdir()
+    first = _make_no_gps_jpg(first_folder, "DJI_0001.jpg")
+    second = _make_no_gps_jpg(second_folder, "DJI_0001.jpg")
+    db = app.state.test_db_session
+    session = SessionModel(
+        name="duplicate names",
+        folder_path=str(tmp_path),
+        photo_count=0,
+        usable_count=0,
+    )
+    db.add(session)
+    db.commit()
+    db.refresh(session)
+    ingest_cfg = {
+        "accepted_extensions": [".jpg", ".jpeg"],
+        "filter_zero_gps": False,
+        "thumbnail_size_px": 64,
+        "thumbnail_jpeg_quality": 75,
+    }
+
+    with patch("backend.core.config.get_ingest_config", return_value=ingest_cfg), patch(
+        "backend.core.config.load_config"
+    ) as mock_load_cfg:
+        mock_load_cfg.return_value.processed_dir = str(tmp_path / "processed")
+        mock_load_cfg.return_value.thumbnail_size_px = 64
+        mock_load_cfg.return_value.fov_horizontal_deg = 83
+        mock_load_cfg.return_value.fov_vertical_deg = 53
+        mock_load_cfg.return_value.target_crs = "EPSG:32617"
+        _run(session.id, tmp_path, TestSessionLocal)
+
+    db.expire_all()
+    images = db.query(ImageModel).filter(ImageModel.session_id == session.id).all()
+    assert {image.filepath for image in images} == {str(first), str(second)}
+    assert len({image.filename for image in images}) == 2
+    assert len({image.thumb_path for image in images}) == 2
+    assert all(Path(image.thumb_path).is_file() for image in images)
+
+
+def test_run_marks_empty_folder_as_an_error(tmp_path, setup_test_db):
+    """A successfully created session does not silently finish when it has no media."""
+    from backend.db.models import Session as SessionModel
+    from backend.main import app
+    from backend.services.ingest_orchestrator import _run, get_progress
+    from tests.conftest import TestSessionLocal
+
+    db = app.state.test_db_session
+    session = SessionModel(
+        name="empty import",
+        folder_path=str(tmp_path),
+        photo_count=0,
+        usable_count=0,
+    )
+    db.add(session)
+    db.commit()
+    db.refresh(session)
+    (tmp_path / "readme.txt").write_text("not an image")
+
+    with patch(
+        "backend.core.config.get_ingest_config",
+        return_value={"accepted_extensions": [".jpg"]},
+    ):
+        _run(session.id, tmp_path, TestSessionLocal)
+
+    progress = get_progress(session.id)
+    assert progress["status"] == "error"
+    assert progress["error"] == "No importable files found in the selected folder"
+
+
 # ---------------------------------------------------------------------------
 # Fix 4/5: filter_zero_gps skips (0, 0) images; real-coord images still land
 # ---------------------------------------------------------------------------
