@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import { MapContainer, TileLayer, GeoJSON, ImageOverlay, useMap } from 'react-leaflet'
 import type { LatLngBoundsExpression, Layer } from 'leaflet'
 import 'leaflet/dist/leaflet.css'
@@ -73,6 +73,15 @@ export default function LeafletMapView({ footprints, coverage, isLoading, error,
   const { activeLayers, basemapId, setBasemapId, slopeOpacity } = useMapStore()
   const basemap = BASEMAPS[basemapId as keyof typeof BASEMAPS] ?? BASEMAPS.esri_satellite
 
+  const gapGeoJSON = useMemo(() => {
+    if (!coverage?.gap_geojson) return null
+    try {
+      return JSON.parse(coverage.gap_geojson)
+    } catch {
+      return null
+    }
+  }, [coverage])
+
   if (error) {
     return (
       <div className="flex-1 flex items-center justify-center">
@@ -120,8 +129,6 @@ export default function LeafletMapView({ footprints, coverage, isLoading, error,
         }, []),
       }
     : null
-
-  const gapGeoJSON = coverage?.gap_geojson ? JSON.parse(coverage.gap_geojson) : null
 
   return (
     <div className="relative w-full h-full">
