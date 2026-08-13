@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import json
-import os
 import zipfile
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
+from backend.core.paths import confine_path
 from backend.db.models import Image
 
 
@@ -41,14 +41,10 @@ def odm_options_for(mode: str, *, has_gcp: bool) -> list[str]:
 def build_webodm_package(
     zip_path: Path, images: list[Image], options: WebodmPackageOptions, *, exports_dir: Path
 ) -> dict:
-    safe_root = os.path.realpath(exports_dir)
-    safe_zip_path = os.path.realpath(zip_path)
     try:
-        if os.path.commonpath((safe_root, safe_zip_path)) != safe_root:
-            raise ValueError("Package path must be inside exports directory")
+        zip_path = confine_path(zip_path, exports_dir, allow_root=False)
     except ValueError as exc:
         raise ValueError("Package path must be inside exports directory") from exc
-    zip_path = Path(safe_zip_path)
     zip_path.parent.mkdir(parents=True, exist_ok=True)
     contents = []
     copied = 0

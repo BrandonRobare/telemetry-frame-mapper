@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from ..core.config import get_backup_config, get_config
+from ..core.paths import confine_path
 from ..services.storage_summary_cache import _cache, invalidate_storage_summary_cache
 
 router = APIRouter(prefix="/storage", tags=["storage"])
@@ -145,12 +146,12 @@ def delete_file(
         if candidate.name != filename:
             continue
 
-        resolved = candidate.resolve()
-        if not resolved.is_relative_to(base_resolved):
+        try:
+            resolved = confine_path(candidate, base_resolved)
+        except ValueError as exc:
             raise HTTPException(
-                status_code=403,
-                detail="File must be inside storage directory",
-            )
+                status_code=403, detail="File must be inside storage directory"
+            ) from exc
         if not resolved.is_file():
             raise HTTPException(status_code=400, detail="Path is not a file")
         resolved.unlink()

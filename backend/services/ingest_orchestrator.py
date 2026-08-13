@@ -8,6 +8,7 @@ from pathlib import Path
 
 from sqlalchemy.orm import Session as DBSession
 
+from ..core.paths import confine_path
 from ..db.models import Footprint, Image, SessionLogEntry
 from ..db.models import Session as SessionModel
 from .geometry import compute_footprint
@@ -61,15 +62,13 @@ def _run(session_id: int, folder: Path, db_factory) -> None:
         candidates = []
     for p in candidates:
         try:
-            resolved = p.resolve()
-            if not resolved.is_relative_to(root):
-                continue
+            resolved = confine_path(p, root)
             if p.is_file() and p.suffix.lower() in _ACCEPTED_SUFFIXES:
                 key = os.path.normcase(str(resolved))
                 if key not in seen:
                     seen.add(key)
                     accepted_files.append(p)
-        except OSError:
+        except (OSError, ValueError):
             continue
     total = len(accepted_files)
     with _progress_lock:

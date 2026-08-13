@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session as DBSession
 
 from ..core.config import get_config, get_render_config, get_webodm_config
+from ..core.paths import confine_path
 from ..db.database import get_db
 from ..db.models import (
     Image,
@@ -34,7 +35,6 @@ from ..services.quality_report import (
 from ..services.reconstruction import (
     _export_point_cloud,
     _load_geo_transform_for_reconstruction,
-    _safe_export_path,
     _write_mesh_georef,
     build_reconstruction_diagnostics,
     cancel_reconstruction,
@@ -69,7 +69,7 @@ VALID_BACKENDS = {"colmap", "webodm"}
 def _safe_export_http_path(path: Path) -> Path:
     cfg = get_config()
     try:
-        return _safe_export_path(path, Path(cfg.exports_dir))
+        return confine_path(path, Path(cfg.exports_dir))
     except ValueError as exc:
         raise HTTPException(status_code=403, detail="Invalid export path") from exc
 
@@ -86,7 +86,7 @@ def _safe_owned_http_path(path: Path, *, allow_processed: bool = False) -> Path:
         roots.append(Path(cfg.processed_dir))
     for root in roots:
         try:
-            return _safe_export_path(path, root)
+            return confine_path(path, root)
         except ValueError:
             continue
     raise HTTPException(status_code=403, detail="Invalid artifact path")

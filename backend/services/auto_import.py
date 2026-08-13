@@ -9,6 +9,8 @@ from pathlib import Path
 
 from sqlalchemy.exc import IntegrityError
 
+from backend.core.paths import confine_path
+
 from ..core.config import get_auto_import_config, get_ingest_config
 from ..db.database import SessionLocal
 from ..db.models import AutoImportRecord
@@ -141,9 +143,11 @@ class AutoImportWatcher:
         try:
             for path in root.rglob("*"):
                 if path.is_file() and path.suffix.lower() in suffixes:
-                    folder = path.parent.resolve()
-                    if folder.is_relative_to(allowed_root):
-                        candidates.add(folder)
+                    try:
+                        folder = confine_path(path.parent, allowed_root, allow_root=True)
+                    except ValueError:
+                        continue
+                    candidates.add(folder)
         except OSError:
             return {"path": str(root), "status": "unavailable", "candidates": 0, "imported": 0}
 

@@ -27,11 +27,12 @@ gsplat installed.
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
+
+from ..core.paths import confine_path
 
 # Accept both Unix (\n) and Windows (\r\n) line endings in the PLY header,
 # mirroring _load_ply_positions_and_colors in reconstruction.py.
@@ -231,12 +232,7 @@ def write_splat(cloud: GaussianCloud, dst: Path, output_root: Path) -> Path:
     expect x,y,z,w instead — if a target viewer renders garbled orientation,
     swap the ``quats[:, [1, 2, 3, 0]]`` reindex here.
     """
-    root = os.path.normcase(os.path.normpath(os.path.realpath(output_root)))
-    output_path = os.path.normcase(os.path.normpath(os.path.realpath(dst)))
-    root_prefix = root if root.endswith(os.sep) else f"{root}{os.sep}"
-    if not output_path.startswith(root_prefix):
-        raise ValueError(f"Splat output path {dst} is outside the export directory")
-    dst = Path(output_path)
+    dst = confine_path(dst, output_root, boundary_name="the export directory")
 
     n = _validate_cloud(cloud)
     order = prune_order(cloud.opacities, keep_ratio=1.0)
