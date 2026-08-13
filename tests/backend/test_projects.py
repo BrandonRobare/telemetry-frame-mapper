@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 from unittest.mock import patch
 
 import pytest
+from PIL import Image as PILImage
 
 from backend.db.models import CoverageRun, Image, Project, Reconstruction, TargetArea
 from backend.db.models import Session as SessionModel
@@ -51,6 +52,49 @@ def test_create_project_keeps_human_readable_name(client):
 
     assert response.status_code == 201
     assert response.json()["name"] == "North Field — Phase 2"
+
+
+def test_project_folder_import_processes_nested_images(client, tmp_path):
+    """Project folder imports invoke the shared recursive ingest service."""
+    from backend.main import app
+    from backend.services.ingest_orchestrator import _run
+    from tests.conftest import TestSessionLocal
+
+    db = app.state.test_db_session
+    project = Project(name="Nested project")
+    db.add(project)
+    db.commit()
+    imports_dir = tmp_path / "imports"
+    nested = imports_dir / "Nested project" / "card" / "DCIM" / "100MEDIA"
+    nested.mkdir(parents=True)
+    PILImage.new("RGB", (100, 100)).save(nested / "DJI_0001.jpg")
+    cfg = type("Cfg", (), {"imports_dir": str(imports_dir)})()
+    ingest_cfg = {
+        "accepted_extensions": [".jpg"],
+        "filter_zero_gps": False,
+        "thumbnail_size_px": 64,
+    }
+
+    with patch("backend.routers.projects.get_config", return_value=cfg), patch(
+        "backend.core.config.get_ingest_config", return_value=ingest_cfg
+    ), patch("backend.core.config.load_config") as mock_load_cfg, patch(
+        "backend.routers.projects.start_import",
+        side_effect=lambda session_id, folder, _db_factory: _run(
+            session_id, folder, TestSessionLocal
+        ),
+    ):
+        mock_load_cfg.return_value.processed_dir = str(tmp_path / "processed")
+        mock_load_cfg.return_value.thumbnail_size_px = 64
+        mock_load_cfg.return_value.fov_horizontal_deg = 83
+        mock_load_cfg.return_value.fov_vertical_deg = 53
+        mock_load_cfg.return_value.target_crs = "EPSG:32617"
+        response = client.post(
+            f"/projects/{project.id}/sessions/import",
+            json={"folder_path": "card", "name": "Nested card"},
+        )
+
+    assert response.status_code == 200
+    assert db.query(Image).filter(Image.session_id == response.json()["id"]).count() == 1
 
 
 def test_list_projects_after_create(client):
