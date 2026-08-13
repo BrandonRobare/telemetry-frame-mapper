@@ -39,8 +39,8 @@ def build_exiftool_args(tags: list[FrameTag], exiftool: str | Path = "exiftool")
                 f"-GPSLatitudeRef={gps_ref(tag.lat, 'N', 'S')}",
                 f"-GPSLongitude={abs(tag.lon):.8f}",
                 f"-GPSLongitudeRef={gps_ref(tag.lon, 'E', 'W')}",
-                f"-GPSAltitude={tag.abs_alt_m:.3f}",
-                "-GPSAltitudeRef=Above Sea Level",
+                f"-GPSAltitude={abs(tag.abs_alt_m):.3f}",
+                f"-GPSAltitudeRef={gps_ref(tag.abs_alt_m, 'Above Sea Level', 'Below Sea Level')}",
                 "-GPSMapDatum=WGS-84",
                 "-Make=DJI",
                 # Height above the launch point, matching what a DJI still writes.

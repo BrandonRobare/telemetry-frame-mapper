@@ -27,8 +27,28 @@ def test_build_exiftool_args_contains_gps_tags() -> None:
     assert "-GPSLongitude=81.25000000" in args
     assert "-GPSLongitudeRef=W" in args
     assert "-GPSAltitude=352.438" in args
+    assert "-GPSAltitudeRef=Above Sea Level" in args
     assert "-DateTimeOriginal=2025:08:06 18:28:47" in args
     assert any("frame_00001.jpg" in str(a) for a in args)
+
+
+def test_build_exiftool_args_encodes_negative_altitude_with_below_sea_level_ref() -> None:
+    tag = FrameTag(
+        source=Path("frames/frame_00001.jpg"),
+        target=Path("geotagged/frame_00001.jpg"),
+        frame_index=1,
+        seconds=0,
+        lat=41.125,
+        lon=-81.25,
+        rel_alt_m=-20.5,
+        abs_alt_m=-20.5,
+        timestamp=None,
+    )
+
+    args = build_exiftool_args([tag])
+
+    assert "-GPSAltitude=20.500" in args
+    assert "-GPSAltitudeRef=Below Sea Level" in args
 
 
 def test_write_exiftool_args_file_non_ascii_path(tmp_path: Path) -> None:
