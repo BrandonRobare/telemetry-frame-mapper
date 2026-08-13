@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -9,7 +10,7 @@ from drone_video_geotagger import cli
 from drone_video_geotagger.exiftool import write_exif
 from drone_video_geotagger.frames import FrameTag
 from drone_video_geotagger.telemetry import TelemetryPoint
-from drone_video_geotagger.video import extract_srt, read_video_start
+from drone_video_geotagger.video import extract_srt, read_video_duration, read_video_start
 
 
 def _tag(tmp_path: Path) -> FrameTag:
@@ -43,6 +44,29 @@ def test_write_exif_missing_exiftool_reports_install_guidance(tmp_path: Path) ->
         write_exif("/missing/bin/exiftool", [_tag(tmp_path)], tmp_path / "exif.args")
 
 
+def test_read_video_duration_parses_ffmpeg_output(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    output = "Duration: 00:01:40.125, start: 0.000000, bitrate: 42 kb/s"
+    monkeypatch.setattr(
+        "drone_video_geotagger.video.subprocess.run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 1, "", output),
+    )
+
+    assert read_video_duration("ffmpeg", tmp_path / "flight.mp4") == pytest.approx(100.125)
+
+
+def test_read_video_duration_returns_none_when_ffmpeg_omits_duration(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(
+        "drone_video_geotagger.video.subprocess.run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 1, "", ""),
+    )
+
+    assert read_video_duration("ffmpeg", tmp_path / "flight.mp4") is None
+
+
 def test_cli_run_reads_video_start_from_video_argument(monkeypatch, tmp_path: Path) -> None:
     video = tmp_path / "flight.mp4"
     video.write_bytes(b"video")
@@ -60,7 +84,8 @@ def test_cli_run_reads_video_start_from_video_argument(monkeypatch, tmp_path: Pa
 
     monkeypatch.setattr(cli, "parse_srt", lambda path: [TelemetryPoint(0.0, 1.0, 2.0, 3.0, 4.0)])
     monkeypatch.setattr(cli, "collect_frames", lambda path: [(path / "frame_00001.jpg", 1)])
-    monkeypatch.setattr(cli, "infer_frame_rate", lambda frames, end_s: 1.0)
+    monkeypatch.setattr(cli, "infer_frame_rate", lambda frames, end_s, duration_s: 1.0)
+    monkeypatch.setattr(cli, "read_video_duration", lambda *_: 1.0)
     monkeypatch.setattr(cli, "read_video_start", fake_read_video_start)
     monkeypatch.setattr(cli, "build_frame_tags", lambda **kwargs: [])
     monkeypatch.setattr(cli, "copy_frames", lambda tags: None)

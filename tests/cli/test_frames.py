@@ -56,7 +56,14 @@ def test_build_frame_tags_rejects_zero_frame_rate() -> None:
 def test_infer_frame_rate_uses_nearest_common_rate() -> None:
     frames = [(Path(f"frame_{index:05d}.jpg"), index) for index in range(1, 117)]
 
-    assert infer_frame_rate(frames, telemetry_end_s=14.5) == 8
+    assert infer_frame_rate(frames, telemetry_end_s=14.5, video_duration_s=14.5) == 8
+
+
+def test_infer_frame_rate_rejects_telemetry_span_that_disagrees_with_video_timing() -> None:
+    frames = [(Path(f"frame_{index:05d}.jpg"), index) for index in range(1, 802)]
+
+    with pytest.raises(ValueError, match=r"telemetry.*--frame-rate"):
+        infer_frame_rate(frames, telemetry_end_s=80, video_duration_s=100)
 
 
 def test_infer_frame_rate_returns_default_without_telemetry() -> None:
