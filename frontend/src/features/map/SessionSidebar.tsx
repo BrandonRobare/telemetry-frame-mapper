@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import type { Session, CoverageResult } from '../../types/api'
 import { useMapStore } from '../../shared/stores/mapStore'
-import { get } from '../../shared/api/client'
+import { apiUrl, get } from '../../shared/api/client'
 import { useRunCoverage } from '../../shared/api/mutations'
 import { Skeleton } from '../../shared/components/Skeleton'
 import GlassSurface from '../../shared/components/GlassSurface'
@@ -10,7 +10,6 @@ import SessionTagsNotes from '../sessions/SessionTagsNotes'
 
 interface TargetAreaOption { id: number; name: string }
 
-const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
 
 interface Props {
   session: Session | undefined
@@ -111,7 +110,7 @@ export default function SessionSidebar({ session, coverage, frameCount, isLoadin
     : '—'
 
   function downloadFile(path: string) {
-    window.open(`${BASE_URL}${path}`, '_blank')
+    window.open(apiUrl(path), '_blank')
   }
 
   return (

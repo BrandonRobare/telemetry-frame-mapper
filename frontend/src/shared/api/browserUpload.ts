@@ -1,5 +1,5 @@
 import type { Session } from '../../types/api'
-import { API_BASE_URL } from './client'
+import { apiUrl } from './client'
 
 export interface BrowserUploadFilePlan {
   file: File
@@ -54,7 +54,7 @@ function throwIfAborted(signal?: AbortSignal) {
 }
 
 async function checkedFetch<T>(path: string, init: RequestInit): Promise<T> {
-  const res = await fetch(`${API_BASE_URL}${path}`, init)
+  const res = await fetch(apiUrl(path), { credentials: 'include', ...init })
   if (!res.ok) throw new Error(await readError(res))
   return res.json() as Promise<T>
 }
@@ -116,7 +116,10 @@ export async function uploadBrowserImport({ name, files, signal, onProgress }: B
     onProgress?.({ uploadId: start.upload_id, uploadedBytes, totalBytes, status: 'importing' })
     return { session: completed.session, uploadId: completed.upload_id }
   } catch (error) {
-    await fetch(`${API_BASE_URL}/uploads/imports/${start.upload_id}/cancel`, { method: 'POST' }).catch(() => undefined)
+    await fetch(apiUrl(`/uploads/imports/${start.upload_id}/cancel`), {
+      method: 'POST',
+      credentials: 'include',
+    }).catch(() => undefined)
     throw error
   }
 }

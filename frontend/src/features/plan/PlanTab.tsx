@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
-import { post, get } from '../../shared/api/client'
+import { apiUrl, post, get } from '../../shared/api/client'
 import { useToast } from '../../shared/hooks/useToast'
 import { Button } from '../../shared/components/Button'
 import TabHeader from '../../shared/components/TabHeader'
@@ -10,7 +10,6 @@ import WeatherAdvisorPanel from './WeatherAdvisorPanel'
 import PlanMap from './PlanMap'
 import { computeCentroid, type CentroidGeometry } from './weatherAdvisor'
 
-const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
 
 interface TargetAreaOut {
   id: number
@@ -307,7 +306,7 @@ export default function PlanTab() {
                 size="sm"
                 style={{ flex: 1 }}
                 disabled={!plan.kml_path}
-                onClick={() => downloadFile(`${BASE_URL}/plans/${plan.id}/kml`)}
+                onClick={() => downloadFile(apiUrl(`/plans/${plan.id}/kml`))}
               >
                 KML ↓
               </Button>
@@ -316,7 +315,7 @@ export default function PlanTab() {
                 size="sm"
                 style={{ flex: 1 }}
                 disabled={!plan.gpx_path}
-                onClick={() => downloadFile(`${BASE_URL}/plans/${plan.id}/gpx`)}
+                onClick={() => downloadFile(apiUrl(`/plans/${plan.id}/gpx`))}
               >
                 GPX ↓
               </Button>
@@ -445,7 +444,7 @@ export default function PlanTab() {
                       variant="ghost"
                       size="sm"
                       style={{ flex: 1, fontSize: '0.7rem' }}
-                      onClick={() => downloadFile(`${BASE_URL}/plans/${plan?.id}/segments/${seg.index}/kml`)}
+                      onClick={() => downloadFile(apiUrl(`/plans/${plan?.id}/segments/${seg.index}/kml`))}
                     >
                       KML ↓
                     </Button>
@@ -455,7 +454,7 @@ export default function PlanTab() {
                       variant="ghost"
                       size="sm"
                       style={{ flex: 1, fontSize: '0.7rem' }}
-                      onClick={() => downloadFile(`${BASE_URL}/plans/${plan?.id}/segments/${seg.index}/gpx`)}
+                      onClick={() => downloadFile(apiUrl(`/plans/${plan?.id}/segments/${seg.index}/gpx`))}
                     >
                       GPX ↓
                     </Button>

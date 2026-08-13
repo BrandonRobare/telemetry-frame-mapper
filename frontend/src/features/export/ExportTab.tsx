@@ -1,6 +1,6 @@
 import { useState, type CSSProperties } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { get, post } from '../../shared/api/client'
+import { apiUrl, get, post, shareUrl } from '../../shared/api/client'
 import { useMapStore } from '../../shared/stores/mapStore'
 import { useToast } from '../../shared/hooks/useToast'
 import { Button } from '../../shared/components/Button'
@@ -10,7 +10,6 @@ import { useCoverageResult } from '../map/hooks/useCoverageResult'
 import { formatCoveragePct } from './coverageSummary'
 import type { Session, Image, Job, MeshStatus, OrthoStatus } from '../../types/api'
 
-const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
 
 // ---- inline hooks ----
 
@@ -143,7 +142,7 @@ function MeshExportCard({ job }: { job: Job }) {
         <div className="flex gap-2 flex-wrap">
           {mesh?.mesh_glb_path && (
             <a
-              href={`${BASE_URL}/reconstruction/${job.id}/mesh?format=glb`}
+              href={apiUrl(`/reconstruction/${job.id}/mesh?format=glb`)}
               download={`mesh_${job.id}.glb`}
               style={downloadLinkStyle}
             >
@@ -152,7 +151,7 @@ function MeshExportCard({ job }: { job: Job }) {
           )}
           {mesh?.mesh_obj_path && (
             <a
-              href={`${BASE_URL}/export/reconstructions/${job.id}/usd`}
+              href={apiUrl(`/export/reconstructions/${job.id}/usd`)}
               download={`mesh_${job.id}_usd_handoff.zip`}
               style={downloadLinkStyle}
               title="USDA mesh, source assets, and georeferencing sidecar."
@@ -162,7 +161,7 @@ function MeshExportCard({ job }: { job: Job }) {
           )}
           {mesh?.mesh_obj_path && (
             <a
-              href={`${BASE_URL}/reconstruction/${job.id}/mesh?format=obj`}
+              href={apiUrl(`/reconstruction/${job.id}/mesh?format=obj`)}
               download={`mesh_${job.id}.obj`}
               style={downloadLinkStyle}
             >
@@ -171,7 +170,7 @@ function MeshExportCard({ job }: { job: Job }) {
           )}
           {mesh?.mesh_mtl_path && (
             <a
-              href={`${BASE_URL}/reconstruction/${job.id}/mesh?format=mtl`}
+              href={apiUrl(`/reconstruction/${job.id}/mesh?format=mtl`)}
               download={`mesh_${job.id}.mtl`}
               style={downloadLinkStyle}
             >
@@ -195,7 +194,7 @@ function PotreeExportCard({ job }: { job: Job }) {
   return (
     <div className="flex gap-2 items-center">
       <a
-        href={`${BASE_URL}/reconstruction/${job.id}/pointcloud`}
+        href={apiUrl(`/reconstruction/${job.id}/pointcloud`)}
         download={`pointcloud_${job.id}.las`}
         style={downloadLinkStyle}
       >
@@ -290,7 +289,7 @@ function OrthoExportCard({ job }: { job: Job }) {
         <div className="flex gap-2 flex-wrap">
           {ortho?.ortho_path && (
             <a
-              href={`${BASE_URL}/reconstruction/${job.id}/ortho`}
+              href={apiUrl(`/reconstruction/${job.id}/ortho`)}
               download={`orthomosaic_${job.id}.tif`}
               style={downloadLinkStyle}
             >
@@ -568,7 +567,7 @@ export default function ExportTab() {
                         className="font-mono text-xs"
                         style={{ color: 'var(--text-muted)', wordBreak: 'break-all', userSelect: 'all' }}
                       >
-                        {BASE_URL}/view/share/{shareResult.share_token}
+                        {shareUrl(`/view/share/${shareResult.share_token}`)}
                       </span>
                     </div>
                   ) : (
@@ -611,7 +610,7 @@ export default function ExportTab() {
               variant="primary"
               onClick={() => {
                 window.open(
-                  `${BASE_URL}/export/survey-report?session_id=${selectedSessionId}&format=html`,
+                  apiUrl(`/export/survey-report?session_id=${selectedSessionId}&format=html`),
                   '_blank',
                 )
               }}
@@ -619,7 +618,7 @@ export default function ExportTab() {
               View / Print Report
             </Button>
             <a
-              href={`${BASE_URL}/export/survey-report?session_id=${selectedSessionId}&format=json`}
+              href={apiUrl(`/export/survey-report?session_id=${selectedSessionId}&format=json`)}
               download={`survey_report_session_${selectedSessionId}.json`}
               style={downloadLinkStyle}
             >
@@ -744,7 +743,7 @@ export default function ExportTab() {
               {(['geojson', 'kml', 'kmz'] as const).map((format) => (
                 <a
                   key={format}
-                  href={`${BASE_URL}/footprints/export?session_id=${selectedSessionId}&format=${format}`}
+                  href={apiUrl(`/footprints/export?session_id=${selectedSessionId}&format=${format}`)}
                   download={`session_${selectedSessionId}_footprints.${format}`}
                   style={downloadLinkStyle}
                 >
@@ -760,7 +759,7 @@ export default function ExportTab() {
               {(['geojson', 'kml', 'kmz'] as const).map((format) => (
                 <a
                   key={format}
-                  href={`${BASE_URL}/coverage/results/export?session_id=${selectedSessionId}&format=${format}`}
+                  href={apiUrl(`/coverage/results/export?session_id=${selectedSessionId}&format=${format}`)}
                   download={`session_${selectedSessionId}_coverage.${format}`}
                   style={downloadLinkStyle}
                 >

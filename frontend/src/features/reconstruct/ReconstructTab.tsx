@@ -19,7 +19,7 @@ import type {
   GcpAccuracyReport,
   QualityScorecard,
 } from '../../types/api'
-import { API_BASE_URL } from '../../shared/api/client'
+import { apiUrl } from '../../shared/api/client'
 
 interface TargetAreaOption { id: number; name: string }
 
@@ -123,7 +123,7 @@ function QualityReportInline({ jobId }: { jobId: number }) {
                 </div>
               )}
               <a
-                href={`${API_BASE_URL}/reconstruction/${jobId}/quality-scorecard`}
+                href={apiUrl(`/reconstruction/${jobId}/quality-scorecard`)}
                 target="_blank"
                 rel="noopener noreferrer"
                 style={{ color: 'var(--accent-strong)', textDecoration: 'underline', alignSelf: 'flex-start' }}
@@ -745,7 +745,7 @@ export default function ReconstructTab() {
                     )}
                     {job.status === 'complete' && (
                       <a
-                        href={`${API_BASE_URL}/reconstruction/${job.id}/splat?lod=full`}
+                        href={apiUrl(`/reconstruction/${job.id}/splat?lod=full`)}
                         download={`splat_${job.id}.ply`}
                         style={{
                           padding: '3px 10px', borderRadius: 'var(--radius-sm)', fontSize: 12,

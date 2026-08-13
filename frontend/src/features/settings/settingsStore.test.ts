@@ -26,7 +26,6 @@ describe('settingsStore', () => {
       coordFormat: 'decimal',
       coordPrecision: 6,
       reducedMotion: false,
-      apiBaseUrl: '',
     })
   })
 
@@ -38,7 +37,6 @@ describe('settingsStore', () => {
     expect(s.coordFormat).toBe('decimal')
     expect(s.coordPrecision).toBe(6)
     expect(s.reducedMotion).toBe(false)
-    expect(s.apiBaseUrl).toBe('')
   })
 
   it('setUnits updates state and persists to localStorage', () => {
@@ -89,13 +87,6 @@ describe('settingsStore', () => {
     expect(stored.lastActiveTab).toBe('review')
   })
 
-  it('setApiBaseUrl persists to localStorage', () => {
-    const { setApiBaseUrl } = useSettingsStore.getState()
-    setApiBaseUrl('http://myserver:9000')
-    expect(useSettingsStore.getState().apiBaseUrl).toBe('http://myserver:9000')
-    const stored = JSON.parse(localStorageMock.getItem('gui-settings') ?? '{}')
-    expect(stored.apiBaseUrl).toBe('http://myserver:9000')
-  })
 
   it('multiple mutations all persist', () => {
     const s = useSettingsStore.getState()

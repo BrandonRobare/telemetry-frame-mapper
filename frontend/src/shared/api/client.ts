@@ -1,4 +1,32 @@
-export const API_BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
+/**
+ * Resolve the backend origin for every browser-facing API URL.
+ *
+ * A nonblank VITE_API_URL supports split frontend/backend deployments. An
+ * empty result deliberately keeps the single-container build same-origin.
+ */
+export function resolveApiBaseUrl({
+  viteApiUrl = import.meta.env.VITE_API_URL,
+}: {
+  viteApiUrl?: string
+} = {}): string {
+  const configured = viteApiUrl?.trim() || ''
+  return configured.replace(/\/+$/, '')
+}
+
+/** Build a backend URL from the shared resolver. */
+export function apiUrl(path: string): string {
+  if (/^https?:\/\//i.test(path)) return path
+  const baseUrl = resolveApiBaseUrl()
+  if (!baseUrl) return path
+  return `${baseUrl}${path.startsWith('/') ? path : `/${path}`}`
+}
+
+/** Build an absolute URL for a person to open on this frontend's origin. */
+export function shareUrl(path: string): string {
+  const relativePath = path.startsWith('/') ? path : `/${path}`
+  const origin = globalThis.location?.origin
+  return origin ? new URL(relativePath, origin).toString() : relativePath
+}
 
 async function errorMessage(res: Response): Promise<string> {
   const fallback = `API error ${res.status}`
@@ -30,7 +58,7 @@ async function errorMessage(res: Response): Promise<string> {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${API_BASE_URL}${path}`, { credentials: 'include', ...init })
+  const res = await fetch(apiUrl(path), { credentials: 'include', ...init })
   if (!res.ok) throw new Error(await errorMessage(res))
   if (res.status === 204 || res.headers.get('content-length') === '0') return undefined as T
   return res.json() as Promise<T>

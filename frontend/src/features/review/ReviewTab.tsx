@@ -1,6 +1,6 @@
 import { useState, useEffect, type CSSProperties } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { get, patch, post } from '../../shared/api/client'
+import { apiUrl, get, patch, post } from '../../shared/api/client'
 import { useMapStore } from '../../shared/stores/mapStore'
 import TabHeader from '../../shared/components/TabHeader'
 import EmptyState from '../../shared/components/EmptyState'
@@ -12,7 +12,6 @@ import { getUrlParam, setUrlParam } from '../../shared/hooks/useUrlState'
 import { CATEGORY_LABELS, SEVERITY_LABELS } from '../session-log/defects'
 import type { Defect, DefectCategory, DefectSeverity, Image } from '../../types/api'
 
-const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
 
 // ---- inline hooks ----
 function useImages(sessionId: number | null) {
@@ -91,7 +90,7 @@ const FLAG_BADGE: Record<Image['flag'], { bg: string; text: string; label: strin
 // ---- thumb URL helper ----
 function thumbUrl(img: Image): string {
   if (img.thumb_path) {
-    return `${BASE_URL}/${img.thumb_path.replace(/\\/g, '/')}`
+    return apiUrl(`/${img.thumb_path.replace(/\\/g, '/')}`)
   }
   return ''
 }

@@ -86,8 +86,8 @@ const GENERAL_DEFAULTS: GeneralSettingsType = {
 
 export default function GeneralSettings() {
   const {
-    defaultTab, units, coordFormat, coordPrecision, reducedMotion, apiBaseUrl,
-    setDefaultTab, setUnits, setCoordFormat, setCoordPrecision, setReducedMotion, setApiBaseUrl,
+    defaultTab, units, coordFormat, coordPrecision, reducedMotion,
+    setDefaultTab, setUnits, setCoordFormat, setCoordPrecision, setReducedMotion,
   } = useSettingsStore()
   const { theme, toggleTheme } = useMapStore()
 
@@ -213,15 +213,7 @@ export default function GeneralSettings() {
             </div>
           </Field>
 
-          <Field label="API Base URL" hint="Override the backend URL (leave blank for default)">
-            <input
-              type="text"
-              value={apiBaseUrl}
-              onChange={(e) => setApiBaseUrl(e.target.value)}
-              placeholder="http://localhost:8000"
-              style={{ ...inputStyle, maxWidth: 360 }}
-            />
-          </Field>
+
         </div>
       </section>
 
