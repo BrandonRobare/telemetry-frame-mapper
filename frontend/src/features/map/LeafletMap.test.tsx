@@ -33,10 +33,19 @@ afterEach(() => {
 })
 
 describe('LeafletMap malformed coverage geometry', () => {
-  it('skips a malformed coverage-gap overlay without firing the root ErrorBoundary', () => {
+  it.each([
+    '{not valid JSON',
+    '{"type":"Point","coordinates":["not-a-number",null]}',
+  ])('skips an unrenderable coverage-gap overlay without firing the root ErrorBoundary', (gapGeoJSON) => {
     render(
       <ErrorBoundary>
-        <LeafletMapView footprints={[]} coverage={coverage} slopeOverlay={null} isLoading={false} error={null} />
+        <LeafletMapView
+          footprints={[]}
+          coverage={{ ...coverage, gap_geojson: gapGeoJSON }}
+          slopeOverlay={null}
+          isLoading={false}
+          error={null}
+        />
       </ErrorBoundary>,
     )
 
