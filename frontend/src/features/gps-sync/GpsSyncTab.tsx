@@ -69,15 +69,23 @@ export default function GpsSyncTab() {
 
     const formData = new FormData()
     formData.append('file', file)
+    formData.append('session_id', String(selectedSessionId))
 
     try {
-      const res = await fetch(`${BASE_URL}/flight-logs/upload?session_id=${selectedSessionId}`, {
+      const res = await fetch(`${BASE_URL}/flight-logs/upload`, {
         method: 'POST',
         body: formData,
       })
       if (!res.ok) {
         const text = await res.text()
-        throw new Error(text || `Upload failed (${res.status})`)
+        let message = text
+        try {
+          const body = JSON.parse(text) as { detail?: unknown }
+          if (typeof body.detail === 'string') message = body.detail
+        } catch {
+          // Keep the text response as the fallback error message.
+        }
+        throw new Error(message || `Upload failed (${res.status})`)
       }
       setUploadSuccess(true)
       setPreviewEnabled(true)
