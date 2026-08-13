@@ -89,7 +89,6 @@ def infer_frame_rate(
                 f"({video_duration_s:g} s) while telemetry ends at {telemetry_end_s:g} s. "
                 "Re-run with --frame-rate set to the extraction rate."
             )
-
     return frame_rate
 
 
@@ -110,6 +109,12 @@ def build_frame_tags(
 
     for source, frame_index in frames:
         seconds = (frame_index - first_index) / frame_rate
+        if seconds >= telemetry[-1].end_s:
+            raise ValueError(
+                f"Cannot geotag frame {frame_index} at {seconds:g}s: telemetry ends at "
+                f"{telemetry[-1].end_s:g}s. Re-run with complete telemetry or exclude frames "
+                "outside its recorded span."
+            )
         lat, lon, rel_alt_m = interpolate(telemetry, seconds)
         timestamp = video_start + timedelta(seconds=seconds) if video_start else None
         tags.append(
