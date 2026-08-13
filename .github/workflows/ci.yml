@@ -177,12 +177,14 @@ jobs:
       - name: Install locked packaging and test environment
         run: uv sync --frozen --group backend --group windows-package --group dev
 
-      - name: Test settings atomic writes on Windows
+      # The Windows job intentionally runs the CLI suite plus settings atomic-write tests:
+      # they exercise path, subprocess, and redirected-stream behavior where Windows differs.
+      # The full suite remains on the Linux matrix to keep the Windows packaging job bounded.
+      - name: Test Windows-sensitive Python suites
         run: >-
           uv run --frozen --no-sync pytest
-          tests/backend/test_settings_router.py::test_concurrent_disjoint_patches_preserve_both_changes
-          tests/backend/test_settings_router.py::test_patch_response_read_does_not_overlap_another_promote
-          tests/backend/test_settings_router.py::test_reset_response_read_does_not_overlap_another_promote
+          tests/cli
+          tests/backend/test_settings_router.py
 
       - name: Build frontend
         working-directory: frontend
