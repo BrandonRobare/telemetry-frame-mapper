@@ -198,6 +198,26 @@ def test_cancel_job_marks_cancelled(setup_test_db):
     assert entry_db.completed_at is not None
 
 
+def test_cancel_pending_reconstruction_marks_target_cancelled(setup_test_db):
+    from backend.main import app
+
+    db = app.state.test_db_session
+    s = _make_session(db)
+    rec = Reconstruction(session_id=s.id, preset="quick", status="pending", frames_used=1)
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+
+    entry = enqueue(RECONSTRUCTION, rec.id)
+
+    assert cancel_job(entry.id)
+
+    db.refresh(rec)
+    assert rec.status == "cancelled"
+    assert rec.step == "cancelled"
+    assert rec.completed_at is not None
+
+
 def test_cancel_completed_job_returns_false(setup_test_db):
     from backend.main import app
 
@@ -243,6 +263,36 @@ def test_claim_stale_jobs_marks_running_as_failed(setup_test_db):
     db.refresh(entry)
     assert entry.status == "failed"
     assert "orphaned" in (entry.error_msg or "")
+
+
+def test_claim_stale_reconstruction_marks_target_failed(setup_test_db):
+    from backend.main import app
+
+    db = app.state.test_db_session
+    s = _make_session(db)
+    rec = Reconstruction(
+        session_id=s.id, preset="quick", status="running_colmap", frames_used=1
+    )
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+
+    entry = JobQueueEntry(
+        job_type=RECONSTRUCTION,
+        target_id=rec.id,
+        status="running",
+        priority=5,
+    )
+    db.add(entry)
+    db.commit()
+
+    claim_stale_jobs()
+
+    db.refresh(rec)
+    assert rec.status == "failed"
+    assert rec.step == "failed"
+    assert "orphaned" in (rec.error_msg or "")
+    assert rec.completed_at is not None
 
 
 def test_claim_stale_jobs_requeues_running_remote_without_touching_attempts(setup_test_db):
@@ -399,6 +449,8 @@ def test_no_handler_marks_as_failed(setup_test_db):
     stored = db.query(JobQueueEntry).filter(JobQueueEntry.id == entry.id).first()
     assert stored is not None
     assert stored.status in ("failed", "completed")
+    db.refresh(rec)
+    assert rec.status == "pending", "non-reconstruction jobs must not alter the target"
 
 
 # ---------------------------------------------------------------------------
