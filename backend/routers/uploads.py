@@ -19,6 +19,7 @@ from ..db.database import SessionLocal, get_db
 from ..db.models import Session as SessionModel
 from ..services.duplicate_detection import find_duplicate_matches
 from ..services.ingest_orchestrator import start_import
+from ..services.upload_reader import read_upload_with_limit
 
 router = APIRouter(prefix="/uploads/imports", tags=["uploads"])
 
@@ -283,7 +284,12 @@ async def upload_import_chunk(
     chunk: UploadFile = File(...),
 ):
     state = _state(upload_id)
-    data = await chunk.read()
+    limits = _limits()
+    data = await read_upload_with_limit(
+        chunk,
+        limits["chunk_size_bytes"],
+        too_large_detail="Chunk exceeds configured size",
+    )
     with _lock_for(upload_id):
         if state["status"] != "uploading":
             raise HTTPException(status_code=409, detail="Upload is not accepting chunks")
@@ -293,9 +299,6 @@ async def upload_import_chunk(
         if planned is None:
             raise HTTPException(status_code=400, detail="Chunk path was not in upload plan")
 
-        limits = _limits()
-        if len(data) > limits["chunk_size_bytes"]:
-            raise HTTPException(status_code=413, detail="Chunk exceeds configured size")
         if planned["received"] + len(data) > planned["size"]:
             raise HTTPException(status_code=413, detail="Chunk exceeds planned file size")
 
