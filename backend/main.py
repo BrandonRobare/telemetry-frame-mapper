@@ -176,11 +176,20 @@ PIN_LOCK_OPEN_PATHS = {
     "/pin-lock/status",
     "/pin-lock/unlock",
 }
+PIN_LOCK_SHARE_SHELL_RESOURCES = {
+    "/favicon.ico",
+    "/favicon.svg",
+    "/manifest.webmanifest",
+    "/pwa-icon-maskable.svg",
+    "/pwa-icon.svg",
+}
 
 
 def _pin_lock_open_path(path: str) -> bool:
     return (
         path in PIN_LOCK_OPEN_PATHS
+        or path in PIN_LOCK_SHARE_SHELL_RESOURCES
+        or path.startswith("/assets/")
         or path.startswith("/docs/")
         or path.startswith("/redoc/")
         or path == "/share"
