@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { createId } from '../id'
 
 export type ToastType = 'success' | 'error' | 'info'
 export interface ToastAction { label: string; onClick: () => void }
@@ -13,7 +14,7 @@ interface ToastState {
 export const useToast = create<ToastState>((set) => ({
   toasts: [],
   addToast: (message, type = 'info', action) => {
-    const id = crypto.randomUUID()
+    const id = createId('toast')
     set((s) => ({ toasts: [...s.toasts, { id, message, type, action }] }))
     // Actioned toasts (e.g. Undo) linger a little longer so they can be clicked.
     setTimeout(() => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })), action ? 6000 : 4000)

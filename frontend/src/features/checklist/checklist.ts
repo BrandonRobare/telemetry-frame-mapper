@@ -43,7 +43,7 @@ export function toggleItem(items: ChecklistItem[], id: string): ChecklistItem[] 
 
 /**
  * Append a new custom, unchecked item to the given group.
- * `id` is supplied by the caller (e.g. crypto.randomUUID()) so this stays pure.
+ * `id` is supplied by the caller so this stays pure.
  * Blank labels (after trimming) are ignored.
  */
 export function addItem(
