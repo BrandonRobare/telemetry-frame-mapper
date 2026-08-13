@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 import asyncio
+from html.parser import HTMLParser
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import pytest
+from starlette.routing import Mount
 
 import backend.main as main
 from backend.core.config import get_api_key_config, get_pin_lock_config
 from backend.services import job_queue
-from backend.services.share_links import hash_password
+from backend.services.share_links import SHARE_LINK_PREFIX, create_share_token, hash_password
 
 
 @pytest.fixture
@@ -37,6 +40,55 @@ def enabled_api_key(enabled_pin_lock, monkeypatch):
     )
     monkeypatch.setenv("TEST_API_KEY_HASH", hash_password("automation-key"))
     yield
+
+
+class _LocalAssetParser(HTMLParser):
+    """Collect root-relative shell resources from a rendered SPA document."""
+
+    def __init__(self):
+        super().__init__()
+        self.paths: set[str] = set()
+
+    def handle_starttag(self, tag, attrs):
+        for name, value in attrs:
+            if name in {"href", "src"} and value and value.startswith("/"):
+                self.paths.add(urlsplit(value).path)
+
+
+@pytest.fixture
+def share_viewer_shell(tmp_path):
+    """Mount a minimal built viewer shell without relying on ignored dist output."""
+    dist_dir = tmp_path / "dist"
+    assets_dir = dist_dir / "assets"
+    assets_dir.mkdir(parents=True)
+    (dist_dir / "index.html").write_text(
+        "<link rel='icon' href='/favicon.svg'>"
+        "<link rel='manifest' href='/manifest.webmanifest'>"
+        "<link rel='apple-touch-icon' href='/pwa-icon.svg'>"
+        "<script src='/assets/viewer.js'></script>"
+    )
+    (assets_dir / "viewer.js").write_text("console.log('share viewer')")
+    (dist_dir / "manifest.webmanifest").write_text('{"icons": []}')
+    (dist_dir / "favicon.svg").write_text("<svg/>")
+    (dist_dir / "pwa-icon.svg").write_text("<svg/>")
+
+    original_routes = list(main.app.router.routes)
+    main.app.router.routes[:] = [
+        route
+        for route in original_routes
+        if not (isinstance(route, Mount) and route.path == "")
+    ]
+    main.app.router.routes.append(
+        main.FrontendMount(
+            "/",
+            app=main.SPAStaticFiles(directory=str(dist_dir), html=True),
+            name="share-viewer-shell",
+        )
+    )
+    try:
+        yield
+    finally:
+        main.app.router.routes[:] = original_routes
 
 
 def test_pin_lock_disabled_leaves_routes_unlocked(client):
@@ -98,6 +150,28 @@ def test_pin_lock_rejects_then_unlocks_all_protected_routes(client, enabled_pin_
     assert "path=/" in cookie
     assert "secure" not in cookie
     assert client.get("/sessions").status_code != 401
+
+
+def test_pin_lock_allows_only_share_viewer_shell_assets(
+    client, enabled_pin_lock, share_viewer_shell
+):
+    token = SHARE_LINK_PREFIX + create_share_token(1)
+    page = client.get(f"/view/share/{token}")
+    assert page.status_code == 200
+
+    parser = _LocalAssetParser()
+    parser.feed(page.text)
+    assert parser.paths == {
+        "/assets/viewer.js",
+        "/favicon.svg",
+        "/manifest.webmanifest",
+        "/pwa-icon.svg",
+    }
+    for asset_path in parser.paths:
+        assert client.get(asset_path).status_code == 200
+
+    for protected_path in ("/sessions", "/processed/thumbnail.jpg", "/export/reconstructions/1"):
+        assert client.get(protected_path).status_code == 401
 
 
 def test_api_key_requires_an_enabled_pin_lock(tmp_path, monkeypatch):
