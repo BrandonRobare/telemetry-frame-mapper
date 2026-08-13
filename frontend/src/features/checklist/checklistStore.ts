@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { createId } from '../../shared/id'
 import {
   type ChecklistGroup,
   type ChecklistItem,
@@ -44,12 +45,6 @@ function saveItems(items: ChecklistItem[]) {
   }
 }
 
-function makeItemId(): string {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return crypto.randomUUID()
-  }
-  return `item-${Date.now()}-${Math.random().toString(36).slice(2)}`
-}
 
 export const useChecklistStore = create<ChecklistStore>((set, get) => ({
   items: loadItems(),
@@ -60,7 +55,7 @@ export const useChecklistStore = create<ChecklistStore>((set, get) => ({
     saveItems(items)
   },
   add: (label, group) => {
-    const items = addItem(get().items, makeItemId(), label, group)
+    const items = addItem(get().items, createId('item'), label, group)
     set({ items })
     saveItems(items)
   },
