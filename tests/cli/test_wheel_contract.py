@@ -59,3 +59,25 @@ def test_wheel_is_cli_only_and_every_console_script_runs(tmp_path: Path) -> None
             text=True,
         )
         assert result.returncode == 0, result.stderr
+
+    frames_dir = tmp_path / "frames"
+    frames_dir.mkdir()
+    (frames_dir / "geotagged.jpg").write_bytes(b"not decoded")
+    job_file = tmp_path / "ingest.yml"
+    job_file.write_text(
+        f"""\
+name: missing-piexif
+output_root: {tmp_path / "output"}
+steps:
+  - kind: ingest
+    source_dir: {frames_dir}
+"""
+    )
+    ingest_result = subprocess.run(
+        [_venv_script(venv_dir, "dvg-pipeline"), str(job_file)],
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+    assert ingest_result.returncode == 1
+    assert "piexif" in ingest_result.stdout

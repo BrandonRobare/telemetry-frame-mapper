@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -211,6 +213,89 @@ steps:
     plan = plan_job(yaml_file)
     assert "missing-frames" in plan
     assert "no JPEG" in plan.lower() or "geotag" in plan.lower()
+
+
+# ── Ingest tests ────────────────────────────────────────────────────────────
+
+
+def test_ingest_missing_piexif_fails_instead_of_reporting_all_images_gps_less(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A CLI-only install must not turn a missing decoder into missing GPS data."""
+    from drone_video_geotagger.pipeline import IngestSpec, _run_ingest
+
+    (tmp_path / "geotagged.jpg").write_bytes(b"not decoded")
+    monkeypatch.setitem(sys.modules, "piexif", None)
+
+    with pytest.raises(RuntimeError, match=r"piexif.*pip install piexif"):
+        _run_ingest(IngestSpec(tmp_path), dry_run=False, output_root=tmp_path / "output")
+
+    assert not (tmp_path / "output" / "ingest_summary.json").exists()
+
+
+def test_ingest_records_images_without_gps_when_piexif_is_available(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Missing GPS remains normal per-image accounting, not a dependency failure."""
+    from drone_video_geotagger.pipeline import IngestSpec, _run_ingest
+
+    (tmp_path / "no-gps.jpg").write_bytes(b"not decoded")
+    monkeypatch.setitem(sys.modules, "piexif", SimpleNamespace(load=lambda _: {"GPS": {}}))
+
+    output = _run_ingest(IngestSpec(tmp_path), dry_run=False, output_root=tmp_path / "output")
+
+    assert "GPS valid: 0" in output
+    assert "GPS missing: 1" in output
+
+
+def test_ingest_counts_malformed_exif_as_missing_gps(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Malformed per-file EXIF remains a no-GPS result after dependency loading."""
+    from drone_video_geotagger.pipeline import IngestSpec, _run_ingest
+
+    class InvalidImageDataError(Exception):
+        pass
+
+    (tmp_path / "malformed.jpg").write_bytes(b"not decoded")
+
+    def fail_load(_: str) -> dict[str, object]:
+        raise InvalidImageDataError("malformed EXIF")
+
+    monkeypatch.setitem(
+        sys.modules,
+        "piexif",
+        SimpleNamespace(InvalidImageDataError=InvalidImageDataError, load=fail_load),
+    )
+
+    output = _run_ingest(IngestSpec(tmp_path), dry_run=False, output_root=tmp_path / "output")
+
+    assert "GPS valid: 0" in output
+    assert "GPS missing: 1" in output
+
+
+def test_ingest_propagates_unexpected_exif_errors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Only malformed EXIF is counted as no-GPS; programming errors stay visible."""
+    from drone_video_geotagger.pipeline import IngestSpec, _run_ingest
+
+    (tmp_path / "broken-reader.jpg").write_bytes(b"not decoded")
+
+    def fail_load(_: str) -> dict[str, object]:
+        raise OSError("disk failure")
+
+    class InvalidImageDataError(Exception):
+        pass
+
+    monkeypatch.setitem(
+        sys.modules,
+        "piexif",
+        SimpleNamespace(InvalidImageDataError=InvalidImageDataError, load=fail_load),
+    )
+
+    with pytest.raises(OSError, match="disk failure"):
+        _run_ingest(IngestSpec(tmp_path), dry_run=False, output_root=tmp_path / "output")
 
 
 # ── PipelineRunner tests ────────────────────────────────────────────────────

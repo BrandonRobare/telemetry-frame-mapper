@@ -213,44 +213,59 @@ def _run_ingest(spec: IngestSpec, dry_run: bool, *, output_root: Path) -> str:
     if not jpegs:
         raise ValueError(f"No JPEG files found in {source_dir}")
 
+    if dry_run:
+        return "\n".join(
+            [
+                f"  source_dir: {source_dir}",
+                f"  total JPEGs: {len(jpegs)}",
+                f"  GPS valid: {len(jpegs)}",
+                "  GPS missing: 0",
+            ]
+        )
+
+    try:
+        import piexif
+    except ModuleNotFoundError as exc:
+        if exc.name == "piexif":
+            raise RuntimeError(
+                "The ingest step requires the piexif dependency; "
+                "install it with `pip install piexif`."
+            ) from exc
+        raise
+
     valid = 0
     no_gps = 0
     for jpg in jpegs:
-        if dry_run:
-            valid += 1
-            continue
-        # Lightweight check: look for GPS EXIF via piexif
+        # Lightweight check: look for GPS EXIF via piexif.
         try:
-            import piexif
-
             exif_dict = piexif.load(str(jpg))
-            gps = exif_dict.get("GPS", {})
-            if gps:
-                valid += 1
-            else:
-                no_gps += 1
-        except Exception:
+        except piexif.InvalidImageDataError:
+            no_gps += 1
+            continue
+
+        gps = exif_dict.get("GPS", {})
+        if gps:
+            valid += 1
+        else:
             no_gps += 1
 
-    if not dry_run:
-        ingest_log = output_root / "ingest_summary.json"
-        ingest_log.parent.mkdir(parents=True, exist_ok=True)
-        ingest_log.write_text(
-            json.dumps(
-                {
-                    "source_dir": str(source_dir),
-                    "total": len(jpegs),
-                    "gps_valid": valid,
-                    "gps_missing": no_gps,
-                    "timestamp": datetime.now(UTC).isoformat(),
-                },
-                indent=2,
-            )
+    ingest_log = output_root / "ingest_summary.json"
+    ingest_log.parent.mkdir(parents=True, exist_ok=True)
+    ingest_log.write_text(
+        json.dumps(
+            {
+                "source_dir": str(source_dir),
+                "total": len(jpegs),
+                "gps_valid": valid,
+                "gps_missing": no_gps,
+                "timestamp": datetime.now(UTC).isoformat(),
+            },
+            indent=2,
         )
-        logger.info(
-            "Ingest summary written to %s (total=%d, valid=%d)",
-            ingest_log, len(jpegs), valid
-        )
+    )
+    logger.info(
+        "Ingest summary written to %s (total=%d, valid=%d)", ingest_log, len(jpegs), valid
+    )
 
     return "\n".join(
         [
