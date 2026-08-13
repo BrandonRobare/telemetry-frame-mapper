@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
+
+import numpy as np
 
 from backend.db.models import Image, Reconstruction, ReconstructionFrame
 from backend.db.models import Session as SessionModel
+from backend.services.colmap_io import ColmapCamera
 
 
 def _db(client):
@@ -283,6 +287,54 @@ def test_calibration_drift_report_is_unavailable_when_sparse_model_is_missing(cl
 
     assert resp.status_code == 200
     assert resp.json()["status"] == "unavailable"
+
+
+def test_calibration_drift_report_uses_largest_fragmented_sparse_model(
+    client, tmp_path, monkeypatch
+):
+    """A sparse/1 winner must not be hidden behind the old sparse/0 path."""
+    db = _db(client)
+    session = SessionModel(name="FragmentedCalibration", folder_path=str(tmp_path))
+    db.add(session)
+    db.commit()
+    db.refresh(session)
+    colmap_dir = tmp_path / "colmap"
+    sparse = colmap_dir / "sparse"
+    for name, image_count in (("0", 1), ("1", 2)):
+        model_dir = sparse / name
+        model_dir.mkdir(parents=True)
+        (model_dir / "images.txt").write_text(
+            "".join(
+                f"{index} 1 0 0 0 0 0 0 1 frame_{index}.jpg\n"
+                for index in range(1, image_count + 1)
+            )
+        )
+    rec = Reconstruction(session_id=session.id, status="complete", colmap_dir=str(colmap_dir))
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+    selected: list[Path] = []
+
+    def fake_read_model(path):
+        selected.append(path)
+        return type(
+            "Model",
+            (),
+            {
+                "cameras": {
+                    1: ColmapCamera(1, "PINHOLE", 100, 100, np.array([50, 50, 50, 50])),
+                    2: ColmapCamera(2, "PINHOLE", 100, 100, np.array([50, 50, 50, 50])),
+                }
+            },
+        )()
+
+    monkeypatch.setattr("backend.routers.reconstruction.read_model", fake_read_model)
+
+    resp = client.get(f"/reconstruction/{rec.id}/calibration-drift-report")
+
+    assert resp.status_code == 200
+    assert resp.json()["available"] is True
+    assert selected == [sparse / "1"]
 
 
 # ---------------------------------------------------------------------------
