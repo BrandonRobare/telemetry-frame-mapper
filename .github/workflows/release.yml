@@ -9,6 +9,10 @@ permissions:
   contents: read
 
 jobs:
+  verification:
+    name: Run complete verification
+    uses: ./.github/workflows/ci.yml
+
   frontend-dist:
     name: Build and attach frontend/dist
     runs-on: ubuntu-latest
@@ -44,7 +48,7 @@ jobs:
 
   publish-frontend-dist:
     name: Publish frontend/dist
-    needs: frontend-dist
+    needs: [verification, frontend-dist]
     runs-on: ubuntu-latest
     permissions:
       contents: write

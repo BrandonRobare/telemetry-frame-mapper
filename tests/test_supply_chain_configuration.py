@@ -26,8 +26,40 @@ def test_ci_uses_locked_uv_environment_and_audits_runtime_groups() -> None:
         "--group backend --group reconstruction"
     ) in ci
     assert "pip-audit -r /tmp/runtime-requirements.txt" in ci
-    assert "pip install" not in ci
+    assert not re.search(r"^\s*pip install\b", ci, flags=re.MULTILINE)
     assert '"pip-audit==2.10.1"' in pyproject
+
+
+def test_reusable_ci_builds_and_smokes_the_wheel_distribution() -> None:
+    ci = CI_WORKFLOW.read_text(encoding="utf-8")
+
+    assert re.search(r"^\s{2}workflow_call:\s*$", ci, flags=re.MULTILINE)
+    assert re.search(r"^  distribution:\n", ci, flags=re.MULTILINE)
+    assert "uv build" in ci
+    assert "uv venv --clear" in ci
+    assert "uv pip install --python" in ci
+    assert "dist/*.whl" in ci
+    assert re.search(r'wheel-venv/bin/drone-video-geotagger" --help', ci)
+    assert re.search(r'wheel-venv/bin/dvg-pipeline" --help', ci)
+
+
+def test_tag_release_invokes_reusable_full_verification_before_publication() -> None:
+    ci = CI_WORKFLOW.read_text(encoding="utf-8")
+    release = RELEASE_WORKFLOW.read_text(encoding="utf-8")
+
+    assert re.search(r'^\s{4}tags:\n\s{6}- "v\*"$', release, flags=re.MULTILINE)
+    for job in ("test", "frontend", "docker-build", "distribution", "windows-package"):
+        assert re.search(rf"^  {job}:\n", ci, flags=re.MULTILINE)
+    assert re.search(
+        r'^  verification:\n(?:.*\n)*?^    uses: \.\/\.github\/workflows\/ci\.yml$',
+        release,
+        flags=re.MULTILINE,
+    )
+    assert re.search(
+        r"^  publish-frontend-dist:\n(?:.*\n)*?^    needs: \[verification, frontend-dist\]$",
+        release,
+        flags=re.MULTILINE,
+    )
 
 
 def test_docker_uses_locked_uv_runtime_environment_and_ci_smokes_health() -> None:
@@ -69,6 +101,8 @@ def test_dependabot_keeps_github_actions_updates_enabled() -> None:
 
 if __name__ == "__main__":
     test_ci_uses_locked_uv_environment_and_audits_runtime_groups()
+    test_reusable_ci_builds_and_smokes_the_wheel_distribution()
+    test_tag_release_invokes_reusable_full_verification_before_publication()
     test_docker_uses_locked_uv_runtime_environment_and_ci_smokes_health()
     test_release_actions_are_immutable_and_write_scope_is_publication_job_only()
     test_dependabot_keeps_github_actions_updates_enabled()
