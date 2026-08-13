@@ -4,6 +4,7 @@ import type { LatLngBoundsExpression, Layer } from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import type { Footprint, CoverageResult } from '../../types/api'
 import { useMapStore } from '../../shared/stores/mapStore'
+import { isRenderableGeoJSON, parseRenderableGeoJSON } from '../../shared/utils/geojson'
 
 const BASEMAPS = {
   esri_satellite: {
@@ -51,8 +52,8 @@ function FitBounds({ footprints }: { footprints: Footprint[] }) {
     const coords: number[][] = []
     footprints.forEach((fp) => {
       try {
-        const geom = JSON.parse(fp.geom_geojson)
-        if (geom.coordinates) {
+        const geom: unknown = JSON.parse(fp.geom_geojson)
+        if (isRenderableGeoJSON(geom) && geom.coordinates) {
           const flat = (geom.coordinates as number[][][]).flat(2)
           for (let i = 0; i < flat.length; i += 2) coords.push([flat[i + 1], flat[i]])
         }
@@ -74,12 +75,7 @@ export default function LeafletMapView({ footprints, coverage, isLoading, error,
   const basemap = BASEMAPS[basemapId as keyof typeof BASEMAPS] ?? BASEMAPS.esri_satellite
 
   const gapGeoJSON = useMemo(() => {
-    if (!coverage?.gap_geojson) return null
-    try {
-      return JSON.parse(coverage.gap_geojson)
-    } catch {
-      return null
-    }
+    return parseRenderableGeoJSON(coverage?.gap_geojson)
   }, [coverage])
 
   if (error) {
@@ -117,9 +113,11 @@ export default function LeafletMapView({ footprints, coverage, isLoading, error,
         >((acc, fp) => {
           if (!fp.geom_geojson) return acc
           try {
+            const geometry: unknown = JSON.parse(fp.geom_geojson)
+            if (!isRenderableGeoJSON(geometry)) return acc
             acc.push({
               type: 'Feature',
-              geometry: JSON.parse(fp.geom_geojson),
+              geometry,
               properties: { id: fp.id },
             })
           } catch {
@@ -213,7 +211,7 @@ export default function LeafletMapView({ footprints, coverage, isLoading, error,
         {activeLayers.coverage && gapGeoJSON && (
           <GeoJSON
             key={`cov-${coverage?.id}`}
-            data={gapGeoJSON}
+            data={gapGeoJSON as GeoJSON.GeoJsonObject}
             style={{
               color: COVERAGE_COLOR,
               fillColor: COVERAGE_COLOR,
