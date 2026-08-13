@@ -58,7 +58,11 @@ def frame_numbering_gap_summary(frames: list[tuple[Path, int]]) -> str | None:
     return None
 
 
-def infer_frame_rate(frames: list[tuple[Path, int]], telemetry_end_s: float) -> float:
+def infer_frame_rate(
+    frames: list[tuple[Path, int]],
+    telemetry_end_s: float,
+    video_duration_s: float | None = None,
+) -> float:
     gap_summary = frame_numbering_gap_summary(frames)
     if gap_summary:
         raise ValueError(
@@ -70,10 +74,23 @@ def infer_frame_rate(frames: list[tuple[Path, int]], telemetry_end_s: float) -> 
         return 8.0
 
     rough_rate = len(frames) / telemetry_end_s
+    frame_rate = rough_rate
     for candidate in (1, 2, 4, 5, 8, 10, 12, 15, 24, 25, 29.97, 30):
         if math.isclose(rough_rate, candidate, rel_tol=0.015, abs_tol=0.05):
-            return float(candidate)
-    return rough_rate
+            frame_rate = float(candidate)
+            break
+
+    if video_duration_s and video_duration_s > 0:
+        implied_span_s = (frames[-1][1] - frames[0][1]) / frame_rate
+        if not math.isclose(implied_span_s, video_duration_s, rel_tol=0.03, abs_tol=0.05):
+            raise ValueError(
+                "Cannot safely infer frame rate: the frame-number span "
+                f"({implied_span_s:g} s) disagrees with the video duration "
+                f"({video_duration_s:g} s) while telemetry ends at {telemetry_end_s:g} s. "
+                "Re-run with --frame-rate set to the extraction rate."
+            )
+
+    return frame_rate
 
 
 def build_frame_tags(

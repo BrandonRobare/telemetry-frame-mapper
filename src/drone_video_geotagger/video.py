@@ -37,6 +37,27 @@ def extract_srt(ffmpeg: str | Path, video: Path, srt_path: Path) -> None:
         raise RuntimeError(f"ffmpeg could not extract SRT metadata:\n{result.stderr}")
 
 
+def read_video_duration(ffmpeg: str | Path, video: Path) -> float | None:
+    try:
+        result = subprocess.run(
+            [str(ffmpeg), "-hide_banner", "-i", external_file_arg(video, ffmpeg)],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+    except FileNotFoundError as exc:
+        raise RuntimeError(
+            f"ffmpeg executable not found: {ffmpeg}. "
+            "Install ffmpeg or pass --ffmpeg /path/to/ffmpeg."
+        ) from exc
+    text = result.stdout + "\n" + result.stderr
+    match = re.search(r"Duration:\s*(\d+):(\d{2}):(\d{2}(?:\.\d+)?)", text)
+    if not match:
+        return None
+    hours, minutes, seconds = match.groups()
+    return int(hours) * 3600 + int(minutes) * 60 + float(seconds)
+
+
 def read_video_start(ffmpeg: str | Path, video: Path) -> datetime | None:
     try:
         result = subprocess.run(
