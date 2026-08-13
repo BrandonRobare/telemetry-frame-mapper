@@ -41,6 +41,9 @@ source-only dependencies with:
 uv sync --group backend --group dev
 ```
 
+`backend` and `dev` are PEP 735 dependency groups for a source checkout, not pip-installable wheel
+extras.
+
 `ffmpeg` and `exiftool` must be on your `PATH` (or passed with `--ffmpeg` / `--exiftool`). COLMAP
 and a CUDA GPU are needed only for reconstruction. Full setup, including per-platform binaries and
 GPU training, is in [docs/INSTALL.md](docs/INSTALL.md).
