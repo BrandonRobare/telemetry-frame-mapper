@@ -1,7 +1,7 @@
 import { useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import type { Job } from '../../../types/api'
-import { API_BASE_URL, get } from '../../../shared/api/client'
+import { apiUrl, get } from '../../../shared/api/client'
 
 export type SlopeBounds = [[number, number], [number, number]]
 
@@ -23,7 +23,9 @@ export function latestCompletedReconstructionId(jobs: Job[], sessionId: number |
 }
 
 async function fetchSlopeOverlay(reconstructionId: number) {
-  const response = await fetch(`${API_BASE_URL}/export/reconstructions/${reconstructionId}/slope`)
+  const response = await fetch(apiUrl(`/export/reconstructions/${reconstructionId}/slope`), {
+    credentials: 'include',
+  })
   if (!response.ok) {
     const body = await response.json().catch(() => null) as { detail?: unknown } | null
     throw new Error(typeof body?.detail === 'string' ? body.detail : `API error ${response.status}`)

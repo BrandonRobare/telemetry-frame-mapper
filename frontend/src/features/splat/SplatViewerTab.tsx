@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { get, post, del } from '../../shared/api/client'
+import { apiUrl, get, post, del } from '../../shared/api/client'
 import { useMapStore } from '../../shared/stores/mapStore'
 import { Skeleton } from '../../shared/components/Skeleton'
 import EmptyState from '../../shared/components/EmptyState'
@@ -38,7 +38,6 @@ import {
   type NarrationPoint,
 } from './presentationMode'
 
-const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
 
 // Radius (world units, ~meters) within which a flown-through camera position
 // triggers an annotation's narration callout during presentation mode.
@@ -169,7 +168,9 @@ function useSemanticOverlay(reconstructionId: number | null, enabled: boolean) {
   return useQuery<SemanticOverlay>({
     queryKey: ['semantic-overlay', reconstructionId, 'preview'],
     queryFn: async () => {
-      const res = await fetch(`${BASE_URL}/reconstruction/${reconstructionId!}/semantic-labels/overlay?lod=preview`)
+      const res = await fetch(apiUrl(`/reconstruction/${reconstructionId!}/semantic-labels/overlay?lod=preview`), {
+        credentials: 'include',
+      })
       if (!res.ok) throw new Error(`Semantic overlay fetch failed: ${res.status}`)
       return parseSemanticOverlay(await res.arrayBuffer())
     },
@@ -695,7 +696,7 @@ function FlythroughControls({
       )}
       {status?.flythrough_status === 'complete' && status.flythrough_path && (
         <a
-          href={`${BASE_URL}/reconstruction/${reconstructionId}/flythrough`}
+          href={apiUrl(`/reconstruction/${reconstructionId}/flythrough`)}
           download={`flythrough_${reconstructionId}.mp4`}
           style={{ color: '#E2A877', fontSize: 11, textDecoration: 'none' }}
         >
@@ -1209,7 +1210,7 @@ function SplatCanvas({
         })
         viewerRef.current = viewer
 
-        const splatUrl = `${BASE_URL}/reconstruction/${reconstructionId}/splat?lod=preview`
+        const splatUrl = apiUrl(`/reconstruction/${reconstructionId}/splat?lod=preview`)
         await viewer.addSplatScene(splatUrl, { streamView: true, format: SceneFormat.Ply })
         if (!cancelled) {
           setLoading(false)
@@ -1498,7 +1499,7 @@ function SplatCanvas({
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
         <p style={{ color: 'var(--danger, #f85149)', fontSize: 13 }}>Viewer error: {error}</p>
         <a
-          href={`${BASE_URL}/reconstruction/${reconstructionId}/splat?lod=full`}
+          href={apiUrl(`/reconstruction/${reconstructionId}/splat?lod=full`)}
           download={`splat_${reconstructionId}.ply`}
           style={{ color: 'var(--accent-strong)', fontSize: 13 }}
         >
@@ -1706,7 +1707,7 @@ function AnnotationsList({ reconstructionId, annotations }: AnnotationsListProps
         ))}
       </div>
       <a
-        href={`${BASE_URL}/reconstruction/${reconstructionId}/annotations.geojson`}
+        href={apiUrl(`/reconstruction/${reconstructionId}/annotations.geojson`)}
         download={`annotations_${reconstructionId}.geojson`}
         style={{
           display: 'block', marginTop: 6, fontSize: 10,
@@ -1993,7 +1994,7 @@ export default function SplatViewerTab() {
               {splitPaneActive ? '⊟ Full 3D' : '⊞ Split View'}
             </button>
             <a
-              href={`${BASE_URL}/reconstruction/${activeId}/pointcloud`}
+              href={apiUrl(`/reconstruction/${activeId}/pointcloud`)}
               download={`pointcloud_${activeId}.las`}
               style={{
                 display: 'block',

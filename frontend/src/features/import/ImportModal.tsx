@@ -11,9 +11,8 @@ import { useMapStore } from '../../shared/stores/mapStore'
 import { useQuickReport } from '../map/hooks/useQuickReport'
 import RapidQACard from '../overview/RapidQACard'
 import { Button } from '../../shared/components/Button'
+import { apiUrl } from '../../shared/api/client'
 import { validateImportPath } from './validateImportPath'
-
-const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
 
 type HealthStatus = 'checking' | 'ok' | 'down'
 type ImportMode = 'browser' | 'server-path'
@@ -23,7 +22,7 @@ function useBackendHealth(enabled: boolean): HealthStatus {
 
   const check = useCallback(async (signal: AbortSignal) => {
     try {
-      const res = await fetch(`${BASE_URL}/health`, { signal })
+      const res = await fetch(apiUrl('/health'), { signal, credentials: 'include' })
       setStatus(res.ok ? 'ok' : 'down')
     } catch {
       if (!signal.aborted) setStatus('down')

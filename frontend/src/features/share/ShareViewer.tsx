@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { get, post } from '../../shared/api/client'
+import { apiUrl, get, post } from '../../shared/api/client'
 
 interface ShareViewerPayload {
   reconstruction_id: number
@@ -264,8 +264,10 @@ function ShareError({ status, message }: { status: number; message: string }) {
 }
 
 function artifactUrl(path: string, token: string, legacy: boolean) {
-  if (!legacy) return path
-  return path + (path.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(token)
+  const withToken = legacy
+    ? path + (path.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(token)
+    : path
+  return apiUrl(withToken)
 }
 
 function SharePasswordPrompt({
