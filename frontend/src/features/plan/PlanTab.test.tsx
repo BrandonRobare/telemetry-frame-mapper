@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import PlanTab from './PlanTab'
+import { ErrorBoundary } from '../../ErrorBoundary'
 import { useToast } from '../../shared/hooks/useToast'
 
 vi.mock('./PlanMap', () => ({
@@ -52,9 +53,11 @@ function renderPlanTab() {
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
   return render(
-    <QueryClientProvider client={queryClient}>
-      <PlanTab />
-    </QueryClientProvider>,
+    <ErrorBoundary>
+      <QueryClientProvider client={queryClient}>
+        <PlanTab />
+      </QueryClientProvider>
+    </ErrorBoundary>,
   )
 }
 
@@ -62,6 +65,26 @@ afterEach(() => {
   cleanup()
   vi.unstubAllGlobals()
   useToast.setState({ toasts: [] })
+})
+
+describe('PlanTab malformed lane geometry', () => {
+  it('skips a malformed lanes overlay without firing the root ErrorBoundary', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.endsWith('/target-areas/')) return jsonResponse({ id: 7 })
+      if (url.endsWith('/plans/generate')) {
+        return jsonResponse({ ...plan, lanes_geojson: '{not valid JSON' })
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    }))
+    renderPlanTab()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Draw area' }))
+    await screen.findByText(/Target area saved/)
+    fireEvent.click(screen.getByRole('button', { name: 'Generate Plan' }))
+
+    expect(await screen.findByText('Plan Summary')).toBeTruthy()
+    expect(screen.queryByText('Render error. Check console for details')).toBeNull()
+  })
 })
 
 describe('PlanTab segment downloads', () => {
