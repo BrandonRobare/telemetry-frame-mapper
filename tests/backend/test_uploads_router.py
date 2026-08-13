@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import json
+from io import BytesIO
 from unittest.mock import patch
+
+from PIL import Image as PILImage
 
 
 def test_browser_upload_plan_rejects_oversized_total(client, tmp_path):
@@ -95,6 +98,77 @@ def test_browser_upload_chunks_complete_and_start_import(client, tmp_path):
     assert uploaded.read_bytes() == b"abcdef"
     assert mock_start.call_count == 1
     assert mock_start.call_args.args[0] == session_id
+
+
+def test_browser_upload_imports_nested_webkit_relative_path(client, tmp_path):
+    """The browser uploader preserves a nested path which shared ingest then imports."""
+    from backend.db.models import Image
+    from backend.main import app
+    from backend.services.ingest_orchestrator import _run
+    from tests.conftest import TestSessionLocal
+
+    payload = BytesIO()
+    PILImage.new("RGB", (100, 100)).save(payload, format="JPEG")
+    image_bytes = payload.getvalue()
+    cfg = type("Cfg", (), {"imports_dir": str(tmp_path / "imports")})()
+    limits = {
+        "chunk_size_bytes": len(image_bytes),
+        "max_file_bytes": len(image_bytes),
+        "max_total_bytes": len(image_bytes),
+        "quota_bytes": len(image_bytes) * 2,
+        "cleanup_after_hours": 24,
+        "accepted_extensions": [".jpg"],
+    }
+    ingest_cfg = {
+        "accepted_extensions": [".jpg"],
+        "filter_zero_gps": False,
+        "thumbnail_size_px": 64,
+        "thumbnail_jpeg_quality": 75,
+    }
+
+    with patch("backend.routers.uploads.get_config", return_value=cfg), patch(
+        "backend.routers.uploads.get_browser_upload_config", return_value=limits
+    ), patch("backend.core.config.get_ingest_config", return_value=ingest_cfg), patch(
+        "backend.core.config.load_config"
+    ) as mock_load_cfg, patch(
+        "backend.routers.uploads.start_import",
+        side_effect=lambda session_id, folder, _db_factory: _run(
+            session_id, folder, TestSessionLocal
+        ),
+    ):
+        mock_load_cfg.return_value.processed_dir = str(tmp_path / "processed")
+        mock_load_cfg.return_value.thumbnail_size_px = 64
+        mock_load_cfg.return_value.fov_horizontal_deg = 83
+        mock_load_cfg.return_value.fov_vertical_deg = 53
+        mock_load_cfg.return_value.target_crs = "EPSG:32617"
+        start = client.post("/uploads/imports/start", json={
+            "name": "Nested browser import",
+            "total_bytes": len(image_bytes),
+            "files": [{"path": "DCIM/100MEDIA/DJI_0001.jpg", "size": len(image_bytes)}],
+        })
+        upload_id = start.json()["upload_id"]
+        chunk = client.post(
+            f"/uploads/imports/{upload_id}/chunk",
+            data={"path": "DCIM/100MEDIA/DJI_0001.jpg", "offset": "0"},
+            files={"chunk": ("chunk", image_bytes, "application/octet-stream")},
+        )
+        assert chunk.status_code == 200
+        completed = client.post(f"/uploads/imports/{upload_id}/complete")
+
+    assert completed.status_code == 200
+    db = app.state.test_db_session
+    images = db.query(Image).filter(Image.session_id == completed.json()["session_id"]).all()
+    assert [image.filepath for image in images] == [
+        str(
+            tmp_path
+            / "imports"
+            / ".browser_uploads"
+            / upload_id
+            / "DCIM"
+            / "100MEDIA"
+            / "DJI_0001.jpg"
+        )
+    ]
 
 
 def test_browser_upload_accepts_user_selected_cloud_synced_folder(client, tmp_path):

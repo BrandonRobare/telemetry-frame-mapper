@@ -4,6 +4,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 from fastapi import HTTPException
+from PIL import Image as PILImage
 
 from backend.db.models import Defect, Image, Reconstruction, SessionLogEntry
 from backend.db.models import Session as SessionModel
@@ -38,6 +39,46 @@ def test_get_session_found(client):
     data = resp.json()
     assert data["id"] == s.id
     assert data["name"] == s.name
+
+
+def test_session_folder_import_processes_nested_images(client, tmp_path):
+    """Server-side session imports use the same recursive ingest service as uploads."""
+    from backend.db.models import Image
+    from backend.main import app
+    from backend.services.ingest_orchestrator import _run
+    from tests.conftest import TestSessionLocal
+
+    imports_dir = tmp_path / "imports"
+    nested = imports_dir / "card" / "DCIM" / "100MEDIA"
+    nested.mkdir(parents=True)
+    PILImage.new("RGB", (100, 100)).save(nested / "DJI_0001.jpg")
+    cfg = type("Cfg", (), {"imports_dir": str(imports_dir)})()
+    ingest_cfg = {
+        "accepted_extensions": [".jpg"],
+        "filter_zero_gps": False,
+        "thumbnail_size_px": 64,
+    }
+
+    with patch("backend.routers.sessions.get_config", return_value=cfg), patch(
+        "backend.core.config.get_ingest_config", return_value=ingest_cfg
+    ), patch("backend.core.config.load_config") as mock_load_cfg, patch(
+        "backend.routers.sessions.start_import",
+        side_effect=lambda session_id, folder, _db_factory: _run(
+            session_id, folder, TestSessionLocal
+        ),
+    ):
+        mock_load_cfg.return_value.processed_dir = str(tmp_path / "processed")
+        mock_load_cfg.return_value.thumbnail_size_px = 64
+        mock_load_cfg.return_value.fov_horizontal_deg = 83
+        mock_load_cfg.return_value.fov_vertical_deg = 53
+        mock_load_cfg.return_value.target_crs = "EPSG:32617"
+        response = client.post(
+            "/sessions/import", json={"folder_path": "card", "name": "Nested card"}
+        )
+
+    assert response.status_code == 200
+    db = app.state.test_db_session
+    assert db.query(Image).filter(Image.session_id == response.json()["id"]).count() == 1
 
 
 def test_delete_session(client):
