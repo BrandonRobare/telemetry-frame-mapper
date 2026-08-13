@@ -286,19 +286,27 @@ function LogPanel({ recId, isActive }: { recId: number; isActive: boolean }) {
   )
 }
 
-const STATUS_BADGE: Record<string, { bg: string; text: string; label: string }> = {
+type StatusBadge = { bg: string; text: string; label: string }
+
+const STATUS_BADGE: Record<Job['status'], StatusBadge> = {
   pending:        { bg: 'var(--tan-soft)',     text: 'var(--tan-text)',      label: 'Pending' },
   running_colmap: { bg: 'var(--warning-soft)', text: 'var(--warning)',       label: 'COLMAP' },
   running_gsplat: { bg: 'var(--accent-soft)',  text: 'var(--accent-strong)', label: 'Gaussian' },
+  cancelling:     { bg: 'var(--warning-soft)', text: 'var(--warning)',       label: 'Cancelling' },
+  cancelled:      { bg: 'var(--surface)',      text: 'var(--text)',          label: 'Cancelled' },
   complete:       { bg: 'var(--success-soft)', text: 'var(--success)',       label: 'Complete' },
   failed:         { bg: 'var(--danger-soft)',  text: 'var(--danger)',        label: 'Failed' },
+}
+
+function statusBadge(status: string): StatusBadge {
+  return STATUS_BADGE[status as Job['status']] ?? { bg: 'var(--surface)', text: 'var(--text)', label: status }
 }
 
 function jobStatusBadgeColor(status: string): ComponentProps<typeof Badge>['color'] {
   if (status === 'complete') return 'sage'
   if (status === 'failed') return 'red'
   if (status === 'pending') return 'tan'
-  if (status === 'running_colmap') return 'amber'
+  if (status === 'running_colmap' || status === 'cancelling') return 'amber'
   if (status === 'running_gsplat') return 'terracotta'
   return 'muted'
 }
@@ -395,7 +403,7 @@ export default function JobsTab() {
             </h2>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {running.map((job) => {
-                const s = STATUS_BADGE[job.status]
+                const s = statusBadge(job.status)
                 const eta = formatEta(job.started_at, job.progress_pct)
                 return (
                   <div
@@ -500,7 +508,7 @@ export default function JobsTab() {
               </thead>
               <tbody>
                 {done.map((job) => {
-                  const s = STATUS_BADGE[job.status] ?? { bg: 'var(--surface)', text: 'var(--text)', label: job.status }
+                  const s = statusBadge(job.status)
                   return (
                     <tr key={job.id} style={{ borderBottom: '1px solid var(--border)' }}>
                       <td style={{ padding: '8px 10px', color: 'var(--text-muted)' }}>{job.id}</td>
