@@ -85,6 +85,24 @@ def test_ci_uses_locked_uv_environment_and_audits_runtime_groups() -> None:
     assert '"pip-audit==2.10.1"' in pyproject
 
 
+def test_windows_ci_runs_documented_path_and_subprocess_sensitive_pytest_suites() -> None:
+    ci = CI_WORKFLOW.read_text(encoding="utf-8")
+
+    windows_job = re.search(
+        r"^  windows-package:\n(?P<body>.*?)(?=^  [a-z][\w-]*:\n|\Z)",
+        ci,
+        flags=re.MULTILINE | re.DOTALL,
+    )
+
+    assert windows_job is not None
+    body = windows_job.group("body")
+    assert "Test Windows-sensitive Python suites" in body
+    assert "tests/cli" in body
+    assert "tests/backend/test_settings_router.py" in body
+    assert "The Windows job intentionally runs the CLI suite" in body
+    assert "path, subprocess, and redirected-stream behavior" in body
+
+
 def test_reusable_ci_builds_and_smokes_the_wheel_distribution() -> None:
     ci = CI_WORKFLOW.read_text(encoding="utf-8")
 
@@ -159,6 +177,7 @@ def test_dependabot_keeps_github_actions_updates_enabled() -> None:
 if __name__ == "__main__":
     test_release_version_declarations_agree()
     test_ci_uses_locked_uv_environment_and_audits_runtime_groups()
+    test_windows_ci_runs_documented_path_and_subprocess_sensitive_pytest_suites()
     test_reusable_ci_builds_and_smokes_the_wheel_distribution()
     test_tag_release_invokes_reusable_full_verification_before_publication()
     test_docker_uses_locked_uv_runtime_environment_and_ci_smokes_health()
