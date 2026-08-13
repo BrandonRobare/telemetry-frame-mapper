@@ -1,9 +1,10 @@
-import { useState, useEffect, type CSSProperties } from 'react'
+import { useState, useEffect, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { apiUrl, get, patch, post } from '../../shared/api/client'
 import { useMapStore } from '../../shared/stores/mapStore'
 import TabHeader from '../../shared/components/TabHeader'
 import EmptyState from '../../shared/components/EmptyState'
+import ConfirmDialog from '../../shared/components/ConfirmDialog'
 import InfoHint from '../../shared/components/InfoHint'
 import { FrustumCard, FrustumMark } from '../../shared/components/FrustumCard'
 import { ReconstructLoader } from '../../shared/components/Skeleton'
@@ -543,20 +544,6 @@ function BatchToolbar({
   onMarkSkip: () => void
   onSetFlag: (flag: Image['flag']) => void
 }) {
-  // Keyboard shortcuts for fast selection on large flights (ignored while typing).
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      const t = e.target as HTMLElement | null
-      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return
-      if (e.metaKey || e.ctrlKey || e.altKey) return
-      if (e.key === 'a') { e.preventDefault(); onSelectAllShown() }
-      else if (e.key === 'u') { onSelectUsable() }
-      else if (e.key === 'Escape') { onClear() }
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onSelectAllShown, onSelectUsable, onClear])
-
   const btn: CSSProperties = {
     background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)',
     padding: '3px 9px', cursor: 'pointer', color: 'var(--text)', fontFamily: 'var(--font-display)', fontSize: 12,
@@ -605,6 +592,7 @@ export default function ReviewTab() {
   const [sortBy, setSortBy] = useState<'none' | 'reproj'>(() =>
     getUrlParam('sort') === 'reproj' ? 'reproj' : 'none',
   )
+  const [clearConfirmationOpen, setClearConfirmationOpen] = useState(false)
 
   // Deep-link the Review filters (e.g. ?tab=review&flag=blurry&sort=reproj).
   useEffect(() => { setUrlParam('flag', activeFlag ?? null) }, [activeFlag])
@@ -652,8 +640,24 @@ export default function ReviewTab() {
   function selectUsable() {
     setSelectionMutation.mutate(usableIds)
   }
+  function requestClearSelection() {
+    setClearConfirmationOpen(true)
+  }
   function clearSelection() {
     setSelectionMutation.mutate([])
+    setClearConfirmationOpen(false)
+  }
+
+  function handleGridKeyDown(e: ReactKeyboardEvent<HTMLDivElement>) {
+    if (e.target !== e.currentTarget || e.metaKey || e.ctrlKey || e.altKey) return
+    if (e.key === 'a') {
+      e.preventDefault()
+      selectAllShown()
+    } else if (e.key === 'u') {
+      selectUsable()
+    } else if (e.key === 'Escape') {
+      requestClearSelection()
+    }
   }
 
   const shownIds = filtered.map((img) => img.id)
@@ -697,13 +701,25 @@ export default function ReviewTab() {
         selectedCount={selectedSet.size}
         onSelectAllShown={selectAllShown}
         onSelectUsable={selectUsable}
-        onClear={clearSelection}
+        onClear={requestClearSelection}
         onMarkUsable={markShownUsable}
         onMarkSkip={markShownSkip}
         onSetFlag={setShownFlag}
       />
+      <ConfirmDialog
+        open={clearConfirmationOpen}
+        title="Clear reconstruction selection?"
+        description={`This will remove all ${selectedSet.size} selected frame${selectedSet.size === 1 ? '' : 's'} from the next reconstruction.`}
+        confirmLabel="Clear selection"
+        danger
+        loading={setSelectionMutation.isPending}
+        onConfirm={clearSelection}
+        onCancel={() => setClearConfirmationOpen(false)}
+      />
       <div
         className="fm-review-grid flex-1 overflow-y-auto p-4"
+        tabIndex={-1}
+        onKeyDown={handleGridKeyDown}
         style={{
           display: 'grid',
           gridTemplateColumns: 'repeat(auto-fill, minmax(190px, 1fr))',
