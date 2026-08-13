@@ -77,14 +77,17 @@ function LifecyclePolicy() {
   })
 
   function addRule() {
+    setResult(null)
     setRules((prev) => [...prev, { target: 'raw_frames', age_days: 30, disk_pct: null }])
   }
 
   function removeRule(index: number) {
+    setResult(null)
     setRules((prev) => prev.filter((_, i) => i !== index))
   }
 
   function updateRule(index: number, patch: Partial<PolicyRuleInput>) {
+    setResult(null)
     setRules((prev) =>
       prev.map((r, i) => (i === index ? { ...r, ...patch } : r))
     )
