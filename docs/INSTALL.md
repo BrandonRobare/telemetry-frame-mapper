@@ -102,10 +102,13 @@ $env:DRONE_MAPPING_PIN_HASH = python -c "from getpass import getpass; from backe
 
 The prompt does not echo or store the PIN in shell history. Use a persistent secret manager or
 service environment for production; the PowerShell assignment above lasts only for that shell.
-While enabled, every API endpoint, the browser app and its static
-assets, `/processed` files, and share routes require an unlock cookie. `/health` and FastAPI docs
-remain available for operations. Unlock with `POST /pin-lock/unlock` JSON `{"pin":"..."}`; a
-successful `204` sets an HttpOnly, SameSite=Lax cookie valid for `session_ttl` seconds (8 hours by
+While enabled, non-share UI and API paths and `/processed` files require an unlock cookie. Share
+routes (`/share/*` and `/view/share/*`) and the static shell assets needed to load a public share
+view deliberately bypass the PIN gate: share access is authorized by the link token and, when
+configured, its password instead. `/health`, `/metrics`, FastAPI docs (`/docs`, `/openapi.json`,
+and `/redoc`), plus `/pin-lock/status` and `/pin-lock/unlock` remain open for operations and
+authentication. Unlock with `POST /pin-lock/unlock` JSON `{"pin":"..."}`; a successful `204` sets
+an HttpOnly, SameSite=Lax cookie valid for `session_ttl` seconds (8 hours by
 default). Check only the non-secret state at `GET /pin-lock/status`. Restarting the backend clears
 all unlock sessions. If the configured hash environment variable is absent, the backend refuses to
 start rather than silently running unlocked.
@@ -113,8 +116,9 @@ start rather than silently running unlocked.
 Repeated wrong PINs from the same client are throttled: after 5 consecutive failures each
 further attempt is delayed with exponential backoff, and after 10 the client is locked out for
 15 minutes. Blocked attempts return `429` with a `Retry-After` header; a correct PIN clears the
-counter. The same limiter guards `POST /share/token/{token}/unlock`. Counters live in memory and
-reset when the backend restarts.
+PIN counter. Share-link password unlocks at `POST /share/token/{token}/unlock` use a separate
+per-client limiter with the same thresholds, so their failures do not count against PIN attempts.
+Both counters live in memory and reset when the backend restarts.
 
 ### One API process only (v2.0.2)
 
