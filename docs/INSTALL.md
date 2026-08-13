@@ -120,11 +120,11 @@ PIN counter. Share-link password unlocks at `POST /share/token/{token}/unlock` u
 per-client limiter with the same thresholds, so their failures do not count against PIN attempts.
 Both counters live in memory and reset when the backend restarts.
 
-### One API process only (v2.0.2)
+### One API process only (v2.0.3)
 
 PIN unlock sessions, share-link unlock sessions, and PIN/share throttles are process-local. Run
 one API process on one host: do not add Uvicorn/Gunicorn workers or place multiple API containers
-or hosts behind a proxy. Multi-process and cross-host API serving are unsupported in v2.0.2; this
+or hosts behind a proxy. Multi-process and cross-host API serving are unsupported in v2.0.3; this
 limitation does not add cross-process coordination.
 
 ### Binding beyond loopback

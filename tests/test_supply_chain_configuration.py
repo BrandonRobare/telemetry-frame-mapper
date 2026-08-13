@@ -1,6 +1,8 @@
 """Regression checks for immutable Python environments and release actions."""
 
+import json
 import re
+import tomllib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -9,6 +11,59 @@ RELEASE_WORKFLOW = ROOT / ".github/workflows/release.yml"
 DOCKERFILE = ROOT / "Dockerfile"
 DEPENDABOT = ROOT / ".github/dependabot.yml"
 PYPROJECT = ROOT / "pyproject.toml"
+PACKAGE_INIT = ROOT / "src/drone_video_geotagger/__init__.py"
+BACKEND_MAIN = ROOT / "backend/main.py"
+FRONTEND_PACKAGE = ROOT / "frontend/package.json"
+FRONTEND_LOCK = ROOT / "frontend/package-lock.json"
+WINDOWS_INSTALLER = ROOT / "packaging/telemetry-frame-mapper.iss"
+UV_LOCK = ROOT / "uv.lock"
+CHANGELOG = ROOT / "CHANGELOG.md"
+RELEASE_NOTES = ROOT / "release-notes/v2.0.3.md"
+RELEASE_VERSION = "2.0.3"
+
+
+def _match_version(pattern: str, text: str) -> str:
+    match = re.search(pattern, text, flags=re.MULTILINE)
+    assert match is not None
+    return match.group(1)
+
+
+def test_release_version_declarations_agree() -> None:
+    pyproject = tomllib.loads(PYPROJECT.read_text(encoding="utf-8"))
+    package_init = PACKAGE_INIT.read_text(encoding="utf-8")
+    backend_main = BACKEND_MAIN.read_text(encoding="utf-8")
+    frontend_package = json.loads(FRONTEND_PACKAGE.read_text(encoding="utf-8"))
+    frontend_lock = json.loads(FRONTEND_LOCK.read_text(encoding="utf-8"))
+    windows_installer = WINDOWS_INSTALLER.read_text(encoding="utf-8")
+    uv_lock = tomllib.loads(UV_LOCK.read_text(encoding="utf-8"))
+    changelog = CHANGELOG.read_text(encoding="utf-8")
+    release_notes = RELEASE_NOTES.read_text(encoding="utf-8")
+    locked_project = next(
+        package for package in uv_lock["package"] if package["name"] == pyproject["project"]["name"]
+    )
+
+    declarations = {
+        "pyproject.toml": pyproject["project"]["version"],
+        "src/drone_video_geotagger/__init__.py": _match_version(
+            r'^__version__ = "([^"]+)"$', package_init
+        ),
+        "backend/main.py": _match_version(
+            r'FastAPI\([^\n]+version="([^"]+)"', backend_main
+        ),
+        "frontend/package.json": frontend_package["version"],
+        "frontend/package-lock.json root": frontend_lock["version"],
+        "frontend/package-lock.json package": frontend_lock["packages"][""]["version"],
+        "packaging/telemetry-frame-mapper.iss": _match_version(
+            r'^#define AppVersion "([^"]+)"$', windows_installer
+        ),
+        "uv.lock": locked_project["version"],
+        "CHANGELOG.md": _match_version(r"^## \[([^]]+)\]", changelog),
+        "release-notes/v2.0.3.md": _match_version(
+            r"^# Telemetry Frame Mapper v([^\s]+)$", release_notes
+        ),
+    }
+
+    assert declarations == dict.fromkeys(declarations, RELEASE_VERSION)
 
 
 def test_ci_uses_locked_uv_environment_and_audits_runtime_groups() -> None:
@@ -102,6 +157,7 @@ def test_dependabot_keeps_github_actions_updates_enabled() -> None:
 
 
 if __name__ == "__main__":
+    test_release_version_declarations_agree()
     test_ci_uses_locked_uv_environment_and_audits_runtime_groups()
     test_reusable_ci_builds_and_smokes_the_wheel_distribution()
     test_tag_release_invokes_reusable_full_verification_before_publication()
