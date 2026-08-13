@@ -445,7 +445,7 @@ export default function PlanTab() {
                       variant="ghost"
                       size="sm"
                       style={{ flex: 1, fontSize: '0.7rem' }}
-                      onClick={() => downloadFile(`${BASE_URL}/plans/${plan?.id}/kml`)}
+                      onClick={() => downloadFile(`${BASE_URL}/plans/${plan?.id}/segments/${seg.index}/kml`)}
                     >
                       KML ↓
                     </Button>
@@ -455,7 +455,7 @@ export default function PlanTab() {
                       variant="ghost"
                       size="sm"
                       style={{ flex: 1, fontSize: '0.7rem' }}
-                      onClick={() => downloadFile(`${BASE_URL}/plans/${plan?.id}/gpx`)}
+                      onClick={() => downloadFile(`${BASE_URL}/plans/${plan?.id}/segments/${seg.index}/gpx`)}
                     >
                       GPX ↓
                     </Button>
