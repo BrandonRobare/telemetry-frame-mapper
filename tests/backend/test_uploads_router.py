@@ -5,6 +5,7 @@ from io import BytesIO
 from unittest.mock import patch
 
 from PIL import Image as PILImage
+from starlette.datastructures import UploadFile
 
 
 def test_browser_upload_plan_rejects_oversized_total(client, tmp_path):
@@ -98,6 +99,47 @@ def test_browser_upload_chunks_complete_and_start_import(client, tmp_path):
     assert uploaded.read_bytes() == b"abcdef"
     assert mock_start.call_count == 1
     assert mock_start.call_args.args[0] == session_id
+
+
+def test_browser_chunk_endpoint_reads_only_one_byte_beyond_limit(client, tmp_path, monkeypatch):
+    """The browser endpoint itself must preserve the helper's allocation bound."""
+    cfg = type("Cfg", (), {"imports_dir": str(tmp_path / "imports")})()
+    limits = {
+        "chunk_size_bytes": 4,
+        "max_file_bytes": 10,
+        "max_total_bytes": 10,
+        "quota_bytes": 100,
+        "cleanup_after_hours": 24,
+        "accepted_extensions": [".jpg"],
+    }
+    requested_sizes: list[int] = []
+    original_read = UploadFile.read
+
+    async def recording_read(self, size: int = -1):
+        requested_sizes.append(size)
+        return await original_read(self, size)
+
+    monkeypatch.setattr(UploadFile, "read", recording_read)
+    with patch("backend.routers.uploads.get_config", return_value=cfg), patch(
+        "backend.routers.uploads.get_browser_upload_config", return_value=limits
+    ):
+        start = client.post(
+            "/uploads/imports/start",
+            json={
+                "name": "Bounded browser upload",
+                "total_bytes": 4,
+                "files": [{"path": "a.jpg", "size": 4}],
+            },
+        )
+        upload_id = start.json()["upload_id"]
+        response = client.post(
+            f"/uploads/imports/{upload_id}/chunk",
+            data={"path": "a.jpg", "offset": "0"},
+            files={"chunk": ("chunk", b"abcd", "application/octet-stream")},
+        )
+
+    assert response.status_code == 200
+    assert requested_sizes == [limits["chunk_size_bytes"] + 1]
 
 
 def test_browser_upload_imports_nested_webkit_relative_path(client, tmp_path):
