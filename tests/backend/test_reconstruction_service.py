@@ -458,6 +458,37 @@ def test_run_colmap_converts_the_largest_submodel_when_fragmented(tmp_path):
     assert Path(converter[converter.index("--input_path") + 1]) == bigger
 
 
+def test_geo_transform_uses_the_same_largest_fragmented_submodel_as_splat_training(tmp_path):
+    """The geo transform and splat must be based on one COLMAP coordinate frame."""
+    from unittest.mock import patch
+
+    from backend.services.reconstruction import _compute_geo_transform
+
+    colmap_dir = tmp_path / "colmap"
+    _write_fake_images_txt(colmap_dir, 2)  # sparse/0
+    bigger = colmap_dir / "sparse" / "1"
+    bigger.mkdir(parents=True)
+    (bigger / "images.txt").write_text(
+        "".join(
+            f"{index} 1 0 0 0 0 0 0 1 frame_{index}.jpg\n\n"
+            for index in range(1, 6)
+        )
+    )
+    captured: list[Path] = []
+
+    def fake_compute(_colmap_dir, sparse_dir, _images):
+        captured.append(sparse_dir)
+        return {"utm_zone": "17N", "scale": 1.0}
+
+    with patch(
+        "backend.services.georeferencing_solve.compute_geo_transform", side_effect=fake_compute
+    ):
+        result = _compute_geo_transform(123, colmap_dir, [])
+
+    assert result == {"utm_zone": "17N", "scale": 1.0}
+    assert captured == [bigger]
+
+
 def test_run_colmap_zero_registered_images_raises(tmp_path):
     """COLMAP completing but registering zero images is still a failure."""
     import threading
