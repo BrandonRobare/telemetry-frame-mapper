@@ -268,6 +268,62 @@ def read_points3d_txt(path: Path) -> tuple[np.ndarray, np.ndarray]:
 # ---------------------------------------------------------------------------
 
 
+def _pick_best_submodel(sparse_dir: Path) -> Path:
+    """Return the numbered COLMAP sub-model with the most registered images.
+
+    COLMAP can fragment a reconstruction into ``sparse/0``, ``sparse/1``, and
+    subsequent directories.  All consumers of the sparse coordinate system
+    must use this same selection policy.  If no numbered model exists, return
+    ``sparse/0`` for mocked and incomplete workspaces.
+    """
+    if not sparse_dir.exists():
+        return sparse_dir / "0"
+    candidates = sorted(
+        (
+            directory
+            for directory in sparse_dir.iterdir()
+            if directory.is_dir() and directory.name.isdigit()
+        ),
+        key=lambda directory: int(directory.name),
+    )
+    if not candidates:
+        return sparse_dir / "0"
+    return max(
+        candidates,
+        key=lambda directory: (
+            _registered_image_count(directory),
+            -int(directory.name),
+        ),
+    )
+
+
+def _registered_image_count(model_dir: Path) -> int:
+    """Count registered images, preferring COLMAP's authoritative BIN model."""
+    images_bin = model_dir / "images.bin"
+    if images_bin.exists():
+        with images_bin.open("rb") as stream:
+            header = stream.read(8)
+        if len(header) != 8:
+            return 0
+        return int(struct.unpack("<Q", header)[0])
+
+    images_txt = model_dir / "images.txt"
+    if not images_txt.exists():
+        return 0
+    count = 0
+    for line in images_txt.read_text(encoding="utf-8", errors="replace").splitlines():
+        if not line or line.startswith("#"):
+            continue
+        parts = line.split()
+        if len(parts) >= 10:
+            try:
+                int(parts[0])
+            except ValueError:
+                continue
+            count += 1
+    return count
+
+
 def read_model(sparse_dir: Path) -> ColmapModel:
     """Load a COLMAP sparse model from ``sparse_dir``, preferring BIN over TXT.
 
