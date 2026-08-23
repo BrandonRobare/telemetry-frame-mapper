@@ -8,6 +8,7 @@ import pytest
 
 from backend.services.colmap_io import (
     ColmapImage,
+    _pick_best_submodel,
     qvec_to_rotmat,
     read_cameras_bin,
     read_images_bin,
@@ -60,6 +61,37 @@ def _points3d_bin(
 
 _QVEC = [0.7071067811865476, 0.0, 0.0, 0.7071067811865476]  # 90 deg about +z, wxyz
 _TVEC = [0.5, -0.25, 2.0]
+
+
+def test_pick_best_submodel_prefers_the_most_registered_images(tmp_path):
+    """Fragmented reconstructions consistently select their largest model."""
+    sparse = tmp_path / "sparse"
+    _write_txt_model(sparse / "0")
+    _write_txt_model(sparse / "1")
+    images = (sparse / "1" / "images.txt").read_text()
+    (sparse / "1" / "images.txt").write_text(images + images.splitlines()[3] + "\n\n")
+
+    assert _pick_best_submodel(sparse) == sparse / "1"
+
+
+def test_pick_best_submodel_prefers_largest_bin_only_model(tmp_path):
+    """Fresh mapper output is BIN-only before model_converter runs."""
+    sparse = tmp_path / "sparse"
+    model_zero = sparse / "0"
+    model_one = sparse / "1"
+    model_zero.mkdir(parents=True)
+    model_one.mkdir(parents=True)
+    (model_zero / "images.bin").write_bytes(_images_bin([(1, _QVEC, _TVEC, 1, "a.jpg", [])]))
+    (model_one / "images.bin").write_bytes(
+        _images_bin(
+            [
+                (1, _QVEC, _TVEC, 1, "a.jpg", []),
+                (2, _QVEC, _TVEC, 1, "b.jpg", []),
+            ]
+        )
+    )
+
+    assert _pick_best_submodel(sparse) == model_one
 
 
 def _write_bin_model(sparse_dir: Path) -> None:

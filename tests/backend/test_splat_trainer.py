@@ -149,6 +149,35 @@ def test_training_pct_maps_into_rebalanced_window():
     assert 40.0 < midpoint < 99.0
 
 
+def test_train_uses_largest_fragmented_colmap_submodel(tmp_path: Path):
+    """Splat training must share reconstruction's largest-model selection policy."""
+    sparse = tmp_path / "sparse"
+    for name, image_count in (("0", 1), ("1", 2)):
+        submodel = sparse / name
+        submodel.mkdir(parents=True)
+        headers = [
+            f"{index} 1 0 0 0 0 0 0 1 frame_{index}.jpg\n"
+            for index in range(1, image_count + 1)
+        ]
+        (submodel / "images.txt").write_text("".join(headers))
+    no_images_model = MagicMock(images=[], points_xyz=np.empty((0, 3)))
+    torch = MagicMock()
+    torch.cuda.is_available.return_value = False
+
+    with (
+        patch.object(
+            splat_trainer.colmap_io, "read_model", return_value=no_images_model
+        ) as read_model,
+        pytest.raises(RuntimeError, match="no registered images"),
+    ):
+        splat_trainer._train(
+            torch, MagicMock(), tmp_path, tmp_path / "splat.ply",
+            TrainerConfig.from_preset({"iterations": 1}), _noop_progress, threading.Event(),
+        )
+
+    read_model.assert_called_once_with(sparse / "1")
+
+
 class _ArrayTensor:
     def __init__(self, value):
         self._value = np.asarray(value)

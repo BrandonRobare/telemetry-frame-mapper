@@ -590,6 +590,84 @@ def test_mark_failed_does_not_overwrite_cancelled(setup_test_db):
 
 
 # ---------------------------------------------------------------------------
+# _execute_job retry path — the only terminal transition that lacked a guard
+# ---------------------------------------------------------------------------
+
+def test_retry_does_not_resurrect_cancelled(setup_test_db):
+    """A cancelled job whose handler raises a non-cancellation error stays cancelled.
+
+    Regression for #630: the retry branch in ``_execute_job`` was the only
+    terminal transition without a cancelled guard, so an OSError from
+    ``_write_cancel_checkpoint`` flipped the row back to pending and re-ran a
+    reconstruction the user had stopped.
+    """
+    from backend.main import app
+    from backend.services import job_queue as jq
+
+    db = app.state.test_db_session
+    s = _make_session(db)
+    rec = Reconstruction(session_id=s.id, preset="quick", status="pending", frames_used=1)
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+
+    entry = enqueue(RECONSTRUCTION, rec.id, max_attempts=2)
+    # Claim it so the row is running with attempt=1 (the real mid-training state).
+    assert jq._claim_pending(db, entry.id, datetime.now(UTC)) is True
+    # User cancels mid-training; the checkpoint write then fails with an OSError.
+    assert cancel_job(entry.id) is True
+
+    def boom_handler(e, db_session, cancel):
+        raise OSError("checkpoint PLY write failed")
+
+    orig = jq._handlers.get(RECONSTRUCTION)
+    jq.register_handler(RECONSTRUCTION, boom_handler)
+    try:
+        jq._execute_job(entry.id, RECONSTRUCTION, rec.id, None, threading.Event())
+    finally:
+        if orig is not None:
+            jq.register_handler(RECONSTRUCTION, orig)
+
+    stored = db.query(JobQueueEntry).filter(JobQueueEntry.id == entry.id).first()
+    assert stored.status == "cancelled", (
+        f"a cancelled job must not be re-queued by the retry path, got {stored.status!r}"
+    )
+
+
+def test_retry_still_retries_non_cancelled(setup_test_db):
+    """A non-cancelled job that fails below max_attempts is re-queued to pending."""
+    from backend.main import app
+    from backend.services import job_queue as jq
+
+    db = app.state.test_db_session
+    s = _make_session(db)
+    rec = Reconstruction(session_id=s.id, preset="quick", status="pending", frames_used=1)
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+
+    entry = enqueue(RECONSTRUCTION, rec.id, max_attempts=2)
+    assert jq._claim_pending(db, entry.id, datetime.now(UTC)) is True
+    # Not cancelled — the row stays running.
+
+    def boom_handler(e, db_session, cancel):
+        raise OSError("transient failure")
+
+    orig = jq._handlers.get(RECONSTRUCTION)
+    jq.register_handler(RECONSTRUCTION, boom_handler)
+    try:
+        jq._execute_job(entry.id, RECONSTRUCTION, rec.id, None, threading.Event())
+    finally:
+        if orig is not None:
+            jq.register_handler(RECONSTRUCTION, orig)
+
+    stored = db.query(JobQueueEntry).filter(JobQueueEntry.id == entry.id).first()
+    assert stored.status == "pending", (
+        f"a non-cancelled job below max_attempts must retry, got {stored.status!r}"
+    )
+
+
+# ---------------------------------------------------------------------------
 # Drain-worker OS lock — a second acquirer backs off
 # ---------------------------------------------------------------------------
 
