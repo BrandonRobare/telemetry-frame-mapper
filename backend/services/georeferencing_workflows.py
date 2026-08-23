@@ -72,13 +72,21 @@ def detect_precision_workflow(images: Iterable[Image]) -> dict:
 
 
 def render_gcp_list(points: Iterable[GcpPoint]) -> str:
-    lines = ["# EPSG:4326"]
+    """Render ODM's ``gcp_list.txt``.
+
+    Line 1 is the SRS header, read verbatim by ODM's ``GCPFile`` (so no ``#``).
+    Every following line is exactly seven whitespace-separated tokens:
+    ``geo_x geo_y geo_z im_x im_y im_name gcp_label``.  Altitude defaults to
+    ``0.000`` rather than an empty string so the column count never shifts;
+    filenames and labels are whitespace-free by validation at the boundary.
+    """
+    lines = ["EPSG:4326"]
     for point in points:
-        altitude = "" if point.altitude_m is None else f"{point.altitude_m:.3f}"
+        altitude = 0.0 if point.altitude_m is None else point.altitude_m
         label = point.label or point.image_filename
         lines.append(
-            f"{point.longitude:.8f} {point.latitude:.8f} {altitude} "
-            f"{point.pixel_x:.3f} {point.pixel_y:.3f} {point.image_filename} {label}".strip()
+            f"{point.longitude:.8f} {point.latitude:.8f} {altitude:.3f} "
+            f"{point.pixel_x:.3f} {point.pixel_y:.3f} {point.image_filename} {label}"
         )
     return "\n".join(lines) + "\n"
 
