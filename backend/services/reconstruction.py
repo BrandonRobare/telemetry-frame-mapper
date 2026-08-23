@@ -2293,7 +2293,11 @@ def _run_pipeline(entry, db, cancel: threading.Event) -> None:
                     ),
                     completed_at=datetime.now(UTC),
                 )
-            else:
+            elif "COLMAP sparse cloud only" in str(exc):
+                # The trainer's documented graceful-degradation contract: missing
+                # torch/gsplat is the only RuntimeError that means "COLMAP-only
+                # success". Key on the message family, not the exception type —
+                # every other trainer RuntimeError is a real failure.
                 _log_rec(reconstruction_id, f"Gaussian Splatting skipped: {exc}")
                 _update_rec(
                     db, reconstruction_id,
@@ -2303,6 +2307,15 @@ def _run_pipeline(entry, db, cancel: threading.Event) -> None:
                     completed_at=datetime.now(UTC),
                 )
                 _log_rec(reconstruction_id, "Pipeline complete (COLMAP only)")
+            else:
+                # Unsupported camera model, empty sparse model, missing frame, ...
+                _log_rec(reconstruction_id, f"Gaussian Splatting failed: {exc}")
+                _update_rec(
+                    db, reconstruction_id,
+                    status="failed",
+                    error_msg=str(exc)[:_ERROR_MSG_MAX_CHARS],
+                    completed_at=datetime.now(UTC),
+                )
 
     except Exception as exc:
         _update_rec(
