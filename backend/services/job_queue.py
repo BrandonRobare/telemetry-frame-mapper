@@ -474,9 +474,16 @@ def _execute_job(
             if entry is None:
                 return
             if entry.attempt < entry.max_attempts:
-                # Re-queue for retry
-                entry.status = "pending"
-                entry.error_msg = str(exc)[:5000]
+                # Re-queue for retry. Use the same cancelled predicate _mark_failed
+                # and mark_complete use so a cancel that races this write is never
+                # overwritten — the row stays cancelled instead of being resurrected.
+                db.query(JobQueueEntry).filter(
+                    JobQueueEntry.id == job_id,
+                    JobQueueEntry.status != "cancelled",
+                ).update(
+                    {"status": "pending", "error_msg": str(exc)[:5000]},
+                    synchronize_session=False,
+                )
                 db.commit()
             else:
                 _mark_failed(job_id, str(exc)[:5000], db=db)
