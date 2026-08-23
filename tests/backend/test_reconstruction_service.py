@@ -1084,6 +1084,67 @@ def test_run_pipeline_oom_maps_to_preset_hint(setup_test_db):
     assert "switch to 'quick' preset" in rec.error_msg
 
 
+def test_run_pipeline_unsupported_camera_model_fails(setup_test_db):
+    """#625: SIMPLE_RADIAL is actively suggested for wide lenses, so this is the
+    realistic trigger. The trainer raises a plain RuntimeError; it must land as
+    failed with the message, not complete/colmap_only."""
+    from backend.main import app
+
+    db = app.state.test_db_session
+    with tempfile.TemporaryDirectory() as tmp:
+        rec, img, colmap_dir = _pipeline_fixture(db, tmp)
+        bad_model = MagicMock(side_effect=RuntimeError(
+            "Unsupported COLMAP camera model: SIMPLE_RADIAL. "
+            "Only PINHOLE and SIMPLE_PINHOLE are supported."
+        ))
+        _run_pipeline_with_gsplat(db, tmp, rec, img, colmap_dir, bad_model)
+
+    assert rec.status == "failed"
+    assert rec.error_msg is not None
+    assert "SIMPLE_RADIAL" in rec.error_msg
+
+
+def test_run_pipeline_trainer_runtime_error_fails_not_colmap_only(setup_test_db):
+    """#625: any trainer RuntimeError outside the sparse-cloud-only sentinel must
+    produce status=failed with a non-null error_msg, never complete/colmap_only."""
+    from backend.main import app
+
+    db = app.state.test_db_session
+    with tempfile.TemporaryDirectory() as tmp:
+        rec, img, colmap_dir = _pipeline_fixture(db, tmp)
+        for message in (
+            "COLMAP model contains no registered images",
+            "COLMAP model contains no sparse points",
+            "Training frame not found: /data/frames/f.jpg",
+        ):
+            rec.status = "running"  # reset for each scenario
+            db.commit()
+            boom = MagicMock(side_effect=RuntimeError(message))
+            _run_pipeline_with_gsplat(db, tmp, rec, img, colmap_dir, boom)
+            assert rec.status == "failed", message
+            assert rec.error_msg is not None and message in rec.error_msg, message
+
+
+def test_run_pipeline_sparse_cloud_only_sentinel_still_degrades(setup_test_db):
+    """#625: the genuine graceful-degradation path (missing torch/gsplat) must
+    still yield colmap_only + complete after the branch was narrowed."""
+    from backend.main import app
+
+    db = app.state.test_db_session
+    with tempfile.TemporaryDirectory() as tmp:
+        rec, img, colmap_dir = _pipeline_fixture(db, tmp)
+        guidance = MagicMock(side_effect=RuntimeError(
+            "Gaussian-splat training dependencies (torch + gsplat) are not installed — "
+            "see docs/SETUP.md for the GPU install. "
+            "The reconstruction will complete with COLMAP sparse cloud only."
+        ))
+        _run_pipeline_with_gsplat(db, tmp, rec, img, colmap_dir, guidance)
+
+    assert rec.status == "complete"
+    assert rec.step == "colmap_only"
+    assert rec.progress_pct == 100.0
+
+
 def test_run_pipeline_persists_frames_registered_from_colmap(setup_test_db):
     """The count _run_colmap returns should land on the reconstruction record."""
     from unittest.mock import MagicMock
