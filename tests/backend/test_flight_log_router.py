@@ -212,6 +212,28 @@ def test_offset_preview_returns_graph_rows(client):
     assert all({"matched", "total", "mean_abs_delta_s"} <= set(row) for row in data)
 
 
+def test_offset_preview_bounds_tiny_step_s(client):
+    """A tiny step_s passes the router's ``gt=0`` bound; the row count stays bounded."""
+    from backend.services.flight_log_sync import _MAX_PREVIEW_STEPS
+
+    s = _make_session(client)
+    _upload_log(client, s.id)
+
+    # Uncapped this is int(600 / 0.05) + 1 == 12_001 rows.
+    resp = client.get(
+        f"/flight-logs/offset-preview?session_id={s.id}&window_s=300&step_s=0.05"
+    )
+    assert resp.status_code == 200
+    assert len(resp.json()) == _MAX_PREVIEW_STEPS + 1
+
+    # Only reachable once the cap exists: uncapped this is 600_000_001 iterations.
+    resp = client.get(
+        f"/flight-logs/offset-preview?session_id={s.id}&window_s=300&step_s=0.000001"
+    )
+    assert resp.status_code == 200
+    assert len(resp.json()) == _MAX_PREVIEW_STEPS + 1
+
+
 # ---------------------------------------------------------------------------
 # Apply-sync tests
 # ---------------------------------------------------------------------------
