@@ -447,7 +447,7 @@ def _train(
     progress = _ProgressThrottle(progress_cb)
     progress("loading COLMAP model", _PROGRESS_START, force=True)
 
-    model = colmap_io.read_model(colmap_dir / "sparse" / "0")
+    model = colmap_io.read_model(colmap_io._pick_best_submodel(colmap_dir / "sparse"))
     if not model.images:
         raise RuntimeError("COLMAP model contains no registered images")
     if model.points_xyz.shape[0] == 0:

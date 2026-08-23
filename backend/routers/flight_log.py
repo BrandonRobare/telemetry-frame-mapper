@@ -17,32 +17,12 @@ from ..services.flight_log_sync import (
     match_images_to_log,
     parse_flight_log_csv,
 )
+from ..services.upload_reader import read_upload_with_limit
 
 router = APIRouter(prefix="/flight-logs", tags=["flight-logs"])
 
-_FLIGHT_LOG_CHUNK_SIZE = 1024 * 1024
-
 # Allowed extensions for DJI binary logs.
 _DJI_EXTENSIONS = {".txt"}
-
-
-async def _read_upload_with_limit(file: UploadFile, max_bytes: int) -> bytes:
-    chunks: list[bytes] = []
-    total = 0
-
-    while True:
-        chunk = await file.read(_FLIGHT_LOG_CHUNK_SIZE)
-        if not chunk:
-            break
-        total += len(chunk)
-        if total > max_bytes:
-            raise HTTPException(
-                status_code=413,
-                detail=f"Flight log upload exceeds {max_bytes} byte limit",
-            )
-        chunks.append(chunk)
-
-    return b"".join(chunks)
 
 
 # ---------------------------------------------------------------------------
@@ -114,7 +94,12 @@ async def upload_flight_log(
         raise HTTPException(status_code=404, detail="Session not found")
 
     limits = get_upload_limits_config()
-    content = await _read_upload_with_limit(file, limits["flight_log_max_bytes"])
+    max_bytes = limits["flight_log_max_bytes"]
+    content = await read_upload_with_limit(
+        file,
+        max_bytes,
+        too_large_detail=f"Flight log upload exceeds {max_bytes} byte limit",
+    )
 
     # --- sniff: DJI binary (.txt) or CSV? -----------------------------------
     ext = os.path.splitext(file.filename or "")[1].lower()

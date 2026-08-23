@@ -458,6 +458,37 @@ def test_run_colmap_converts_the_largest_submodel_when_fragmented(tmp_path):
     assert Path(converter[converter.index("--input_path") + 1]) == bigger
 
 
+def test_geo_transform_uses_the_same_largest_fragmented_submodel_as_splat_training(tmp_path):
+    """The geo transform and splat must be based on one COLMAP coordinate frame."""
+    from unittest.mock import patch
+
+    from backend.services.reconstruction import _compute_geo_transform
+
+    colmap_dir = tmp_path / "colmap"
+    _write_fake_images_txt(colmap_dir, 2)  # sparse/0
+    bigger = colmap_dir / "sparse" / "1"
+    bigger.mkdir(parents=True)
+    (bigger / "images.txt").write_text(
+        "".join(
+            f"{index} 1 0 0 0 0 0 0 1 frame_{index}.jpg\n\n"
+            for index in range(1, 6)
+        )
+    )
+    captured: list[Path] = []
+
+    def fake_compute(_colmap_dir, sparse_dir, _images):
+        captured.append(sparse_dir)
+        return {"utm_zone": "17N", "scale": 1.0}
+
+    with patch(
+        "backend.services.georeferencing_solve.compute_geo_transform", side_effect=fake_compute
+    ):
+        result = _compute_geo_transform(123, colmap_dir, [])
+
+    assert result == {"utm_zone": "17N", "scale": 1.0}
+    assert captured == [bigger]
+
+
 def test_run_colmap_zero_registered_images_raises(tmp_path):
     """COLMAP completing but registering zero images is still a failure."""
     import threading
@@ -1051,6 +1082,67 @@ def test_run_pipeline_oom_maps_to_preset_hint(setup_test_db):
 
     assert rec.status == "failed"
     assert "switch to 'quick' preset" in rec.error_msg
+
+
+def test_run_pipeline_unsupported_camera_model_fails(setup_test_db):
+    """#625: SIMPLE_RADIAL is actively suggested for wide lenses, so this is the
+    realistic trigger. The trainer raises a plain RuntimeError; it must land as
+    failed with the message, not complete/colmap_only."""
+    from backend.main import app
+
+    db = app.state.test_db_session
+    with tempfile.TemporaryDirectory() as tmp:
+        rec, img, colmap_dir = _pipeline_fixture(db, tmp)
+        bad_model = MagicMock(side_effect=RuntimeError(
+            "Unsupported COLMAP camera model: SIMPLE_RADIAL. "
+            "Only PINHOLE and SIMPLE_PINHOLE are supported."
+        ))
+        _run_pipeline_with_gsplat(db, tmp, rec, img, colmap_dir, bad_model)
+
+    assert rec.status == "failed"
+    assert rec.error_msg is not None
+    assert "SIMPLE_RADIAL" in rec.error_msg
+
+
+def test_run_pipeline_trainer_runtime_error_fails_not_colmap_only(setup_test_db):
+    """#625: any trainer RuntimeError outside the sparse-cloud-only sentinel must
+    produce status=failed with a non-null error_msg, never complete/colmap_only."""
+    from backend.main import app
+
+    db = app.state.test_db_session
+    with tempfile.TemporaryDirectory() as tmp:
+        rec, img, colmap_dir = _pipeline_fixture(db, tmp)
+        for message in (
+            "COLMAP model contains no registered images",
+            "COLMAP model contains no sparse points",
+            "Training frame not found: /data/frames/f.jpg",
+        ):
+            rec.status = "running"  # reset for each scenario
+            db.commit()
+            boom = MagicMock(side_effect=RuntimeError(message))
+            _run_pipeline_with_gsplat(db, tmp, rec, img, colmap_dir, boom)
+            assert rec.status == "failed", message
+            assert rec.error_msg is not None and message in rec.error_msg, message
+
+
+def test_run_pipeline_sparse_cloud_only_sentinel_still_degrades(setup_test_db):
+    """#625: the genuine graceful-degradation path (missing torch/gsplat) must
+    still yield colmap_only + complete after the branch was narrowed."""
+    from backend.main import app
+
+    db = app.state.test_db_session
+    with tempfile.TemporaryDirectory() as tmp:
+        rec, img, colmap_dir = _pipeline_fixture(db, tmp)
+        guidance = MagicMock(side_effect=RuntimeError(
+            "Gaussian-splat training dependencies (torch + gsplat) are not installed — "
+            "see docs/SETUP.md for the GPU install. "
+            "The reconstruction will complete with COLMAP sparse cloud only."
+        ))
+        _run_pipeline_with_gsplat(db, tmp, rec, img, colmap_dir, guidance)
+
+    assert rec.status == "complete"
+    assert rec.step == "colmap_only"
+    assert rec.progress_pct == 100.0
 
 
 def test_run_pipeline_persists_frames_registered_from_colmap(setup_test_db):
