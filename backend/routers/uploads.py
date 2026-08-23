@@ -319,34 +319,44 @@ async def upload_import_chunk(
 
 @router.post("/{upload_id}/complete", response_model=CompleteUploadResponse)
 def complete_browser_import_upload(upload_id: str, db: DBSession = Depends(get_db)):
-    state = _state(upload_id)
     with _lock_for(upload_id):
-        incomplete = [p for p, meta in state["files"].items() if meta["received"] != meta["size"]]
-        if incomplete:
-            raise HTTPException(status_code=409, detail=f"Upload is incomplete: {incomplete[0]}")
+        # Read the state under the lock so a concurrent /complete that already imported
+        # is visible here, and replay it instead of importing twice (#602).
+        state = _state(upload_id)
+        if state.get("session_id") is None:
+            incomplete = [
+                p for p, meta in state["files"].items() if meta["received"] != meta["size"]
+            ]
+            if incomplete:
+                raise HTTPException(
+                    status_code=409, detail=f"Upload is incomplete: {incomplete[0]}"
+                )
 
-        state["status"] = "importing"
-        session = SessionModel(
-            name=state["name"],
-            folder_path=str(state["root"]),
-            imported_at=datetime.datetime.now(datetime.UTC),
-            photo_count=0,
-            usable_count=0,
-        )
-        db.add(session)
-        db.commit()
-        db.refresh(session)
-        state["session_id"] = session.id
-        _persist_state(state)
-        start_import(session.id, state["root"], SessionLocal)
+            state["status"] = "importing"
+            session = SessionModel(
+                name=state["name"],
+                folder_path=str(state["root"]),
+                imported_at=datetime.datetime.now(datetime.UTC),
+                photo_count=0,
+                usable_count=0,
+            )
+            db.add(session)
+            db.commit()
+            db.refresh(session)
+            state["session_id"] = session.id
+            _persist_state(state)
+            start_import(session.id, state["root"], SessionLocal)
+        session = db.get(SessionModel, state["session_id"])
     return CompleteUploadResponse(
         upload_id=upload_id,
         status=state["status"],
         uploaded_bytes=state["uploaded_bytes"],
         total_bytes=state["total_bytes"],
         file_count=len(state["files"]),
-        session_id=session.id,
-        session={
+        session_id=state["session_id"],
+        session=None
+        if session is None
+        else {
             "id": session.id,
             "name": session.name,
             "folder_path": session.folder_path,
