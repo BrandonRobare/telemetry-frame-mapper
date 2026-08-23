@@ -39,7 +39,7 @@ jobs:
         run: python3 -m zipfile --create frontend-dist.zip frontend/dist
 
       - name: Upload release inputs
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-inputs
           path: |
@@ -54,12 +54,12 @@ jobs:
       contents: write
     steps:
       - name: Download release inputs
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: release-inputs
 
       - name: Upload frontend dist to release
-        uses: softprops/action-gh-release@c12583777ecdfd3be55c69cf75464299dc01057e # v3
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3
         with:
           body_path: release-notes/${{ github.ref_name }}.md
           files: frontend-dist.zip
