@@ -8,6 +8,7 @@ from pathlib import Path
 
 from backend.core.paths import confine_path
 from backend.db.models import Image
+from backend.services.georeferencing_workflows import render_gcp_list
 
 
 @dataclass(frozen=True)
@@ -33,7 +34,9 @@ def odm_options_for(mode: str, *, has_gcp: bool) -> list[str]:
     opts = ["--use-exif"]
     if mode == "force_gps":
         opts.append("--force-gps")
-    if mode == "gcp" or has_gcp:
+    # --gcp follows the file, not the mode label: advertising it for a
+    # gcp_list.txt that holds no points makes ODM fail (#629).
+    if has_gcp:
         opts.append("--gcp gcp_list.txt")
     return opts
 
@@ -58,17 +61,22 @@ def build_webodm_package(
                     zf.write(src, f"images/{src.name}")
                     contents.append(f"images/{src.name}")
                     copied += 1
+        # No surveyed GCPs are persisted anywhere yet, so include_gcp can only
+        # ship a header-only template for the operator to fill in — and the
+        # manifest must not tell them to pass --gcp for it (#629).
+        # ponytail: pass real points here once GCPs are stored.
+        gcp_points: list = []
         if options.include_gcp:
-            zf.writestr("gcp_list.txt", "# EPSG:4326\n")
+            zf.writestr("gcp_list.txt", render_gcp_list(gcp_points))
             contents.append("gcp_list.txt")
+        odm_options = odm_options_for(options.mode, has_gcp=bool(gcp_points))
         manifest = {
             "export_type": "webodm_package",
             "mode": options.mode,
             "image_count": len(images),
             "copied_image_count": copied,
-            "odm_options": odm_options_for(options.mode, has_gcp=options.include_gcp),
-            "copyable_command": "webodm run "
-            + " ".join(odm_options_for(options.mode, has_gcp=options.include_gcp)),
+            "odm_options": odm_options,
+            "copyable_command": "webodm run " + " ".join(odm_options),
             "contents": contents[:],
         }
         zf.writestr("odm_options_manifest.json", json.dumps(manifest, indent=2))
