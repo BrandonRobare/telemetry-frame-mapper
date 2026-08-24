@@ -200,3 +200,64 @@ GPS (-81.0000, 41.2000, 102)
 def test_parse_srt_text_rejects_missing_gps() -> None:
     with pytest.raises(ValueError, match="Supported DJI formats"):
         parse_srt_text("1\n00:00:00,000 --> 00:00:01,000\nno gps")
+
+
+def test_parse_srt_text_accepts_dji_longtitude_misspelling() -> None:
+    points = parse_srt_text(
+        """
+1
+00:00:00,000 --> 00:00:01,000
+[latitude : 41.150900] [longtitude : -81.338200] [altitude: 449.900]
+
+2
+00:00:01,000 --> 00:00:02,000
+[latitude : 41.151000] [longtitude : -81.338300] [altitude: 450.900]
+"""
+    )
+
+    assert len(points) == 2
+    assert points[0].lat == 41.1509
+    assert points[0].lon == -81.3382
+    assert points[0].rel_alt_m == 449.9
+    assert points[1].lon == -81.3383
+
+
+def test_parse_srt_text_warns_about_blocks_with_a_partial_fix() -> None:
+    with pytest.warns(UserWarning, match="1 SRT block"):
+        points = parse_srt_text(
+            """
+1
+00:00:00,000 --> 00:00:01,000
+[latitude: 41.1000] [longitude: -81.1000] [rel_alt: 100.0]
+
+2
+00:00:01,000 --> 00:00:02,000
+[latitude: 41.2000] [rel_alt: 102.0]
+
+3
+00:00:02,000 --> 00:00:03,000
+[latitude: 41.3000] [longitude: -81.3000] [rel_alt: 104.0]
+"""
+        )
+
+    assert [point.lat for point in points] == [41.1, 41.3]
+
+
+def test_parse_srt_text_error_distinguishes_unrecognized_gps_shape() -> None:
+    with pytest.raises(ValueError, match="not in a recognized shape.*Supported DJI formats"):
+        parse_srt_text(
+            """
+1
+00:00:00,000 --> 00:00:01,000
+[latitude: 41.1000] [rel_alt: 100.0]
+
+2
+00:00:01,000 --> 00:00:02,000
+[latitude: 41.2000] [rel_alt: 102.0]
+"""
+        )
+
+
+def test_parse_srt_text_error_reports_no_gps_lines_found() -> None:
+    with pytest.raises(ValueError, match="no GPS lines were found.*Supported DJI formats"):
+        parse_srt_text("1\n00:00:00,000 --> 00:00:01,000\nno gps")

@@ -4,6 +4,7 @@ import json
 import subprocess
 import sys
 import threading
+from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -221,3 +222,186 @@ def test_write_cancel_checkpoint_persists_ply_and_sidecar(tmp_path: Path):
         "gaussian_count": 2,
         "training_metrics": [{"iter": 100, "psnr": 12.3, "ssim": 0.45}],
     }
+
+
+# --- render_flythrough / ffmpeg plumbing (issue #626) ------------------------
+#
+# The deadlock is between two blocking writes, so a faithful reproduction would
+# hang the suite. Instead the fake below raises the moment ffmpeg *would* block,
+# turning "this deadlocks" into "this fails fast".
+
+
+class _StderrPipeFull(RuntimeError):
+    """Raised where the real ffmpeg would block writing into an undrained pipe."""
+
+
+class _FakeStdin:
+    def __init__(self, process: _FakeFfmpeg):
+        self._process = process
+        self.closed = False
+        self.frames_written = 0
+
+    def write(self, data: bytes) -> int:
+        assert not self.closed, "wrote a frame after closing ffmpeg's stdin"
+        self.frames_written += 1
+        self._process.consume_frame()
+        return len(data)
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class _FakeFfmpeg:
+    """Stand-in for the ffmpeg child, modelling only what issue #626 turns on.
+
+    ffmpeg chatters on stderr as it consumes frames, and an OS pipe holds a few
+    KB before its writer blocks — a few KB being the Windows ``CreatePipe``
+    default, and Windows is this project's primary target.
+    """
+
+    pipe_capacity = 4096
+    progress_line = (
+        b"frame=  120 fps= 29 q=28.0 size=    1024kB time=00:00:04.00 bitrate=N/A speed=1x\r"
+    )
+
+    def __init__(self, command, *, stdin=None, stdout=None, stderr=None, exit_code=0):
+        self.command = list(command)
+        self.stdin = _FakeStdin(self)
+        self.returncode = None
+        self.killed = False
+        self.exit_code = exit_code
+        self._stderr_sink = stderr
+        self._unread_pipe_bytes = 0
+        self._output_path = Path(self.command[-1])
+
+    def _emit_stderr(self, blob: bytes) -> None:
+        if self._stderr_sink is subprocess.PIPE:
+            self._unread_pipe_bytes += len(blob)
+            if self._unread_pipe_bytes > self.pipe_capacity:
+                raise _StderrPipeFull(
+                    "ffmpeg blocked writing stderr into a pipe nobody is draining "
+                    "(the real process would deadlock against our stdin write)"
+                )
+        elif self._stderr_sink not in (None, subprocess.DEVNULL):
+            self._stderr_sink.write(blob)
+
+    def consume_frame(self) -> None:
+        self._emit_stderr(self.progress_line)
+
+    def wait(self, timeout=None):
+        if self.returncode is None:
+            self._emit_stderr(b"[libx264 @ 0xdead] the encoder had something to say\n")
+            if self.exit_code == 0:
+                self._output_path.parent.mkdir(parents=True, exist_ok=True)
+                self._output_path.write_bytes(b"not really an mp4")
+            self.returncode = self.exit_code
+        return self.returncode
+
+    def poll(self):
+        return self.returncode
+
+    def kill(self) -> None:
+        # Mirrors Popen.kill(): a no-op once the process has been reaped.
+        if self.returncode is None:
+            self.killed = True
+            self.returncode = -9
+
+
+@contextmanager
+def _fake_render_stack(spawned: list, *, exit_code: int = 0, rasterize=None):
+    """Run render_flythrough against fake torch/gsplat/ffmpeg on a CPU-only box."""
+    torch = MagicMock()
+    torch.cuda.is_available.return_value = False
+    frame = _ArrayTensor(np.zeros((8, 8, 3)))
+
+    def popen(command, **kwargs):
+        process = _FakeFfmpeg(command, exit_code=exit_code, **kwargs)
+        spawned.append(process)
+        return process
+
+    with (
+        patch.object(
+            splat_trainer, "_import_training_deps", return_value=(torch, MagicMock())
+        ),
+        patch.object(splat_trainer.shutil, "which", return_value="/usr/bin/ffmpeg"),
+        patch.object(splat_trainer.ply_io, "read_3dgs_ply", return_value=MagicMock()),
+        patch.object(
+            splat_trainer,
+            "_rasterize_cloud",
+            side_effect=rasterize or (lambda *a, **k: frame),
+        ),
+        patch.object(splat_trainer.subprocess, "Popen", side_effect=popen),
+    ):
+        yield
+
+
+def _flythrough_keyframes(duration_s: float = 4.0) -> list[dict]:
+    return [
+        {"position": [0.0, 0.0, 0.0], "target": [0.0, 0.0, 1.0], "duration_s": duration_s},
+        {"position": [1.0, 0.5, 0.0], "target": [1.0, 0.0, 1.0], "duration_s": duration_s},
+    ]
+
+
+def _render_flythrough(tmp_path: Path) -> Path:
+    return splat_trainer.render_flythrough(
+        tmp_path / "splat.ply", tmp_path / "flythrough.mp4", _flythrough_keyframes(),
+        fps=30, width=8, height=8,
+    )
+
+
+def test_render_flythrough_survives_more_ffmpeg_stderr_than_a_pipe_holds(tmp_path: Path):
+    """#626: stderr must not be a pipe left undrained until the frame loop ends."""
+    spawned: list[_FakeFfmpeg] = []
+    with _fake_render_stack(spawned):
+        result = _render_flythrough(tmp_path)
+
+    # 121 frames of progress chatter is ~10 KB — well past a Windows pipe buffer.
+    assert spawned[0].stdin.frames_written == 121
+    assert result == tmp_path / "flythrough.mp4"
+    assert result.exists()
+
+
+def test_render_flythrough_asks_ffmpeg_to_stop_chattering(tmp_path: Path):
+    """Progress lines are the bulk of the volume; -nostats keeps stderr tiny."""
+    spawned: list[_FakeFfmpeg] = []
+    with _fake_render_stack(spawned):
+        _render_flythrough(tmp_path)
+
+    command = spawned[0].command
+    assert "-nostats" in command
+    assert command[command.index("-loglevel") + 1] == "error"
+
+
+def test_render_flythrough_reaps_ffmpeg_when_a_frame_fails(tmp_path: Path):
+    """#626: a raise inside the write loop must not leave an orphan ffmpeg."""
+    spawned: list[_FakeFfmpeg] = []
+    calls = {"n": 0}
+
+    def exploding_rasterize(*args, **kwargs):
+        calls["n"] += 1
+        if calls["n"] > 5:
+            raise RuntimeError("CUDA kernel went sideways")
+        return _ArrayTensor(np.zeros((8, 8, 3)))
+
+    with (
+        _fake_render_stack(spawned, rasterize=exploding_rasterize),
+        pytest.raises(RuntimeError, match="CUDA kernel went sideways"),
+    ):
+        _render_flythrough(tmp_path)
+
+    process = spawned[0]
+    assert process.stdin.closed
+    assert process.killed, "ffmpeg was left running after the render blew up"
+    assert process.returncode is not None
+    # The lock has to be free for the next GPU job, whatever happened here.
+    assert splat_trainer._GPU_LOCK.acquire(timeout=0)
+    splat_trainer._GPU_LOCK.release()
+
+
+def test_render_flythrough_surfaces_ffmpeg_stderr_when_encoding_fails(tmp_path: Path):
+    spawned: list[_FakeFfmpeg] = []
+    with (
+        _fake_render_stack(spawned, exit_code=1),
+        pytest.raises(RuntimeError, match="the encoder had something to say"),
+    ):
+        _render_flythrough(tmp_path)

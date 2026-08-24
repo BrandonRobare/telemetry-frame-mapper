@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import io
 import json as _json
+import threading
 import zipfile
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -728,9 +731,7 @@ def test_download_bundle_returns_zip_with_mesh_thumbnail_georef_and_metadata(cli
 
     assert resp.status_code == 200
     assert resp.headers["content-type"] == "application/zip"
-    bundle_path = rec_dir / "reconstruction_1_bundle.zip"
-    assert bundle_path.exists()
-    with zipfile.ZipFile(bundle_path) as zf:
+    with zipfile.ZipFile(io.BytesIO(resp.content)) as zf:
         assert sorted(zf.namelist()) == [
             "mesh.glb",
             "mesh_georef.json",
@@ -858,6 +859,104 @@ def test_download_bundle_rejects_glb_path_outside_exports(client, tmp_path):
         resp = client.get(f"/reconstruction/{rec.id}/download-bundle")
 
     assert resp.status_code == 403
+
+
+def _bundle_ready_reconstruction(client, tmp_path):
+    """Complete reconstruction whose bundle can be built without any real pipeline."""
+    db = _get_db(client)
+    s = _make_session_with_images(db)
+    exports_dir = tmp_path / "exports"
+    processed_dir = tmp_path / "processed"
+    rec_dir = exports_dir / "1"
+    rec_dir.mkdir(parents=True)
+    processed_dir.mkdir()
+    glb = rec_dir / "mesh.glb"
+    # Large enough that a torn read shows up as a short body, not a lucky match.
+    glb.write_bytes(bytes(range(256)) * 4096)
+    (rec_dir / "mesh_georef.json").write_text('{"geo_transform":{"scale":1.0}}')
+    db.add(
+        Reconstruction(
+            id=1,
+            session_id=s.id,
+            preset="quick",
+            status="complete",
+            progress_pct=100.0,
+            frames_used=3,
+            mesh_status="complete",
+            mesh_glb_path=str(glb),
+        )
+    )
+    db.commit()
+    cfg = SimpleNamespace(exports_dir=str(exports_dir), processed_dir=str(processed_dir))
+    return rec_dir, glb, cfg
+
+
+def test_download_bundle_concurrent_downloads_do_not_share_a_file(client, tmp_path):
+    """Two overlapping downloads must build separate archives (#684)."""
+    rec_dir, glb, cfg = _bundle_ready_reconstruction(client, tmp_path)
+
+    real_zipfile = zipfile.ZipFile
+    barrier = threading.Barrier(2, timeout=30)
+    build_paths: list[str] = []
+    results: dict[int, object] = {}
+
+    def barriered_zipfile(file, *args, **kwargs):
+        build_paths.append(str(file))
+        # Hold both requests here so their writes genuinely overlap.
+        barrier.wait()
+        return real_zipfile(file, *args, **kwargs)
+
+    def download(tag):
+        try:
+            results[tag] = client.get("/reconstruction/1/download-bundle")
+        except BaseException as exc:  # surfaced by the assertions below
+            results[tag] = exc
+
+    with (
+        patch("backend.routers.reconstruction.get_config", lambda: cfg),
+        patch("backend.routers.reconstruction.zipfile.ZipFile", barriered_zipfile),
+    ):
+        threads = [threading.Thread(target=download, args=(tag,)) for tag in (0, 1)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=60)
+            assert not thread.is_alive()
+
+    assert len(build_paths) == 2
+    assert build_paths[0] != build_paths[1], (
+        f"concurrent downloads shared one bundle path: {build_paths[0]}"
+    )
+
+    for tag in (0, 1):
+        resp = results[tag]
+        assert not isinstance(resp, BaseException), resp
+        assert resp.status_code == 200
+        with zipfile.ZipFile(io.BytesIO(resp.content)) as zf:
+            assert zf.testzip() is None
+            assert sorted(zf.namelist()) == ["mesh.glb", "mesh_georef.json", "metadata.json"]
+            assert zf.read("mesh.glb") == glb.read_bytes()
+
+    # Both temp bundles are cleaned up once their responses are sent.
+    assert sorted(p.name for p in rec_dir.iterdir()) == ["mesh.glb", "mesh_georef.json"]
+
+
+def test_download_bundle_failed_build_leaves_no_zip_behind(client, tmp_path):
+    """A crash mid-build must not leave a partial archive on disk (#684)."""
+    rec_dir, _glb, cfg = _bundle_ready_reconstruction(client, tmp_path)
+
+    def exploding_zipfile(file, *args, **kwargs):
+        Path(file).write_bytes(b"PK\x03\x04 half-written")
+        raise RuntimeError("boom")
+
+    with (
+        patch("backend.routers.reconstruction.get_config", lambda: cfg),
+        patch("backend.routers.reconstruction.zipfile.ZipFile", exploding_zipfile),
+        pytest.raises(RuntimeError, match="boom"),
+    ):
+        client.get("/reconstruction/1/download-bundle")
+
+    assert sorted(p.name for p in rec_dir.iterdir()) == ["mesh.glb", "mesh_georef.json"]
 
 
 def test_render_video_validates_keyframes(client):
