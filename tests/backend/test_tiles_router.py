@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from xml.etree import ElementTree
+
 import numpy as np
 import pytest
 
@@ -101,4 +103,22 @@ def test_wmts_validation_and_missing_orthomosaic(client, tmp_path, monkeypatch):
     pending = Reconstruction(session_id=rec.session_id, status="complete", ortho_status="pending")
     db.add(pending)
     db.commit()
-    assert client.get(f"/tiles/{pending.id}/wms").status_code == 409
+    assert client.get(f"/tiles/{pending.id}/wms?REQUEST=GetMap").status_code == 409
+
+
+def test_wms_capabilities_without_orthomosaic(client, tmp_path):
+    db = _db()
+    session = SessionModel(name="Pending", folder_path=str(tmp_path))
+    db.add(session)
+    db.commit()
+    rec = Reconstruction(session_id=session.id, status="complete", ortho_status="pending")
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+    response = client.get(f"/tiles/{rec.id}/wms")
+    assert response.status_code == 200
+    root = ElementTree.fromstring(response.text)
+    assert root.tag == "WMS_Capabilities"
+    assert root.findtext("./Capability/Layer/Name") == f"reconstruction-{rec.id}"
+    assert client.get(f"/tiles/{rec.id}/wms?REQUEST=GetMap").status_code == 409
+    assert client.get(f"/tiles/{rec.id + 10_000}/wms").status_code == 404
