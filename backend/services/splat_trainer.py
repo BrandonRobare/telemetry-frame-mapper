@@ -40,6 +40,7 @@ import json
 import math
 import shutil
 import subprocess
+import tempfile
 import threading
 import time
 from collections.abc import Callable
@@ -727,15 +728,21 @@ def render_flythrough(
             cloud = ply_io.read_3dgs_ply(splat_path)
             output_path.parent.mkdir(parents=True, exist_ok=True)
             command = [
-                "ffmpeg", "-y",
+                "ffmpeg", "-y", "-nostats", "-loglevel", "error",
                 "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{width}x{height}",
                 "-r", str(fps), "-i", "-",
                 "-c:v", "libx264", "-pix_fmt", "yuv420p", "-movflags", "+faststart",
                 str(output_path),
             ]
+            # Diagnostics go to a temp file, never a pipe. Nothing can read a pipe
+            # while this thread is busy writing frames to stdin, so a full stderr
+            # pipe (a few KB on Windows) blocks ffmpeg, which blocks us, which
+            # strands _GPU_LOCK for every other GPU job. A file never blocks its
+            # writer, so no drain thread is needed.
+            stderr_file = tempfile.TemporaryFile()
             process = subprocess.Popen(
                 command, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
-                stderr=subprocess.PIPE,
+                stderr=stderr_file,
             )
             try:
                 with torch.no_grad():
@@ -780,15 +787,26 @@ def render_flythrough(
                     process.stdin.write(
                         (render.cpu().numpy() * 255.0).astype(np.uint8).tobytes()
                     )
+                process.stdin.close()
+                returncode = process.wait()
+                stderr_file.seek(0)
+                stderr = stderr_file.read().decode("utf-8", errors="replace")
+                if returncode != 0:
+                    raise RuntimeError(
+                        f"ffmpeg failed while encoding the flythrough: {stderr}"
+                    )
+                if not output_path.exists():
+                    raise RuntimeError("ffmpeg reported success but produced no output file")
+                return output_path
             finally:
+                # Reap unconditionally: a raise mid-loop must not leave an ffmpeg
+                # holding the GPU while this thread walks away. kill() is a no-op
+                # once wait() above has already collected the process.
                 if process.stdin is not None:
                     process.stdin.close()
-            stderr = process.stderr.read().decode("utf-8", errors="replace")
-            if process.wait() != 0:
-                raise RuntimeError(f"ffmpeg failed while encoding the flythrough: {stderr}")
-            if not output_path.exists():
-                raise RuntimeError("ffmpeg reported success but produced no output file")
-            return output_path
+                process.kill()
+                process.wait(timeout=10)
+                stderr_file.close()
         finally:
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
