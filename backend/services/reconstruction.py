@@ -1735,12 +1735,31 @@ def _run_flythrough_job(entry, db, cancel: threading.Event) -> None:
         raise
 
 
-def _load_las_positions(pointcloud_path: Path):
+def _load_las_positions_and_colors(pointcloud_path: Path) -> tuple:
+    """Return (Nx3 float64 XYZ, Nx3 uint8 RGB or None) from a LAS/LAZ file."""
     import laspy
     import numpy as np
 
     las = laspy.read(pointcloud_path)
-    return np.column_stack([las.x, las.y, las.z]).astype(np.float64)
+    xyz = np.column_stack([las.x, las.y, las.z]).astype(np.float64)
+    if not {"red", "green", "blue"} <= set(las.point_format.dimension_names):
+        return xyz, None
+
+    rgb = np.column_stack([las.red, las.green, las.blue]).astype(np.float64)
+    # Point formats 2/3/5 always allocate the colour dimensions, so an all-zero
+    # block means "never populated" rather than "black" — grey beats a black raster.
+    if not rgb.any():
+        return xyz, None
+    # LAS colour is nominally 16-bit (our own export scales 8-bit up by 257),
+    # but some producers leave 8-bit values in the field unscaled.
+    if rgb.max() > 255:
+        rgb /= 257.0
+    return xyz, np.clip(rgb, 0, 255).astype(np.uint8)
+
+
+def _load_las_positions(pointcloud_path: Path):
+    """Positions only. Change detection voxelises this result and needs Nx3."""
+    return _load_las_positions_and_colors(pointcloud_path)[0]
 
 
 def _reproject_utm_points(points, source_geo: dict, target_geo: dict):
