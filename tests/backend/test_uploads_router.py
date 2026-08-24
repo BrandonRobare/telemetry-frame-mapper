@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
 from unittest.mock import patch
 
@@ -347,3 +349,83 @@ def test_browser_upload_chunk_rejects_offset_when_file_size_drifted(client, tmp_
 
     assert resp.status_code == 409
     assert "offset" in resp.json()["detail"].lower()
+
+
+def _idempotency_limits() -> dict:
+    return {
+        "chunk_size_bytes": 4,
+        "max_file_bytes": 10,
+        "max_total_bytes": 20,
+        "quota_bytes": 100,
+        "cleanup_after_hours": 24,
+        "accepted_extensions": [".jpg"],
+    }
+
+
+def _upload_one_file(client, name: str) -> str:
+    start = client.post("/uploads/imports/start", json={
+        "name": name,
+        "total_bytes": 4,
+        "files": [{"path": "a.jpg", "size": 4}],
+    })
+    assert start.status_code == 200
+    upload_id = start.json()["upload_id"]
+    chunk = client.post(
+        f"/uploads/imports/{upload_id}/chunk",
+        data={"path": "a.jpg", "offset": "0"},
+        files={"chunk": ("chunk", b"abcd", "application/octet-stream")},
+    )
+    assert chunk.status_code == 200
+    return upload_id
+
+
+def test_browser_upload_complete_is_idempotent(client, db_session, tmp_path):
+    """A retried /complete returns the first session instead of importing twice (#602)."""
+    from backend.db.models import Session as SessionModel
+    from backend.routers import uploads
+
+    cfg = type("Cfg", (), {"imports_dir": str(tmp_path / "imports")})()
+    with patch("backend.routers.uploads.get_config", return_value=cfg), \
+         patch("backend.routers.uploads.get_browser_upload_config",
+               return_value=_idempotency_limits()), \
+         patch("backend.routers.uploads.start_import") as mock_start:
+        upload_id = _upload_one_file(client, "Retry Me")
+
+        first = client.post(f"/uploads/imports/{upload_id}/complete")
+        second = client.post(f"/uploads/imports/{upload_id}/complete")
+
+        # Same replay once the in-memory state is lost and the manifest is reloaded.
+        uploads._UPLOADS.clear()
+        uploads._UPLOAD_LOCKS.clear()
+        third = client.post(f"/uploads/imports/{upload_id}/complete")
+
+    assert [first.status_code, second.status_code, third.status_code] == [200, 200, 200]
+    assert second.json() == first.json()
+    assert third.json() == first.json()
+    assert db_session.query(SessionModel).count() == 1
+    assert mock_start.call_count == 1
+
+
+def test_browser_upload_concurrent_complete_imports_once(client, db_session, tmp_path):
+    """Two simultaneous /complete calls still produce one session and one import (#602)."""
+    from backend.db.models import Session as SessionModel
+
+    cfg = type("Cfg", (), {"imports_dir": str(tmp_path / "imports")})()
+    with patch("backend.routers.uploads.get_config", return_value=cfg), \
+         patch("backend.routers.uploads.get_browser_upload_config",
+               return_value=_idempotency_limits()), \
+         patch("backend.routers.uploads.start_import") as mock_start:
+        upload_id = _upload_one_file(client, "Double Click")
+        barrier = threading.Barrier(2)
+
+        def complete():
+            barrier.wait(timeout=5)
+            return client.post(f"/uploads/imports/{upload_id}/complete")
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            responses = [f.result() for f in [pool.submit(complete), pool.submit(complete)]]
+
+    assert [r.status_code for r in responses] == [200, 200]
+    assert responses[0].json()["session_id"] == responses[1].json()["session_id"]
+    assert db_session.query(SessionModel).count() == 1
+    assert mock_start.call_count == 1
