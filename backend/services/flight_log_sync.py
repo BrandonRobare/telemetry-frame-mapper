@@ -26,7 +26,8 @@ class FlightLogCSVError(ValueError):
 
 # Upper bound on rows returned by ``build_offset_preview``. ``window_s`` and ``step_s``
 # are each bounded by the router, but their quotient is not: window_s=300 with
-# step_s=1e-6 would otherwise ask for 600 million iterations.
+# step_s=1e-6 would otherwise ask for 600 million iterations. Past this many rows
+# the sweep is re-spaced across the same window, never cut short.
 _MAX_PREVIEW_STEPS = 1000
 
 
@@ -329,7 +330,13 @@ def build_offset_preview(
     """Summarize match coverage across candidate offsets for a preview graph."""
     if step_s <= 0:
         step_s = 1.0
-    steps = min(int((window_s * 2) / step_s), _MAX_PREVIEW_STEPS)
+    steps = int((window_s * 2) / step_s)
+    if steps > _MAX_PREVIEW_STEPS:
+        # Coarsen the step rather than truncate the sweep. Returning only the first
+        # slice of the requested window, labelled as the whole window, is a wrong
+        # answer; a coarser resolution over the full range is a bounded one.
+        steps = _MAX_PREVIEW_STEPS
+        step_s = (window_s * 2) / steps
     sorted_points = sorted(log_points, key=lambda p: p["timestamp_s"])
     rows = []
     for i in range(steps + 1):

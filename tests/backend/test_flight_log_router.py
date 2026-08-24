@@ -231,7 +231,10 @@ def test_offset_preview_bounds_tiny_step_s(client):
         f"/flight-logs/offset-preview?session_id={s.id}&window_s=300&step_s=0.000001"
     )
     assert resp.status_code == 200
-    assert len(resp.json()) == _MAX_PREVIEW_STEPS + 1
+    rows = resp.json()
+    assert len(rows) == _MAX_PREVIEW_STEPS + 1
+    # Bounded by re-spacing, so the operator still sees the window they asked for.
+    assert (rows[0]["offset_s"], rows[-1]["offset_s"]) == (-300.0, 300.0)
 
 
 # ---------------------------------------------------------------------------
