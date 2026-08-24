@@ -282,12 +282,17 @@ def test_build_offset_preview_caps_step_count():
     )
     # Uncapped this is int(20 / 0.001) + 1 == 20_001 rows.
     assert len(rows) == flight_log_sync._MAX_PREVIEW_STEPS + 1
+    # The bound re-spaces the sweep; it never cuts the requested window short.
+    assert rows[0]["offset_s"] == -10.0
+    assert rows[-1]["offset_s"] == 10.0
 
     # Only reachable once the cap exists: uncapped this is 600_000_001 iterations.
     rows = flight_log_sync.build_offset_preview(
         _IMAGES, _LOG_POINTS, tolerance_s=2.0, window_s=300.0, step_s=0.000001
     )
     assert len(rows) == flight_log_sync._MAX_PREVIEW_STEPS + 1
+    assert rows[0]["offset_s"] == -300.0
+    assert rows[-1]["offset_s"] == 300.0
 
 
 def test_build_offset_preview_sorts_log_points_once(monkeypatch):
