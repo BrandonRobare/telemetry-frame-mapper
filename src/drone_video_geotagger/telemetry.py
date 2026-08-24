@@ -29,14 +29,17 @@ def parse_srt_time(value: str) -> float:
 
 
 def parse_srt_text(text: str) -> list[TelemetryPoint]:
+    import warnings
+
     time_re = re.compile(r"(\d{2}:\d{2}:\d{2},\d+)\s+-->\s+(\d{2}:\d{2}:\d{2},\d+)")
     gps_re = re.compile(
         r"GPS\s*\(\s*([+-]?\d+(?:\.\d+)?)\s*,\s*"
         r"([+-]?\d+(?:\.\d+)?)\s*,\s*([+-]?\d+(?:\.\d+)?)\s*\)"
     )
     height_re = re.compile(r"(?:^|,\s*)H\s+([+-]?\d+(?:\.\d+)?)m")
+    # gt?itude also accepts "longtitude", DJI GO 4's own long-standing misspelling.
     key_value_re = re.compile(
-        r"\b(lat(?:itude)?|lon(?:gitude)?|rel[_\s-]?alt(?:itude)?|alt(?:itude)?)\b"
+        r"\b(lat(?:itude)?|lon(?:gt?itude)?|rel[_\s-]?alt(?:itude)?|alt(?:itude)?)\b"
         r"\s*[:=]\s*([+-]?\d+(?:\.\d+)?)",
         re.IGNORECASE,
     )
@@ -45,6 +48,7 @@ def parse_srt_text(text: str) -> list[TelemetryPoint]:
     current_start = current_end = None
     timed_blocks = 0
     telemetry_like_lines = 0
+    partial_blocks = 0
 
     for raw_line in text.splitlines():
         line = re.sub(r"<[^<]+?>", "", raw_line).strip()
@@ -88,15 +92,29 @@ def parse_srt_text(text: str) -> list[TelemetryPoint]:
             rel_alt_m = key_values.get("rel_alt", 0.0)
             if lat is not None and lon is not None:
                 points.append(TelemetryPoint(current_start, current_end, lat, lon, rel_alt_m))
+            elif lat is not None or lon is not None:
+                partial_blocks += 1
 
     if len(points) < 2:
+        shape = (
+            "no GPS lines were found"
+            if telemetry_like_lines == 0
+            else f"{telemetry_like_lines} GPS lines were found but not in a recognized shape"
+        )
         raise ValueError(
             "Not enough GPS telemetry was found in the SRT data "
-            f"(parsed {len(points)} points from {timed_blocks} timed blocks; "
-            f"saw {telemetry_like_lines} telemetry-like lines). Supported DJI formats include "
+            f"({shape}; parsed {len(points)} points from {timed_blocks} timed blocks; "
+            f"{partial_blocks} blocks had a partial fix). Supported DJI formats include "
             "'GPS (lon, lat, alt)' with optional 'H 12.3m', and key/value forms such as "
             "'[latitude: 41.1] [longitude: -81.1] [rel_alt: 24.0]' or "
             "'Lat: 41.1 Lon: -81.1 Alt: 24.0'."
+        )
+    if partial_blocks:
+        warnings.warn(
+            f"Dropped {partial_blocks} SRT block(s) with a partial fix "
+            "(latitude without longitude, or the reverse); "
+            f"kept {len(points)} points from {timed_blocks} timed blocks.",
+            stacklevel=2,
         )
     return points
 
