@@ -82,7 +82,9 @@ describe('useSlopeOverlay object URL lifecycle', () => {
       createElement(QueryClientProvider, { client }, children)
 
     const first = renderHook(() => useSlopeOverlay(2, true), { wrapper })
-    await waitFor(() => expect(first.result.current.data).toBeTruthy())
+    // Two chained requests (/jobs/ then /slope) plus a blob read: waitFor's 1s
+    // default is too tight for a loaded CI runner and made this flake.
+    await waitFor(() => expect(first.result.current.data).toBeTruthy(), { timeout: 10_000 })
     const firstUrl = first.result.current.data?.imageUrl
     expect(firstUrl).toBeTruthy()
 
@@ -92,7 +94,7 @@ describe('useSlopeOverlay object URL lifecycle', () => {
 
     // Coming back inside gcTime is served from cache — and must not hand back the dead URL.
     const second = renderHook(() => useSlopeOverlay(2, true), { wrapper })
-    await waitFor(() => expect(second.result.current.data).toBeTruthy())
+    await waitFor(() => expect(second.result.current.data).toBeTruthy(), { timeout: 10_000 })
     const overlay = second.result.current.data
 
     expect(overlay?.imageUrl).toBeTruthy()
