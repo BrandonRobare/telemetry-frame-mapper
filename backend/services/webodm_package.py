@@ -79,6 +79,16 @@ def build_webodm_package(
             "copyable_command": "webodm run " + " ".join(odm_options),
             "contents": contents[:],
         }
+        if options.include_gcp and not gcp_points:
+            # The command above omits --gcp because the shipped file has no points.
+            # Say so, or an operator who fills the template in gets it silently
+            # ignored by ODM (#629).
+            manifest["gcp_note"] = (
+                "gcp_list.txt is an empty template. Add one row per control point "
+                "(geo_x geo_y geo_z im_x im_y im_name gcp_label), then append "
+                "'--gcp gcp_list.txt' to the command above. ODM ignores the file "
+                "without that flag."
+            )
         zf.writestr("odm_options_manifest.json", json.dumps(manifest, indent=2))
         contents.append("odm_options_manifest.json")
     manifest["contents"] = contents
