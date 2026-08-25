@@ -36,12 +36,17 @@ def test_matches_brute_force_across_block_boundaries(monkeypatch):
     np.testing.assert_array_equal(result, _brute_force(points, gaussians))
 
 
-def test_matches_brute_force_far_from_origin():
-    """A UTM-scale cloud: the ‖b‖² - 2·a·b expansion must not lose the nearest one."""
-    rng = np.random.default_rng(7)
+def test_matches_brute_force_for_a_tight_cloud_far_from_origin():
+    """A dense cloud at UTM coordinates: this is what the centering buys.
+
+    Without subtracting a common origin the ‖b‖² and 2·a·b terms are ~2e13 while
+    the distances being compared are ~1e-4, and the expansion picks Gaussians up
+    to 65x farther away than the nearest (39 of these 40 points).
+    """
+    rng = np.random.default_rng(11)
     origin = np.array([512_345.0, 4_567_890.0, 1_234.0])
-    points = origin + rng.random((200, 3)) * 20.0
-    gaussians = origin + rng.random((500, 3)) * 20.0
+    points = origin + rng.normal(size=(40, 3)) * 0.02
+    gaussians = origin + rng.normal(size=(120, 3)) * 0.02
 
     result = _nearest_gaussian_indices(points, gaussians)
 
@@ -65,11 +70,12 @@ def test_duplicate_gaussians_resolve_to_the_lowest_index(monkeypatch):
     np.testing.assert_array_equal(result, [1, 3])
 
 
-def test_equidistant_point_takes_the_lowest_index():
+def test_equidistant_distinct_gaussians_pick_a_true_nearest():
+    """Only equal *coordinates* tie bit for bit; equal distances may go either way."""
     points = np.array([[0.0, 0.0, 0.0]])
     gaussians = np.array([[2.0, 0.0, 0.0], [-2.0, 0.0, 0.0]])
 
-    assert _nearest_gaussian_indices(points, gaussians).tolist() == [0]
+    assert _nearest_gaussian_indices(points, gaussians).tolist() in ([0], [1])
 
 
 def test_no_gaussians_yields_sentinel_indices():

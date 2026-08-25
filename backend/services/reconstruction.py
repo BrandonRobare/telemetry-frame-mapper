@@ -1064,7 +1064,15 @@ def _nearest_gaussian_indices(points_xyz, gaussian_xyz):
     along a row and so cannot change the argmin — which keeps the working array
     at ``(points_block, gaussian_block)`` instead of materialising a
     ``(points, gaussians, 3)`` difference (12 GB at a million Gaussians, #633).
+
+    The expansion is accurate to a couple of ULP, so it can only disagree with a
+    difference-of-coordinates argmin about Gaussians that are equidistant to
+    within float64 noise — for those either answer is as right as the other.
     """
+    # ponytail: still a brute-force O(points x gaussians) scan, ~1.6 s per billion
+    # pairs, so a full-preset export (1M Gaussians) remains minutes of CPU. Only a
+    # spatial index fixes that, and none is in the lock file — add scipy's cKDTree
+    # if the export becomes slow enough to matter.
     import numpy as np
 
     points_xyz = np.asarray(points_xyz, dtype=np.float64)
@@ -1090,8 +1098,9 @@ def _nearest_gaussian_indices(points_xyz, gaussian_xyz):
             block *= -2.0
             block += gaussian_sq[offset : offset + _NEAREST_BLOCK]
             block_min = block.min(axis=1)
-            # Strict `<` leaves ties with the earlier block, so a duplicated
-            # Gaussian resolves to its lowest index as a full-row argmin would.
+            # Strict `<` leaves ties with the earlier block, so Gaussians at the
+            # same coordinates (identical distances, bit for bit) resolve to the
+            # lowest index whichever blocks they land in, as a full-row argmin did.
             closer = block_min < best_distance
             best_index = np.where(closer, block.argmin(axis=1) + offset, best_index)
             best_distance = np.where(closer, block_min, best_distance)
