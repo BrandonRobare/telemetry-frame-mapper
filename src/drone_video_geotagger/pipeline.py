@@ -525,7 +525,10 @@ class PipelineRunner:
                 output = _run_step(step, dry_run, self.job.output_root)
                 results.append(StepResult(i, step.kind, True, output))
             except Exception as exc:
-                logger.exception("Step %d (%s) failed", i, step.kind.value)
+                if not isinstance(exc, NotImplementedError):
+                    # A step that cannot run headlessly is an expected outcome, not a
+                    # crash: it gets the same failed StepResult, but no traceback.
+                    logger.exception("Step %d (%s) failed", i, step.kind.value)
                 results.append(StepResult(i, step.kind, False, "", str(exc)))
 
         finished_at = datetime.now(UTC)
