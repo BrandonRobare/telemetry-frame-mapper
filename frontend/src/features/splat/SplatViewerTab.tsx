@@ -24,6 +24,7 @@ import { deriveGroundPlaneY, geoOriginLatLon, gpsToWorld, worldToGps, useRayCast
 import { smoothstep } from './smoothstep'
 import { cleanupFlythroughRecording } from './flythroughRecording'
 import MiniLeafletPane from './MiniLeafletPane'
+import { resolveActiveJobId } from './activeJob'
 import { sampleProfile, computeVolume } from './measurementMath'
 import type { ProfileSample } from './measurementMath'
 import type { VolumeResult } from './measurementMath'
@@ -1746,7 +1747,7 @@ export default function SplatViewerTab() {
   const jobs = allJobs ?? []
   const running = jobs.filter((j) => ACTIVE_STATUSES.includes(j.status))
   const completed = jobs.filter((j) => j.status === 'complete')
-  const activeId = selectedJobId ?? completed[0]?.id ?? null
+  const activeId = resolveActiveJobId(selectedJobId, jobs, selectedSessionId)
   const { data: reconstructionDetails } = useReconstructionDetails(activeId)
   const { data: geoTransform } = useGeoTransform(activeId)
   const selectedJobComplete = completed.some((j) => j.id === activeId)
