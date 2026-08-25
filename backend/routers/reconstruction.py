@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import tempfile
 import time
 import zipfile
 from collections.abc import Iterator
@@ -11,6 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session as DBSession
+from starlette.background import BackgroundTask
 
 from ..core.config import get_config, get_render_config, get_webodm_config
 from ..core.paths import confine_path
@@ -995,8 +997,8 @@ def download_reconstruction_bundle(reconstruction_id: int, db: DBSession = Depen
                 status_code=422, detail=f"Failed to build mesh georef sidecar: {exc}"
             ) from exc
 
-    bundle_path = _reconstruction_artifact_path(rec.id, f"reconstruction_{rec.id}_bundle.zip")
-    bundle_path.parent.mkdir(parents=True, exist_ok=True)
+    bundle_dir = _reconstruction_artifact_path(rec.id, "bundle.zip").parent
+    bundle_dir.mkdir(parents=True, exist_ok=True)
 
     thumbnail_name = f"thumbnail{thumb_path.suffix.lower() or '.jpg'}" if thumb_path else None
     files = {
@@ -1007,17 +1009,31 @@ def download_reconstruction_bundle(reconstruction_id: int, db: DBSession = Depen
     }
     metadata = _bundle_metadata(rec, files)
 
-    with zipfile.ZipFile(bundle_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-        zf.write(glb_path, "mesh.glb")
-        if thumb_path and thumbnail_name:
-            zf.write(thumb_path, thumbnail_name)
-        zf.write(georef_path, "mesh_georef.json")
-        zf.writestr("metadata.json", json.dumps(metadata, indent=2, sort_keys=True))
+    # Every request builds into its own file and deletes it once the body is sent.
+    # One fixed bundle path let a second download truncate the archive an earlier
+    # one was still streaming, and left a half-written zip behind after a crash
+    # (#684). No os.replace: on Windows it fails while a FileResponse holds the
+    # target open (#653).
+    with tempfile.NamedTemporaryFile(
+        prefix=f".reconstruction_{rec.id}_bundle.", suffix=".zip", dir=bundle_dir, delete=False
+    ) as temporary_file:
+        bundle_path = Path(temporary_file.name)
+    try:
+        with zipfile.ZipFile(bundle_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            zf.write(glb_path, "mesh.glb")
+            if thumb_path and thumbnail_name:
+                zf.write(thumb_path, thumbnail_name)
+            zf.write(georef_path, "mesh_georef.json")
+            zf.writestr("metadata.json", json.dumps(metadata, indent=2, sort_keys=True))
+    except BaseException:
+        bundle_path.unlink(missing_ok=True)
+        raise
 
     return FileResponse(
         bundle_path,
         media_type="application/zip",
         filename=f"reconstruction_{reconstruction_id}_bundle.zip",
+        background=BackgroundTask(bundle_path.unlink, missing_ok=True),
     )
 
 
