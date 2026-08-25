@@ -1,13 +1,10 @@
 import type { Job } from '../../types/api'
-
-// Mirrors the ACTIVE status list used by usePipelineStatus / OverviewTab —
-// jobs still moving through the reconstruction pipeline.
-const ACTIVE_STATUSES = new Set<Job['status']>(['pending', 'running_colmap', 'running_gsplat'])
+import { isLiveReconstructionStatus } from '../../shared/api/reconstructionStatusEvents'
 
 /** All in-flight jobs across every session, newest first. */
 export function selectRunningJobs(jobs: Job[]): Job[] {
   return jobs
-    .filter((j) => ACTIVE_STATUSES.has(j.status))
+    .filter((j) => isLiveReconstructionStatus(j.status))
     .sort((a, b) => b.id - a.id)
 }
 
