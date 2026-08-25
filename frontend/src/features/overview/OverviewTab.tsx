@@ -4,6 +4,7 @@ import { useSession } from '../map/hooks/useSession'
 import { useQuickReport } from '../map/hooks/useQuickReport'
 import { useCoverageResult } from '../map/hooks/useCoverageResult'
 import { get } from '../../shared/api/client'
+import { isLiveReconstructionStatus } from '../../shared/api/reconstructionStatusEvents'
 import type { Job } from '../../types/api'
 import { deriveStageStates } from '../../shared/pipeline/stages'
 import PipelineOverview from './PipelineOverview'
@@ -17,8 +18,6 @@ import Button from '../../shared/components/Button'
 interface Props {
   onImport?: () => void
 }
-
-const ACTIVE = ['pending', 'running_colmap', 'running_gsplat']
 
 function Stat({ label, value }: { label: string; value: React.ReactNode }) {
   return (
@@ -48,7 +47,7 @@ export default function OverviewTab({ onImport }: Props) {
     queryFn: () => get<Job[]>('/jobs/'),
     refetchInterval: (q) => {
       const js = (q.state.data ?? []) as Job[]
-      return js.some((j) => ACTIVE.includes(j.status)) ? 3000 : false
+      return js.some((j) => isLiveReconstructionStatus(j.status)) ? 3000 : false
     },
   })
 

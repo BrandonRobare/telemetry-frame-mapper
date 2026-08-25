@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import type { Job } from '../../types/api'
 import { get } from '../api/client'
+import { isLiveReconstructionStatus } from '../api/reconstructionStatusEvents'
 import { useSession } from '../../features/map/hooks/useSession'
 import { useCoverageResult } from '../../features/map/hooks/useCoverageResult'
 import {
@@ -10,8 +11,6 @@ import {
   type StageKey,
   type StageState,
 } from './stages'
-
-const ACTIVE = ['pending', 'running_colmap', 'running_gsplat']
 
 export interface PipelineStatus {
   session: ReturnType<typeof useSession>['data']
@@ -34,7 +33,7 @@ export function usePipelineStatus(sessionId: number | null): PipelineStatus {
     queryFn: () => get<Job[]>('/jobs/'),
     refetchInterval: (q) => {
       const js = (q.state.data ?? []) as Job[]
-      return js.some((j) => ACTIVE.includes(j.status)) ? 3000 : false
+      return js.some((j) => isLiveReconstructionStatus(j.status)) ? 3000 : false
     },
   })
 
