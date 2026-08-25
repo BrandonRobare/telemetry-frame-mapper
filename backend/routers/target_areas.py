@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import json
+
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
+from shapely.errors import ShapelyError
+from shapely.geometry import shape
 from sqlalchemy.orm import Session as DBSession
 
 from ..db.database import get_db
@@ -9,10 +13,30 @@ from ..db.models import TargetArea
 
 router = APIRouter(prefix="/target-areas", tags=["target-areas"])
 
+_VALID_GEOM_TYPES = {"Polygon", "MultiPolygon"}
+
 
 class TargetAreaIn(BaseModel):
     name: str
     geom_geojson: str
+
+    @field_validator("geom_geojson")
+    @classmethod
+    def validate_geom_geojson(cls, v: str) -> str:
+        # Every downstream consumer (coverage, mission planning, reconstruction
+        # filtering) does `shape(json.loads(v))` with no error handling, so this
+        # is the one place to catch a bad geometry before it reaches the DB (#638).
+        try:
+            geom = shape(json.loads(v))
+        except (json.JSONDecodeError, ShapelyError, TypeError, ValueError, AttributeError) as e:
+            raise ValueError(f"geom_geojson must be valid GeoJSON geometry: {e}") from e
+        if geom.geom_type not in _VALID_GEOM_TYPES:
+            raise ValueError(
+                f"geom_geojson must be a Polygon or MultiPolygon, got {geom.geom_type}"
+            )
+        if geom.is_empty:
+            raise ValueError("geom_geojson must not be an empty geometry")
+        return v
 
 
 class TargetAreaOut(BaseModel):
