@@ -28,7 +28,14 @@ class TargetAreaIn(BaseModel):
         # is the one place to catch a bad geometry before it reaches the DB (#638).
         try:
             geom = shape(json.loads(v))
-        except (json.JSONDecodeError, ShapelyError, TypeError, ValueError, AttributeError) as e:
+        except (
+            json.JSONDecodeError,
+            ShapelyError,
+            TypeError,
+            ValueError,
+            AttributeError,
+            KeyError,
+        ) as e:
             raise ValueError(f"geom_geojson must be valid GeoJSON geometry: {e}") from e
         if geom.geom_type not in _VALID_GEOM_TYPES:
             raise ValueError(
