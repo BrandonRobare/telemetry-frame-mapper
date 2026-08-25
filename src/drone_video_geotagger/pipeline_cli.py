@@ -106,6 +106,6 @@ def main(argv: list[str] | None = None) -> int:
             print(f"error: {exc}", file=sys.stderr)
             return 1
         print(_format_result(result))
-        sys.exit(result.exit_code)
+        return result.exit_code
 
     return 0

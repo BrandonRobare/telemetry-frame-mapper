@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -11,6 +12,7 @@ from drone_video_geotagger.pipeline import (
     PipelineResult,
     ReconstructionPreset,
     StepKind,
+    StepResult,
     StepSpec,
     load_and_run,
     parse_job_spec,
@@ -122,6 +124,21 @@ def test_parse_job_not_a_dict(tmp_path: Path) -> None:
         parse_job_spec(yaml_file)
 
 
+def test_parse_job_with_no_steps_is_rejected(tmp_path: Path) -> None:
+    """An empty job has nothing to succeed at, so it must not exit 0 (#583)."""
+    yaml_file = tmp_path / "empty.yml"
+    yaml_file.write_text("name: nothing-to-do\nsteps: []\n")
+    with pytest.raises(ValueError, match="at least one step"):
+        parse_job_spec(yaml_file)
+
+
+def test_parse_job_with_omitted_steps_is_rejected(tmp_path: Path) -> None:
+    yaml_file = tmp_path / "no-steps.yml"
+    yaml_file.write_text("name: nothing-to-do\n")
+    with pytest.raises(ValueError, match="at least one step"):
+        parse_job_spec(yaml_file)
+
+
 # ── Plan / dry-run tests ────────────────────────────────────────────────────
 
 
@@ -230,7 +247,7 @@ def test_ingest_missing_piexif_fails_instead_of_reporting_all_images_gps_less(
     with pytest.raises(RuntimeError, match=r"piexif.*pip install piexif"):
         _run_ingest(IngestSpec(tmp_path), dry_run=False, output_root=tmp_path / "output")
 
-    assert not (tmp_path / "output" / "ingest_summary.json").exists()
+    assert not (tmp_path / "output" / "ingest_validation.json").exists()
 
 
 def test_ingest_records_images_without_gps_when_piexif_is_available(
@@ -274,6 +291,33 @@ def test_ingest_counts_malformed_exif_as_missing_gps(
     assert "GPS missing: 1" in output
 
 
+def test_ingest_reports_itself_as_validation_not_import(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The step validates GPS EXIF; it imports nothing, and must say so (#583)."""
+    from drone_video_geotagger.pipeline import IngestSpec, _run_ingest
+
+    (tmp_path / "a.jpg").write_bytes(b"not decoded")
+    monkeypatch.setitem(sys.modules, "piexif", SimpleNamespace(load=lambda _: {"GPS": {1: b"N"}}))
+
+    output = _run_ingest(IngestSpec(tmp_path), dry_run=False, output_root=tmp_path / "output")
+
+    assert "validation only" in output.lower()
+    assert "no images imported" in output.lower()
+    summary = json.loads((tmp_path / "output" / "ingest_validation.json").read_text())
+    assert summary["mode"] == "validation"
+
+
+def test_ingest_dry_run_reports_itself_as_validation(tmp_path: Path) -> None:
+    from drone_video_geotagger.pipeline import IngestSpec, _run_ingest
+
+    (tmp_path / "a.jpg").write_bytes(b"not decoded")
+
+    output = _run_ingest(IngestSpec(tmp_path), dry_run=True, output_root=tmp_path / "output")
+
+    assert "validation only" in output.lower()
+
+
 def test_ingest_propagates_unexpected_exif_errors(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -301,7 +345,8 @@ def test_ingest_propagates_unexpected_exif_errors(
 # ── PipelineRunner tests ────────────────────────────────────────────────────
 
 
-def test_pipeline_result_exit_code() -> None:
+def test_pipeline_result_with_no_steps_is_not_a_success() -> None:
+    """`all([])` is True, which made a job that ran nothing exit 0 (#583)."""
     result = PipelineResult(
         name="test",
         steps=[],
@@ -309,8 +354,103 @@ def test_pipeline_result_exit_code() -> None:
         finished_at=None,  # type: ignore[arg-type]
         dry_run=True,
     )
+    assert result.success is False
+    assert result.exit_code == 1
+
+
+def test_pipeline_result_exit_code() -> None:
+    result = PipelineResult(
+        name="test",
+        steps=[StepResult(0, StepKind.GEOTAG, True, "done")],
+        started_at=None,  # type: ignore[arg-type]
+        finished_at=None,  # type: ignore[arg-type]
+        dry_run=True,
+    )
     assert result.success is True
     assert result.exit_code == 0
+
+
+# ── Truthful status: unsupported work must fail, not report success (#583) ──
+
+
+def _write_job(tmp_path: Path, body: str) -> Path:
+    yaml_file = tmp_path / "job.yml"
+    yaml_file.write_text(f"name: status-job\noutput_root: '{tmp_path / 'out'}'\n{body}")
+    return yaml_file
+
+
+def test_live_reconstruction_step_fails_instead_of_reporting_success(tmp_path: Path) -> None:
+    yaml_file = _write_job(tmp_path, "steps:\n  - kind: reconstruction\n    preset: quick\n")
+
+    result = load_and_run(yaml_file, dry_run=False)
+
+    assert result.success is False
+    assert result.exit_code == 1
+    assert result.steps[0].success is False
+    assert "reconstruction" in result.steps[0].error.lower()
+
+
+def test_live_export_step_fails_instead_of_reporting_success(tmp_path: Path) -> None:
+    yaml_file = _write_job(tmp_path, "steps:\n  - kind: export\n    format: webodm_package\n")
+
+    result = load_and_run(yaml_file, dry_run=False)
+
+    assert result.success is False
+    assert result.exit_code == 1
+    assert "export" in result.steps[0].error.lower()
+
+
+def test_step_without_its_spec_fails(tmp_path: Path) -> None:
+    """Every step kind lost its 'no spec' free pass, not just the quoted two."""
+    from drone_video_geotagger.pipeline import JobSpec, PipelineRunner
+
+    for kind in StepKind:
+        job = JobSpec(name="bare", steps=[StepSpec(kind=kind)], output_root=tmp_path / "out")
+        result = PipelineRunner(job).run(dry_run=True)
+        assert result.success is False, f"{kind.value} reported success with no spec"
+        assert kind.value in result.steps[0].error
+
+
+# ── Coverage needs real footprints (#583) ───────────────────────────────────
+
+
+def _polygon(east: float) -> str:
+    """A rectangle from -81.5 to `east`, between 41.1 and 41.2 latitude."""
+    ring = [[-81.5, 41.1], [east, 41.1], [east, 41.2], [-81.5, 41.2], [-81.5, 41.1]]
+    return json.dumps({"type": "Polygon", "coordinates": [ring]})
+
+
+_TARGET = _polygon(-81.4)
+_FOOTPRINT = _polygon(-81.45)  # covers the western half of the target
+
+
+def test_coverage_without_footprints_fails(tmp_path: Path) -> None:
+    yaml_file = _write_job(
+        tmp_path, f"steps:\n  - kind: coverage\n    target_geojson: '{_TARGET}'\n"
+    )
+
+    result = load_and_run(yaml_file, dry_run=False)
+
+    assert result.success is False
+    assert "footprint" in result.steps[0].error.lower()
+    assert not (tmp_path / "out" / "coverage_summary.json").exists()
+
+
+def test_coverage_with_footprints_reports_real_numbers(tmp_path: Path) -> None:
+    yaml_file = _write_job(
+        tmp_path,
+        "steps:\n"
+        "  - kind: coverage\n"
+        f"    target_geojson: '{_TARGET}'\n"
+        "    footprints:\n"
+        f"      - '{_FOOTPRINT}'\n",
+    )
+
+    result = load_and_run(yaml_file, dry_run=False)
+
+    assert result.success is True, result.steps[0].error
+    summary = json.loads((tmp_path / "out" / "coverage_summary.json").read_text())
+    assert summary["coverage_pct"] > 0
 
 
 # ── StepSpec construction ───────────────────────────────────────────────────
@@ -368,10 +508,55 @@ steps:
     # dry_run should not create output files
     assert result.dry_run is True
     assert result.success is True
-    # Only the yaml_file and possibly output_root dir (created for logging)
-    new_files = post_files - pre_files
-    # Accept output_root or log_dir being created (infrastructure, not content)
-    for nf in new_files:
-        assert nf == out or nf == (out / "logs") or nf.is_relative_to(out), (
-            f"Unexpected side-effect file: {nf}"
-        )
+    # Not even the output_root or its log dir: a dry run touches nothing (#583).
+    assert post_files == pre_files
+    assert not out.exists()
+
+
+def test_plan_creates_no_directories(tmp_path: Path) -> None:
+    """`--dry-run` goes through plan_job, which must not create output dirs either."""
+    frames_dir = tmp_path / "frames"
+    frames_dir.mkdir()
+    (frames_dir / "frame_00001.jpg").write_text("")
+    out = tmp_path / "out"
+    yaml_file = tmp_path / "job.yml"
+    yaml_file.write_text(
+        f"""\
+name: plan-no-dirs
+output_root: '{out}'
+log_dir: '{tmp_path / "logs"}'
+steps:
+  - kind: geotag
+    video: /tmp/v.MP4
+    frames: '{frames_dir}'
+    takeoff_altitude: 100
+"""
+    )
+
+    plan_job(yaml_file)
+
+    assert not out.exists()
+    assert not (tmp_path / "logs").exists()
+
+
+def test_live_run_still_creates_output_dirs(tmp_path: Path) -> None:
+    """The dry-run fix must not stop a real run from preparing its output dirs."""
+    source = tmp_path / "src"
+    source.mkdir()
+    (source / "a.jpg").write_bytes(b"not decoded")
+    out = tmp_path / "out"
+    yaml_file = tmp_path / "job.yml"
+    yaml_file.write_text(
+        f"""\
+name: live-dirs
+output_root: '{out}'
+steps:
+  - kind: ingest
+    source_dir: '{source}'
+"""
+    )
+
+    load_and_run(yaml_file, dry_run=False)
+
+    assert out.is_dir()
+    assert (out / "logs").is_dir()
