@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import threading
 from pathlib import Path
 
@@ -184,24 +185,63 @@ def _write_geotiff(output_path: Path, image, geotransform: tuple,
 
     rows, cols = image.shape[0], image.shape[1]
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    # Write beside the target and rename on success: an interrupted write must
+    # not destroy the last good export (#628).
+    temporary_path = output_path.with_name(f"{output_path.stem}.tmp{output_path.suffix}")
 
-    with rasterio.open(
-        str(output_path),
-        "w",
-        driver="GTiff",
-        height=rows,
-        width=cols,
-        count=image.shape[2],
-        dtype=image.dtype,
-        crs=crs_wkt,
-        transform=rasterio.transform.from_origin(
-            geotransform[0], geotransform[3], geotransform[1], abs(geotransform[5])
-        ),
-    ) as dst:
-        for b in range(image.shape[2]):
-            dst.write(image[:, :, b], b + 1)
+    try:
+        with rasterio.open(
+            str(temporary_path),
+            "w",
+            driver="GTiff",
+            height=rows,
+            width=cols,
+            count=image.shape[2],
+            dtype=image.dtype,
+            crs=crs_wkt,
+            transform=rasterio.transform.from_origin(
+                geotransform[0], geotransform[3], geotransform[1], abs(geotransform[5])
+            ),
+        ) as dst:
+            for b in range(image.shape[2]):
+                dst.write(image[:, :, b], b + 1)
+    except BaseException:
+        temporary_path.unlink(missing_ok=True)
+        raise
 
+    os.replace(temporary_path, output_path)
     return output_path
+
+
+def reset_dangling_ortho_status() -> int:
+    """Fail orthomosaic exports left live by a previous process (startup only).
+
+    ``ortho_status`` is committed before the write and only ever cleared by the
+    worker thread, which dies with its process.  A ``pending``/``running`` row
+    surviving a restart is therefore dead, and the "already running" guard in
+    ``start_orthomosaic_export`` would reject every retry forever (#628).
+    Returns the number of rows reaped.
+    """
+    db = SessionLocal()
+    try:
+        reaped = (
+            db.query(Reconstruction)
+            .filter(Reconstruction.ortho_status.in_(["pending", "running"]))
+            .update(
+                {
+                    "ortho_status": "failed",
+                    "ortho_error": (
+                        "Server restart — orthomosaic export was orphaned by a "
+                        "previous shutdown"
+                    ),
+                },
+                synchronize_session=False,
+            )
+        )
+        db.commit()
+        return reaped
+    finally:
+        db.close()
 
 
 def start_orthomosaic_export(reconstruction_id: int, db: DBSession) -> Reconstruction:
