@@ -24,6 +24,13 @@ class FlightLogCSVError(ValueError):
     """Raised when a flight-log CSV does not meet a supported header contract."""
 
 
+# Upper bound on rows returned by ``build_offset_preview``. ``window_s`` and ``step_s``
+# are each bounded by the router, but their quotient is not: window_s=300 with
+# step_s=1e-6 would otherwise ask for 600 million iterations. Past this many rows
+# the sweep is re-spaced across the same window, never cut short.
+_MAX_PREVIEW_STEPS = 1000
+
+
 def parse_dji_csv(content: bytes) -> list[dict]:
     """Parse DJI flight log CSV. Returns list of {timestamp_s, latitude, longitude, altitude_m}."""
     reader = csv.DictReader(io.StringIO(content.decode()))
@@ -184,6 +191,11 @@ def interpolate_log_point(
 ) -> InterpolatedLogPoint | None:
     """Interpolate a log point at ``timestamp_s``.
 
+    ``log_points`` MUST already be sorted ascending by ``timestamp_s``; this is
+    called once per image per candidate offset, so sorting here would repeat the
+    same sort thousands of times per request. Use :func:`match_images_to_log`,
+    which sorts once, unless you are sure your points are ordered.
+
     Points inside the log timeline use linear interpolation. Points just outside
     the timeline are accepted only within ``tolerance_s`` and clamp to the edge
     point. ``nearest_delta_s`` reports distance to the closest raw log sample;
@@ -192,7 +204,7 @@ def interpolate_log_point(
     if not log_points:
         return None
 
-    points = sorted(log_points, key=lambda p: p["timestamp_s"])
+    points = log_points
     times = [float(p["timestamp_s"]) for p in points]
     idx = bisect.bisect_left(times, timestamp_s)
 
@@ -261,7 +273,24 @@ def match_images_to_log(
 
     ``offset_s`` is applied to image timestamps before looking up the log point:
     positive values mean the flight log is later than the image clock.
+
+    Sorts ``log_points`` once; callers do not need to pre-sort.
     """
+    return _match_sorted_log(
+        images,
+        sorted(log_points, key=lambda p: p["timestamp_s"]),
+        tolerance_s,
+        offset_s,
+    )
+
+
+def _match_sorted_log(
+    images: list,
+    log_points: list,
+    tolerance_s: float,
+    offset_s: float,
+) -> list[dict]:
+    """``match_images_to_log`` body, for callers holding already-sorted points."""
     results = []
     for img in images:
         if img.timestamp is None:
@@ -302,10 +331,17 @@ def build_offset_preview(
     if step_s <= 0:
         step_s = 1.0
     steps = int((window_s * 2) / step_s)
+    if steps > _MAX_PREVIEW_STEPS:
+        # Coarsen the step rather than truncate the sweep. Returning only the first
+        # slice of the requested window, labelled as the whole window, is a wrong
+        # answer; a coarser resolution over the full range is a bounded one.
+        steps = _MAX_PREVIEW_STEPS
+        step_s = (window_s * 2) / steps
+    sorted_points = sorted(log_points, key=lambda p: p["timestamp_s"])
     rows = []
     for i in range(steps + 1):
         offset = center_offset_s - window_s + i * step_s
-        matches = match_images_to_log(images, log_points, tolerance_s=tolerance_s, offset_s=offset)
+        matches = _match_sorted_log(images, sorted_points, tolerance_s, offset)
         deltas = [abs(m["delta_s"]) for m in matches if m["delta_s"] is not None]
         rows.append({
             "offset_s": round(offset, 3),
