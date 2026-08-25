@@ -9,9 +9,11 @@ from __future__ import annotations
 
 import json
 import subprocess
+from datetime import datetime
 
 from backend.db.models import FlightLog, FlightLogPoint
 from backend.main import app
+from backend.services import flight_log_sync
 
 # ---------------------------------------------------------------------------
 # Sample djirecord --json (v12 unencrypted)
@@ -250,3 +252,77 @@ def test_upload_dji_binary_missing_session(client, monkeypatch):
         data={"session_id": "999999"},
     )
     assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Offset-preview bounds and sort hoisting (issue #635)
+# ---------------------------------------------------------------------------
+
+
+class _FakeImage:
+    def __init__(self, image_id: int, timestamp: datetime):
+        self.id = image_id
+        self.filename = f"IMG_{image_id}.jpg"
+        self.timestamp = timestamp
+
+
+_LOG_POINTS = [
+    {"timestamp_s": 0.0, "latitude": 35.0, "longitude": -80.0, "altitude_m": 100.0},
+    {"timestamp_s": 1.0, "latitude": 35.001, "longitude": -80.001, "altitude_m": 101.0},
+    {"timestamp_s": 2.0, "latitude": 35.002, "longitude": -80.002, "altitude_m": 102.0},
+]
+
+_IMAGES = [_FakeImage(1, datetime(1970, 1, 1, 0, 0, 1))]
+
+
+def test_build_offset_preview_caps_step_count():
+    """A tiny step_s must yield a bounded row count instead of running unbounded."""
+    rows = flight_log_sync.build_offset_preview(
+        _IMAGES, _LOG_POINTS, tolerance_s=2.0, window_s=10.0, step_s=0.001
+    )
+    # Uncapped this is int(20 / 0.001) + 1 == 20_001 rows.
+    assert len(rows) == flight_log_sync._MAX_PREVIEW_STEPS + 1
+    # The bound re-spaces the sweep; it never cuts the requested window short.
+    assert rows[0]["offset_s"] == -10.0
+    assert rows[-1]["offset_s"] == 10.0
+
+    # Only reachable once the cap exists: uncapped this is 600_000_001 iterations.
+    rows = flight_log_sync.build_offset_preview(
+        _IMAGES, _LOG_POINTS, tolerance_s=2.0, window_s=300.0, step_s=0.000001
+    )
+    assert len(rows) == flight_log_sync._MAX_PREVIEW_STEPS + 1
+    assert rows[0]["offset_s"] == -300.0
+    assert rows[-1]["offset_s"] == 300.0
+
+
+def test_build_offset_preview_sorts_log_points_once(monkeypatch):
+    """The flight log is sorted once per request, not once per image per offset."""
+    calls = []
+    real_sorted = sorted
+
+    def counting_sorted(iterable, **kwargs):
+        calls.append(1)
+        return real_sorted(iterable, **kwargs)
+
+    monkeypatch.setattr(flight_log_sync, "sorted", counting_sorted, raising=False)
+
+    rows = flight_log_sync.build_offset_preview(
+        _IMAGES, _LOG_POINTS, tolerance_s=2.0, window_s=2.0, step_s=1.0
+    )
+
+    assert len(rows) == 5  # 1 image x 5 offsets == 5 sorts before the hoist
+    assert len(calls) == 1
+
+
+def test_match_images_to_log_sorts_unsorted_points():
+    """match_images_to_log owns the sort, so unsorted input still matches correctly.
+
+    ``interpolate_log_point`` now requires sorted points by contract; this guards
+    the one place that guarantees it.
+    """
+    shuffled = [_LOG_POINTS[2], _LOG_POINTS[0], _LOG_POINTS[1]]
+    matches = flight_log_sync.match_images_to_log(_IMAGES, shuffled, tolerance_s=0.1)
+
+    assert len(matches) == 1
+    assert matches[0]["latitude"] == 35.001
+    assert matches[0]["longitude"] == -80.001
