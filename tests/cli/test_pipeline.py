@@ -400,6 +400,42 @@ def test_live_export_step_fails_instead_of_reporting_success(tmp_path: Path) -> 
     assert "export" in result.steps[0].error.lower()
 
 
+def _record_tracebacks(monkeypatch: pytest.MonkeyPatch) -> list[tuple]:
+    """Capture `logger.exception` calls without depending on global logging state."""
+    from drone_video_geotagger import pipeline
+
+    logged: list[tuple] = []
+    monkeypatch.setattr(pipeline.logger, "exception", lambda *args: logged.append(args))
+    return logged
+
+
+def test_unsupported_step_reports_cleanly_without_a_traceback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The failure is expected, so the operator gets the message, not a stack dump."""
+    logged = _record_tracebacks(monkeypatch)
+    yaml_file = _write_job(tmp_path, "steps:\n  - kind: export\n    format: share_bundle\n")
+
+    result = load_and_run(yaml_file, dry_run=False)
+
+    assert result.exit_code == 1
+    assert logged == []
+
+
+def test_unexpected_step_failure_still_logs_a_traceback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    logged = _record_tracebacks(monkeypatch)
+    yaml_file = _write_job(
+        tmp_path, f"steps:\n  - kind: ingest\n    source_dir: '{tmp_path / 'missing'}'\n"
+    )
+
+    result = load_and_run(yaml_file, dry_run=False)
+
+    assert result.exit_code == 1
+    assert logged
+
+
 def test_step_without_its_spec_fails(tmp_path: Path) -> None:
     """Every step kind lost its 'no spec' free pass, not just the quoted two."""
     from drone_video_geotagger.pipeline import JobSpec, PipelineRunner
