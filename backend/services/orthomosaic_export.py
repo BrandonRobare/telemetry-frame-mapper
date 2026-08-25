@@ -205,11 +205,13 @@ def _write_geotiff(output_path: Path, image, geotransform: tuple,
         ) as dst:
             for b in range(image.shape[2]):
                 dst.write(image[:, :, b], b + 1)
+        os.replace(temporary_path, output_path)
     except BaseException:
+        # Covers the rename too: on Windows it fails while a download holds the
+        # target open (#653), which must not leave a stray half-export behind.
         temporary_path.unlink(missing_ok=True)
         raise
 
-    os.replace(temporary_path, output_path)
     return output_path
 
 

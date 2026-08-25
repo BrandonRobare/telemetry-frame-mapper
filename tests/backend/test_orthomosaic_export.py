@@ -225,6 +225,8 @@ class TestOrthoJob:
         rec2 = db.query(Reconstruction).get(rec_id)
         assert rec2.ortho_status == "failed"
         assert "no rasterio" in (rec2.ortho_error or "")
+        # #628: a failed write must never leave ortho_path aimed at a partial file.
+        assert rec2.ortho_path is None
 
 
 # ---------------------------------------------------------------------------
