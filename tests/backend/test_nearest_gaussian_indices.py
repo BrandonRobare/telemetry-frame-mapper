@@ -109,6 +109,11 @@ def test_peak_allocation_is_bounded_for_a_large_gaussian_count():
         tracemalloc.stop()
 
     assert indices.shape == (len(points),)
+    # 120 000 Gaussians is ~118 blocks at the shipped block size, so this also
+    # covers the multi-block fold — a broken one still returns the right shape.
+    for index in rng.choice(len(points), size=8, replace=False):
+        nearest = np.argmin(((gaussians - points[index]) ** 2).sum(axis=1))
+        assert indices[index] == nearest
     assert peak < 64 * 1024**2, (
         f"peak {peak / 1e6:.1f} MB for {len(gaussians)} gaussians "
         f"(the old broadcast needed {naive_bytes / 1e9:.1f} GB per chunk)"
