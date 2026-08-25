@@ -489,6 +489,24 @@ def test_coverage_with_footprints_reports_real_numbers(tmp_path: Path) -> None:
     assert summary["coverage_pct"] > 0
 
 
+def test_shipped_example_job_spec_still_runs(tmp_path: Path) -> None:
+    """The documented example must not demonstrate a job that now fails (#583)."""
+    from drone_video_geotagger.pipeline import _run_coverage
+
+    example = Path(__file__).parents[2] / "docs" / "examples" / "pipeline-job-spec.yml"
+    job = parse_job_spec(example)
+
+    kinds = [step.kind for step in job.steps]
+    assert StepKind.RECONSTRUCTION not in kinds, "the example must not show a step that fails"
+    assert StepKind.EXPORT not in kinds
+
+    coverage = next(step.coverage for step in job.steps if step.kind is StepKind.COVERAGE)
+    assert coverage is not None
+    _run_coverage(coverage, dry_run=False, output_root=tmp_path)
+    summary = json.loads((tmp_path / "coverage_summary.json").read_text())
+    assert 40 < summary["coverage_pct"] < 60, "example footprints should cover half the target"
+
+
 # ── StepSpec construction ───────────────────────────────────────────────────
 
 
