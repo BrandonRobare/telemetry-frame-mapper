@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import type { Job } from '../../../types/api'
 import { apiUrl, get } from '../../../shared/api/client'
@@ -31,7 +31,7 @@ async function fetchSlopeOverlay(reconstructionId: number) {
     throw new Error(typeof body?.detail === 'string' ? body.detail : `API error ${response.status}`)
   }
   return {
-    imageUrl: URL.createObjectURL(await response.blob()),
+    blob: await response.blob(),
     bounds: parseSlopeBounds(response.headers.get('X-Slope-Bounds')),
   }
 }
@@ -50,15 +50,20 @@ export function useSlopeOverlay(sessionId: number | null, enabled: boolean) {
     enabled: enabled && reconstructionId !== null,
     staleTime: Infinity,
   })
-  const imageUrl = overlay.data?.imageUrl
+  // The cache holds the blob, never the object URL: a URL revoked on unmount would
+  // otherwise still be served from the cache on the next mount (#663).
+  const data = useMemo(
+    () => (overlay.data ? { imageUrl: URL.createObjectURL(overlay.data.blob), bounds: overlay.data.bounds } : undefined),
+    [overlay.data],
+  )
   useEffect(() => () => {
-    if (imageUrl) URL.revokeObjectURL(imageUrl)
-  }, [imageUrl])
+    if (data) URL.revokeObjectURL(data.imageUrl)
+  }, [data])
 
   const noReconstruction = enabled && jobs.data !== undefined && reconstructionId === null
   return {
     ...overlay,
-    data: overlay.data,
+    data,
     error: noReconstruction ? new Error('No completed reconstruction is available for this session.') : overlay.error,
   }
 }
