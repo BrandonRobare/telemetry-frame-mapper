@@ -149,8 +149,10 @@ class TestOrthoRasterization:
         }
         image, gt, crs_wkt = ortho._rasterize_to_orthomosaic(points, geo, resolution=0.5)
         assert image.shape[2] == 3
-        # All pixels should be valid uint8
-        assert np.all(image >= 0) and np.all(image <= 255)
+        # Every populated pixel is the grey fallback; empty pixels stay black.
+        populated = image[image.any(axis=2)]
+        assert len(populated) > 0
+        assert np.all(populated == 200)
 
     def test_rasterize_raises_on_too_small_extent(self):
         points = np.array([[500000.0, 5000000.0, 100.0]], dtype=np.float64)
@@ -253,6 +255,149 @@ def _write_tiny_ply(path, n_points: int) -> None:
         for i in range(n_points):
             f.write(f"{x[i]:.6f} {y[i]:.6f} {z[i]:.6f} {r[i]} {g[i]} {b[i]} "
                      f"{nx[i]:.6f} {ny[i]:.6f} {nz[i]:.6f}\n")
+
+class TestColourSurvivesTheLoader:
+    """#627: every point source discarded RGB, so every orthomosaic was flat grey.
+
+    These go through the real ``_load_points_utm`` rather than hand-building an
+    Nx6 array, which is why the pre-existing rasterisation tests missed it.
+    """
+
+    GEO = {
+        "scale": 1.0, "rotation": [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
+        "translation": [0, 0, 0], "utm_zone": "32N", "utm_origin": [500000, 5000000],
+    }
+
+    def _rec(self, client, tmp_path, **kwargs):
+        db = _db(client)
+        session = SessionModel(name="S", folder_path=str(tmp_path))
+        db.add(session)
+        db.commit()
+        db.refresh(session)
+        return _make_rec(db, session, geo_transform=json.dumps(self.GEO), **kwargs)
+
+    def _assert_multicoloured(self, points):
+        assert points.shape[1] == 6, "loader dropped RGB — raster falls back to grey"
+        image, _gt, _crs = ortho._rasterize_to_orthomosaic(points, self.GEO, resolution=0.5)
+        populated = image[image.any(axis=2)]
+        assert len(populated) > 0
+        distinct = np.unique(populated, axis=0)
+        assert len(distinct) > 1, f"orthomosaic is a flat mask: {distinct}"
+        assert not np.all(populated == 200), "every pixel is the grey fallback"
+
+    def test_splat_colour_reaches_the_raster(self, client, tmp_path):
+        splat = tmp_path / "splat.ply"
+        _write_tiny_ply(splat, 200)
+        rec = self._rec(client, tmp_path, splat_path=str(splat))
+
+        points, _geo = ortho._load_points_utm(rec)
+        self._assert_multicoloured(points)
+
+    def test_colmap_colour_reaches_the_raster(self, client, tmp_path):
+        sparse = tmp_path / "colmap" / "sparse" / "0"
+        sparse.mkdir(parents=True)
+        rng = np.random.default_rng(7)
+        lines = ["# POINT3D_ID X Y Z R G B ERROR TRACK[]"]
+        for i in range(200):
+            x, y = rng.uniform(0, 5), rng.uniform(0, 5)
+            r, g, b = rng.integers(0, 256, 3)
+            lines.append(f"{i} {x:.6f} {y:.6f} {rng.uniform(0, 2):.6f} {r} {g} {b} 0.5")
+        (sparse / "points3D.txt").write_text("\n".join(lines) + "\n")
+        rec = self._rec(client, tmp_path, colmap_dir=str(tmp_path / "colmap"))
+
+        points, _geo = ortho._load_points_utm(rec)
+        self._assert_multicoloured(points)
+
+    def test_las_colour_reaches_the_raster(self, client, tmp_path):
+        pytest.importorskip("laspy")
+        import laspy
+
+        rng = np.random.default_rng(3)
+        header = laspy.LasHeader(point_format=3, version="1.4")
+        header.scales = np.array([0.001, 0.001, 0.001])
+        header.offsets = np.array([500000.0, 5000000.0, 0.0])
+        cloud = laspy.LasData(header)
+        cloud.x = 500000 + rng.uniform(0, 5, 200)
+        cloud.y = 5000000 + rng.uniform(0, 5, 200)
+        cloud.z = rng.uniform(0, 2, 200)
+        # 16-bit, the way our own LAS export writes it (8-bit scaled by 257).
+        for channel in ("red", "green", "blue"):
+            setattr(cloud, channel, rng.integers(0, 256, 200).astype(np.uint16) * 257)
+        path = tmp_path / "cloud.las"
+        cloud.write(path)
+        rec = self._rec(client, tmp_path, pointcloud_path=str(path))
+
+        points, _geo = ortho._load_points_utm(rec)
+        self._assert_multicoloured(points)
+
+    def test_las_without_colour_still_falls_back_to_grey(self, client, tmp_path):
+        pytest.importorskip("laspy")
+        import laspy
+
+        # Point format 0 has no colour dimensions at all.
+        header = laspy.LasHeader(point_format=0, version="1.2")
+        header.scales = np.array([0.001, 0.001, 0.001])
+        header.offsets = np.array([500000.0, 5000000.0, 0.0])
+        cloud = laspy.LasData(header)
+        cloud.x = [500000.0, 500002.0, 500001.0, 500003.0]
+        cloud.y = [5000000.0, 5000000.0, 5000001.0, 5000001.0]
+        cloud.z = [1.0, 1.0, 1.0, 1.0]
+        path = tmp_path / "nocolour.las"
+        cloud.write(path)
+        rec = self._rec(client, tmp_path, pointcloud_path=str(path))
+
+        points, _geo = ortho._load_points_utm(rec)
+        assert points.shape[1] == 3
+        image, _gt, _crs = ortho._rasterize_to_orthomosaic(points, self.GEO, resolution=0.5)
+        populated = image[image.any(axis=2)]
+        assert len(populated) > 0
+        assert np.all(populated == 200)
+
+    def test_las_with_unpopulated_colour_block_falls_back_to_grey(self, client, tmp_path):
+        """Format 3 allocates RGB even when the producer never writes it."""
+        pytest.importorskip("laspy")
+        import laspy
+
+        header = laspy.LasHeader(point_format=3, version="1.4")
+        header.scales = np.array([0.001, 0.001, 0.001])
+        header.offsets = np.array([500000.0, 5000000.0, 0.0])
+        cloud = laspy.LasData(header)
+        cloud.x = [500000.0, 500002.0, 500001.0, 500003.0]
+        cloud.y = [5000000.0, 5000000.0, 5000001.0, 5000001.0]
+        cloud.z = [1.0, 1.0, 1.0, 1.0]
+        path = tmp_path / "zerocolour.las"
+        cloud.write(path)
+        rec = self._rec(client, tmp_path, pointcloud_path=str(path))
+
+        points, _geo = ortho._load_points_utm(rec)
+        assert points.shape[1] == 3
+
+    def test_change_detection_loader_still_gets_xyz_only(self, client, tmp_path):
+        """_load_las_positions' other caller voxelises Nx3; Nx6 would corrupt it."""
+        pytest.importorskip("laspy")
+        import laspy
+
+        from backend.services.reconstruction import (
+            _load_reconstruction_points_utm,
+            _voxelize_points,
+        )
+
+        header = laspy.LasHeader(point_format=3, version="1.4")
+        header.scales = np.array([0.001, 0.001, 0.001])
+        header.offsets = np.array([500000.0, 5000000.0, 0.0])
+        cloud = laspy.LasData(header)
+        cloud.x = [500000.0, 500002.0]
+        cloud.y = [5000000.0, 5000000.0]
+        cloud.z = [1.0, 1.0]
+        cloud.red, cloud.green, cloud.blue = [100, 200], [110, 210], [120, 220]
+        path = tmp_path / "coloured.las"
+        cloud.write(path)
+        rec = self._rec(client, tmp_path, pointcloud_path=str(path))
+
+        points, _geo = _load_reconstruction_points_utm(rec)
+        assert points.shape[1] == 3
+        assert all(len(voxel) == 3 for voxel in _voxelize_points(points, 0.5))
+
 
 class TestRasterBudget:
     """The raster must stay bounded regardless of point-cloud extent.

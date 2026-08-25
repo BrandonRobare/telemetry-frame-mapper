@@ -40,10 +40,16 @@ def _load_geo_transform_for_reconstruction(rec: Reconstruction) -> dict:
 
 
 def _load_points_utm(rec: Reconstruction) -> tuple:
-    """Return (Nx3 float64 UTM points, geo dict)."""
+    """Return (Nx6 float64 UTM points + RGB, geo dict).
+
+    Falls back to Nx3 only when the source carries no colour, which
+    ``_rasterize_to_orthomosaic`` renders as flat grey.
+    """
+
+    import numpy as np
 
     from backend.services.reconstruction import (
-        _load_las_positions,
+        _load_las_positions_and_colors,
         _load_ply_positions_and_colors,
         _pick_best_submodel,
         _read_colmap_points3d,
@@ -54,18 +60,23 @@ def _load_points_utm(rec: Reconstruction) -> tuple:
 
     # Prefer dense point cloud, then splat, then COLMAP sparse
     if rec.pointcloud_path and Path(rec.pointcloud_path).exists():
-        points = _load_las_positions(Path(rec.pointcloud_path))
+        points, rgb = _load_las_positions_and_colors(Path(rec.pointcloud_path))
     elif rec.splat_path and Path(rec.splat_path).exists():
-        points, _rgb = _load_ply_positions_and_colors(Path(rec.splat_path))
+        points, rgb = _load_ply_positions_and_colors(Path(rec.splat_path))
         points = _world_points_to_utm(points, geo)
     elif rec.colmap_dir:
         colmap_dir = Path(rec.colmap_dir)
-        points, _rgb = _read_colmap_points3d(
+        points, rgb = _read_colmap_points3d(
             _pick_best_submodel(colmap_dir / "sparse") / "points3D.txt"
         )
         points = _world_points_to_utm(points, geo)
     else:
         raise RuntimeError(f"Reconstruction {rec.id} has no point source for orthomosaic")
+
+    # Appended after the UTM transform, which multiplies by a 3x3 rotation and
+    # would reject a 6-column array.
+    if rgb is not None:
+        points = np.column_stack([points, rgb])
 
     return points, geo
 
