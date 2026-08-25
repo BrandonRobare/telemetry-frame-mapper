@@ -1,6 +1,10 @@
-import { describe, expect, it } from 'vitest'
+// @vitest-environment jsdom
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { createElement, type ReactNode } from 'react'
+import { cleanup, renderHook, waitFor } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { Job } from '../../../types/api'
-import { latestCompletedReconstructionId, parseSlopeBounds } from './useSlopeOverlay'
+import { latestCompletedReconstructionId, parseSlopeBounds, useSlopeOverlay } from './useSlopeOverlay'
 
 function job(id: number, sessionId: number): Job {
   return {
@@ -29,5 +33,84 @@ describe('slope overlay helpers', () => {
     expect(parseSlopeBounds('[[40,-80],[41,-79]]')).toEqual([[40, -80], [41, -79]])
     expect(() => parseSlopeBounds('[[41,-80],[40,-79]]')).toThrow('invalid geographic bounds')
     expect(() => parseSlopeBounds(null)).toThrow('did not include geographic bounds')
+  })
+})
+
+// jsdom implements neither of these, so the tests below install their own.
+const realCreateObjectURL = URL.createObjectURL
+const realRevokeObjectURL = URL.revokeObjectURL
+const revoked: string[] = []
+
+function stubObjectUrls() {
+  let minted = 0
+  URL.createObjectURL = vi.fn(() => `blob:slope-${++minted}`)
+  URL.revokeObjectURL = vi.fn((url: string) => void revoked.push(url))
+}
+
+function stubSlopeApi() {
+  const fetchMock = vi.fn((input: string) => {
+    if (input.startsWith('/jobs/')) {
+      return Promise.resolve(new Response(JSON.stringify([job(9, 2)]), {
+        headers: { 'content-type': 'application/json' },
+      }))
+    }
+    if (input === '/export/reconstructions/9/slope') {
+      // Not a real Response: on Node 20 undici's constructor calls .stream() on a
+      // Blob body, which jsdom's Blob does not implement, so `new Response(blob)`
+      // throws there and passes on newer Node. Stub the surface fetchSlopeOverlay
+      // actually reads instead, and keep a genuine Blob as the cached value.
+      const bounds = '[[40,-80],[41,-79]]'
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        blob: () => Promise.resolve(new Blob(['slope-png'])),
+        headers: {
+          get: (name: string) => (name.toLowerCase() === 'x-slope-bounds' ? bounds : null),
+        },
+      } as unknown as Response)
+    }
+    return Promise.reject(new Error(`Unexpected request: ${input}`))
+  })
+  vi.stubGlobal('fetch', fetchMock)
+  return fetchMock
+}
+
+afterEach(() => {
+  cleanup()
+  vi.unstubAllGlobals()
+  URL.createObjectURL = realCreateObjectURL
+  URL.revokeObjectURL = realRevokeObjectURL
+  revoked.length = 0
+})
+
+describe('useSlopeOverlay object URL lifecycle', () => {
+  it('mints a live object URL from the cached blob when the Map tab is remounted', async () => {
+    stubObjectUrls()
+    const fetchMock = stubSlopeApi()
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const wrapper = ({ children }: { children: ReactNode }) =>
+      createElement(QueryClientProvider, { client }, children)
+
+    const first = renderHook(() => useSlopeOverlay(2, true), { wrapper })
+    // Two chained requests (/jobs/ then /slope) plus a blob read: waitFor's 1s
+    // default is too tight for a loaded CI runner and made this flake.
+    await waitFor(() => expect(first.result.current.data).toBeTruthy(), { timeout: 4000 })
+    const firstUrl = first.result.current.data?.imageUrl
+    expect(firstUrl).toBeTruthy()
+
+    // Leaving the Map tab unmounts the hook and revokes the URL it minted.
+    first.unmount()
+    expect(revoked).toEqual([firstUrl])
+
+    // Coming back inside gcTime is served from cache — and must not hand back the dead URL.
+    const second = renderHook(() => useSlopeOverlay(2, true), { wrapper })
+    await waitFor(() => expect(second.result.current.data).toBeTruthy(), { timeout: 4000 })
+    const overlay = second.result.current.data
+
+    expect(overlay?.imageUrl).toBeTruthy()
+    expect(revoked).not.toContain(overlay?.imageUrl)
+    expect(overlay?.imageUrl).not.toBe(firstUrl)
+    expect(overlay?.bounds).toEqual([[40, -80], [41, -79]])
+    expect(fetchMock.mock.calls.filter(([url]) => url.endsWith('/slope'))).toHaveLength(1)
   })
 })
