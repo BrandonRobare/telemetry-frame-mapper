@@ -1069,11 +1069,12 @@ def _nearest_gaussian_indices(points_xyz, gaussian_xyz):
     difference-of-coordinates argmin about Gaussians that are equidistant to
     within float64 noise — for those either answer is as right as the other.
     """
+    import numpy as np
+
     # ponytail: still a brute-force O(points x gaussians) scan, ~1.6 s per billion
     # pairs, so a full-preset export (1M Gaussians) remains minutes of CPU. Only a
     # spatial index fixes that, and none is in the lock file — add scipy's cKDTree
     # if the export becomes slow enough to matter.
-    import numpy as np
 
     points_xyz = np.asarray(points_xyz, dtype=np.float64)
     gaussian_xyz = np.asarray(gaussian_xyz, dtype=np.float64)
