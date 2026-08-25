@@ -93,8 +93,9 @@ generated ExifTool argument file.
 
 ### Batch jobs
 
-`dvg-pipeline` runs a whole geotag → ingest → coverage → reconstruct → export sequence from a YAML
-job spec, with no web UI involved:
+`dvg-pipeline` runs a geotag → GPS validation → coverage sequence from a YAML job spec, with no web
+UI involved. Reconstruction and export need COLMAP/gsplat and a database, so the CLI fails those
+steps with exit code 1 rather than reporting work it did not do — start them from the app:
 
 ```bash
 dvg-pipeline job.yml --dry-run   # print the step plan, change nothing
