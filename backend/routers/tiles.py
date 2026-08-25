@@ -124,7 +124,7 @@ def wms(
     db: DBSession = Depends(get_db),
 ):
     """Minimal WMS 1.3.0 discovery and GetMap interface for one orthomosaic."""
-    path = _orthomosaic_path(_reconstruction(reconstruction_id, db))
+    rec = _reconstruction(reconstruction_id, db)
     if service.upper() != "WMS":
         raise HTTPException(status_code=400, detail="SERVICE must be WMS")
     operation, layer = request.upper(), f"reconstruction-{reconstruction_id}"
@@ -143,6 +143,7 @@ def wms(
         return Response(content=xml, media_type="application/xml")
     if operation != "GETMAP":
         raise HTTPException(status_code=400, detail="REQUEST must be GetCapabilities or GetMap")
+    path = _orthomosaic_path(rec)
     if layers != layer:
         raise HTTPException(status_code=400, detail=f"LAYERS must be {layer}")
     if (crs or srs or "").upper() != "EPSG:3857":
