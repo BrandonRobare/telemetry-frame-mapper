@@ -26,6 +26,18 @@ def test_create_rejects_empty_ring_polygon(client):
     assert resp.status_code == 422
 
 
+def test_create_rejects_polygon_missing_coordinates(client):
+    resp = client.post("/target-areas/", json={"name": "x", "geom_geojson": '{"type":"Polygon"}'})
+    assert resp.status_code == 422
+
+
+def test_create_rejects_unknown_geometry_type(client):
+    resp = client.post(
+        "/target-areas/", json={"name": "x", "geom_geojson": '{"type":"Circle","radius":5}'}
+    )
+    assert resp.status_code == 422
+
+
 def test_create_accepts_polygon(client):
     resp = client.post("/target-areas/", json={"name": "field", "geom_geojson": _POLYGON})
     assert resp.status_code == 200
