@@ -52,8 +52,68 @@ def test_build_gcp_list_returns_webodm_text(client):
     )
 
     assert resp.status_code == 200
-    assert "# EPSG:4326" in resp.json()["contents"]
-    assert "frame_001.jpg north-pad" in resp.json()["contents"]
+    header, row = resp.json()["contents"].splitlines()
+    # ODM's GCPFile reads line 1 as the SRS header verbatim; a "#" breaks it.
+    assert header == "EPSG:4326"
+    assert row.split() == [
+        "-81.50000000",
+        "41.20000000",
+        "300.000",
+        "10.000",
+        "20.000",
+        "frame_001.jpg",
+        "north-pad",
+    ]
+
+
+def test_build_gcp_list_keeps_seven_columns_without_altitude(client):
+    resp = client.post(
+        "/georeferencing/gcp-list",
+        json=[
+            {
+                "image_filename": "IMG_0525.JPG",
+                "pixel_x": 1024,
+                "pixel_y": 768,
+                "longitude": -81.0,
+                "latitude": 28.0,
+            }
+        ],
+    )
+
+    assert resp.status_code == 200
+    row = resp.json()["contents"].splitlines()[1]
+    # A missing altitude must still leave seven columns, not shift them left.
+    assert row.split() == [
+        "-81.00000000",
+        "28.00000000",
+        "0.000",
+        "1024.000",
+        "768.000",
+        "IMG_0525.JPG",
+        "IMG_0525.JPG",
+    ]
+
+
+@pytest.mark.parametrize(
+    "override",
+    [{"image_filename": "DJI 0001.JPG"}, {"label": "north pad"}, {"image_filename": ""}],
+)
+def test_build_gcp_list_rejects_whitespace_in_filename_or_label(client, override):
+    resp = client.post(
+        "/georeferencing/gcp-list",
+        json=[
+            {
+                "image_filename": "frame_001.jpg",
+                "pixel_x": 10,
+                "pixel_y": 20,
+                "longitude": -81.5,
+                "latitude": 41.2,
+                **override,
+            }
+        ],
+    )
+
+    assert resp.status_code == 422
 
 
 @pytest.mark.parametrize("format", ["pix4d", "dronedeploy"])

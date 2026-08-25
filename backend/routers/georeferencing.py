@@ -36,6 +36,15 @@ class GcpPointIn(BaseModel):
     altitude_m: float | None = None
     label: str | None = None
 
+    @field_validator("image_filename", "label")
+    @classmethod
+    def reject_whitespace(cls, v: str | None) -> str | None:
+        # gcp_list.txt rows are whitespace-delimited, so a space here would
+        # shift every following column (#629).
+        if v is not None and v.split() != [v]:
+            raise ValueError("must be non-empty and contain no whitespace")
+        return v
+
 
 class ControlPointIn(BaseModel):
     label: str = Field(min_length=1)
