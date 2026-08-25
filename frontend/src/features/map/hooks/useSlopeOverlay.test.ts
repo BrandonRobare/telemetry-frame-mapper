@@ -55,9 +55,19 @@ function stubSlopeApi() {
       }))
     }
     if (input === '/export/reconstructions/9/slope') {
-      return Promise.resolve(new Response(new Blob(['slope-png']), {
-        headers: { 'X-Slope-Bounds': '[[40,-80],[41,-79]]' },
-      }))
+      // Not a real Response: on Node 20 undici's constructor calls .stream() on a
+      // Blob body, which jsdom's Blob does not implement, so `new Response(blob)`
+      // throws there and passes on newer Node. Stub the surface fetchSlopeOverlay
+      // actually reads instead, and keep a genuine Blob as the cached value.
+      const bounds = '[[40,-80],[41,-79]]'
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        blob: () => Promise.resolve(new Blob(['slope-png'])),
+        headers: {
+          get: (name: string) => (name.toLowerCase() === 'x-slope-bounds' ? bounds : null),
+        },
+      } as unknown as Response)
     }
     return Promise.reject(new Error(`Unexpected request: ${input}`))
   })
@@ -84,7 +94,7 @@ describe('useSlopeOverlay object URL lifecycle', () => {
     const first = renderHook(() => useSlopeOverlay(2, true), { wrapper })
     // Two chained requests (/jobs/ then /slope) plus a blob read: waitFor's 1s
     // default is too tight for a loaded CI runner and made this flake.
-    await waitFor(() => expect(first.result.current.data).toBeTruthy(), { timeout: 10_000 })
+    await waitFor(() => expect(first.result.current.data).toBeTruthy(), { timeout: 4000 })
     const firstUrl = first.result.current.data?.imageUrl
     expect(firstUrl).toBeTruthy()
 
@@ -94,7 +104,7 @@ describe('useSlopeOverlay object URL lifecycle', () => {
 
     // Coming back inside gcTime is served from cache — and must not hand back the dead URL.
     const second = renderHook(() => useSlopeOverlay(2, true), { wrapper })
-    await waitFor(() => expect(second.result.current.data).toBeTruthy(), { timeout: 10_000 })
+    await waitFor(() => expect(second.result.current.data).toBeTruthy(), { timeout: 4000 })
     const overlay = second.result.current.data
 
     expect(overlay?.imageUrl).toBeTruthy()
