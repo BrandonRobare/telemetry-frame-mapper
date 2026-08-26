@@ -1,0 +1,51 @@
+{
+  "schema": "telemetry-frame-mapper-altitude-truth-v1",
+  "generator": {
+    "simulator": "OmniSim",
+    "version": "8.1.6",
+    "world": "scripted ENU camera rig",
+    "physics": "gravity disabled; supervisor-authored poses",
+    "validation": "headless run exited cleanly with 0 errors and 0 warnings"
+  },
+  "camera": {
+    "field_of_view_horizontal_deg": 83.0,
+    "image_width_px": 32,
+    "image_height_px": 24
+  },
+  "takeoff_altitude_msl_m": 334.0,
+  "frames": [
+    {
+      "frame": 0,
+      "timestamp_utc": "2026-08-26T10:00:00Z",
+      "sim_time_s": 0.1,
+      "position_enu_m": [0.0, 0.0, 115.9],
+      "rotation_world_from_camera_row_major": [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
+      "latitude_deg": 41.1509,
+      "longitude_deg": -81.3382,
+      "relative_altitude_m": 115.9,
+      "absolute_altitude_msl_m": 449.9
+    },
+    {
+      "frame": 1,
+      "timestamp_utc": "2026-08-26T10:00:01Z",
+      "sim_time_s": 0.2,
+      "position_enu_m": [8.0, 0.0, 116.9],
+      "rotation_world_from_camera_row_major": [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
+      "latitude_deg": 41.1509,
+      "longitude_deg": -81.33810455924485,
+      "relative_altitude_m": 116.9,
+      "absolute_altitude_msl_m": 450.9
+    },
+    {
+      "frame": 2,
+      "timestamp_utc": "2026-08-26T10:00:02Z",
+      "sim_time_s": 0.3,
+      "position_enu_m": [16.0, 4.0, 117.9],
+      "rotation_world_from_camera_row_major": [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
+      "latitude_deg": 41.150935932447,
+      "longitude_deg": -81.3380091184897,
+      "relative_altitude_m": 117.9,
+      "absolute_altitude_msl_m": 451.9
+    }
+  ]
+}

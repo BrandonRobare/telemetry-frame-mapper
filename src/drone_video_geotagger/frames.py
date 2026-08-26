@@ -115,7 +115,11 @@ def build_frame_tags(
                 f"{telemetry[-1].end_s:g}s. Re-run with complete telemetry or exclude frames "
                 "outside its recorded span."
             )
-        lat, lon, rel_alt_m = interpolate(telemetry, seconds)
+        lat, lon, rel_alt_m = interpolate(
+            telemetry,
+            seconds,
+            takeoff_altitude_m=takeoff_altitude_m,
+        )
         timestamp = video_start + timedelta(seconds=seconds) if video_start else None
         tags.append(
             FrameTag(

@@ -11,7 +11,8 @@ class TelemetryPoint:
     end_s: float
     lat: float
     lon: float
-    rel_alt_m: float
+    rel_alt_m: float | None
+    abs_alt_m: float | None = None
 
 
 def parse_srt_time(value: str) -> float:
@@ -39,7 +40,8 @@ def parse_srt_text(text: str) -> list[TelemetryPoint]:
     height_re = re.compile(r"(?:^|,\s*)H\s+([+-]?\d+(?:\.\d+)?)m")
     # gt?itude also accepts "longtitude", DJI GO 4's own long-standing misspelling.
     key_value_re = re.compile(
-        r"\b(lat(?:itude)?|lon(?:gt?itude)?|rel[_\s-]?alt(?:itude)?|alt(?:itude)?)\b"
+        r"\b(lat(?:itude)?|lon(?:gt?itude)?|rel[_\s-]?alt(?:itude)?|"
+        r"abs[_\s-]?alt(?:itude)?|alt(?:itude)?)\b"
         r"\s*[:=]\s*([+-]?\d+(?:\.\d+)?)",
         re.IGNORECASE,
     )
@@ -82,16 +84,32 @@ def parse_srt_text(text: str) -> list[TelemetryPoint]:
                 key_values["lon"] = float(value)
             elif normalized.startswith("rel"):
                 key_values["rel_alt"] = float(value)
+            elif normalized.startswith("abs"):
+                key_values["abs_alt"] = float(value)
             elif normalized.startswith("alt"):
-                key_values.setdefault("rel_alt", float(value))
+                # An unqualified altitude is absolute. Treating it as relative
+                # makes the caller add takeoff elevation a second time.
+                key_values.setdefault("abs_alt", float(value))
 
         if key_values and current_start is not None and current_end is not None:
             telemetry_like_lines += 1
             lat = key_values.get("lat")
             lon = key_values.get("lon")
-            rel_alt_m = key_values.get("rel_alt", 0.0)
+            rel_alt_m = key_values.get("rel_alt")
+            abs_alt_m = key_values.get("abs_alt")
+            if rel_alt_m is None and abs_alt_m is None:
+                rel_alt_m = 0.0
             if lat is not None and lon is not None:
-                points.append(TelemetryPoint(current_start, current_end, lat, lon, rel_alt_m))
+                points.append(
+                    TelemetryPoint(
+                        current_start,
+                        current_end,
+                        lat,
+                        lon,
+                        rel_alt_m,
+                        abs_alt_m,
+                    )
+                )
             elif lat is not None or lon is not None:
                 partial_blocks += 1
 
@@ -107,7 +125,7 @@ def parse_srt_text(text: str) -> list[TelemetryPoint]:
             f"{partial_blocks} blocks had a partial fix). Supported DJI formats include "
             "'GPS (lon, lat, alt)' with optional 'H 12.3m', and key/value forms such as "
             "'[latitude: 41.1] [longitude: -81.1] [rel_alt: 24.0]' or "
-            "'Lat: 41.1 Lon: -81.1 Alt: 24.0'."
+            "'[latitude: 41.1] [longitude: -81.1] [altitude: 334.0]'."
         )
     if partial_blocks:
         warnings.warn(
@@ -134,7 +152,21 @@ def _no_fix_error(seconds: float) -> ValueError:
     return ValueError(f"Cannot interpolate telemetry at {seconds:g}s: no GPS fix was recorded.")
 
 
-def interpolate(points: list[TelemetryPoint], seconds: float) -> tuple[float, float, float]:
+def _relative_altitude(point: TelemetryPoint, takeoff_altitude_m: float | None) -> float:
+    if point.rel_alt_m is not None:
+        return point.rel_alt_m
+    if point.abs_alt_m is not None and takeoff_altitude_m is not None:
+        return point.abs_alt_m - takeoff_altitude_m
+    raise ValueError(
+        "Cannot resolve absolute SRT altitude without the takeoff altitude above sea level."
+    )
+
+
+def interpolate(
+    points: list[TelemetryPoint],
+    seconds: float,
+    takeoff_altitude_m: float | None = None,
+) -> tuple[float, float, float]:
     if not points:
         raise ValueError("telemetry points are required")
 
@@ -146,26 +178,30 @@ def interpolate(points: list[TelemetryPoint], seconds: float) -> tuple[float, fl
         first = points[0]
         if not _has_gps_fix(first):
             raise _no_fix_error(seconds)
-        return first.lat, first.lon, first.rel_alt_m
+        return first.lat, first.lon, _relative_altitude(first, takeoff_altitude_m)
 
     for previous, current in zip(points, points[1:], strict=False):
         if seconds == current.start_s:
             if not _has_gps_fix(current):
                 raise _no_fix_error(seconds)
-            return current.lat, current.lon, current.rel_alt_m
+            return current.lat, current.lon, _relative_altitude(current, takeoff_altitude_m)
         if previous.start_s < seconds < current.start_s:
             if not _has_gps_fix(previous) or not _has_gps_fix(current):
                 raise _no_fix_error(seconds)
             span = current.start_s - previous.start_s
             if span <= 0:
-                return previous.lat, previous.lon, previous.rel_alt_m
+                return previous.lat, previous.lon, _relative_altitude(
+                    previous, takeoff_altitude_m
+                )
             ratio = (seconds - previous.start_s) / span
             lat = previous.lat + (current.lat - previous.lat) * ratio
             lon = previous.lon + (current.lon - previous.lon) * ratio
-            rel_alt_m = previous.rel_alt_m + (current.rel_alt_m - previous.rel_alt_m) * ratio
+            previous_alt_m = _relative_altitude(previous, takeoff_altitude_m)
+            current_alt_m = _relative_altitude(current, takeoff_altitude_m)
+            rel_alt_m = previous_alt_m + (current_alt_m - previous_alt_m) * ratio
             return lat, lon, rel_alt_m
 
     last = points[-1]
     if not _has_gps_fix(last):
         raise _no_fix_error(seconds)
-    return last.lat, last.lon, last.rel_alt_m
+    return last.lat, last.lon, _relative_altitude(last, takeoff_altitude_m)
