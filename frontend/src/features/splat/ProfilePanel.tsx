@@ -84,7 +84,13 @@ export default function ProfilePanel({ samples, onClear }: ProfilePanelProps) {
     // Inline styles so the exported SVG looks right standalone
     clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg')
     const serializer = new XMLSerializer()
-    const svgString = serializer.serializeToString(clone)
+    // The gridlines/axes/path all reference var(--border|text-muted|accent-strong|bg)
+    // so the on-screen chart tracks theme changes live. CSS custom properties only
+    // resolve against the document though, so once this clone is serialized and
+    // detached it has nothing to resolve against and every stroke/fill silently
+    // drops to none. Resolve each var(--x) to its current computed value — read
+    // from the still-attached source, not the detached clone — before serializing.
+    const svgString = inlineCssVariables(serializer.serializeToString(clone), svgEl)
     const dataUrl = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgString)
     const a = document.createElement('a')
     a.href = dataUrl
@@ -212,6 +218,22 @@ export default function ProfilePanel({ samples, onClear }: ProfilePanelProps) {
       </div>
     </div>
   )
+}
+
+// ---------------------------------------------------------------------------
+// Resolve var(--token) references against a still-attached element's computed
+// style so an exported/serialized copy renders standalone. Generic over the
+// whole string (attributes and inline `style=` alike) so any current or future
+// CSS variable used inside the chart is covered, not just the ones this file
+// happens to name today.
+// ---------------------------------------------------------------------------
+
+function inlineCssVariables(svgString: string, source: Element): string {
+  const computed = getComputedStyle(source)
+  return svgString.replace(/var\((--[\w-]+)\)/g, (fullMatch, name: string) => {
+    const value = computed.getPropertyValue(name).trim()
+    return value || fullMatch
+  })
 }
 
 // ---------------------------------------------------------------------------
