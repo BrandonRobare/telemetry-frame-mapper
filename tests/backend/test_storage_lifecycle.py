@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -167,6 +168,9 @@ class _Query:
             imported_at=datetime.now(UTC) - timedelta(days=1),
         )
 
+    def all(self):
+        return [self.first()]
+
 
 class _FakeDb:
     def query(self, _model):
@@ -262,6 +266,9 @@ def test_apply_policy_uses_session_import_date_for_dry_run(tmp_path):
                 imported_at=datetime.now(UTC) - timedelta(days=10),
             )
 
+        def all(self):
+            return [self.first()]
+
     class Db:
         def query(self, _model):
             return SessionQuery()
@@ -287,3 +294,163 @@ def test_apply_policy_uses_session_import_date_for_dry_run(tmp_path):
 
     assert len(result["candidates"]) == 1
     assert "Age 10d" in result["candidates"][0]["reason"]
+
+
+class TestSessionMatchingIsExact:
+    """Regression tests for #643: folder_path lookup must be an exact path
+    match, not an unescaped LIKE substring, and must never fall back to an
+    arbitrary row when the match is ambiguous or absent (this decides
+    whether we delete a user's data).
+    """
+
+    @staticmethod
+    def _cfg(tmp_path: Path, imports: Path) -> AppConfig:
+        (tmp_path / "processed").mkdir(exist_ok=True)
+        (tmp_path / "exports").mkdir(exist_ok=True)
+        (tmp_path / "data").mkdir(exist_ok=True)
+        return AppConfig(
+            imports_dir=str(imports),
+            processed_dir=str(tmp_path / "processed"),
+            exports_dir=str(tmp_path / "exports"),
+            data_dir=str(tmp_path / "data"),
+        )
+
+    def test_short_name_is_not_matched_by_substring_of_older_session(
+        self, tmp_path, db_session
+    ):
+        """Exact scenario from #643: imports/10 (imported today) sits next to
+        imports/2026-01-10 (imported 200 days ago). A substring LIKE match on
+        "10" hits both rows; picking .first() can return the 200-day-old row
+        for the *fresh* "10" directory and archive today's data.
+        """
+        imports = tmp_path / "imports"
+        imports.mkdir()
+
+        old_dir = imports / "2026-01-10"
+        old_dir.mkdir()
+        (old_dir / "frame.jpg").write_bytes(b"x" * 100)
+
+        fresh_dir = imports / "10"
+        fresh_dir.mkdir()
+        (fresh_dir / "frame.jpg").write_bytes(b"x" * 100)
+
+        # Insert the old session first so an order-dependent `.first()` over
+        # a substring match is the row most likely returned for both dirs.
+        db_session.add(
+            SessionModel(
+                name="old",
+                folder_path=str(old_dir.resolve()),
+                imported_at=datetime.now(UTC) - timedelta(days=200),
+            )
+        )
+        db_session.add(
+            SessionModel(
+                name="fresh",
+                folder_path=str(fresh_dir.resolve()),
+                imported_at=datetime.now(UTC),
+            )
+        )
+        db_session.commit()
+
+        cfg = self._cfg(tmp_path, imports)
+        result = apply_policy(
+            [{"target": "raw_frames", "age_days": 90}],
+            execute=False,
+            cfg=cfg,
+            db=db_session,
+        )
+
+        candidate_paths = {c["path"] for c in result["candidates"]}
+        assert str(old_dir.resolve()) in candidate_paths
+        assert str(fresh_dir.resolve()) not in candidate_paths
+
+    def test_wildcard_named_directory_matches_nothing(self, tmp_path, db_session):
+        """A directory literally named "%" must not match every row via an
+        unescaped LIKE pattern."""
+        imports = tmp_path / "imports"
+        imports.mkdir()
+
+        wild_dir = imports / "%"
+        wild_dir.mkdir()
+        (wild_dir / "frame.jpg").write_bytes(b"x" * 100)
+
+        db_session.add(
+            SessionModel(
+                name="unrelated-old",
+                folder_path=str(tmp_path / "somewhere-else"),
+                imported_at=datetime.now(UTC) - timedelta(days=200),
+            )
+        )
+        db_session.commit()
+
+        cfg = self._cfg(tmp_path, imports)
+        result = apply_policy(
+            [{"target": "raw_frames", "age_days": 90}],
+            execute=False,
+            cfg=cfg,
+            db=db_session,
+        )
+
+        candidate_paths = {c["path"] for c in result["candidates"]}
+        assert str(wild_dir.resolve()) not in candidate_paths
+
+    def test_ambiguous_duplicate_rows_are_skipped_not_first(self, tmp_path, db_session):
+        """Two rows sharing the same folder_path is ambiguous; an arbitrary
+        `.first()` pick is not safe on a delete path."""
+        imports = tmp_path / "imports"
+        imports.mkdir()
+
+        session_dir = imports / "dup_session"
+        session_dir.mkdir()
+        (session_dir / "frame.jpg").write_bytes(b"x" * 100)
+
+        db_session.add(
+            SessionModel(
+                name="dup-old",
+                folder_path=str(session_dir.resolve()),
+                imported_at=datetime.now(UTC) - timedelta(days=200),
+            )
+        )
+        db_session.add(
+            SessionModel(
+                name="dup-fresh",
+                folder_path=str(session_dir.resolve()),
+                imported_at=datetime.now(UTC),
+            )
+        )
+        db_session.commit()
+
+        cfg = self._cfg(tmp_path, imports)
+        result = apply_policy(
+            [{"target": "raw_frames", "age_days": 90}],
+            execute=False,
+            cfg=cfg,
+            db=db_session,
+        )
+
+        candidate_paths = {c["path"] for c in result["candidates"]}
+        assert str(session_dir.resolve()) not in candidate_paths
+
+    def test_unmatched_directory_is_skipped_not_aged_by_mtime(self, tmp_path, db_session):
+        """No DB row at all for this directory: must be skipped outright, not
+        aged from filesystem mtime as a fallback."""
+        imports = tmp_path / "imports"
+        imports.mkdir()
+
+        orphan_dir = imports / "orphan_session"
+        orphan_dir.mkdir()
+        (orphan_dir / "frame.jpg").write_bytes(b"x" * 100)
+
+        old_time = (datetime.now(UTC) - timedelta(days=200)).timestamp()
+        os.utime(orphan_dir, (old_time, old_time))
+
+        cfg = self._cfg(tmp_path, imports)
+        result = apply_policy(
+            [{"target": "raw_frames", "age_days": 90}],
+            execute=False,
+            cfg=cfg,
+            db=db_session,
+        )
+
+        candidate_paths = {c["path"] for c in result["candidates"]}
+        assert str(orphan_dir.resolve()) not in candidate_paths
