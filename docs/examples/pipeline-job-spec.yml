@@ -1,8 +1,14 @@
-# Pipeline job spec example — full end-to-end batch plan for headless processing.
+# Pipeline job spec example — batch plan for headless processing.
 #
 # Usage:
-#   dvg-pipeline docs/examples/pipeline-job-spec.yml           # run
+#   dvg-pipeline docs/examples/pipeline-job-spec.yml            # run
 #   dvg-pipeline --dry-run docs/examples/pipeline-job-spec.yml  # validate + print plan
+#
+# Point `video` and `frames` at your own footage first: the paths below are placeholders,
+# and a run against them reports "no JPEG frames found" for the steps that need them.
+#
+# Every step below runs headlessly. A step that cannot (reconstruction, export) fails the
+# run with exit code 1 rather than reporting success — see the commented block at the end.
 
 name: "example-mission"
 output_root: "./pipeline_output/example-mission"
@@ -18,9 +24,15 @@ steps:
     exiftool: "exiftool"
     # in_place: false  # default: false (creates copies)
 
+  # Validation only: checks that every JPEG carries GPS EXIF and writes
+  # ingest_validation.json. It does not import anything into a session — use the app
+  # (or the /uploads API) for that.
   - kind: ingest
     source_dir: "./pipeline_output/example-mission/geotagged"
 
+  # Measures the flown footprints against the target area and writes
+  # coverage_summary.json. Both keys are required: without footprints there is nothing to
+  # measure, so the step fails instead of reporting 0% as a finished result.
   - kind: coverage
     target_geojson: |
       {
@@ -29,14 +41,25 @@ steps:
           [-81.5, 41.1], [-81.4, 41.1], [-81.4, 41.2], [-81.5, 41.2], [-81.5, 41.1]
         ]]
       }
+    # One GeoJSON polygon per flown image footprint. A real job pastes the list the app
+    # exports from GET /footprints; these two stand-in swaths cover the western half of
+    # the target, so the example reports roughly 50% coverage with a gap in the east.
+    footprints:
+      - '{"type":"Polygon","coordinates":[[[-81.50,41.10],[-81.45,41.10],[-81.45,41.15],[-81.50,41.15],[-81.50,41.10]]]}'
+      - '{"type":"Polygon","coordinates":[[[-81.50,41.15],[-81.45,41.15],[-81.45,41.20],[-81.50,41.20],[-81.50,41.15]]]}'
 
-  - kind: reconstruction
-    preset: quick   # quick | full — same names as config.yaml and the REST API
-    # session_id: 1  # optional: reference an ingested session
-
-  - kind: export
-    format: webodm_package
-    # session_id: 1
-    options:
-      mode: exif
-      include_images: true
+# Reconstruction and export are NOT runnable from the CLI: they need COLMAP/gsplat, a
+# configured database, and an ingested session, none of which the CLI-only wheel has.
+# Uncommenting either step makes the run fail with a clear error and exit code 1. Start
+# them from the app instead. The syntax is kept here for when that changes.
+#
+#  - kind: reconstruction
+#    preset: quick   # quick | full — same names as config.yaml and the REST API
+#    # session_id: 1  # optional: reference an ingested session
+#
+#  - kind: export
+#    format: webodm_package
+#    # session_id: 1
+#    options:
+#      mode: exif
+#      include_images: true
