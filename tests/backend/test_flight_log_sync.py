@@ -255,6 +255,45 @@ def test_upload_dji_binary_missing_session(client, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# parse_dji_csv drift from its sibling parsers (issue #683)
+# ---------------------------------------------------------------------------
+
+
+def test_parse_dji_csv_skips_truncated_row():
+    """A row missing trailing columns yields None -> float(None) is a TypeError.
+
+    The sibling parsers (Autel/Parrot/ArduPilot) catch TypeError too; a
+    truncated DJI row should be skipped rather than crashing the parse.
+    """
+    csv_bytes = (
+        b"time(millisecond),OSD.latitude,OSD.longitude,OSD.altitude[m]\n"
+        b"1000,35.0,-80.0,100.0\n"
+        b"2000,35.1\n"  # missing longitude and altitude columns -> None
+    )
+
+    points = flight_log_sync.parse_dji_csv(csv_bytes)
+
+    assert len(points) == 1
+    assert points[0]["latitude"] == 35.0
+
+
+def test_parse_dji_csv_rejects_out_of_range_coordinate():
+    """Out-of-range lat/lon should be rejected like the other three parsers."""
+    csv_bytes = (
+        b"time(millisecond),OSD.latitude,OSD.longitude,OSD.altitude[m]\n"
+        b"1000,35.0,-80.0,100.0\n"
+        b"2000,95.0,-80.0,100.0\n"  # latitude out of [-90, 90] range
+        b"3000,35.0,-200.0,100.0\n"  # longitude out of [-180, 180] range
+    )
+
+    points = flight_log_sync.parse_dji_csv(csv_bytes)
+
+    assert len(points) == 1
+    assert points[0]["latitude"] == 35.0
+    assert points[0]["longitude"] == -80.0
+
+
+# ---------------------------------------------------------------------------
 # Offset-preview bounds and sort hoisting (issue #635)
 # ---------------------------------------------------------------------------
 
