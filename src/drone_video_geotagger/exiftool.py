@@ -26,11 +26,16 @@ def timestamp_values(
 
 
 def build_exiftool_args(tags: list[FrameTag], exiftool: str | Path = "exiftool") -> list[str]:
-    args: list[str] = ["-charset", "filename=UTF8"]
+    args: list[str] = []
     for tag in tags:
         exif_time, gps_date, gps_time, subsec = timestamp_values(tag.timestamp)
         args.extend(
             [
+                # ExifTool resets its options at every -execute, so this must be
+                # repeated per file just like -overwrite_original/-P/-q/-q below —
+                # written once at the top it would only cover the first frame.
+                "-charset",
+                "filename=UTF8",
                 "-overwrite_original",
                 "-P",
                 "-q",
