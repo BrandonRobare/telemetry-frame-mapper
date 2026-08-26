@@ -37,15 +37,17 @@ def parse_dji_csv(content: bytes) -> list[dict]:
     points = []
     for row in reader:
         try:
-            ts = float(row.get("time(millisecond)", 0)) / 1000.0
-            points.append({
-                "timestamp_s": ts,
+            point = {
+                "timestamp_s": float(row.get("time(millisecond)", 0)) / 1000.0,
                 "latitude": float(row["OSD.latitude"]),
                 "longitude": float(row["OSD.longitude"]),
                 "altitude_m": float(row.get("OSD.altitude[m]", 0)),
-            })
-        except (KeyError, ValueError):
+            }
+        except (KeyError, TypeError, ValueError):
             continue
+        if not -90.0 <= point["latitude"] <= 90.0 or not -180.0 <= point["longitude"] <= 180.0:
+            continue
+        points.append(point)
     return sorted(points, key=lambda p: p["timestamp_s"])
 
 
