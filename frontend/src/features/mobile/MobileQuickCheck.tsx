@@ -19,6 +19,7 @@ const JOB_STATUS_LABEL: Record<string, string> = {
   pending: 'Queued',
   running_colmap: 'Aligning',
   running_gsplat: 'Training',
+  running_remote: 'Remote worker',
   cancelling: 'Cancelling',
   cancelled: 'Cancelled',
   complete: 'Complete',

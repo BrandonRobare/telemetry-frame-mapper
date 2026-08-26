@@ -84,6 +84,22 @@ describe('JobsTab reconstruction statuses', () => {
     expect(screen.queryByText('Render error. Check console for details')).toBeNull()
   })
 
+  it('renders a running_remote job in the Active list, not History', async () => {
+    const remoteJob: Job = { ...cancellingJob, id: 900, status: 'running_remote', step: 'Remote worker: training' }
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.startsWith('/jobs/?')) return jsonResponse([remoteJob])
+      if (url === '/system/resources') return jsonResponse(resources)
+      throw new Error(`Unexpected request: ${url}`)
+    }))
+
+    renderJobsTab()
+
+    // `selector` skips the same-labelled <option> in the History status filter.
+    expect(await screen.findByText('Remote', { selector: 'span' })).toBeTruthy()
+    expect(screen.getByText('Active (1)')).toBeTruthy()
+    expect(screen.queryByText('Render error. Check console for details')).toBeNull()
+  })
+
   it('renders an unrecognized status as its raw label instead of crashing', async () => {
     const unknownStatusJob = { ...cancellingJob, id: 655, status: 'waiting_for_operator' } as unknown as Job
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {

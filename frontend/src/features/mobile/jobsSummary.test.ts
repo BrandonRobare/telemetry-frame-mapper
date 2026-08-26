@@ -29,8 +29,10 @@ describe('selectRunningJobs', () => {
       makeJob({ id: 4, status: 'complete' }),
       makeJob({ id: 5, status: 'failed' }),
       makeJob({ id: 6, status: 'cancelled' }),
+      makeJob({ id: 7, status: 'running_remote' }),
+      makeJob({ id: 8, status: 'cancelling' }),
     ]
-    expect(selectRunningJobs(jobs).map((j) => j.id)).toEqual([3, 2, 1])
+    expect(selectRunningJobs(jobs).map((j) => j.id)).toEqual([8, 7, 3, 2, 1])
   })
 
   it('sorts running jobs newest-first by id', () => {
