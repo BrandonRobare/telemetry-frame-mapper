@@ -86,6 +86,10 @@ class IngestSpec:
 @dataclass
 class CoverageSpec:
     target_geojson: str  # raw GeoJSON string
+    # Flown footprints to measure the target against, each a raw GeoJSON string.
+    # ponytail: inline GeoJSON only; read them from an ingested session when the
+    # headless pipeline gains a database.
+    footprints: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -204,8 +208,15 @@ def _run_geotag(spec: GeotagSpec, dry_run: bool) -> str:
     return str(output_dir)
 
 
+_INGEST_HEADER = "  validation only (no images imported)"
+
+
 def _run_ingest(spec: IngestSpec, dry_run: bool, *, output_root: Path) -> str:
-    """Headless file-level ingest: validate all JPEG files have GPS EXIF."""
+    """Check that every JPEG in the source directory carries GPS EXIF.
+
+    This does not import anything into a session — it is a validation summary, and
+    reports itself as one so automation is not told an import happened.
+    """
     source_dir = spec.source_dir
     jpegs = sorted(
         p for p in source_dir.iterdir() if p.is_file() and p.suffix.lower() in {".jpg", ".jpeg"}
@@ -216,10 +227,9 @@ def _run_ingest(spec: IngestSpec, dry_run: bool, *, output_root: Path) -> str:
     if dry_run:
         return "\n".join(
             [
+                _INGEST_HEADER,
                 f"  source_dir: {source_dir}",
-                f"  total JPEGs: {len(jpegs)}",
-                f"  GPS valid: {len(jpegs)}",
-                "  GPS missing: 0",
+                f"  would check {len(jpegs)} JPEGs for GPS EXIF",
             ]
         )
 
@@ -249,11 +259,12 @@ def _run_ingest(spec: IngestSpec, dry_run: bool, *, output_root: Path) -> str:
         else:
             no_gps += 1
 
-    ingest_log = output_root / "ingest_summary.json"
+    ingest_log = output_root / "ingest_validation.json"
     ingest_log.parent.mkdir(parents=True, exist_ok=True)
     ingest_log.write_text(
         json.dumps(
             {
+                "mode": "validation",
                 "source_dir": str(source_dir),
                 "total": len(jpegs),
                 "gps_valid": valid,
@@ -264,11 +275,12 @@ def _run_ingest(spec: IngestSpec, dry_run: bool, *, output_root: Path) -> str:
         )
     )
     logger.info(
-        "Ingest summary written to %s (total=%d, valid=%d)", ingest_log, len(jpegs), valid
+        "Ingest validation written to %s (total=%d, valid=%d)", ingest_log, len(jpegs), valid
     )
 
     return "\n".join(
         [
+            _INGEST_HEADER,
             f"  source_dir: {source_dir}",
             f"  total JPEGs: {len(jpegs)}",
             f"  GPS valid: {valid}",
@@ -280,11 +292,21 @@ def _run_ingest(spec: IngestSpec, dry_run: bool, *, output_root: Path) -> str:
 def _run_coverage(spec: CoverageSpec, dry_run: bool, *, output_root: Path) -> str:
     """Compute coverage from a set of footprint GeoJSON strings."""
     if dry_run:
-        return f"  target_geojson present: {bool(spec.target_geojson)}"
+        return (
+            f"  target_geojson present: {bool(spec.target_geojson)}\n"
+            f"  footprints: {len(spec.footprints)}"
+        )
+
+    if not spec.footprints:
+        raise ValueError(
+            "The coverage step needs at least one flown footprint: add a 'footprints' "
+            "list of GeoJSON polygons to the step. Measuring a target against no "
+            "footprints only ever reports 0% coverage."
+        )
 
     from backend.services.coverage import run_coverage
 
-    result = run_coverage([], spec.target_geojson)
+    result = run_coverage(spec.footprints, spec.target_geojson)
     cov_log = output_root / "coverage_summary.json"
     cov_log.parent.mkdir(parents=True, exist_ok=True)
     cov_log.write_text(json.dumps(result, indent=2))
@@ -297,17 +319,21 @@ def _run_coverage(spec: CoverageSpec, dry_run: bool, *, output_root: Path) -> st
 
 def _run_reconstruction(spec: ReconstructionSpec, dry_run: bool, *, output_root: Path) -> str:
     if dry_run:
-        return f"  preset: {spec.preset.value}"
-    # Reconstruction requires COLMAP/gsplat and a configured DB — defer to actual
-    # backend services when both are available, but for now report as skipped.
-    return f"  preset: {spec.preset.value}  status: skipped (requires backend resources)"
+        return f"  preset: {spec.preset.value}  (NOT RUNNABLE HEADLESS — a real run fails here)"
+    raise NotImplementedError(
+        "The reconstruction step cannot run headlessly: it needs COLMAP/gsplat and a "
+        "configured database. Start the reconstruction from the app, or drop the step "
+        "from the job spec."
+    )
 
 
 def _run_export(spec: ExportSpec, dry_run: bool, *, output_root: Path) -> str:
     if dry_run:
-        return f"  format: {spec.format.value}"
-    # Headless export without FastAPI: build exports locally
-    return f"  format: {spec.format.value}  status: skipped (requires backend session)"
+        return f"  format: {spec.format.value}  (NOT RUNNABLE HEADLESS — a real run fails here)"
+    raise NotImplementedError(
+        "The export step cannot run headlessly: it needs a backend session to export "
+        "from. Export from the app, or drop the step from the job spec."
+    )
 
 
 # ── YAML parsing ────────────────────────────────────────────────────────────
@@ -335,7 +361,10 @@ def _parse_ingest(raw: dict) -> IngestSpec:
 
 def _parse_coverage(raw: dict) -> CoverageSpec:
     coverage = raw.get("coverage", raw)
-    return CoverageSpec(target_geojson=coverage["target_geojson"])
+    return CoverageSpec(
+        target_geojson=coverage["target_geojson"],
+        footprints=list(coverage.get("footprints", [])),
+    )
 
 
 def _parse_reconstruction(raw: dict) -> ReconstructionSpec:
@@ -377,8 +406,12 @@ def parse_job_spec(yaml_path: Path) -> JobSpec:
     output_root = Path(raw.get("output_root", "./pipeline_output"))
     log_dir = Path(raw["log_dir"]) if "log_dir" in raw else None
 
+    raw_steps = raw.get("steps") or []
+    if not raw_steps:
+        raise ValueError("Job spec must define at least one step")
+
     steps: list[StepSpec] = []
-    for i, step_raw in enumerate(raw.get("steps", [])):
+    for i, step_raw in enumerate(raw_steps):
         kind_raw = step_raw.get("kind")
         if kind_raw is None:
             raise ValueError(f"Step {i}: missing 'kind' field")
@@ -431,11 +464,41 @@ class PipelineResult:
 
     @property
     def success(self) -> bool:
-        return all(s.success for s in self.steps)
+        # `all([])` is True: a run that executed no steps has not succeeded at anything.
+        return bool(self.steps) and all(s.success for s in self.steps)
 
     @property
     def exit_code(self) -> int:
         return 0 if self.success else 1
+
+
+_STEP_RUNNERS = {
+    StepKind.GEOTAG: lambda spec, dry_run, output_root: _run_geotag(spec, dry_run),
+    StepKind.INGEST: lambda spec, dry_run, output_root: _run_ingest(
+        spec, dry_run, output_root=output_root
+    ),
+    StepKind.COVERAGE: lambda spec, dry_run, output_root: _run_coverage(
+        spec, dry_run, output_root=output_root
+    ),
+    StepKind.RECONSTRUCTION: lambda spec, dry_run, output_root: _run_reconstruction(
+        spec, dry_run, output_root=output_root
+    ),
+    StepKind.EXPORT: lambda spec, dry_run, output_root: _run_export(
+        spec, dry_run, output_root=output_root
+    ),
+}
+
+
+def _run_step(step: StepSpec, dry_run: bool, output_root: Path) -> str:
+    """Run one step, or raise. Never returns a string that stands in for a failure."""
+    runner = _STEP_RUNNERS.get(step.kind)
+    if runner is None:
+        raise ValueError(f"Unsupported step kind: {step.kind.value}")
+    # StepSpec's per-kind fields are named after the StepKind values.
+    spec = getattr(step, step.kind.value)
+    if spec is None:
+        raise ValueError(f"Step of kind {step.kind.value} is missing its '{step.kind.value}' spec")
+    return runner(spec, dry_run, output_root)
 
 
 class PipelineRunner:
@@ -443,7 +506,6 @@ class PipelineRunner:
 
     def __init__(self, job: JobSpec) -> None:
         self.job = job
-        self._ensure_output_dirs()
 
     def _ensure_output_dirs(self) -> None:
         self.job.output_root.mkdir(parents=True, exist_ok=True)
@@ -454,54 +516,19 @@ class PipelineRunner:
         started_at = datetime.now(UTC)
         results: list[StepResult] = []
 
-        _STEP_RUNNERS = {
-            StepKind.GEOTAG: (
-                lambda spec, dr: (
-                    _run_geotag(spec.geotag, dr) if spec.geotag else "no spec"
-                )
-            ),
-            StepKind.INGEST: (
-                lambda spec, dr: (
-                    _run_ingest(spec.ingest, dr, output_root=self.job.output_root)
-                    if spec.ingest
-                    else "no spec"
-                )
-            ),
-            StepKind.COVERAGE: (
-                lambda spec, dr: (
-                    _run_coverage(spec.coverage, dr, output_root=self.job.output_root)
-                    if spec.coverage
-                    else "no spec"
-                )
-            ),
-            StepKind.RECONSTRUCTION: (
-                lambda spec, dr: (
-                    _run_reconstruction(spec.reconstruction, dr, output_root=self.job.output_root)
-                    if spec.reconstruction
-                    else "no spec"
-                )
-            ),
-            StepKind.EXPORT: (
-                lambda spec, dr: (
-                    _run_export(spec.export, dr, output_root=self.job.output_root)
-                    if spec.export
-                    else "no spec"
-                )
-            ),
-        }
+        if not dry_run:
+            # A dry run must leave the filesystem exactly as it found it.
+            self._ensure_output_dirs()
 
         for i, step in enumerate(self.job.steps):
-            runner = _STEP_RUNNERS.get(step.kind)
-            if runner is None:
-                results.append(
-                    StepResult(i, step.kind, False, "", f"Unknown step kind: {step.kind}")
-                )
-                continue
             try:
-                output = runner(step, dry_run)
+                output = _run_step(step, dry_run, self.job.output_root)
                 results.append(StepResult(i, step.kind, True, output))
             except Exception as exc:
-                logger.exception("Step %d (%s) failed", i, step.kind.value)
+                if not isinstance(exc, NotImplementedError):
+                    # A step that cannot run headlessly is an expected outcome, not a
+                    # crash: it gets the same failed StepResult, but no traceback.
+                    logger.exception("Step %d (%s) failed", i, step.kind.value)
                 results.append(StepResult(i, step.kind, False, "", str(exc)))
 
         finished_at = datetime.now(UTC)
@@ -519,51 +546,9 @@ class PipelineRunner:
         for i, step in enumerate(self.job.steps):
             lines.append(f"Step {i + 1}: {step.kind.value}")
             try:
-                runner = {
-                    StepKind.GEOTAG: (
-                        lambda s: _run_geotag(s.geotag, dry_run=True) if s.geotag else ""
-                    ),
-                    StepKind.INGEST: (
-                        lambda s: (
-                            _run_ingest(
-                                s.ingest, dry_run=True, output_root=self.job.output_root
-                            )
-                            if s.ingest
-                            else ""
-                        )
-                    ),
-                    StepKind.COVERAGE: (
-                        lambda s: (
-                            _run_coverage(
-                                s.coverage, dry_run=True, output_root=self.job.output_root
-                            )
-                            if s.coverage
-                            else ""
-                        )
-                    ),
-                    StepKind.RECONSTRUCTION: (
-                        lambda s: (
-                            _run_reconstruction(
-                                s.reconstruction, dry_run=True, output_root=self.job.output_root
-                            )
-                            if s.reconstruction
-                            else ""
-                        )
-                    ),
-                    StepKind.EXPORT: (
-                        lambda s: (
-                            _run_export(
-                                s.export, dry_run=True, output_root=self.job.output_root
-                            )
-                            if s.export
-                            else ""
-                        )
-                    ),
-                }.get(step.kind)
-                if runner:
-                    detail = runner(step)
-                    if detail:
-                        lines.append(detail)
+                detail = _run_step(step, dry_run=True, output_root=self.job.output_root)
+                if detail:
+                    lines.append(detail)
             except Exception as exc:
                 lines.append(f"  ERROR during plan: {exc}")
             lines.append("")

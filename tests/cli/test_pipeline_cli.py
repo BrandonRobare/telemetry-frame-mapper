@@ -69,6 +69,33 @@ steps:
     assert "extract SRT" in captured.out or "SRT" in captured.out or "EXIF" in captured.out
 
 
+def test_cli_exits_nonzero_when_a_step_cannot_run(tmp_path: Path, capsys) -> None:
+    """Automation gates on this exit code; a skipped step must not read as done (#583)."""
+    yaml_file = tmp_path / "job.yml"
+    yaml_file.write_text(
+        f"""\
+name: unsupported
+output_root: '{tmp_path / "out"}'
+steps:
+  - kind: reconstruction
+    preset: quick
+"""
+    )
+
+    code = main([str(yaml_file)])
+
+    assert code == 1
+    assert "FAIL" in capsys.readouterr().out
+
+
+def test_cli_exits_nonzero_for_an_empty_job(tmp_path: Path) -> None:
+    yaml_file = tmp_path / "empty.yml"
+    yaml_file.write_text("name: nothing\nsteps: []\n")
+
+    assert main([str(yaml_file)]) == 1
+    assert main(["--dry-run", str(yaml_file)]) == 1
+
+
 def test_format_result_success() -> None:
     from datetime import datetime
 
