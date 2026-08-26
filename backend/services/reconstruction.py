@@ -1051,20 +1051,61 @@ def _load_ply_positions_and_colors(ply_path: Path) -> tuple:
     return xyz, None
 
 
+# Both axes of the distance matrix are blocked at this size, so the working set
+# stays at two _NEAREST_BLOCK ** 2 float64 arrays (16 MiB) whatever the cloud
+# size. Larger blocks measured no faster — the reduction is bandwidth-bound.
+_NEAREST_BLOCK = 1024
+
+
 def _nearest_gaussian_indices(points_xyz, gaussian_xyz):
-    """Return nearest Gaussian index for each point, chunked to bound memory use."""
+    """Return nearest Gaussian index for each point, blocked to bound memory use.
+
+    Squared distance is the ``‖b‖² - 2·a·b`` expansion — ``‖a‖²`` is constant
+    along a row and so cannot change the argmin — which keeps the working array
+    at ``(points_block, gaussian_block)`` instead of materialising a
+    ``(points, gaussians, 3)`` difference (12 GB at a million Gaussians, #633).
+
+    The expansion is accurate to a couple of ULP, so it can only disagree with a
+    difference-of-coordinates argmin about Gaussians that are equidistant to
+    within float64 noise — for those either answer is as right as the other.
+    """
     import numpy as np
 
+    # ponytail: still a brute-force O(points x gaussians) scan, ~1.6 s per billion
+    # pairs, so a full-preset export (1M Gaussians) remains minutes of CPU. Only a
+    # spatial index fixes that, and none is in the lock file — add scipy's cKDTree
+    # if the export becomes slow enough to matter.
+
+    points_xyz = np.asarray(points_xyz, dtype=np.float64)
+    gaussian_xyz = np.asarray(gaussian_xyz, dtype=np.float64)
     if len(gaussian_xyz) == 0:
         return np.full(len(points_xyz), -1, dtype=np.int64)
 
-    indices = np.empty(len(points_xyz), dtype=np.int64)
-    chunk_size = 512
-    for start in range(0, len(points_xyz), chunk_size):
-        stop = min(start + chunk_size, len(points_xyz))
-        chunk = points_xyz[start:stop]
-        distances = ((chunk[:, None, :] - gaussian_xyz[None, :, :]) ** 2).sum(axis=2)
-        indices[start:stop] = np.argmin(distances, axis=1)
+    # Center both clouds first: for a cloud far from the origin (UTM eastings,
+    # say) the ‖b‖² and 2·a·b terms would dwarf the distances being compared and
+    # the cancellation could pick the wrong Gaussian.
+    origin = gaussian_xyz.mean(axis=0)
+    points = points_xyz - origin
+    gaussians = gaussian_xyz - origin
+    gaussian_sq = np.einsum("ij,ij->i", gaussians, gaussians)
+
+    indices = np.empty(len(points), dtype=np.int64)
+    for start in range(0, len(points), _NEAREST_BLOCK):
+        chunk = points[start : start + _NEAREST_BLOCK]
+        best_distance = np.full(len(chunk), np.inf)
+        best_index = np.zeros(len(chunk), dtype=np.int64)
+        for offset in range(0, len(gaussians), _NEAREST_BLOCK):
+            block = chunk @ gaussians[offset : offset + _NEAREST_BLOCK].T
+            block *= -2.0
+            block += gaussian_sq[offset : offset + _NEAREST_BLOCK]
+            block_min = block.min(axis=1)
+            # Strict `<` leaves ties with the earlier block, so Gaussians at the
+            # same coordinates (identical distances, bit for bit) resolve to the
+            # lowest index whichever blocks they land in, as a full-row argmin did.
+            closer = block_min < best_distance
+            best_index = np.where(closer, block.argmin(axis=1) + offset, best_index)
+            best_distance = np.where(closer, block_min, best_distance)
+        indices[start : start + _NEAREST_BLOCK] = best_index
     return indices
 
 

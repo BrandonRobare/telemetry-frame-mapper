@@ -112,12 +112,23 @@ def _discover_candidates(
         for session_dir in sorted(imports.iterdir()):
             if not session_dir.is_dir():
                 continue
-            session = (
+            matches = (
                 db.query(SessionModel)
-                .filter(SessionModel.folder_path.like(f"%{session_dir.name}%"))
-                .first()
+                .filter(
+                    SessionModel.folder_path.in_(
+                        [str(session_dir), str(session_dir.resolve())]
+                    )
+                )
+                .all()
             )
-            if session and session.imported_at:
+            if len(matches) != 1:
+                # No confident DB match (none, or ambiguous duplicate rows for
+                # the same path) - skip rather than guess from mtime. This
+                # decides whether we delete a user's data, so an unmatched
+                # directory must be left alone, not aged by fallback (#643).
+                continue
+            session = matches[0]
+            if session.imported_at:
                 age = _age_from_dt(session.imported_at)
             else:
                 age = _age_from_file(session_dir)
