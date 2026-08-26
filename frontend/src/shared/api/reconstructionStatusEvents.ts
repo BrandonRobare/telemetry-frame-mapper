@@ -3,7 +3,15 @@ import { useQueryClient } from '@tanstack/react-query'
 import { apiUrl } from './client'
 import type { Job, Reconstruction } from '../../types/api'
 
-const LIVE_STATUSES = new Set<Job['status']>(['pending', 'running_colmap', 'running_gsplat', 'cancelling'])
+// The backend's live set (backend/routers/reconstruction.py). This is the ONLY
+// place it is spelled out — every call site imports isLiveReconstructionStatus.
+const LIVE_STATUSES = new Set<Job['status']>([
+  'pending',
+  'running_colmap',
+  'running_gsplat',
+  'running_remote',
+  'cancelling',
+])
 
 export function isLiveReconstructionStatus(status: Job['status']) {
   return LIVE_STATUSES.has(status)

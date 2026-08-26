@@ -72,6 +72,51 @@ def test_write_exiftool_args_file_non_ascii_path(tmp_path: Path) -> None:
     assert content.startswith("-charset\nfilename=UTF8\n")
 
 
+def test_build_exiftool_args_repeats_charset_for_every_file() -> None:
+    """ExifTool resets options at each -execute, so a directive written once at
+    the top of the args file only ever applies to the first file (see issue
+    #676: verified against real ExifTool 13.59 that a charset set only before
+    the first command does not carry into the second). The UTF-8 filename
+    charset must be repeated per file, exactly like -overwrite_original/-P/-q/-q
+    already are.
+    """
+    tags = [
+        FrameTag(
+            source=Path(f"frames/frame_{i:05d}.jpg"),
+            target=Path(f"geotagged/frame_{i:05d}.jpg"),
+            frame_index=i,
+            seconds=0,
+            lat=41.125,
+            lon=-81.25,
+            rel_alt_m=115.5,
+            abs_alt_m=352.438,
+            timestamp=None,
+        )
+        for i in range(1, 4)
+    ]
+
+    args = build_exiftool_args(tags)
+
+    assert args.count("-charset") == len(tags)
+    assert args.count("filename=UTF8") == len(tags)
+
+    # Each -execute-delimited command must carry its own charset pair, not just
+    # the first: a bare occurrence count would also pass an implementation that
+    # wrote the directive once at the top and happened to repeat some other
+    # unrelated token len(tags) times.
+    commands: list[list[str]] = [[]]
+    for item in args:
+        if item == "-execute":
+            commands.append([])
+        else:
+            commands[-1].append(item)
+    commands = [c for c in commands if c]  # drop the empty tail after the last -execute
+    assert len(commands) == len(tags)
+    for command in commands:
+        assert command[0] == "-charset"
+        assert command[1] == "filename=UTF8"
+
+
 def test_build_exiftool_args_writes_relative_altitude() -> None:
     """Frames must carry height-above-launch, not just GPSAltitude (MSL).
 

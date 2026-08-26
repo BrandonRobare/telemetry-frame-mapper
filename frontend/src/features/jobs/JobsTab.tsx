@@ -292,6 +292,7 @@ const STATUS_BADGE: Record<Job['status'], StatusBadge> = {
   pending:        { bg: 'var(--tan-soft)',     text: 'var(--tan-text)',      label: 'Pending' },
   running_colmap: { bg: 'var(--warning-soft)', text: 'var(--warning)',       label: 'COLMAP' },
   running_gsplat: { bg: 'var(--accent-soft)',  text: 'var(--accent-strong)', label: 'Gaussian' },
+  running_remote: { bg: 'var(--accent-soft)',  text: 'var(--accent-strong)', label: 'Remote' },
   cancelling:     { bg: 'var(--warning-soft)', text: 'var(--warning)',       label: 'Cancelling' },
   cancelled:      { bg: 'var(--surface)',      text: 'var(--text)',          label: 'Cancelled' },
   complete:       { bg: 'var(--success-soft)', text: 'var(--success)',       label: 'Complete' },
@@ -307,7 +308,7 @@ function jobStatusBadgeColor(status: string): ComponentProps<typeof Badge>['colo
   if (status === 'failed') return 'red'
   if (status === 'pending') return 'tan'
   if (status === 'running_colmap' || status === 'cancelling') return 'amber'
-  if (status === 'running_gsplat') return 'terracotta'
+  if (status === 'running_gsplat' || status === 'running_remote') return 'terracotta'
   return 'muted'
 }
 
@@ -485,6 +486,7 @@ export default function JobsTab() {
               <option value="pending">Pending</option>
               <option value="running_colmap">COLMAP</option>
               <option value="running_gsplat">Gaussian</option>
+              <option value="running_remote">Remote</option>
             </select>
           </div>
           {done.length === 0 ? (
