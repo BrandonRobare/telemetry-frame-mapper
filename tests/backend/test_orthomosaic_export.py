@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 from unittest import mock
 
 import numpy as np
@@ -224,6 +225,8 @@ class TestOrthoJob:
         rec2 = db.query(Reconstruction).get(rec_id)
         assert rec2.ortho_status == "failed"
         assert "no rasterio" in (rec2.ortho_error or "")
+        # #628: a failed write must never leave ortho_path aimed at a partial file.
+        assert rec2.ortho_path is None
 
 
 # ---------------------------------------------------------------------------
@@ -445,3 +448,113 @@ class TestRasterBudget:
         # Without percentile clipping the floaters stretch the raster ~150x per axis.
         assert b.shape[0] < a.shape[0] * 3
         assert b.shape[1] < a.shape[1] * 3
+
+
+class TestAtomicGeoTiffWrite:
+    """#628: the writer opened the final path directly, so a crash mid-write
+    destroyed the last good export."""
+
+    _GEOTRANSFORM = (0.0, 1.0, 0.0, 10.0, 0.0, -1.0)
+
+    @staticmethod
+    def _install_fake_rasterio(monkeypatch, *, fail: bool):
+        import sys
+        import types
+
+        class _Dataset:
+            def __init__(self, path):
+                self.path = Path(path)
+
+            def __enter__(self):
+                self.path.write_bytes(b"PARTIAL")
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+            def write(self, band, index):
+                if fail:
+                    raise OSError("no space left on device")
+                self.path.write_bytes(b"NEW RASTER")
+
+        module = types.ModuleType("rasterio")
+        module.open = lambda path, mode, **kwargs: _Dataset(path)
+        module.transform = types.SimpleNamespace(from_origin=lambda *args: object())
+        monkeypatch.setitem(sys.modules, "rasterio", module)
+
+    def _image(self):
+        return np.zeros((2, 2, 3), dtype=np.uint8)
+
+    def test_failed_write_leaves_previous_raster_intact(self, monkeypatch, tmp_path):
+        output = tmp_path / "orthomosaic.tif"
+        output.write_bytes(b"GOOD RASTER")
+        self._install_fake_rasterio(monkeypatch, fail=True)
+
+        with pytest.raises(OSError):
+            ortho._write_geotiff(output, self._image(), self._GEOTRANSFORM, None)
+
+        assert output.read_bytes() == b"GOOD RASTER"
+        assert list(tmp_path.glob("*tmp*")) == []
+
+    def test_successful_write_replaces_the_previous_raster(self, monkeypatch, tmp_path):
+        output = tmp_path / "orthomosaic.tif"
+        output.write_bytes(b"GOOD RASTER")
+        self._install_fake_rasterio(monkeypatch, fail=False)
+
+        assert ortho._write_geotiff(output, self._image(), self._GEOTRANSFORM, None) == output
+        assert output.read_bytes() == b"NEW RASTER"
+        assert list(tmp_path.glob("*tmp*")) == []
+
+
+class TestDanglingOrthoStatusReaper:
+    """#628: ``ortho_status`` was committed as running and never reset, so a
+    crash wedged the reconstruction at 422 forever."""
+
+    def test_dangling_running_is_reaped_and_export_retryable(self, client, tmp_path):
+        db = _db(client)
+        session = SessionModel(name="S", folder_path=str(tmp_path))
+        db.add(session)
+        db.commit()
+        db.refresh(session)
+
+        splat = tmp_path / "splat.ply"
+        _write_tiny_ply(splat, 10)
+        rec = _make_rec(db, session, splat_path=str(splat))
+        rec.ortho_status = "running"
+        db.commit()
+        rec_id = rec.id
+
+        # Wedged: every retry is rejected while the stale status stands.
+        assert client.post(f"/export/reconstructions/{rec_id}/orthomosaic").status_code == 422
+
+        with mock.patch.object(ortho, "SessionLocal", return_value=db):
+            assert ortho.reset_dangling_ortho_status() == 1
+
+        reaped = db.query(Reconstruction).get(rec_id)
+        assert reaped.ortho_status == "failed"
+        assert "restart" in (reaped.ortho_error or "").lower()
+
+        with mock.patch.object(ortho, "_run_ortho_job"):
+            resp = client.post(f"/export/reconstructions/{rec_id}/orthomosaic")
+        assert resp.status_code == 202
+        assert resp.json()["ortho_status"] == "pending"
+
+    def test_pending_is_reaped_and_terminal_rows_are_untouched(self, client, tmp_path):
+        db = _db(client)
+        session = SessionModel(name="S", folder_path=str(tmp_path))
+        db.add(session)
+        db.commit()
+        db.refresh(session)
+
+        pending = _make_rec(db, session)
+        pending.ortho_status = "pending"
+        done = _make_rec(db, session)
+        done.ortho_status = "complete"
+        db.commit()
+        pending_id, done_id = pending.id, done.id
+
+        with mock.patch.object(ortho, "SessionLocal", return_value=db):
+            assert ortho.reset_dangling_ortho_status() == 1
+
+        assert db.query(Reconstruction).get(pending_id).ortho_status == "failed"
+        assert db.query(Reconstruction).get(done_id).ortho_status == "complete"

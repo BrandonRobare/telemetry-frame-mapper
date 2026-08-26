@@ -72,12 +72,22 @@ async def lifespan(app: FastAPI):
     from backend.services.artifact_backup_schedule import scheduled_backup_from_config
     from backend.services.auto_import import AutoImportWatcher
     from backend.services.job_queue import shutdown_worker, start_worker
+    from backend.services.orthomosaic_export import reset_dangling_ortho_status
 
-    if not start_worker() and pin_lock_config["enabled"]:
+    owns_job_queue = start_worker()
+    if not owns_job_queue and pin_lock_config["enabled"]:
         raise RuntimeError(
             "PIN lock requires a single API process; another process already owns the job "
             "queue lock."
         )
+    if owns_job_queue:
+        # Same startup-recovery pass as the job-queue reaper, and gated on the same
+        # lock so a second process cannot fail another's in-flight export (#628).
+        reaped = reset_dangling_ortho_status()
+        if reaped:
+            logging.getLogger("backend").info(
+                "Recovered %d orphaned orthomosaic export(s) on startup", reaped
+            )
 
     watcher = AutoImportWatcher()
     app.state.auto_import_watcher = watcher
