@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { apiUrl, get, post, del } from '../../shared/api/client'
+import { isLiveReconstructionStatus } from '../../shared/api/reconstructionStatusEvents'
 import { useMapStore } from '../../shared/stores/mapStore'
 import { Skeleton } from '../../shared/components/Skeleton'
 import EmptyState from '../../shared/components/EmptyState'
@@ -44,7 +45,6 @@ import {
 // triggers an annotation's narration callout during presentation mode.
 const NARRATION_ENTER_RADIUS_M = 6
 
-const ACTIVE_STATUSES: string[] = ['pending', 'running_colmap', 'running_gsplat']
 const SEMANTIC_CLASS_NAMES: SemanticClassName[] = ['ground', 'vegetation', 'structure', 'vehicle', 'water', 'other']
 
 interface SemanticOverlayPoint {
@@ -83,7 +83,7 @@ function useAllJobsForSession(sessionId: number | null) {
     enabled: sessionId !== null,
     refetchInterval: (query) => {
       const jobs = query.state.data ?? []
-      const hasRunning = jobs.some((j) => ACTIVE_STATUSES.includes(j.status))
+      const hasRunning = jobs.some((j) => isLiveReconstructionStatus(j.status))
       return hasRunning ? 2000 : 30_000
     },
   })
@@ -1745,7 +1745,7 @@ export default function SplatViewerTab() {
   const [presenting, setPresenting] = useState(false)
 
   const jobs = allJobs ?? []
-  const running = jobs.filter((j) => ACTIVE_STATUSES.includes(j.status))
+  const running = jobs.filter((j) => isLiveReconstructionStatus(j.status))
   const completed = jobs.filter((j) => j.status === 'complete')
   const activeId = resolveActiveJobId(selectedJobId, jobs, selectedSessionId)
   const { data: reconstructionDetails } = useReconstructionDetails(activeId)

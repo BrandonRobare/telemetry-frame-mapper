@@ -43,6 +43,12 @@ describe('detectJobTransitions', () => {
     expect(transitions).toEqual([{ job: jobs[0], outcome: 'succeeded' }])
   })
 
+  it('fires a completion transition for a remote-worker job', () => {
+    const previous = new Map([[1, 'running_remote' as Job['status']]])
+    const jobs = [makeJob({ id: 1, status: 'complete' })]
+    expect(detectJobTransitions(previous, jobs)).toEqual([{ job: jobs[0], outcome: 'succeeded' }])
+  })
+
   it('fires a failed transition when a live job fails', () => {
     const previous = new Map([[1, 'running_colmap' as Job['status']]])
     const jobs = [makeJob({ id: 1, status: 'failed', error_msg: 'COLMAP crashed' })]
