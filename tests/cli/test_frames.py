@@ -41,6 +41,20 @@ def test_build_frame_tags_aligns_frames_and_adds_takeoff_altitude() -> None:
     assert tags[2].timestamp == datetime(2025, 8, 6, 18, 28, 48, tzinfo=UTC)
 
 
+def test_build_frame_tags_derives_relative_altitude_from_absolute_telemetry() -> None:
+    tags = build_frame_tags(
+        frames=[(Path("frames/frame_00001.jpg"), 1)],
+        telemetry=[TelemetryPoint(0, 1, 41.1509, -81.3382, None, 449.9)],
+        output_dir=Path("geotagged"),
+        frame_rate=1,
+        takeoff_altitude_m=334.0,
+        video_start=None,
+    )
+
+    assert tags[0].rel_alt_m == pytest.approx(115.9)
+    assert tags[0].abs_alt_m == pytest.approx(449.9)
+
+
 def test_build_frame_tags_rejects_zero_frame_rate() -> None:
     with pytest.raises(ValueError, match="frame rate"):
         build_frame_tags(

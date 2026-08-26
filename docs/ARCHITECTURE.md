@@ -17,8 +17,8 @@ A standalone geotagging tool (`drone-video-geotagger`). Pipeline order inside `c
 | Stage | Module | What it does |
 |---|---|---|
 | 1 | `video.py` | `ffmpeg` extracts the DJI subtitle telemetry track (stream `0:2`) to SRT; reads `creation_time` for the video start timestamp |
-| 2 | `telemetry.py` | Parses DJI SRT into `TelemetryPoint`s (time window, lat/lon, relative altitude); linear interpolation between points |
-| 3 | `frames.py` | Collects `*.jpg`, frame index = last number in the filename; infers extraction fps from telemetry duration when not given; builds `FrameTag`s (absolute altitude = takeoff + relative) |
+| 2 | `telemetry.py` | Parses DJI SRT into `TelemetryPoint`s (time window, lat/lon, distinct relative/absolute altitude); linear interpolation between points |
+| 3 | `frames.py` | Collects `*.jpg`, frame index = last number in the filename; infers extraction fps from telemetry duration when not given; resolves relative/absolute telemetry against takeoff elevation and builds `FrameTag`s |
 | 4 | `exiftool.py` | Writes one ExifTool args file and invokes `exiftool -@ file` once for all frames |
 | 5 | `audit.py` | Writes `frame_geotags.csv` for inspection |
 

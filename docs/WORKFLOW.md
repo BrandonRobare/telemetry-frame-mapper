@@ -30,6 +30,9 @@ drone-video-geotagger \
 ```
 
 - `--takeoff-altitude` is the launch point's elevation in **meters above sea level** (find it on a topo map or your flight log). DJI telemetry stores altitude relative to takeoff; the CLI adds the two so the EXIF carries absolute altitude, while DJI XMP relative altitude drives footprint sizing later.
+- In key/value SRT data, `rel_alt`/`rel_altitude` is relative to takeoff. A bare
+  `alt`/`altitude` or explicit `abs_alt`/`abs_altitude` is treated as altitude above sea level;
+  the CLI subtracts `--takeoff-altitude` before writing DJI XMP relative altitude.
 - The SRT telemetry is extracted from the video automatically. If you already have it, pass `--srt flight.srt`; if you know the extraction rate, pass `--frame-rate 2` (otherwise it is estimated from the telemetry duration).
 - After parsing the telemetry the CLI checks for signs of a weak or missing GPS lock — points stuck at (0, 0), coordinates frozen across many consecutive points, implausible position jumps — and prints a `WARNING:` line to stderr for each finding. Tagging still proceeds; treat the warnings as a prompt to inspect `frame_geotags.csv` before importing.
 - Add `--in-place` to tag the original frames instead of writing copies.

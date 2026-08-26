@@ -67,7 +67,8 @@ Lat: 41.2000 Lon: -81.0000 Alt: 102.0
     assert points[0].rel_alt_m == 100
     assert points[1].lat == 41.2
     assert points[1].lon == -81.0
-    assert points[1].rel_alt_m == 102
+    assert points[1].rel_alt_m is None
+    assert points[1].abs_alt_m == 102
 
 
 def test_interpolate_between_srt_points() -> None:
@@ -202,7 +203,7 @@ def test_parse_srt_text_rejects_missing_gps() -> None:
         parse_srt_text("1\n00:00:00,000 --> 00:00:01,000\nno gps")
 
 
-def test_parse_srt_text_accepts_dji_longtitude_misspelling() -> None:
+def test_parse_srt_text_keeps_unqualified_altitude_absolute() -> None:
     points = parse_srt_text(
         """
 1
@@ -218,8 +219,32 @@ def test_parse_srt_text_accepts_dji_longtitude_misspelling() -> None:
     assert len(points) == 2
     assert points[0].lat == 41.1509
     assert points[0].lon == -81.3382
-    assert points[0].rel_alt_m == 449.9
+    assert points[0].rel_alt_m is None
+    assert points[0].abs_alt_m == 449.9
     assert points[1].lon == -81.3383
+
+    with pytest.raises(ValueError, match="takeoff altitude"):
+        interpolate(points, 0.5)
+
+    _, _, rel_alt_m = interpolate(points, 0.5, takeoff_altitude_m=334.0)
+    assert rel_alt_m == pytest.approx(116.4)
+
+
+def test_parse_srt_text_accepts_explicit_absolute_altitude() -> None:
+    points = parse_srt_text(
+        """
+1
+00:00:00,000 --> 00:00:01,000
+[latitude: 41.1509] [longitude: -81.3382] [abs_altitude: 449.9]
+
+2
+00:00:01,000 --> 00:00:02,000
+[latitude: 41.1510] [longitude: -81.3383] [abs_altitude: 450.9]
+"""
+    )
+
+    assert points[0].rel_alt_m is None
+    assert points[0].abs_alt_m == 449.9
 
 
 def test_parse_srt_text_warns_about_blocks_with_a_partial_fix() -> None:
