@@ -15,6 +15,10 @@ import { useToast } from '../../shared/hooks/useToast'
 import { filterReconstructionLogLines } from './logPanel'
 
 const HISTORY_PAGE_SIZE = 10
+// `/jobs/` has no search parameter, so a search can only see what the client
+// loaded. Pull one wide window instead of a single page — 200 is the `le=200`
+// ceiling on the endpoint's `limit`.
+const HISTORY_SEARCH_LIMIT = 200
 type JobStatusFilter = 'all' | Job['status']
 
 function jobsPath(skip: number, limit: number, status: JobStatusFilter) {
@@ -325,10 +329,14 @@ export default function JobsTab() {
   const [statusFilter, setStatusFilter] = useState<JobStatusFilter>('all')
   const [search, setSearch] = useState('')
   const [sseConnectedIds, setSseConnectedIds] = useState<ReadonlySet<number>>(new Set())
+  const searchNeedle = search.trim().toLowerCase()
   const { data: activeJobs, isLoading: isLoadingActive } = useJobs(0, 50, 'all', sseConnectedIds)
+  // A search loads one window from the top of history and pages through it
+  // client-side. Filtering a single ten-row page reported "no match" for jobs
+  // that were only a page away.
   const { data: historyJobs, isLoading: isLoadingHistory } = useJobs(
-    historyPage * HISTORY_PAGE_SIZE,
-    HISTORY_PAGE_SIZE + 1,
+    searchNeedle ? 0 : historyPage * HISTORY_PAGE_SIZE,
+    searchNeedle ? HISTORY_SEARCH_LIMIT : HISTORY_PAGE_SIZE + 1,
     statusFilter,
     sseConnectedIds
   )
@@ -351,8 +359,6 @@ export default function JobsTab() {
 
   const activeList = activeJobs ?? []
   const historyPageJobs = historyJobs ?? []
-  const hasNextHistoryPage = historyPageJobs.length > HISTORY_PAGE_SIZE
-  const searchNeedle = search.trim().toLowerCase()
 
   // Rendered inside the layout rather than returned early: System Health lives in
   // <ResourceBar />, and it is the only place showing whether ffmpeg/exiftool/
@@ -363,9 +369,8 @@ export default function JobsTab() {
     activeList.length === 0 && historyPageJobs.length === 0 && !searchNeedle && statusFilter === 'all'
 
   const running = activeList.filter((j) => isLiveReconstructionStatus(j.status))
-  const done = historyPageJobs
+  const matchingHistory = historyPageJobs
     .filter((j) => !isLiveReconstructionStatus(j.status))
-    .slice(0, HISTORY_PAGE_SIZE)
     .filter((job) => {
       if (!searchNeedle) return true
       return [
@@ -377,6 +382,16 @@ export default function JobsTab() {
         job.error_msg ?? '',
       ].some((value) => value.toLowerCase().includes(searchNeedle))
     })
+  // Without a search the server already returned exactly this page; with one it
+  // returned the whole window, so slice the page out of the matches.
+  const pageStart = searchNeedle ? historyPage * HISTORY_PAGE_SIZE : 0
+  const done = matchingHistory.slice(pageStart, pageStart + HISTORY_PAGE_SIZE)
+  const hasNextHistoryPage = searchNeedle
+    ? matchingHistory.length > pageStart + HISTORY_PAGE_SIZE
+    : historyPageJobs.length > HISTORY_PAGE_SIZE
+  // A window short of the cap holds every history row, so "no match" is the
+  // whole truth. A full one means older jobs went unsearched — say so.
+  const searchIsScoped = Boolean(searchNeedle) && historyPageJobs.length >= HISTORY_SEARCH_LIMIT
 
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
@@ -459,7 +474,10 @@ export default function JobsTab() {
             <input
               aria-label="Search job history"
               value={search}
-              onChange={(event) => setSearch(event.target.value)}
+              onChange={(event) => {
+                setSearch(event.target.value)
+                setHistoryPage(0)
+              }}
               placeholder="Search jobs…"
               style={{
                 minWidth: 180, padding: '6px 8px', borderRadius: 'var(--radius-sm)',
@@ -491,7 +509,11 @@ export default function JobsTab() {
           </div>
           {done.length === 0 ? (
             <div style={{ padding: '16px 10px', color: 'var(--text-muted)', fontSize: 13 }}>
-              No history jobs match the current search and status filter.
+              {/* Widening the window for a search refetches; without this the
+                  panel flashes a "no match" that is not yet true. */}
+              {isLoadingHistory
+                ? 'Loading…'
+                : 'No history jobs match the current search and status filter.'}
             </div>
           ) : (
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
@@ -539,6 +561,11 @@ export default function JobsTab() {
                 })}
               </tbody>
             </table>
+          )}
+          {searchIsScoped && (
+            <p className="text-xs" style={{ color: 'var(--text-muted)', margin: '8px 10px 0' }}>
+              Search covers the {HISTORY_SEARCH_LIMIT} most recent jobs.
+            </p>
           )}
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 12, color: 'var(--text-muted)', fontSize: 12 }}>
             <Button
