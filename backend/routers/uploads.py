@@ -90,6 +90,25 @@ def _dir_size(path: Path) -> int:
     return sum(p.stat().st_size for p in path.rglob("*") if p.is_file())
 
 
+def _reserved_bytes(root: Path) -> int:
+    """Bytes on disk plus the not-yet-written remainder of every in-flight upload.
+
+    A started upload holds its whole plan against the quota until it finishes, is
+    cancelled, or is swept, so a reservation is visible before any chunk arrives.
+    Counting only the remainder means bytes already written are never counted twice,
+    and reading it off the manifests makes reservations survive a restart (#601).
+    """
+    total = _dir_size(root)
+    for child in root.iterdir():
+        if not child.is_dir() or not _UPLOAD_ID_RE.fullmatch(child.name):
+            continue
+        state = _load_state_from_manifest(child.name)
+        if state is None or state.get("status") != "uploading":
+            continue
+        total += max(0, state.get("total_bytes", 0) - state.get("uploaded_bytes", 0))
+    return total
+
+
 def _cleanup_old_uploads(root: Path, cleanup_after_hours: int) -> None:
     cutoff = datetime.datetime.now(datetime.UTC).timestamp() - cleanup_after_hours * 3600
     for child in root.iterdir():
@@ -246,26 +265,32 @@ def _progress(state: dict[str, Any]) -> UploadProgress:
 def start_browser_import_upload(req: StartUploadRequest):
     limits = _limits()
     root = _upload_root()
-    _cleanup_old_uploads(root, limits["cleanup_after_hours"])
     by_path = _validate_plan(req, limits)
-    if _dir_size(root) + req.total_bytes > limits["quota_bytes"]:
-        raise HTTPException(status_code=507, detail="Browser upload storage quota exceeded")
+    # Sweep, measure and reserve in one critical section, so two concurrent starts
+    # cannot both pass the quota check against the same measurement (#601).
+    # ponytail: one process-wide lock serializes every start and rescans the staging
+    # tree each time; shard per upload root if a second staging root ever exists.
+    with _UPLOADS_GUARD:
+        _cleanup_old_uploads(root, limits["cleanup_after_hours"])
+        if _reserved_bytes(root) + req.total_bytes > limits["quota_bytes"]:
+            raise HTTPException(status_code=507, detail="Browser upload storage quota exceeded")
 
-    upload_id = uuid.uuid4().hex
-    dest = root / upload_id
-    dest.mkdir(parents=True)
-    state = {
-        "id": upload_id,
-        "name": req.name.strip(),
-        "root": dest,
-        "files": {path: {"size": plan.size, "received": 0} for path, plan in by_path.items()},
-        "uploaded_bytes": 0,
-        "total_bytes": req.total_bytes,
-        "status": "uploading",
-        "session_id": None,
-        "error": None,
-    }
-    _persist_state(state)
+        upload_id = uuid.uuid4().hex
+        dest = root / upload_id
+        dest.mkdir(parents=True)
+        state = {
+            "id": upload_id,
+            "name": req.name.strip(),
+            "root": dest,
+            "files": {path: {"size": plan.size, "received": 0} for path, plan in by_path.items()},
+            "uploaded_bytes": 0,
+            "total_bytes": req.total_bytes,
+            "status": "uploading",
+            "session_id": None,
+            "error": None,
+        }
+        # The manifest is the reservation: it is what the next start measures.
+        _persist_state(state)
     _remember_state(state)
     return StartUploadResponse(
         upload_id=upload_id,
