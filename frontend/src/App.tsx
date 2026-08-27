@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useMapStore } from './shared/stores/mapStore'
 import { useSettingsStore } from './features/settings/settingsStore'
+import { ErrorBoundary } from './ErrorBoundary'
 import OverviewTab from './features/overview/OverviewTab'
 import LogoMark from './shared/components/LogoMark'
 import MapTab from './features/map/MapTab'
@@ -336,7 +337,22 @@ export default function App() {
             exit="exit"
             transition={reducedMotion ? { duration: 0.12 } : bloomTransition}
           >
-            {renderTab(activeTab, () => setShowImport(true))}
+            {/*
+              Per-tab boundary (#649): a throw in one tab degrades to an inline
+              panel instead of blanking the app; the root boundary in main.tsx
+              stays the last resort. Keyed by tab so switching away discards a
+              caught error rather than stranding the operator on a dead panel —
+              the motion.div above is keyed the same, but pinning reset to the
+              tab here keeps it from depending on the animation layer.
+              Ceiling: this resets on tab switch, not on session switch, so a
+              tab that throws on one session's data stays dead until you tab
+              away and back. Adding selectedSessionId to the key would fix that
+              but remount every tab on every session change, dropping scroll,
+              form and panel state — deliberately not worth the trade.
+            */}
+            <ErrorBoundary key={activeTab} inline>
+              {renderTab(activeTab, () => setShowImport(true))}
+            </ErrorBoundary>
           </motion.div>
         </AnimatePresence>
       </div>
