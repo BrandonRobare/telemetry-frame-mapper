@@ -11,7 +11,7 @@ ffmpeg is not on PATH. Install it (see INSTALL.md) or pass the full path: `--ffm
 Same story for ExifTool: `--exiftool "%LOCALAPPDATA%\Programs\ExifTool\ExifTool.exe"` on a winget install.
 
 **`error: ffmpeg could not extract SRT metadata: …`**
-The video has no extractable subtitle/telemetry track at stream `0:2`. Causes: the video wasn't recorded with video captions enabled (DJI Fly → Camera settings → Video Captions/Subtitles **on**), the file was re-encoded (stripping data streams), or it's not a DJI source. Check with `ffmpeg -i flight.mp4` — you should see a `Subtitle` stream. If you have the matching `.srt` from the SD card, pass it with `--srt`.
+The video has no extractable subtitle/telemetry track. Causes: the video wasn't recorded with video captions enabled (DJI Fly → Camera settings → Video Captions/Subtitles **on**), the file was re-encoded (stripping data streams), or it's not a DJI source. Stream layout also used to matter — versions before 2.0.4 read a hardcoded stream `0:2`, so a file with no audio track (or an extra timecode/data stream) put the subtitle track at a different index and failed here even though the telemetry was present; upgrade if you see this on a file that does have a `Subtitle` stream. Check with `ffmpeg -i flight.mp4` — you should see a `Subtitle` stream. If you have the matching `.srt` from the SD card, pass it with `--srt`.
 
 **`error: Not enough GPS telemetry was found in the SRT data: …`**
 The SRT exists but contains fewer than two GPS fixes — usually an indoor/no-lock flight, or a non-GPS DJI caption format. Open the `.srt` in a text editor; the parser expects `GPS(lon, lat, alt)` patterns with optional `H xxx.xm` relative height.
