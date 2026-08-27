@@ -429,3 +429,77 @@ def test_browser_upload_concurrent_complete_imports_once(client, db_session, tmp
     assert responses[0].json()["session_id"] == responses[1].json()["session_id"]
     assert db_session.query(SessionModel).count() == 1
     assert mock_start.call_count == 1
+
+
+def _quota_limits() -> dict:
+    return {
+        "chunk_size_bytes": 1024,
+        "max_file_bytes": 6000,
+        "max_total_bytes": 6000,
+        "quota_bytes": 10_000,
+        "cleanup_after_hours": 24,
+        "accepted_extensions": [".jpg"],
+    }
+
+
+def _quota_plan() -> dict:
+    return {"name": "Reserve", "total_bytes": 6000, "files": [{"path": "a.jpg", "size": 6000}]}
+
+
+def test_browser_upload_concurrent_starts_do_not_overcommit_quota(client, tmp_path):
+    """Two simultaneous starts must not both reserve against the same measurement (#601)."""
+    from backend.routers import uploads
+
+    cfg = type("Cfg", (), {"imports_dir": str(tmp_path / "imports")})()
+    barrier = threading.Barrier(2)
+    real_dir_size = uploads._dir_size
+
+    def gated_dir_size(path):
+        size = real_dir_size(path)
+        # Both starts meet here with their quota measurement in hand. Once the check
+        # and the reservation share a critical section only one start can be here at
+        # a time, so the barrier breaks on the timeout instead of tripping.
+        try:
+            barrier.wait(timeout=0.5)
+        except threading.BrokenBarrierError:
+            pass
+        return size
+
+    with patch("backend.routers.uploads.get_config", return_value=cfg), \
+         patch("backend.routers.uploads.get_browser_upload_config",
+               return_value=_quota_limits()), \
+         patch("backend.routers.uploads._dir_size", gated_dir_size):
+
+        def start():
+            return client.post("/uploads/imports/start", json=_quota_plan())
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            responses = [f.result() for f in [pool.submit(start), pool.submit(start)]]
+
+    assert sorted(r.status_code for r in responses) == [200, 507]
+    staged = [p for p in (tmp_path / "imports" / ".browser_uploads").iterdir() if p.is_dir()]
+    assert len(staged) == 1
+
+
+def test_browser_upload_reservation_survives_state_loss_and_releases_on_cancel(client, tmp_path):
+    """A started upload holds its whole plan against the quota until cancelled (#601)."""
+    from backend.routers import uploads
+
+    cfg = type("Cfg", (), {"imports_dir": str(tmp_path / "imports")})()
+    with patch("backend.routers.uploads.get_config", return_value=cfg), \
+         patch("backend.routers.uploads.get_browser_upload_config",
+               return_value=_quota_limits()):
+        first = client.post("/uploads/imports/start", json=_quota_plan())
+        assert first.status_code == 200
+        upload_id = first.json()["upload_id"]
+
+        # No chunk has arrived, so the reservation exists only in the manifest.
+        uploads._UPLOADS.clear()
+        uploads._UPLOAD_LOCKS.clear()
+        second = client.post("/uploads/imports/start", json=_quota_plan())
+        assert second.status_code == 507
+
+        assert client.post(f"/uploads/imports/{upload_id}/cancel").status_code == 200
+        third = client.post("/uploads/imports/start", json=_quota_plan())
+
+    assert third.status_code == 200
