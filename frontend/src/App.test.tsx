@@ -1,8 +1,13 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import App from './App'
+import { useMapStore } from './shared/stores/mapStore'
+
+// Render counter for the mocked Overview tab — App re-rendering drags the
+// whole active-tab subtree with it, so this doubles as an App render counter.
+const counters = vi.hoisted(() => ({ overview: 0 }))
 
 // A tab that blows up during render, the way a bare JSON.parse on bad
 // persisted data does (#605). Without a per-tab boundary this takes the whole
@@ -14,7 +19,10 @@ vi.mock('./features/review/ReviewTab', () => ({
 }))
 
 vi.mock('./features/overview/OverviewTab', () => ({
-  default: () => <div>overview tab content</div>,
+  default: () => {
+    counters.overview++
+    return <div>overview tab content</div>
+  },
 }))
 
 const INLINE_ERROR = /This tab failed to render/
@@ -63,5 +71,23 @@ describe('App per-tab error boundary', () => {
     // A boundary that never resets would strand the operator on the dead panel.
     await waitFor(() => expect(screen.getByText('overview tab content')).toBeTruthy())
     expect(screen.queryByText(INLINE_ERROR)).toBeNull()
+  })
+})
+
+describe('App store subscription', () => {
+  // #664: `const { requestedTab } = useMapStore()` selects the whole state
+  // object, which is a new reference after every `set`. Orbiting the splat
+  // viewer calls setSyncedViewport at pointer-move rate, so the nav, the HUD
+  // and the whole active tab reconciled on every frame of a drag.
+  it('does not re-render on an unrelated store write', async () => {
+    renderApp('overview')
+    await waitFor(() => expect(screen.getByText('overview tab content')).toBeTruthy())
+
+    const before = counters.overview
+    act(() => {
+      useMapStore.getState().setSyncedViewport({ lat: 47.6, lon: -122.3, zoom: 17, source: '3d' })
+    })
+
+    expect(counters.overview).toBe(before)
   })
 })
