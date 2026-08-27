@@ -8,10 +8,12 @@ import pytest
 
 from drone_video_geotagger import cli, telemetry
 from drone_video_geotagger.cli import warn_gps_lock
+from drone_video_geotagger.frames import build_frame_tags
 from drone_video_geotagger.telemetry import (
     interpolate,
     parse_srt_text,
     parse_srt_time,
+    resolve_altitudes,
 )
 
 SRT_TEXT = """
@@ -247,6 +249,60 @@ def test_parse_srt_text_accepts_dji_longtitude_misspelling() -> None:
     assert points[0].lon == -81.3382
     assert points[0].rel_alt_m == 449.9
     assert points[1].lon == -81.3383
+
+
+def test_bare_altitude_is_absolute_and_does_not_double_count_takeoff(tmp_path: Path) -> None:
+    """A lone "altitude" field is metres above sea level, not height above launch (#675).
+
+    449.9 m MSL from a 334 m launch pad is 115.9 m above launch. Read as relative it wrote
+    RelativeAltitude=+449.900 and GPSAltitude=783.900 for the same frame, and that XMP tag
+    is what the backend sizes ground footprints from.
+    """
+    points = parse_srt_text(
+        """
+1
+00:00:00,000 --> 00:00:01,000
+[latitude : 41.1509] [longitude : -81.3382] [altitude: 449.900]
+
+2
+00:00:01,000 --> 00:00:02,000
+[latitude : 41.1510] [longitude : -81.3383] [altitude: 449.900]
+"""
+    )
+
+    assert points[0].abs_alt_m == 449.9
+
+    with pytest.warns(UserWarning, match="only an absolute altitude"):
+        tags = build_frame_tags(
+            frames=[(Path("frames/frame_00001.jpg"), 1)],
+            telemetry=points,
+            output_dir=tmp_path,
+            frame_rate=1,
+            takeoff_altitude_m=334.0,
+            video_start=None,
+        )
+
+    assert tags[0].rel_alt_m == pytest.approx(115.9)
+    assert tags[0].abs_alt_m == pytest.approx(449.9)
+
+
+def test_explicit_relative_altitude_is_never_reinterpreted() -> None:
+    """rel_alt wins over a bare altitude on the same line, and is left alone (#675)."""
+    points = parse_srt_text(
+        """
+1
+00:00:00,000 --> 00:00:01,000
+[latitude: 41.1000] [longitude: -81.1000] [rel_alt: 100.0] [altitude: 434.0]
+
+2
+00:00:01,000 --> 00:00:02,000
+[latitude: 41.2000] [longitude: -81.2000] [rel_alt: 102.0] [altitude: 436.0]
+"""
+    )
+
+    assert [point.rel_alt_m for point in points] == [100.0, 102.0]
+    assert [point.abs_alt_m for point in points] == [None, None]
+    assert resolve_altitudes(points, 334.0) == points
 
 
 def test_parse_srt_text_warns_about_blocks_with_a_partial_fix() -> None:

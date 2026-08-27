@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+import warnings
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 
@@ -12,6 +13,10 @@ class TelemetryPoint:
     lat: float
     lon: float
     rel_alt_m: float
+    # Set when the source carried only an absolute (above sea level) altitude, such as a
+    # bare "[altitude: 449.9]". rel_alt_m then repeats that unresolved number until
+    # resolve_altitudes() subtracts the launch elevation.
+    abs_alt_m: float | None = None
 
 
 def parse_srt_time(value: str) -> float:
@@ -29,8 +34,6 @@ def parse_srt_time(value: str) -> float:
 
 
 def parse_srt_text(text: str) -> list[TelemetryPoint]:
-    import warnings
-
     time_re = re.compile(r"(\d{2}:\d{2}:\d{2},\d+)\s+-->\s+(\d{2}:\d{2}:\d{2},\d+)")
     gps_re = re.compile(
         r"GPS\s*\(\s*([+-]?\d+(?:\.\d+)?)\s*,\s*"
@@ -83,15 +86,20 @@ def parse_srt_text(text: str) -> list[TelemetryPoint]:
             elif normalized.startswith("rel"):
                 key_values["rel_alt"] = float(value)
             elif normalized.startswith("alt"):
-                key_values.setdefault("rel_alt", float(value))
+                key_values.setdefault("abs_alt", float(value))
 
         if key_values and current_start is not None and current_end is not None:
             telemetry_like_lines += 1
             lat = key_values.get("lat")
             lon = key_values.get("lon")
-            rel_alt_m = key_values.get("rel_alt", 0.0)
+            # An explicit relative height always wins. A bare "altitude" is metres above
+            # sea level, so it is left unresolved until a takeoff elevation is known.
+            abs_alt_m = None if "rel_alt" in key_values else key_values.get("abs_alt")
+            rel_alt_m = abs_alt_m if abs_alt_m is not None else key_values.get("rel_alt", 0.0)
             if lat is not None and lon is not None:
-                points.append(TelemetryPoint(current_start, current_end, lat, lon, rel_alt_m))
+                points.append(
+                    TelemetryPoint(current_start, current_end, lat, lon, rel_alt_m, abs_alt_m)
+                )
             elif lat is not None or lon is not None:
                 partial_blocks += 1
 
@@ -124,6 +132,32 @@ def parse_srt(srt_path: Path) -> list[TelemetryPoint]:
         return parse_srt_text(srt_path.read_text(encoding="utf-8", errors="ignore"))
     except ValueError as exc:
         raise ValueError(f"{exc}: {srt_path}") from exc
+
+
+def resolve_altitudes(
+    points: list[TelemetryPoint], takeoff_altitude_m: float
+) -> list[TelemetryPoint]:
+    """Turn absolute-only altitudes into height above the launch point.
+
+    A source reporting a single bare "altitude" reports metres above sea level, so the
+    height above launch is that value minus the launch elevation. Treating it as relative
+    and then adding the takeoff altitude back counts the launch elevation twice, which
+    inflates the XMP RelativeAltitude tag the backend sizes ground footprints from.
+    """
+    if not any(point.abs_alt_m is not None for point in points):
+        return points
+    warnings.warn(
+        "Telemetry reported only an absolute altitude; reading it as metres above sea "
+        f"level and subtracting the {takeoff_altitude_m:g} m takeoff altitude to get "
+        "height above launch. Use a source with an explicit rel_alt if that is wrong.",
+        stacklevel=2,
+    )
+    return [
+        point
+        if point.abs_alt_m is None
+        else replace(point, rel_alt_m=point.abs_alt_m - takeoff_altitude_m)
+        for point in points
+    ]
 
 
 def _has_gps_fix(point: TelemetryPoint) -> bool:

@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from drone_video_geotagger.telemetry import TelemetryPoint, interpolate
+from drone_video_geotagger.telemetry import TelemetryPoint, interpolate, resolve_altitudes
 
 
 @dataclass(frozen=True)
@@ -103,6 +103,10 @@ def build_frame_tags(
 ) -> list[FrameTag]:
     if frame_rate <= 0:
         raise ValueError("frame rate must be greater than zero")
+
+    # The only place a launch elevation is known, so the only place an absolute-only
+    # altitude can be converted to height above launch.
+    telemetry = resolve_altitudes(telemetry, takeoff_altitude_m)
 
     tags: list[FrameTag] = []
     first_index = frames[0][1]
