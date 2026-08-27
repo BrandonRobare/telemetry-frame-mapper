@@ -24,6 +24,10 @@ def export_elevation_geotiff(
         raise ValueError("product must be dsm or dem")
     if not math.isfinite(resolution_m) or resolution_m <= 0:
         raise ValueError("resolution_m must be a finite value greater than zero")
+    if resolution_m < MIN_RESOLUTION_M:
+        raise ValueError(
+            f"resolution_m must be at least {MIN_RESOLUTION_M} m; got {resolution_m}"
+        )
 
     try:
         import laspy
@@ -60,10 +64,6 @@ def export_elevation_geotiff(
     y_min, y_max = float(y.min()), float(y.max())
     width = max(1, int(math.floor((x_max - x_min) / resolution_m + 1e-9)) + 1)
     height = max(1, int(math.floor((y_max - y_min) / resolution_m + 1e-9)) + 1)
-    if resolution_m < MIN_RESOLUTION_M:
-        raise ValueError(
-            f"resolution_m must be at least {MIN_RESOLUTION_M} m; got {resolution_m}"
-        )
     if width * height > MAX_RASTER_PIXELS:
         raise ValueError(
             f"Requested raster is {width}x{height} = {width * height} px, which exceeds "

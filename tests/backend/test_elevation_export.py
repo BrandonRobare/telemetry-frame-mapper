@@ -94,6 +94,19 @@ def test_over_pixel_budget_raises_before_allocation(tmp_path: Path):
     assert not (tmp_path / "dsm.tif").exists()
 
 
+@pytest.mark.parametrize("resolution_m", [1e-310, 0.001])
+def test_below_resolution_floor_raises_before_reading_the_cloud(
+    tmp_path: Path, resolution_m: float
+):
+    # No raster dependencies needed: the floor guard must fire before the optional imports and
+    # before laspy.read. The path does not exist, so reaching the read raises a non-ValueError,
+    # and 1e-310 would overflow math.floor to OverflowError once dimensions were computed.
+    with pytest.raises(ValueError, match="at least"):
+        export_elevation_geotiff(
+            tmp_path / "missing.las", tmp_path / "dsm.tif", product="dsm", resolution_m=resolution_m
+        )
+
+
 def test_elevation_route_returns_422_below_resolution_floor(
     client, classified_las: Path, monkeypatch, tmp_path
 ):
