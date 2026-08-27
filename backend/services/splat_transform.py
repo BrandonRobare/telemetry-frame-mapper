@@ -71,7 +71,9 @@ def clear_splat_transform_cache() -> None:
 def _run_splat_transform(args: list[str], *, timeout: int = 300) -> subprocess.CompletedProcess:
     """Run ``npx @playcanvas/splat-transform <args>`` and return the CompletedProcess.
 
-    Raises RuntimeError if Node/npx are not available.
+    Raises RuntimeError if Node/npx are not available, if the subprocess exits
+    non-zero, or if it times out.  Callers may assume a returned
+    CompletedProcess means the output file was written.
     """
     probe = splat_transform_available()
     if not probe["available"]:
@@ -82,7 +84,18 @@ def _run_splat_transform(args: list[str], *, timeout: int = 300) -> subprocess.C
     npx = str(probe["npx_path"])
     cmd = [npx, "@playcanvas/splat-transform", *args]
     logger.debug("Running: %s", " ".join(cmd))
-    return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, check=False)
+    try:
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=timeout, check=False
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(f"splat-transform timed out after {timeout}s") from exc
+    if result.returncode != 0:
+        raise RuntimeError(
+            (result.stderr or "").strip()[:5000]
+            or f"splat-transform exited {result.returncode}"
+        )
+    return result
 
 
 def cleanup_splat(

@@ -1806,3 +1806,38 @@ def test_list_all_jobs_includes_source_session_ids(client):
     found = [j for j in resp.json() if j["id"] == rec.id]
     assert len(found) == 1
     assert found[0]["source_session_ids"] == [s1.id, s2.id]
+
+
+def test_splat_transform_cleanup_failed_subprocess_is_not_201(client, tmp_path):
+    """A failed npx run must not return 201 advertising a cleaned_path that was
+    never written (#645)."""
+    db = _get_db(client)
+    s = _make_session_with_images(db)
+
+    exports_dir = tmp_path / "exports"
+    rec_dir = exports_dir / "645"
+    rec_dir.mkdir(parents=True)
+    splat_file = rec_dir / "splat.ply"
+    splat_file.write_bytes(b"ply data")
+
+    rec = Reconstruction(
+        id=645, session_id=s.id, preset="quick", status="complete",
+        progress_pct=100.0, frames_used=3, splat_path=str(splat_file),
+    )
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+
+    probe = {"available": True, "node_path": "/usr/bin/node", "npx_path": "/usr/bin/npx"}
+    failed = SimpleNamespace(returncode=1, stdout="", stderr="npm ERR! network unreachable")
+    with (
+        patch("backend.routers.reconstruction.get_config") as mock_cfg,
+        patch("backend.services.splat_transform.splat_transform_available", return_value=probe),
+        patch("backend.services.splat_transform.subprocess.run", return_value=failed),
+    ):
+        mock_cfg.return_value.exports_dir = str(exports_dir)
+        resp = client.post(f"/reconstruction/{rec.id}/splat-transform-cleanup")
+
+    assert resp.status_code == 422
+    assert "network unreachable" in resp.json()["detail"]
+    assert not (rec_dir / "splat_transform_cleaned.ply").exists()
