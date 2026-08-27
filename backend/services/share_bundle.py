@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 import zipfile
 from pathlib import Path
 
@@ -60,16 +62,28 @@ def build_share_bundle(zip_path: Path, rec: Reconstruction, exports_dir: Path) -
     images = rec.session.images if rec.session else []
     tileset = build_tileset(images, content_uri)
 
-    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-        text = json.dumps(manifest, indent=2)
-        zf.writestr("manifest.json", text)
-        zf.writestr("index.html", VIEWER_HTML.replace("MANIFEST_JSON", text.replace("</", "<\\/")))
-        zf.writestr("tileset.json", json.dumps(tileset, indent=2))
-        for label, raw in manifest["artifacts"].items():
-            p = Path(raw)
-            if p.is_file():
-                zf.write(p, f"artifacts/{p.name}")
-                copied.append({"label": label, "path": f"artifacts/{p.name}"})
+    # Build into a unique sibling temp file inside the confined directory, then
+    # os.replace onto the durable path: a concurrent writer or a crash mid-write
+    # can never leave a half-written bundle at zip_path (#641).
+    fd, tmp_name = tempfile.mkstemp(dir=zip_path.parent, prefix=f".{zip_path.name}.", suffix=".tmp")
+    os.close(fd)
+    tmp_path = Path(tmp_name)
+    try:
+        with zipfile.ZipFile(tmp_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            text = json.dumps(manifest, indent=2)
+            zf.writestr("manifest.json", text)
+            zf.writestr(
+                "index.html", VIEWER_HTML.replace("MANIFEST_JSON", text.replace("</", "<\\/"))
+            )
+            zf.writestr("tileset.json", json.dumps(tileset, indent=2))
+            for label, raw in manifest["artifacts"].items():
+                p = Path(raw)
+                if p.is_file():
+                    zf.write(p, f"artifacts/{p.name}")
+                    copied.append({"label": label, "path": f"artifacts/{p.name}"})
+        os.replace(tmp_path, zip_path)
+    finally:
+        tmp_path.unlink(missing_ok=True)
     manifest["bundle_path"] = str(zip_path)
     manifest["bundled_artifacts"] = copied
     return manifest

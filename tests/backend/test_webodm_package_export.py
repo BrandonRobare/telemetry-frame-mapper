@@ -1,5 +1,8 @@
+from __future__ import annotations
+
 import zipfile
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -61,6 +64,44 @@ def test_webodm_package_includes_images_and_manifest(client, tmp_path, monkeypat
     } <= names
     # ODM reads line 1 as the SRS header verbatim, so no leading "#".
     assert gcp_list == "EPSG:4326\n"
+
+
+def test_webodm_georeferencing_csv_crash_mid_write_keeps_previous_zip(
+    client, tmp_path, monkeypatch
+):
+    """The CSV-only ZIP is rebuilt in place too, so it needs the same guard (#641)."""
+    exports = tmp_path / "exports"
+    monkeypatch.setattr(
+        export_router, "get_config", lambda: type("Cfg", (), {"exports_dir": str(exports)})()
+    )
+    db = _db(client)
+    session = SessionModel(name="S", folder_path=str(tmp_path))
+    db.add(session)
+    db.commit()
+    db.refresh(session)
+    db.add(
+        Image(
+            session_id=session.id, filename="a.jpg", filepath=str(tmp_path / "a.jpg"),
+            usable=True, latitude=1, longitude=2, altitude_m=3,
+        )
+    )
+    db.commit()
+
+    zip_path = Path(
+        client.post(f"/export/webodm-georeferencing-csv?session_id={session.id}").json()["zip_path"]
+    )
+    good = zip_path.read_bytes()
+
+    with patch(
+        "backend.routers.export.zipfile.ZipFile.writestr", side_effect=OSError("disk full")
+    ):
+        with pytest.raises(OSError, match="disk full"):
+            client.post(f"/export/webodm-georeferencing-csv?session_id={session.id}")
+
+    assert zip_path.read_bytes() == good
+    with zipfile.ZipFile(zip_path) as zf:
+        assert zf.read("odm_georeferencing.csv").decode().startswith("filename,")
+    assert not list(exports.glob("*.tmp"))
 
 
 @pytest.mark.parametrize("filename", ["../escape.zip", "../exports-sibling/package.zip"])
