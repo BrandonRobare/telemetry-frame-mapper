@@ -219,3 +219,56 @@ class TestVotingCore:
         assert labels.tolist() == [0, 1, 1]
         assert float(confidence[0]) == 1.0
         assert float(confidence[1]) == 0.5
+
+    def test_accumulate_votes_matches_reference_loop(self):
+        """Vectorised accumulation must equal the per-gaussian reference loop.
+
+        The fixture deliberately includes out-of-frame projections and
+        out-of-range segmentation ids (255 = UNLABELED) — both are skipped
+        rather than binned or raising IndexError.
+        """
+        from backend.services.semantic_labels import accumulate_votes
+
+        rng = np.random.default_rng(634)
+        n, h, w = 500, 40, 60
+        projected = {
+            # Deliberately overshoot the frame so out-of-bounds pixels appear.
+            "u": rng.uniform(-10, w + 10, n),
+            "v": rng.uniform(-10, h + 10, n),
+        }
+        visible = rng.random(n) < 0.8
+        opacities = rng.normal(0.0, 2.0, n)
+        seg = rng.integers(0, 6, size=(h, w)).astype(np.uint8)
+        seg[seg == 5] = 255  # unmapped pixels the loop skipped via the range check
+
+        def reference(votes):
+            u = np.rint(projected["u"]).astype(np.int64)
+            v = np.rint(projected["v"]).astype(np.int64)
+            weights = 1.0 / (1.0 + np.exp(-np.asarray(opacities, dtype=np.float64)))
+            valid = visible & (u >= 0) & (u < w) & (v >= 0) & (v < h)
+            for idx in np.flatnonzero(valid):
+                cls = int(seg[v[idx], u[idx]])
+                if 0 <= cls < votes.shape[1]:
+                    votes[idx, cls] += weights[idx]
+
+        expected = np.zeros((n, 6), dtype=np.float32)
+        reference(expected)
+        assert expected.any(), "fixture must produce some votes"
+
+        actual = np.zeros((n, 6), dtype=np.float32)
+        accumulate_votes(actual, seg, projected, visible, opacities)
+        np.testing.assert_allclose(actual, expected, rtol=1e-6)
+
+    def test_accumulate_votes_ignores_empty_selection(self):
+        from backend.services.semantic_labels import accumulate_votes
+
+        projected = {"u": np.array([1.0, 2.0]), "v": np.array([1.0, 2.0])}
+        votes = np.zeros((2, 6), dtype=np.float32)
+        accumulate_votes(
+            votes,
+            np.zeros((4, 4), dtype=np.uint8),
+            projected,
+            np.array([False, False]),
+            np.zeros(2),
+        )
+        assert not votes.any()

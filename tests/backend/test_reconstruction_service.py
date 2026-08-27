@@ -2262,11 +2262,12 @@ def test_new_model_columns_include_semantic_fields(setup_test_db):
 
 
 def test_semantic_job_success_updates_status_and_invalidates_las(setup_test_db, tmp_path):
+    import threading
     from unittest.mock import patch
 
     from backend.main import app
-    from backend.services.reconstruction import _run_semantic_job
-    from tests.conftest import TestSessionLocal
+    from backend.services.job_queue import SEMANTIC_LABELING
+    from backend.services.reconstruction import _FakeEntry, _run_semantic_job
 
     db = app.state.test_db_session
     s = _make_session(db)
@@ -2293,9 +2294,10 @@ def test_semantic_job_success_updates_status_and_invalidates_las(setup_test_db, 
         _kwargs["log_cb"]("Semantic labels: processed view 1/1")
         return labels
 
-    with patch("backend.services.reconstruction.SessionLocal", TestSessionLocal), \
-         patch("backend.services.reconstruction.compute_semantic_labels", side_effect=fake_compute):
-        _run_semantic_job(rec.id)
+    entry = _FakeEntry(id=-1, job_type=SEMANTIC_LABELING, target_id=rec.id,
+                       payload_json=None, max_attempts=1, attempt=0)
+    with patch("backend.services.reconstruction.compute_semantic_labels", side_effect=fake_compute):
+        _run_semantic_job(entry, db, threading.Event())
 
     db.expire_all()
     db.refresh(rec)
@@ -2303,6 +2305,129 @@ def test_semantic_job_success_updates_status_and_invalidates_las(setup_test_db, 
     assert rec.semantic_labels_path == str(labels)
     assert rec.pointcloud_path is None
     assert not cached_las.exists()
+
+
+def test_start_semantic_labeling_enqueues_gpu_capped_job(setup_test_db, tmp_path):
+    """#634: labelling must go through the queue, not a bare daemon thread."""
+    from backend.db.models import JobQueueEntry
+    from backend.main import app
+    from backend.services.job_queue import GPU_JOB_TYPES, SEMANTIC_LABELING
+    from backend.services.reconstruction import start_semantic_labeling
+
+    db = app.state.test_db_session
+    s = _make_session(db)
+    splat = tmp_path / "splat.ply"
+    splat.write_bytes(b"ply")
+    rec = Reconstruction(
+        session_id=s.id,
+        preset="quick",
+        status="complete",
+        frames_used=1,
+        splat_path=str(splat),
+    )
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+
+    started = start_semantic_labeling(rec.id, db)
+    assert started.semantic_status == "pending"
+
+    entries = (
+        db.query(JobQueueEntry)
+        .filter(
+            JobQueueEntry.job_type == SEMANTIC_LABELING,
+            JobQueueEntry.target_id == rec.id,
+        )
+        .all()
+    )
+    assert len(entries) == 1
+    assert entries[0].status == "pending"
+    # The queue only serialises what it knows is GPU-bound.
+    assert SEMANTIC_LABELING in GPU_JOB_TYPES
+
+
+def test_start_semantic_labeling_rejects_a_queued_duplicate(setup_test_db, tmp_path):
+    from backend.db.models import JobQueueEntry
+    from backend.main import app
+    from backend.services.job_queue import SEMANTIC_LABELING
+    from backend.services.reconstruction import start_semantic_labeling
+
+    db = app.state.test_db_session
+    s = _make_session(db)
+    splat = tmp_path / "splat.ply"
+    splat.write_bytes(b"ply")
+    rec = Reconstruction(
+        session_id=s.id, preset="quick", status="complete", frames_used=1,
+        splat_path=str(splat),
+    )
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+
+    start_semantic_labeling(rec.id, db)
+    with pytest.raises(ValueError, match="already running"):
+        start_semantic_labeling(rec.id, db)
+
+    # A status left "running" by a dead process has no live queue entry, so a
+    # restart is allowed rather than wedged forever.
+    db.query(JobQueueEntry).filter(JobQueueEntry.target_id == rec.id).update(
+        {"status": "failed"}
+    )
+    rec.semantic_status = "running"
+    db.commit()
+    started = start_semantic_labeling(rec.id, db)
+    assert started.semantic_status == "pending"
+    assert (
+        db.query(JobQueueEntry)
+        .filter(
+            JobQueueEntry.job_type == SEMANTIC_LABELING,
+            JobQueueEntry.status == "pending",
+        )
+        .count()
+        == 1
+    )
+
+
+def test_compute_semantic_labels_loads_views_at_training_downscale(tmp_path):
+    """#634: full-resolution loads blow RAM — use the preset's downscale factor."""
+    import sys
+    from unittest.mock import patch
+
+    import numpy as np
+
+    from backend.services import reconstruction as recon
+    from backend.services.ply_io import GaussianCloud, write_3dgs_ply
+
+    cloud = GaussianCloud(
+        means=np.zeros((2, 3), dtype=np.float32),
+        sh0=np.zeros((2, 3), dtype=np.float32),
+        shN=np.zeros((2, 0, 3), dtype=np.float32),
+        opacities=np.array([0.1, 0.9], dtype=np.float32),
+        scales=np.zeros((2, 3), dtype=np.float32),
+        quats=np.tile(np.array([1, 0, 0, 0], dtype=np.float32), (2, 1)),
+    )
+    splat = write_3dgs_ply(tmp_path / "splat.ply", cloud)
+    colmap_dir = tmp_path / "colmap"
+    (colmap_dir / "sparse").mkdir(parents=True)
+    rec = SimpleNamespace(
+        id=1, preset="full", colmap_dir=str(colmap_dir), splat_path=str(splat)
+    )
+
+    captured = {}
+
+    def fake_load_dataset(_torch, _colmap_dir, _model, downscale_factor):
+        captured["downscale_factor"] = downscale_factor
+        return []
+
+    with patch.dict(sys.modules, {"torch": MagicMock()}), \
+         patch.object(recon.splat_trainer, "_load_dataset", fake_load_dataset), \
+         patch.object(recon, "_pick_best_submodel", lambda path: path), \
+         patch.object(recon, "_reconstruction_export_dir", lambda _id: tmp_path), \
+         patch("backend.services.colmap_io.read_model", return_value=object()):
+        recon.compute_semantic_labels(rec)
+
+    # config.yaml -> reconstruction.presets.full.downscale_factor
+    assert captured["downscale_factor"] == 2
 
 
 def test_semantic_overlay_bytes_frames_preview_payload(tmp_path, monkeypatch):

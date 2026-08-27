@@ -38,6 +38,7 @@ from backend.services.job_queue import (
     FLYTHROUGH_RENDER,
     MESH_EXPORT,
     RECONSTRUCTION,
+    SEMANTIC_LABELING,
     SESSION_COMPARISON,
     JobNonRetryableError,
     enqueue,
@@ -91,9 +92,6 @@ _mesh_jobs: set[int] = set()
 _mesh_jobs_lock = threading.Lock()
 _flythrough_jobs: set[int] = set()
 _flythrough_jobs_lock = threading.Lock()
-_semantic_jobs: set[int] = set()
-_semantic_jobs_lock = threading.Lock()
-_semantic_cancel_events: dict[int, threading.Event] = {}
 _comparison_jobs: set[int] = set()
 _comparison_jobs_lock = threading.Lock()
 _rec_status_condition = threading.Condition()
@@ -1311,6 +1309,18 @@ def render_expected_depth(cloud: ply_io.GaussianCloud, view: dict, *, device: st
     return renders[0, ..., 0].detach().cpu().numpy()
 
 
+def _training_downscale_factor(preset: str | None) -> int:
+    """Downscale factor the reconstruction's preset trained at (>= 1).
+
+    Semantic labelling reuses the training views, so it must reuse the training
+    resolution too: a 400-frame 4000x3000 survey is ~14 GB of uint8 at full
+    resolution and ~0.9 GB at the full preset's downscale of 2 (#634).
+    """
+    presets = get_reconstruction_config().get("presets", {})
+    preset_cfg = presets.get(preset or "") or presets.get("quick") or {}
+    return max(1, int(TrainerConfig.from_preset(preset_cfg).downscale_factor))
+
+
 def compute_semantic_labels(
     rec: Reconstruction,
     *,
@@ -1331,7 +1341,8 @@ def compute_semantic_labels(
     colmap_dir = Path(rec.colmap_dir)
     cloud = ply_io.read_3dgs_ply(splat_path)
     model = colmap_io.read_model(_pick_best_submodel(colmap_dir / "sparse"))
-    views = splat_trainer._load_dataset(__import__("torch"), colmap_dir, model, 1)
+    downscale = _training_downscale_factor(rec.preset)
+    views = splat_trainer._load_dataset(__import__("torch"), colmap_dir, model, downscale)
     votes = np.zeros((len(cloud.means), NUM_CLASSES), dtype=np.float32)
     with splat_trainer._GPU_LOCK:
         segmenter = None
@@ -1376,39 +1387,50 @@ def start_semantic_labeling(reconstruction_id: int, db: DBSession) -> Reconstruc
         raise ValueError("Reconstruction must be complete before semantic labeling")
     if not rec.splat_path:
         raise ValueError("Splat file not found on disk")
-    if rec.semantic_status in {"pending", "running"} and reconstruction_id not in _semantic_jobs:
+    # A status left behind by a process that died has no live queue entry — clear
+    # it rather than wedging the reconstruction as permanently "running".
+    if rec.semantic_status in {"pending", "running"} and not _has_live_semantic_job(
+        db, reconstruction_id
+    ):
         rec.semantic_status = None
         db.commit()
     if rec.semantic_status in {"pending", "running"}:
         raise ValueError(
             f"Semantic labeling already running for reconstruction {reconstruction_id}"
         )
-    with _semantic_jobs_lock:
-        if reconstruction_id in _semantic_jobs:
-            raise ValueError(
-            f"Semantic labeling already running for reconstruction {reconstruction_id}"
-        )
-        _semantic_jobs.add(reconstruction_id)
-    cancel = threading.Event()
-    _semantic_cancel_events[reconstruction_id] = cancel
     rec.semantic_status = "pending"
     rec.semantic_error = None
     db.commit()
     db.refresh(rec)
-    threading.Thread(target=_run_semantic_job, args=(reconstruction_id,), daemon=True).start()
+
+    enqueue(SEMANTIC_LABELING, reconstruction_id, priority=3)
     return rec
 
 
-def _run_semantic_job(reconstruction_id: int) -> None:
-    db = SessionLocal()
+def _has_live_semantic_job(db: DBSession, reconstruction_id: int) -> bool:
+    return (
+        db.query(JobQueueEntry)
+        .filter(
+            JobQueueEntry.job_type == SEMANTIC_LABELING,
+            JobQueueEntry.target_id == reconstruction_id,
+            JobQueueEntry.status.in_(["pending", "running"]),
+        )
+        .first()
+        is not None
+    )
+
+
+def _run_semantic_job(entry, db, cancel: threading.Event) -> None:
+    """Job queue handler for semantic labelling."""
+    reconstruction_id = entry.target_id
+    rec = db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).first()
+    if rec is None:
+        return
+    rec.semantic_status = "running"
+    rec.semantic_error = None
+    db.commit()
+
     try:
-        rec = db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).first()
-        if rec is None:
-            return
-        rec.semantic_status = "running"
-        rec.semantic_error = None
-        db.commit()
-        cancel = _semantic_cancel_events.get(reconstruction_id, threading.Event())
         path = compute_semantic_labels(
             rec,
             log_cb=lambda msg: _log_rec(reconstruction_id, msg),
@@ -1423,17 +1445,14 @@ def _run_semantic_job(reconstruction_id: int) -> None:
                 cached.unlink()
             rec.pointcloud_path = None
         db.commit()
+        mark_complete(entry.id)
     except Exception as exc:
         db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).update({
             "semantic_status": "failed",
             "semantic_error": str(exc)[:_ERROR_MSG_MAX_CHARS],
         })
         db.commit()
-    finally:
-        db.close()
-        _semantic_cancel_events.pop(reconstruction_id, None)
-        with _semantic_jobs_lock:
-            _semantic_jobs.discard(reconstruction_id)
+        raise
 
 
 def semantic_overlay_bytes(rec: Reconstruction, lod: str = "preview") -> bytes:
@@ -2538,6 +2557,7 @@ def _run_remote_pipeline(
 register_handler(RECONSTRUCTION, _run_pipeline)
 register_handler(MESH_EXPORT, _run_mesh_export_job)
 register_handler(FLYTHROUGH_RENDER, _run_flythrough_job)
+register_handler(SEMANTIC_LABELING, _run_semantic_job)
 register_handler(SESSION_COMPARISON, _run_comparison_job)
 
 

@@ -30,6 +30,12 @@ RECONSTRUCTION = "reconstruction"
 MESH_EXPORT = "mesh_export"
 FLYTHROUGH_RENDER = "flythrough_render"
 SESSION_COMPARISON = "session_comparison"
+SEMANTIC_LABELING = "semantic_labeling"
+
+# Job types that contend for the GPU — the drain loop runs one of these at a time.
+GPU_JOB_TYPES = frozenset(
+    {RECONSTRUCTION, MESH_EXPORT, FLYTHROUGH_RENDER, SEMANTIC_LABELING}
+)
 
 _RUNNING_JOBS: set[int] = set()
 _RUNNING_LOCK = threading.Lock()
@@ -365,11 +371,9 @@ def _drain_loop() -> None:
     """Single background thread that polls the queue and dispatches jobs.
 
     Enforces concurrency limits:
-    - max 1 GPU-bound job (reconstruction, mesh, flythrough) at a time.
+    - max 1 GPU-bound job (``GPU_JOB_TYPES``) at a time.
     - Comparison jobs are CPU-bound and can run alongside GPU work.
     """
-    GPU_TYPES = {RECONSTRUCTION, MESH_EXPORT, FLYTHROUGH_RENDER}
-
     while not _shutdown.is_set():
         # Drain any pending job whose type's slot is free
         dispatched = False
@@ -379,7 +383,7 @@ def _drain_loop() -> None:
             # Check current concurrency
             with _RUNNING_LOCK:
                 running_gpu = any(
-                    _job_type_for_id(eid, db) in GPU_TYPES
+                    _job_type_for_id(eid, db) in GPU_JOB_TYPES
                     for eid in _RUNNING_JOBS
                 )
 
@@ -392,7 +396,7 @@ def _drain_loop() -> None:
             )
 
             for entry in query.all():
-                is_gpu = entry.job_type in GPU_TYPES
+                is_gpu = entry.job_type in GPU_JOB_TYPES
                 if is_gpu and running_gpu:
                     continue  # GPU slot occupied — skip for now
 
