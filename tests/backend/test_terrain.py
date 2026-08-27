@@ -162,6 +162,69 @@ class TestGeoTiffTerrainServiceWithMock:
                 assert r.elevation_m == pytest.approx(55.0, abs=0.01)
 
 
+class TestGeoTiffSampleErrors:
+    """An unreadable DEM must warn instead of silently reading as out-of-bounds (#646)."""
+
+    @pytest.fixture(autouse=True)
+    def _ensure_rasterio(self):
+        try:
+            import rasterio  # noqa: F401
+        except ImportError:
+            pytest.skip("rasterio not installed")
+
+    def _service_with_failing_read(self, tmp_path, exc):
+        from backend.services.terrain import GeoTiffTerrainService
+
+        dem_path = tmp_path / "dem.tif"
+        dem_path.write_bytes(b"mock")
+        mock_dataset = _make_mock_dataset()
+
+        def _raise(*args, **kwargs):
+            raise exc
+
+        mock_dataset.read = _raise
+        svc = GeoTiffTerrainService(dem_path=dem_path)
+        svc._dataset = mock_dataset  # skip rasterio.open; the band read is what fails
+        return svc
+
+    def test_unreadable_band_warns_once_with_dem_path(self, tmp_path):
+        """A band that cannot be read warns once per service, naming the DEM (#646)."""
+        import rasterio.errors
+
+        svc = self._service_with_failing_read(
+            tmp_path, rasterio.errors.RasterioIOError("band read failed")
+        )
+        with patch("backend.services.terrain.logger") as mock_logger:
+            results = svc.elevation_batch([(0.0, 0.0), (0.1, 0.1), (0.2, 0.2)])
+
+        assert all(r.out_of_bounds for r in results)
+        assert mock_logger.warning.call_count == 1
+        assert str(tmp_path / "dem.tif") in str(mock_logger.warning.call_args)
+
+    def test_unexpected_error_propagates(self, tmp_path):
+        """A non-raster error is a real bug and must not masquerade as out-of-bounds (#646)."""
+        svc = self._service_with_failing_read(tmp_path, RuntimeError("boom"))
+        with pytest.raises(RuntimeError, match="boom"):
+            svc.elevation(lat=0.0, lon=0.0)
+
+    def test_genuine_out_of_bounds_is_silent(self, tmp_path):
+        """A point outside the raster stays a plain out-of-bounds result, no warning (#646)."""
+        from backend.services.terrain import GeoTiffTerrainService
+
+        dem_path = tmp_path / "dem.tif"
+        dem_path.write_bytes(b"mock")
+        mock_dataset = _make_mock_dataset()
+        with patch("rasterio.open", return_value=mock_dataset):
+            svc = GeoTiffTerrainService(dem_path=dem_path)
+            with patch("backend.services.terrain.logger") as mock_logger:
+                result = svc.elevation(lat=89.0, lon=179.0)
+
+        assert result.out_of_bounds is True
+        assert result.elevation_m == 0.0
+        assert result.source == "dem"
+        assert mock_logger.warning.call_count == 0
+
+
 def _make_mock_dataset(width=100, height=100, constant_value=0.0):
     """Build a rasterio-like mock dataset that returns a constant value at every sample point."""
 

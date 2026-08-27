@@ -229,3 +229,74 @@ class TestTerrainFollowingWithMock:
         # All altitudes should be above AGL
         for a in altitudes:
             assert a > agl_m
+
+class TestTerrainDegradedSignal:
+    """A DEM that yields no usable elevations must not pass as terrain following (#646)."""
+
+    def _broken_dem_service(self):
+        """Terrain service behaving like a DEM whose every sample fails to read."""
+        from backend.services.terrain import ElevationResult, TerrainService
+
+        class _BrokenDem(TerrainService):
+            def elevation(self, lat, lon):
+                return ElevationResult(elevation_m=0.0, source="dem", out_of_bounds=True)
+
+            def elevation_batch(self, points):
+                return [self.elevation(lat, lon) for lat, lon in points]
+
+        return _BrokenDem()
+
+    def test_unusable_dem_flags_terrain_degraded(self):
+        """An unreadable DEM sets terrain_degraded instead of silently using ground 0 (#646)."""
+        result = generate_lawnmower(
+            target_geojson=_POLY,
+            altitude_ft=200,
+            side_overlap=0.7,
+            forward_overlap=0.8,
+            terrain_follow=True,
+            terrain_service=self._broken_dem_service(),
+        )
+        assert result["terrain_degraded"] is True
+
+    def test_usable_dem_is_not_degraded(self):
+        """A DEM returning real elevations reports terrain following as intact (#646)."""
+        from backend.services.terrain import ElevationResult, TerrainService
+
+        class _GoodDem(TerrainService):
+            def elevation(self, lat, lon):
+                return ElevationResult(elevation_m=120.0, source="dem")
+
+            def elevation_batch(self, points):
+                return [self.elevation(lat, lon) for lat, lon in points]
+
+        result = generate_lawnmower(
+            target_geojson=_POLY,
+            altitude_ft=200,
+            side_overlap=0.7,
+            forward_overlap=0.8,
+            terrain_follow=True,
+            terrain_service=_GoodDem(),
+        )
+        assert result["terrain_degraded"] is False
+
+    def test_plan_generation_and_rth_check_agree(self):
+        """Both consumers of the same broken DEM report terrain data as unusable (#646)."""
+        from backend.services.mission_planner import evaluate_rth_terrain_safety
+
+        svc = self._broken_dem_service()
+        result = generate_lawnmower(
+            target_geojson=_POLY,
+            altitude_ft=200,
+            side_overlap=0.7,
+            forward_overlap=0.8,
+            terrain_follow=True,
+            terrain_service=svc,
+        )
+        rth = evaluate_rth_terrain_safety(
+            lanes_geojson=result["lanes_geojson"],
+            altitude_ft=200,
+            rth_altitude_ft=100,
+            terrain_service=svc,
+        )
+        assert result["terrain_degraded"] is True
+        assert any("Terrain data unavailable" in msg for msg in rth.info)
