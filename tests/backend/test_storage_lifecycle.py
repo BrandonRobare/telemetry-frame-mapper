@@ -525,8 +525,10 @@ class TestReconstructionArtifactsClearDbPaths:
         cfg = self._cfg(tmp_path)
         rec_id = self._rec(tmp_path, db_session, age_days=10).id
 
+        # Disk pressure is what deletes now; `age_days: 0` is an age rule and
+        # archives like any other age rule (#642).
         result = apply_policy(
-            [{"target": "reconstruction_artifacts", "age_days": 0}],
+            [{"target": "reconstruction_artifacts", "disk_pct": 0}],
             execute=True,
             cfg=cfg,
             db=db_session,
@@ -573,4 +575,117 @@ class TestReconstructionArtifactsClearDbPaths:
             e["archive_path"] for e in result["executed"]["archived"]
         }
         for entry in recorded:
+            assert Path(entry["archive_path"]).exists()
+
+
+class TestDiskPressureDeletes:
+    """Regression tests for #642: a disk_pct rule must free real bytes. The
+    archive root lives on the same volume in the default layout, so archiving
+    under disk pressure frees nothing - every target has to delete, and all
+    targets have to agree under one rule.
+    """
+
+    @staticmethod
+    def _cfg(tmp_path: Path) -> AppConfig:
+        for name in ("imports", "processed", "exports", "data"):
+            (tmp_path / name).mkdir(exist_ok=True)
+        return AppConfig(
+            imports_dir=str(tmp_path / "imports"),
+            processed_dir=str(tmp_path / "processed"),
+            exports_dir=str(tmp_path / "exports"),
+            data_dir=str(tmp_path / "data"),
+        )
+
+    @staticmethod
+    def _session_dir(tmp_path: Path, db_session) -> Path:
+        session_dir = (tmp_path / "imports" / "frames_session").resolve()
+        session_dir.mkdir(parents=True, exist_ok=True)
+        (session_dir / "frame.jpg").write_bytes(b"x" * 100)
+        db_session.add(
+            SessionModel(
+                name="frames",
+                folder_path=str(session_dir),
+                imported_at=datetime.now(UTC) - timedelta(days=10),
+            )
+        )
+        db_session.commit()
+        return session_dir
+
+    def test_disk_rule_deletes_raw_frames(self, tmp_path, db_session):
+        cfg = self._cfg(tmp_path)
+        session_dir = self._session_dir(tmp_path, db_session)
+
+        # disk_pct=0 always trips: usage is never below 0%.
+        result = apply_policy(
+            [{"target": "raw_frames", "disk_pct": 0}],
+            execute=True,
+            cfg=cfg,
+            db=db_session,
+        )
+
+        assert result["summary"]["removed_items"] == 1
+        assert result["summary"]["archived_items"] == 0
+        assert not session_dir.exists()
+        # Nothing was merely moved onto the same volume.
+        assert not (tmp_path / "exports" / "storage_archive").exists()
+
+    def test_disk_rule_deletes_reconstruction_artifacts(self, tmp_path, db_session):
+        cfg = self._cfg(tmp_path)
+        rec_id = TestReconstructionArtifactsClearDbPaths._rec(
+            tmp_path, db_session, age_days=10
+        ).id
+
+        result = apply_policy(
+            [{"target": "reconstruction_artifacts", "disk_pct": 0}],
+            execute=True,
+            cfg=cfg,
+            db=db_session,
+        )
+
+        assert result["summary"]["removed_items"] == 2
+        assert result["summary"]["archived_items"] == 0
+        assert not (tmp_path / "exports" / "storage_archive").exists()
+        db_session.expire_all()
+        rec = db_session.query(Reconstruction).filter(Reconstruction.id == rec_id).one()
+        assert rec.splat_path is None
+        assert rec.pointcloud_path is None
+
+    def test_both_targets_take_the_same_action_under_one_rule(self, tmp_path, db_session):
+        cfg = self._cfg(tmp_path)
+        self._session_dir(tmp_path, db_session)
+        TestReconstructionArtifactsClearDbPaths._rec(tmp_path, db_session, age_days=10)
+
+        result = apply_policy(
+            [
+                {"target": "raw_frames", "disk_pct": 0},
+                {"target": "reconstruction_artifacts", "disk_pct": 0},
+            ],
+            execute=False,
+            cfg=cfg,
+            db=db_session,
+        )
+
+        assert len(result["candidates"]) == 3
+        assert {c["action"] for c in result["candidates"]} == {"delete"}
+
+    def test_age_rule_still_archives(self, tmp_path, db_session):
+        """Age-based rules keep archiving - including `age_days: 0`, which the
+        old truthiness check read as delete."""
+        cfg = self._cfg(tmp_path)
+        self._session_dir(tmp_path, db_session)
+        TestReconstructionArtifactsClearDbPaths._rec(tmp_path, db_session, age_days=10)
+
+        result = apply_policy(
+            [
+                {"target": "raw_frames", "age_days": 0},
+                {"target": "reconstruction_artifacts", "age_days": 0},
+            ],
+            execute=True,
+            cfg=cfg,
+            db=db_session,
+        )
+
+        assert result["summary"]["archived_items"] == 3
+        assert result["summary"]["removed_items"] == 0
+        for entry in result["executed"]["archived"]:
             assert Path(entry["archive_path"]).exists()
