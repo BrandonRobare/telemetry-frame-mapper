@@ -272,7 +272,8 @@ def _run_ingest(spec: IngestSpec, dry_run: bool, *, output_root: Path) -> str:
                 "timestamp": datetime.now(UTC).isoformat(),
             },
             indent=2,
-        )
+        ),
+        encoding="utf-8",
     )
     logger.info(
         "Ingest validation written to %s (total=%d, valid=%d)", ingest_log, len(jpegs), valid
@@ -309,7 +310,7 @@ def _run_coverage(spec: CoverageSpec, dry_run: bool, *, output_root: Path) -> st
     result = run_coverage(spec.footprints, spec.target_geojson)
     cov_log = output_root / "coverage_summary.json"
     cov_log.parent.mkdir(parents=True, exist_ok=True)
-    cov_log.write_text(json.dumps(result, indent=2))
+    cov_log.write_text(json.dumps(result, indent=2), encoding="utf-8")
 
     return (
         f"  coverage_pct: {result['coverage_pct']}%  "
@@ -396,7 +397,7 @@ _STEP_PARSERS = {
 
 def parse_job_spec(yaml_path: Path) -> JobSpec:
     """Parse a pipeline job YAML file into a JobSpec."""
-    text = yaml_path.read_text()
+    text = yaml_path.read_text(encoding="utf-8")
     raw = yaml.safe_load(text)
 
     if not isinstance(raw, dict):

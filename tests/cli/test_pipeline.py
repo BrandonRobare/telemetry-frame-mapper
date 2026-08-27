@@ -139,6 +139,43 @@ def test_parse_job_with_omitted_steps_is_rejected(tmp_path: Path) -> None:
         parse_job_spec(yaml_file)
 
 
+def _force_locale_codec(monkeypatch: pytest.MonkeyPatch, codec: str) -> None:
+    """Decode encoding-less reads with `codec`, the way a non-UTF-8 locale box does."""
+    real_read_text = Path.read_text
+
+    def read_text(self: Path, encoding: str | None = None, *args: object, **kwargs: object) -> str:
+        return real_read_text(self, encoding or codec, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", read_text)
+
+
+def test_parse_job_spec_decodes_utf8_not_the_locale_codec(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A UTF-8 job spec must survive a cp1252 locale (#677).
+
+    Without an explicit codec the spec decodes to mojibake, and the geotag step
+    then fails naming a path the user never typed.
+    """
+    yaml_file = tmp_path / "job.yml"
+    yaml_file.write_bytes(
+        "name: Übung\n"
+        "steps:\n"
+        "  - kind: geotag\n"
+        "    video: /tmp/Übung/日本語.MP4\n"
+        "    frames: /tmp/Übung/frames\n"
+        "    takeoff_altitude: 200.0\n".encode()
+    )
+    _force_locale_codec(monkeypatch, "cp1252")
+
+    job = parse_job_spec(yaml_file)
+
+    assert job.name == "Übung"
+    assert job.steps[0].geotag is not None
+    assert job.steps[0].geotag.video == Path("/tmp/Übung/日本語.MP4")
+    assert job.steps[0].geotag.frames == Path("/tmp/Übung/frames")
+
+
 # ── Plan / dry-run tests ────────────────────────────────────────────────────
 
 

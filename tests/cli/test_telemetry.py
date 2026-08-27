@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from drone_video_geotagger import cli
+from drone_video_geotagger import cli, telemetry
 from drone_video_geotagger.cli import warn_gps_lock
 from drone_video_geotagger.telemetry import (
     interpolate,
@@ -23,6 +23,33 @@ F/2.8, SS 1000, ISO 100, GPS (-81.1000, 41.1000, 24), D 10.0m, H 100.00m
 00:00:01,000 --> 00:00:02,000
 F/2.8, SS 1000, ISO 100, GPS (-81.0000, 41.2000, 24), D 11.0m, H 102.00m
 """
+
+
+def _force_locale_codec(monkeypatch: pytest.MonkeyPatch, codec: str) -> None:
+    """Decode encoding-less reads with `codec`, the way a non-UTF-8 locale box does."""
+    real_read_text = Path.read_text
+
+    def read_text(self: Path, encoding: str | None = None, *args: object, **kwargs: object) -> str:
+        return real_read_text(self, encoding or codec, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", read_text)
+
+
+def test_parse_srt_decodes_utf8_not_the_locale_codec(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A UTF-8 SRT must survive a cp1252 locale (#677).
+
+    ``errors="ignore"`` turns the codec mismatch into silent character loss instead
+    of a crash, so the only thing that shows it is the text the parser is handed.
+    """
+    srt_text = f"[Übung 日本語 Ёлка]{SRT_TEXT}"
+    srt_path = tmp_path / "flight.SRT"
+    srt_path.write_bytes(srt_text.encode())
+    _force_locale_codec(monkeypatch, "cp1252")
+    monkeypatch.setattr(telemetry, "parse_srt_text", lambda text: [text])
+
+    assert telemetry.parse_srt(srt_path) == [srt_text]
 
 
 def test_parse_srt_time() -> None:

@@ -121,7 +121,7 @@ def parse_srt_text(text: str) -> list[TelemetryPoint]:
 
 def parse_srt(srt_path: Path) -> list[TelemetryPoint]:
     try:
-        return parse_srt_text(srt_path.read_text(errors="ignore"))
+        return parse_srt_text(srt_path.read_text(encoding="utf-8", errors="ignore"))
     except ValueError as exc:
         raise ValueError(f"{exc}: {srt_path}") from exc
 
