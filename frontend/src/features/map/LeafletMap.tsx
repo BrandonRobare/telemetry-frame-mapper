@@ -38,17 +38,16 @@ interface Props {
   slopeOverlay: { imageUrl: string; bounds: [[number, number], [number, number]] } | null
 }
 
-function FitBounds({ footprints }: { footprints: Footprint[] }) {
+function FitBounds({ footprints, sessionId }: { footprints: Footprint[]; sessionId: number | null }) {
   const map = useMap()
-  const fitted = useRef(false)
-  const previousFootprints = useRef<Footprint[]>(footprints)
+  // Fit once per session, not once per array identity: a live import appends a
+  // new footprints array roughly every 1.5s, and re-fitting on each of those
+  // snapped the view back while the operator was panning or zooming (#662).
+  // `undefined` means "nothing fitted yet" — distinct from a null session.
+  const fittedSessionId = useRef<number | null | undefined>(undefined)
 
   useEffect(() => {
-    if (previousFootprints.current !== footprints) {
-      fitted.current = false
-      previousFootprints.current = footprints
-    }
-    if (fitted.current || footprints.length === 0) return
+    if (fittedSessionId.current === sessionId || footprints.length === 0) return
     const coords: number[][] = []
     footprints.forEach((fp) => {
       try {
@@ -63,15 +62,15 @@ function FitBounds({ footprints }: { footprints: Footprint[] }) {
     })
     if (coords.length > 0) {
       map.fitBounds(coords as LatLngBoundsExpression, { padding: [20, 20] })
-      fitted.current = true
+      fittedSessionId.current = sessionId
     }
-  }, [footprints, map])
+  }, [footprints, map, sessionId])
 
   return null
 }
 
 export default function LeafletMapView({ footprints, coverage, isLoading, error, slopeOverlay }: Props) {
-  const { activeLayers, basemapId, setBasemapId, slopeOpacity } = useMapStore()
+  const { activeLayers, basemapId, setBasemapId, slopeOpacity, selectedSessionId } = useMapStore()
   const basemap = BASEMAPS[basemapId as keyof typeof BASEMAPS] ?? BASEMAPS.esri_satellite
 
   const gapGeoJSON = useMemo(() => {
@@ -225,7 +224,7 @@ export default function LeafletMapView({ footprints, coverage, isLoading, error,
           <ImageOverlay url={slopeOverlay.imageUrl} bounds={slopeOverlay.bounds} opacity={slopeOpacity} />
         )}
 
-        <FitBounds footprints={activeLayers.footprints ? footprints : []} />
+        <FitBounds footprints={activeLayers.footprints ? footprints : []} sessionId={selectedSessionId} />
       </MapContainer>
     </div>
   )
