@@ -47,6 +47,11 @@ class PolicyRule:
         self.target = target
         self.age_days = age_days
         self.disk_pct = disk_pct
+        # Archive-vs-delete is decided once, here, and never re-inferred from
+        # age_days downstream (#642). Disk pressure must actually free bytes and
+        # the archive root can share the volume, so it deletes; age-based sweeps
+        # archive to stay recoverable.
+        self.action = "archive" if has_age else "delete"
 
 
 # ---- Candidate discovery ----------------------------------------------------
@@ -166,7 +171,7 @@ def _discover_candidates(
                     "path": str(session_dir.resolve()),
                     "bytes": size,
                     "reason": reason,
-                    "action": "archive" if rule.age_days is not None else "delete",
+                    "action": rule.action,
                     "directory": True,
                 }
             )
@@ -190,7 +195,7 @@ def _discover_candidates(
                 continue
             reason = (
                 f"Age {age}d > {rule.age_days}d threshold"
-                if rule.age_days
+                if rule.age_days is not None
                 else f"Disk pressure {rule.disk_pct}%"
             )
             candidates.append(
@@ -198,6 +203,8 @@ def _discover_candidates(
                     "path": str(colmap_dir.resolve()),
                     "bytes": size,
                     "reason": reason,
+                    # Not rule.action: COLMAP intermediates are regenerable cache,
+                    # never worth archiving, so this target always deletes.
                     "action": "delete",
                     "directory": True,
                 }
@@ -229,13 +236,15 @@ def _discover_candidates(
                 size = p.stat().st_size if p.is_file() else _size_of(p)
                 reason = (
                     f"Reconstruction #{rec.id} completed {age}d ago > {rule.age_days}d threshold"
+                    if rule.age_days is not None
+                    else f"Reconstruction #{rec.id}: disk pressure {rule.disk_pct}%"
                 )
                 candidates.append(
                     {
                         "path": str(resolved),
                         "bytes": size,
                         "reason": reason,
-                        "action": "archive" if rule.age_days else "delete",
+                        "action": rule.action,
                         "directory": p.is_dir(),
                         "rec_id": rec.id,
                         "field": field,
@@ -337,7 +346,8 @@ def apply_policy(
                 usage = _disk_usage_pct(cfg.data_dir)
                 if usage < rule.disk_pct:
                     continue
-                rule.age_days = 0
+                # No age_days to force: with it left None the cutoff is None and
+                # every age filter below short-circuits, so all items qualify.
 
             all_candidates.extend(_discover_candidates(rule, cfg, db))
 
