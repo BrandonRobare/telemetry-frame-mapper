@@ -256,10 +256,13 @@ def accumulate_votes(
     v = np.rint(projected["v"]).astype(np.int64)
     weights = 1.0 / (1.0 + np.exp(-np.asarray(opacities, dtype=np.float64)))
     valid = visible & (u >= 0) & (u < w) & (v >= 0) & (v < h)
-    for idx in np.flatnonzero(valid):
-        cls = int(seg[v[idx], u[idx]])
-        if 0 <= cls < votes.shape[1]:
-            votes[idx, cls] += weights[idx]
+    idx = np.flatnonzero(valid)
+    if idx.size == 0:
+        return
+    cls = seg[v[idx], u[idx]].astype(np.int64)
+    # Pixels carrying an id outside the class range (e.g. UNLABELED) cast no vote.
+    in_range = (cls >= 0) & (cls < votes.shape[1])
+    np.add.at(votes, (idx[in_range], cls[in_range]), weights[idx[in_range]])
 
 
 def finalize_labels(votes: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
