@@ -155,6 +155,39 @@ class TestOrthoRasterization:
         assert len(populated) > 0
         assert np.all(populated == 200)
 
+    @pytest.mark.parametrize("resolution", [0.5, 1.0, 2.0])
+    def test_row_index_matches_geotransform(self, resolution):
+        # Markers on a diagonal, spaced well over a pixel apart, each carrying a
+        # unique red value so the pixel it landed in is identifiable.
+        n = 21
+        step = 5.0
+        i = np.arange(n, dtype=np.float64)
+        x = 500000.0 + i * step
+        y = 5000000.0 + i * step
+        points = np.column_stack(
+            [x, y, np.full(n, 100.0), i + 1, np.zeros(n), np.zeros(n)]
+        )
+
+        geo = {
+            "scale": 1.0, "rotation": [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
+            "translation": [0, 0, 0], "utm_zone": "32N", "utm_origin": [500000, 5000000],
+        }
+        image, gt, _crs = ortho._rasterize_to_orthomosaic(
+            points, geo, resolution=resolution
+        )
+        x_origin, px, _, y_origin, _, py = gt
+        assert (px, py) == (resolution, -resolution)
+
+        # The extent is percentile-clipped, so the two end markers fall outside
+        # the grid and get clamped; every interior one must land in the row and
+        # column the geotransform claims covers it.
+        for k in range(1, n - 1):
+            row = int((y_origin - y[k]) / px)
+            col = int((x[k] - x_origin) / px)
+            assert image[row, col, 0] == k + 1, (
+                f"marker at y={y[k]} missing from row {row} at resolution {resolution}"
+            )
+
     def test_rasterize_raises_on_too_small_extent(self):
         points = np.array([[500000.0, 5000000.0, 100.0]], dtype=np.float64)
         geo = {
