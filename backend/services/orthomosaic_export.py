@@ -137,7 +137,7 @@ def _rasterize_to_orthomosaic(
     counts = np.zeros((rows, cols), dtype=np.uint32)
 
     col_idx = ((x - x_min) / resolution).astype(np.int64)
-    row_idx = (rows - 1 - ((y - y_min) / resolution)).astype(np.int64)
+    row_idx = ((y_max - y) / resolution).astype(np.int64)
     row_idx = np.clip(row_idx, 0, rows - 1)
     col_idx = np.clip(col_idx, 0, cols - 1)
 
