@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import shutil
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -10,6 +11,21 @@ from backend.core.config import AppConfig
 from backend.core.paths import confine_path
 from backend.db.models import Reconstruction
 from backend.db.models import Session as SessionModel
+
+# Reconstruction columns holding a path to an artifact this policy may sweep.
+# Each candidate carries the column it came from so the execute pass can null it
+# once the file is gone (#644).
+_ARTIFACT_PATH_FIELDS = (
+    "splat_path",
+    "splat_preview_path",
+    "splat_medium_path",
+    "pointcloud_path",
+    "mesh_glb_path",
+    "mesh_obj_path",
+    "mesh_mtl_path",
+    "flythrough_path",
+    "coverage_gaps_path",
+)
 
 # ---- Policy model ----------------------------------------------------------
 
@@ -197,18 +213,8 @@ def _discover_candidates(
             if cutoff is not None and rule.age_days is not None and age <= rule.age_days:
                 continue
 
-            artifact_paths = [
-                rec.splat_path,
-                rec.splat_preview_path,
-                rec.splat_medium_path,
-                rec.pointcloud_path,
-                rec.mesh_glb_path,
-                rec.mesh_obj_path,
-                rec.mesh_mtl_path,
-                rec.flythrough_path,
-                rec.coverage_gaps_path,
-            ]
-            for artifact_raw in artifact_paths:
+            for field in _ARTIFACT_PATH_FIELDS:
+                artifact_raw = getattr(rec, field)
                 if not artifact_raw:
                     continue
                 p = Path(artifact_raw)
@@ -231,10 +237,42 @@ def _discover_candidates(
                         "reason": reason,
                         "action": "archive" if rule.age_days else "delete",
                         "directory": p.is_dir(),
+                        "rec_id": rec.id,
+                        "field": field,
                     }
                 )
 
     return candidates
+
+
+def _clear_db_reference(db: DBSession, cand: dict) -> bool:
+    """Null the Reconstruction column whose artifact this policy just swept.
+
+    Returns True when a row was modified, so the caller knows to commit.
+    """
+    rec_id = cand.get("rec_id")
+    field = cand.get("field")
+    if rec_id is None or field is None:
+        return False
+    rec = db.query(Reconstruction).filter(Reconstruction.id == rec_id).first()
+    if rec is None or getattr(rec, field, None) is None:
+        return False
+    setattr(rec, field, None)
+    if field == "splat_path":
+        # The primary artifact is gone; the row must stop looking loadable.
+        rec.status = "archived"
+    return True
+
+
+def _write_archive_manifest(entries: list[dict], cfg: AppConfig) -> str:
+    """Append the archive destinations to a manifest so they stay recoverable."""
+    manifest = _archive_root(cfg) / "manifest.jsonl"
+    manifest.parent.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now(UTC).isoformat()
+    with manifest.open("a", encoding="utf-8") as fh:
+        for entry in entries:
+            fh.write(json.dumps({"archived_at": stamp, **entry}) + "\n")
+    return str(manifest)
 
 
 # ---- Disk-pressure check ----------------------------------------------------
@@ -325,11 +363,13 @@ def apply_policy(
         archived: list[dict] = []
         failed: list[dict] = []
         roots = _configured_roots(cfg)
+        db_dirty = False
 
         for cand in all_candidates:
             p = Path(cand["path"])
             if not p.exists():
                 removed.append(cand["path"])
+                db_dirty |= _clear_db_reference(db, cand)
                 continue
             try:
                 resolved = p.resolve()
@@ -344,12 +384,14 @@ def apply_policy(
                     destination = _archive_destination(p, cfg)
                     destination.parent.mkdir(parents=True, exist_ok=True)
                     shutil.move(str(p), str(destination))
-                    archived.append(
-                        {
-                            "path": str(resolved),
-                            "archive_path": str(destination),
-                        }
-                    )
+                    entry = {
+                        "path": str(resolved),
+                        "archive_path": str(destination),
+                    }
+                    if cand.get("rec_id") is not None:
+                        entry["reconstruction_id"] = cand["rec_id"]
+                        entry["field"] = cand["field"]
+                    archived.append(entry)
                 else:
                     if p.is_dir():
                         shutil.rmtree(p)
@@ -358,8 +400,23 @@ def apply_policy(
                     removed.append(str(resolved))
             except (OSError, ValueError):
                 failed.append({"path": str(resolved), "reason": "operation failed"})
+                continue
+            db_dirty |= _clear_db_reference(db, cand)
 
-        result["executed"] = {"removed": removed, "archived": archived, "failed": failed}
+        manifest = None
+        if archived:
+            # Written after the moves so a manifest failure can't be mistaken for
+            # a failed move; the archive root is provably writable by this point.
+            manifest = _write_archive_manifest(archived, cfg)
+        if db_dirty:
+            db.commit()
+
+        result["executed"] = {
+            "removed": removed,
+            "archived": archived,
+            "failed": failed,
+            "manifest": manifest,
+        }
         result["summary"]["removed_items"] = len(removed)
         result["summary"]["archived_items"] = len(archived)
         result["summary"]["failed_items"] = len(failed)

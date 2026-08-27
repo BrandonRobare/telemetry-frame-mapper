@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -7,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from backend.core.config import AppConfig
+from backend.db.models import Reconstruction
 from backend.db.models import Session as SessionModel
 from backend.services.storage_lifecycle import (
     PolicyRule,
@@ -454,3 +456,121 @@ class TestSessionMatchingIsExact:
 
         candidate_paths = {c["path"] for c in result["candidates"]}
         assert str(orphan_dir.resolve()) not in candidate_paths
+
+
+class TestReconstructionArtifactsClearDbPaths:
+    """Regression tests for #644: sweeping a reconstruction's artifacts off disk
+    must clear the columns that pointed at them, so the API never advertises a
+    path that no longer exists, and the archive destination stays recoverable.
+    """
+
+    @staticmethod
+    def _cfg(tmp_path: Path) -> AppConfig:
+        for name in ("imports", "processed", "exports", "data"):
+            (tmp_path / name).mkdir(exist_ok=True)
+        return AppConfig(
+            imports_dir=str(tmp_path / "imports"),
+            processed_dir=str(tmp_path / "processed"),
+            exports_dir=str(tmp_path / "exports"),
+            data_dir=str(tmp_path / "data"),
+        )
+
+    @staticmethod
+    def _rec(tmp_path: Path, db_session, *, age_days: int) -> Reconstruction:
+        session = SessionModel(
+            name="old",
+            folder_path=str(tmp_path / "imports" / "old_session"),
+            imported_at=datetime.now(UTC) - timedelta(days=age_days),
+        )
+        db_session.add(session)
+        db_session.commit()
+
+        rec_dir = tmp_path / "exports" / "5"
+        rec_dir.mkdir(parents=True, exist_ok=True)
+        splat = rec_dir / "splat.ply"
+        splat.write_bytes(b"x" * 100)
+        pointcloud = rec_dir / "points.ply"
+        pointcloud.write_bytes(b"x" * 100)
+
+        rec = Reconstruction(
+            session_id=session.id,
+            status="complete",
+            splat_path=str(splat),
+            pointcloud_path=str(pointcloud),
+            completed_at=datetime.now(UTC) - timedelta(days=age_days),
+        )
+        db_session.add(rec)
+        db_session.commit()
+        return rec
+
+    def test_archive_nulls_paths_and_marks_reconstruction_archived(self, tmp_path, db_session):
+        cfg = self._cfg(tmp_path)
+        rec_id = self._rec(tmp_path, db_session, age_days=60).id
+
+        result = apply_policy(
+            [{"target": "reconstruction_artifacts", "age_days": 30}],
+            execute=True,
+            cfg=cfg,
+            db=db_session,
+        )
+
+        assert result["summary"]["archived_items"] == 2
+        db_session.expire_all()
+        rec = db_session.query(Reconstruction).filter(Reconstruction.id == rec_id).one()
+        assert rec.splat_path is None
+        assert rec.pointcloud_path is None
+        assert rec.status == "archived"
+
+    def test_delete_nulls_paths(self, tmp_path, db_session):
+        cfg = self._cfg(tmp_path)
+        rec_id = self._rec(tmp_path, db_session, age_days=10).id
+
+        result = apply_policy(
+            [{"target": "reconstruction_artifacts", "age_days": 0}],
+            execute=True,
+            cfg=cfg,
+            db=db_session,
+        )
+
+        assert result["summary"]["removed_items"] == 2
+        db_session.expire_all()
+        rec = db_session.query(Reconstruction).filter(Reconstruction.id == rec_id).one()
+        assert rec.splat_path is None
+        assert rec.pointcloud_path is None
+        assert rec.status == "archived"
+
+    def test_no_row_references_a_path_that_no_longer_exists(self, tmp_path, db_session):
+        cfg = self._cfg(tmp_path)
+        self._rec(tmp_path, db_session, age_days=60)
+
+        apply_policy(
+            [{"target": "reconstruction_artifacts", "age_days": 30}],
+            execute=True,
+            cfg=cfg,
+            db=db_session,
+        )
+
+        db_session.expire_all()
+        for row in db_session.query(Reconstruction).all():
+            for value in (row.splat_path, row.pointcloud_path):
+                assert value is None or Path(value).exists()
+
+    def test_archive_destination_is_recorded_in_a_manifest(self, tmp_path, db_session):
+        cfg = self._cfg(tmp_path)
+        self._rec(tmp_path, db_session, age_days=60)
+
+        result = apply_policy(
+            [{"target": "reconstruction_artifacts", "age_days": 30}],
+            execute=True,
+            cfg=cfg,
+            db=db_session,
+        )
+
+        manifest = tmp_path / "exports" / "storage_archive" / "manifest.jsonl"
+        assert manifest.exists()
+        recorded = [json.loads(line) for line in manifest.read_text().splitlines()]
+        assert {e["archive_path"] for e in recorded} == {
+            e["archive_path"] for e in result["executed"]["archived"]
+        }
+        for entry in recorded:
+            assert Path(entry["archive_path"]).exists()
