@@ -53,12 +53,22 @@ class NoopTerrainService(TerrainService):
 _RASTERIO_AVAILABLE = False
 try:
     import rasterio
+    import rasterio.errors
     import rasterio.transform
     import rasterio.warp
+    import rasterio.windows
 
     _RASTERIO_AVAILABLE = True
+    # Failure modes that legitimately mean "no elevation for this point" or
+    # "this DEM cannot be read".  Anything else propagates as a real bug.
+    _SAMPLE_ERRORS: tuple[type[BaseException], ...] = (
+        rasterio.errors.RasterioError,
+        ValueError,
+        IndexError,
+    )
 except ImportError:
     rasterio = None  # type: ignore[assignment]
+    _SAMPLE_ERRORS = (ValueError, IndexError)
 
 
 class GeoTiffTerrainService(TerrainService):
@@ -82,6 +92,7 @@ class GeoTiffTerrainService(TerrainService):
 
         self._dem_path = dem_path
         self._dataset: rasterio.DatasetReader | None = None  # type: ignore[valid-type]
+        self._sample_error_logged = False
 
     @property
     def dataset(self) -> rasterio.DatasetReader:  # type: ignore[name-defined]
@@ -127,8 +138,20 @@ class GeoTiffTerrainService(TerrainService):
             if ds.nodata is not None and val == ds.nodata:
                 return None
             return float(val)
-        except Exception:
-            logger.debug("DEM sample failed for (%.6f, %.6f)", lat, lon, exc_info=True)
+        except _SAMPLE_ERRORS as exc:
+            # Logged once per service instance: a broken DEM fails on every
+            # sample, and a large plan samples thousands of points.
+            if not self._sample_error_logged:
+                self._sample_error_logged = True
+                logger.warning(
+                    "DEM sampling failed for %s (first failure at %.6f, %.6f): %s. "
+                    "Elevations from this DEM are unavailable; terrain checks degrade.",
+                    self._dem_path,
+                    lat,
+                    lon,
+                    exc,
+                    exc_info=True,
+                )
             return None
 
     def close(self) -> None:
