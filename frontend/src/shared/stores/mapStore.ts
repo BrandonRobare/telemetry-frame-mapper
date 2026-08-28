@@ -6,9 +6,7 @@ export type BasemapId = string
 interface ActiveLayers {
   footprints: boolean
   coverage: boolean
-  heatmap: boolean
   slope: boolean
-  targetArea: boolean
 }
 
 interface SyncedViewport {
@@ -97,7 +95,7 @@ function saveBasemap(id: BasemapId) {
 export const useMapStore = create<MapStore>((set) => ({
   selectedProjectId: null,
   selectedSessionId: null,
-  activeLayers: { footprints: true, coverage: true, heatmap: false, slope: false, targetArea: true },
+  activeLayers: { footprints: true, coverage: true, slope: false },
   theme: savedTheme,
   sidebarOpen: true,
   basemapId: getSavedBasemap(),

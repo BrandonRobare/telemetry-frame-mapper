@@ -32,7 +32,7 @@ afterEach(() => {
   fitBounds.mockClear()
   useMapStore.setState({
     selectedSessionId: null,
-    activeLayers: { footprints: true, coverage: true, heatmap: false, slope: false, targetArea: true },
+    activeLayers: { footprints: true, coverage: true, slope: false },
   })
 })
 
