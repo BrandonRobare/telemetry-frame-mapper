@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import math
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -9,7 +10,14 @@ from shapely.geometry import shape
 
 from .terrain import TerrainService, get_terrain_service
 
+logger = logging.getLogger(__name__)
+
 _MAX_LANES = 10_000
+
+
+def _usable_elevations(results: list) -> list[float]:
+    """Elevations that came from real terrain data (in-bounds, non-no-op)."""
+    return [r.elevation_m for r in results if not r.out_of_bounds and r.source != "noop"]
 
 
 def generate_lawnmower(
@@ -29,7 +37,9 @@ def generate_lawnmower(
     across varying terrain.  The lanes GeoJSON includes a 3rd coordinate
     (altitude in metres above sea level) set to ``requested_agl_m + ground_elevation_m``
     for each vertex.  OOB / missing DEM points fall back to the requested AGL
-    (i.e. ground elevation = 0).
+    (i.e. ground elevation = 0).  When *no* vertex got usable terrain data the
+    returned ``terrain_degraded`` flag is True: the altitudes are plain AGL above
+    the takeoff point and the plan is not really terrain-following.
     """
     if side_overlap >= 1.0:
         raise ValueError(f"side_overlap must be < 1.0, got {side_overlap}")
@@ -93,12 +103,18 @@ def generate_lawnmower(
     total_dist = along_lane_dist + transit_dist
 
     # ---- terrain-following altitude enrichment ---------------------------
+    terrain_degraded = False
     if terrain_follow:
         svc = terrain_service or get_terrain_service()
         # Build altitude-enriched lane coordinates
-        enriched_lanes = _enrich_lanes_with_terrain(
+        enriched_lanes, terrain_degraded = _enrich_lanes_with_terrain(
             lanes, altitude_m, svc
         )
+        if terrain_degraded:
+            logger.warning(
+                "Terrain following was requested but no usable terrain data was returned "
+                "for this area; waypoint altitudes are plain AGL above the takeoff point."
+            )
         lanes_geojson = json.dumps({
             "type": "GeometryCollection",
             "geometries": [{"type": "LineString", "coordinates": ln} for ln in enriched_lanes],
@@ -114,6 +130,7 @@ def generate_lawnmower(
         "lane_count": len(lanes),
         "total_distance_m": round(total_dist, 1),
         "waypoint_spacing_m": round(waypoint_spacing_m, 2),
+        "terrain_degraded": terrain_degraded,
     }
 
 
@@ -121,11 +138,17 @@ def _enrich_lanes_with_terrain(
     lanes: list,
     requested_agl_m: float,
     svc: TerrainService,
-) -> list:
+) -> tuple[list, bool]:
     """Insert per-vertex ground-elevation-based MSL altitudes into lane coords.
 
     Each lane vertex gets a 3rd coordinate: ``requested_agl_m + ground_elevation_m``.
     OOB / missing DEM points default to ``requested_agl_m`` (ground elevation = 0).
+
+    Returns ``(enriched_lanes, terrain_degraded)`` where *terrain_degraded* is True
+    when no vertex got usable terrain data — an unreadable DEM, no DEM at all, or
+    the whole area outside DEM coverage — so the caller can tell that the plan is
+    not actually terrain-following.  Usability is decided by the same predicate the
+    RTH terrain check uses, so the two never disagree about the same DEM.
     """
     point_set: dict[tuple[float, float], int] = {}
     all_points: list[tuple[float, float]] = []
@@ -150,7 +173,7 @@ def _enrich_lanes_with_terrain(
             msl = altitude_map.get((pt[1], pt[0]), requested_agl_m)
             enriched_ln.append([pt[0], pt[1], round(msl, 2)])
         enriched.append(enriched_ln)
-    return enriched
+    return enriched, not _usable_elevations(elev_results)
 
 
 def write_kml(plan_id: int, lanes_geojson: str, exports_dir: Path, suffix: str = "") -> Path:
@@ -396,9 +419,6 @@ def evaluate_rth_terrain_safety(
     home_result = elevations[0]
     path_results = elevations[1 : 1 + len(path_points)]
     survey_results = elevations[1 + len(path_points) :]
-
-    def _usable_elevations(results: list) -> list[float]:
-        return [r.elevation_m for r in results if not r.out_of_bounds and r.source != "noop"]
 
     home_usable = home_result.source != "noop" and not home_result.out_of_bounds
     path_usable = _usable_elevations(path_results)
