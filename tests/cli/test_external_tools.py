@@ -35,6 +35,24 @@ def test_extract_srt_missing_ffmpeg_reports_install_guidance(tmp_path: Path) -> 
         extract_srt("/missing/bin/ffmpeg", tmp_path / "flight.mp4", tmp_path / "flight.srt")
 
 
+def test_extract_srt_selects_first_subtitle_stream(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """SRT extraction must select the subtitle track, not a hardcoded index (#685)."""
+    seen: list[str] = []
+
+    def fake_run(argv, **kwargs):
+        seen.extend(argv)
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    monkeypatch.setattr("drone_video_geotagger.video.subprocess.run", fake_run)
+
+    extract_srt("ffmpeg", tmp_path / "flight.mp4", tmp_path / "flight.srt")
+
+    assert "0:s:0" in seen
+    assert "0:2" not in seen
+
+
 def test_read_video_start_missing_ffmpeg_reports_install_guidance(tmp_path: Path) -> None:
     with pytest.raises(RuntimeError, match="ffmpeg executable not found"):
         read_video_start("/missing/bin/ffmpeg", tmp_path / "flight.mp4")
