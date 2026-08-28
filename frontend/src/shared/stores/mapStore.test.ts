@@ -54,3 +54,23 @@ describe('mapStore theme preference', () => {
     expect(localStorageMock.getItem('theme')).toBe('dark')
   })
 })
+
+describe('mapStore active layers', () => {
+  it('has no layer key that nothing in frontend/src renders', async () => {
+    const { useMapStore } = await loadMapStore()
+    const sources: string[] = Object.values(
+      import.meta.glob(['../../**/*.{ts,tsx}', '!../../**/*.test.{ts,tsx}'], {
+        query: '?raw',
+        import: 'default',
+        eager: true,
+      }),
+    )
+
+    // LayerControls renders a checkbox per key via the generic activeLayers[key],
+    // so a key only earns its checkbox if some component reads it by name (#666).
+    const unread = Object.keys(useMapStore.getState().activeLayers)
+      .filter((key) => !sources.some((src) => src.includes(`activeLayers.${key}`)))
+
+    expect(unread).toEqual([])
+  })
+})

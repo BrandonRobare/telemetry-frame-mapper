@@ -1,5 +1,8 @@
+// @vitest-environment jsdom
+import { useRef } from 'react'
 import { describe, it, expect } from 'vitest'
-import { deriveGroundPlaneY, worldToGps, gpsToWorld } from './useViewerCoords'
+import { renderHook } from '@testing-library/react'
+import { deriveGroundPlaneY, worldToGps, gpsToWorld, useRayCast } from './useViewerCoords'
 import type { GeoTransform } from '../../types/api'
 
 const IDENTITY: GeoTransform = {
@@ -95,5 +98,40 @@ describe('deriveGroundPlaneY', () => {
 
   it('falls back to zero when geo-transform metadata is missing', () => {
     expect(deriveGroundPlaneY(undefined)).toBe(0)
+  })
+})
+
+// #664: SplatCanvas keeps `castRay` in the dependency array of the effect that
+// wires the canvas click/dblclick listeners. An unmemoized `castRay` gets a new
+// identity every render, so those listeners were torn down and re-attached on
+// every render — which, while orbiting, is every pointer move.
+describe('useRayCast', () => {
+  function useSubject(groundY: number) {
+    const viewerRef = useRef<unknown>(null)
+    const containerRef = useRef<HTMLDivElement>(null)
+    return useRayCast(viewerRef, containerRef, groundY)
+  }
+
+  it('keeps castRay identity stable across re-renders', () => {
+    const { result, rerender } = renderHook(({ groundY }) => useSubject(groundY), {
+      initialProps: { groundY: 0 },
+    })
+
+    const first = result.current.castRay
+    rerender({ groundY: 0 })
+    rerender({ groundY: 0 })
+
+    expect(result.current.castRay).toBe(first)
+  })
+
+  it('rebuilds castRay when the ground plane moves', () => {
+    const { result, rerender } = renderHook(({ groundY }) => useSubject(groundY), {
+      initialProps: { groundY: 0 },
+    })
+
+    const first = result.current.castRay
+    rerender({ groundY: 12.5 })
+
+    expect(result.current.castRay).not.toBe(first)
   })
 })

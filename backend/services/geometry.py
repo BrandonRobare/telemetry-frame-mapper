@@ -1,11 +1,46 @@
 from __future__ import annotations
 
 import json
+import logging
 import math
 
+import pyproj
 from pyproj import Transformer
 from shapely.affinity import rotate
 from shapely.geometry import Polygon, mapping
+
+logger = logging.getLogger(__name__)
+
+
+def utm_crs_for(lon: float, lat: float) -> pyproj.CRS:
+    """UTM CRS covering a WGS84 point.  Shared by footprints and coverage."""
+    zone = int((lon + 180) / 6) + 1
+    return pyproj.CRS.from_dict({"proj": "utm", "zone": zone, "south": lat < 0.0})
+
+
+def _resolve_crs(lon: float, lat: float, target_crs: str | None) -> pyproj.CRS:
+    """Projected CRS to build a footprint in at (lon, lat).
+
+    An explicitly configured *target_crs* wins, but only where it actually
+    applies: projecting a flight into a distant UTM zone inflates the polygon
+    (~5% at 24° off the central meridian) while ground_width_m — computed from
+    altitude and FOV — stays correct, so the two silently disagree (#640).
+    """
+    if target_crs is None:
+        return utm_crs_for(lon, lat)
+    crs = pyproj.CRS.from_user_input(target_crs)
+    area = crs.area_of_use
+    if area is not None:
+        west, south, east, north = area.bounds
+        lon_ok = (west <= lon <= east) if west <= east else (lon >= west or lon <= east)
+        if not (lon_ok and south <= lat <= north):
+            logger.warning(
+                "target_crs %s does not cover (%.5f, %.5f); using the local UTM zone "
+                "for this footprint instead",
+                target_crs, lat, lon,
+            )
+            return utm_crs_for(lon, lat)
+    return crs
 
 
 def compute_footprint(
@@ -15,7 +50,7 @@ def compute_footprint(
     fov_horizontal_deg: float,
     fov_vertical_deg: float,
     yaw_deg: float | None,
-    target_crs: str,
+    target_crs: str | None = None,
     gimbal_pitch: float | None = None,
     ground_elevation_m: float = 0.0,
 ) -> dict:
@@ -26,6 +61,9 @@ def compute_footprint(
     frustum is offset along the yaw vector so the footprint centre shifts
     forward, and both dimensions stretch proportionally to the slant range,
     producing an approximate trapezoid.
+
+    *target_crs* is an optional override; by default (and whenever the given
+    CRS does not cover the point) the local UTM zone is derived from lat/lon.
 
     Returns dict with geom_wkt (UTM), geom_geojson (WGS84), ground dimensions,
     heading_estimated flag, and a boolean `pitch_oblique` (True when the
@@ -40,8 +78,9 @@ def compute_footprint(
     """
 
     # ---- helpers -----------------------------------------------------------
-    to_utm = Transformer.from_crs("EPSG:4326", target_crs, always_xy=True)
-    to_wgs = Transformer.from_crs(target_crs, "EPSG:4326", always_xy=True)
+    crs = _resolve_crs(lon, lat, target_crs)
+    to_utm = Transformer.from_crs("EPSG:4326", crs, always_xy=True)
+    to_wgs = Transformer.from_crs(crs, "EPSG:4326", always_xy=True)
 
     cx, cy = to_utm.transform(lon, lat)
 
