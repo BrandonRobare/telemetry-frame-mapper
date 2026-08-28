@@ -96,7 +96,11 @@ export default function App() {
     return TABS.some((t) => t.id === initialTab) ? (initialTab as Tab) : 'overview'
   })
   const [showImport, setShowImport] = useState(false)
-  const { requestedTab, setRequestedTab } = useMapStore()
+  // Per-field selectors, not `useMapStore()` — a bare call selects the whole
+  // state object, which is new on every `set`, so any unrelated store write
+  // (e.g. setSyncedViewport at orbit rate) re-rendered the entire app (#664).
+  const requestedTab = useMapStore((s) => s.requestedTab)
+  const setRequestedTab = useMapStore((s) => s.setRequestedTab)
   const selectedSessionId = useMapStore((s) => s.selectedSessionId)
   const selectedProjectId = useMapStore((s) => s.selectedProjectId)
   const status = usePipelineStatus(selectedSessionId)

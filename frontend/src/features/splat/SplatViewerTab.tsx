@@ -922,6 +922,7 @@ function SplatCanvas({
     containerRef,
     groundY,
   )
+  const splitPaneActive = useMapStore((s) => s.splitPaneActive)
 
   useMeasurementLayer({ viewerRef: viewerRef as React.RefObject<unknown>, viewerReady, points: measurePoints, mode: measureMode })
 
@@ -1248,9 +1249,11 @@ function SplatCanvas({
     }
   }, [reconstructionId])
 
-  // Sync 3D camera → Leaflet via syncedViewport
+  // Sync 3D camera → Leaflet via syncedViewport.
+  // Only while the split pane is up: nothing consumes the synced viewport
+  // otherwise, and OrbitControls fires `change` at pointer-move rate (#664).
   useEffect(() => {
-    if (!viewerReady || !geoTransform) return
+    if (!splitPaneActive || !viewerReady || !geoTransform) return
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const viewer = viewerRef.current as any
     if (!viewer) return
@@ -1258,7 +1261,10 @@ function SplatCanvas({
     const controls = viewer.orbitControls ?? viewer.controls ?? null
     if (!controls) return
 
-    function onCameraChange() {
+    let frame: number | null = null
+
+    function publish() {
+      frame = null
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const v = viewerRef.current as any
       if (!v?.camera || !geoTransform) return
@@ -1270,9 +1276,18 @@ function SplatCanvas({
       useMapStore.getState().setSyncedViewport({ lat: gps.lat, lon: gps.lon, zoom, source: '3d' })
     }
 
+    // Coalesce to one store write per frame; a drag emits many `change` events
+    // between paints and the mini-map can only show the last one anyway.
+    function onCameraChange() {
+      if (frame === null) frame = requestAnimationFrame(publish)
+    }
+
     controls.addEventListener('change', onCameraChange)
-    return () => controls.removeEventListener('change', onCameraChange)
-  }, [viewerReady, geoTransform])
+    return () => {
+      if (frame !== null) cancelAnimationFrame(frame)
+      controls.removeEventListener('change', onCameraChange)
+    }
+  }, [splitPaneActive, viewerReady, geoTransform])
 
   // Canvas click handler for all tools
   useEffect(() => {
