@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 
 import pytest
+from pyproj import Geod
 
 from backend.services.geometry import compute_footprint
 
@@ -55,6 +56,32 @@ def test_footprint_center_near_input_coords():
     centroid_lat = sum(lats) / len(lats)
     assert abs(centroid_lat - LAT) < 0.001
     assert abs(centroid_lon - LON) < 0.001
+
+
+def _ground_width_m(result: dict) -> float:
+    """Real-world distance along the polygon's bottom edge, from the WGS84 output."""
+    coords = json.loads(result["geom_geojson"])["coordinates"][0]
+    (lon_a, lat_a), (lon_b, lat_b) = coords[0], coords[1]
+    return Geod(ellps="WGS84").inv(lon_a, lat_a, lon_b, lat_b)[2]
+
+
+def test_footprint_outside_configured_zone_matches_ground_width():
+    """A flight far from the configured zone must not be inflated by it (#640)."""
+    # Denver (105°W) with the shipped default EPSG:32617 (central meridian 81°W).
+    result = compute_footprint(39.74, -104.99, ALT_M, FOV_H, FOV_V, None, TARGET_CRS)
+    assert _ground_width_m(result) == pytest.approx(result["ground_width_m"], rel=0.005)
+
+
+def test_footprint_inside_configured_zone_still_uses_it():
+    """An explicit target_crs that does cover the flight is still honoured (#640)."""
+    result = compute_footprint(LAT, LON, ALT_M, FOV_H, FOV_V, None, TARGET_CRS)
+    assert _ground_width_m(result) == pytest.approx(result["ground_width_m"], rel=0.005)
+
+
+def test_footprint_without_target_crs_derives_zone():
+    """target_crs is optional; the local UTM zone is derived from lat/lon (#640)."""
+    result = compute_footprint(39.74, -104.99, ALT_M, FOV_H, FOV_V, None)
+    assert _ground_width_m(result) == pytest.approx(result["ground_width_m"], rel=0.005)
 
 
 # ---------------------------------------------------------------------------

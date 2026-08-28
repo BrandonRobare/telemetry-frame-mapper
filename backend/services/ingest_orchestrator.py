@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 import threading
 from collections import Counter
@@ -15,6 +16,8 @@ from .geometry import compute_footprint
 from .ingest import extract_exif, generate_thumbnail
 from .quality import flag_image, score_brightness, score_sharpness
 from .storage_summary_cache import invalidate_storage_summary_cache
+
+logger = logging.getLogger(__name__)
 
 _progress: dict[int, dict] = {}
 _progress_lock = threading.Lock()
@@ -211,7 +214,11 @@ def _run(session_id: int, folder: Path, db_factory) -> None:
                             pitch_oblique=fp.get("pitch_oblique", False),
                         ))
                 except Exception:
-                    pass  # footprint is best-effort
+                    # Footprint stays best-effort, but a silent failure reads as
+                    # "no coverage data" in the UI — say so in the log (#640).
+                    logger.warning(
+                        "Footprint computation failed for %s", filename, exc_info=True
+                    )
 
             with _progress_lock:
                 _progress[session_id]["processed"] = i + 1

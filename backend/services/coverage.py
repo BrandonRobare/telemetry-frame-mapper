@@ -7,6 +7,8 @@ import pyproj
 from shapely.geometry import mapping, shape
 from shapely.ops import transform, unary_union
 
+from .geometry import utm_crs_for
+
 
 def run_coverage(footprint_geojsons: list[str], target_geojson: str) -> dict:
     """Returns covered_area_m2, coverage_pct, gap_geojson, overlap_geojson.
@@ -26,9 +28,7 @@ def run_coverage(footprint_geojsons: list[str], target_geojson: str) -> dict:
 
     # Determine UTM CRS from the target centroid
     centroid = target.centroid
-    utm_zone = int((centroid.x + 180) / 6) + 1
-    is_southern = centroid.y < 0.0
-    utm_crs = pyproj.CRS.from_dict({"proj": "utm", "zone": utm_zone, "south": is_southern})
+    utm_crs = utm_crs_for(centroid.x, centroid.y)
     to_utm = pyproj.Transformer.from_crs("EPSG:4326", utm_crs, always_xy=True).transform
     to_wgs84 = pyproj.Transformer.from_crs(utm_crs, "EPSG:4326", always_xy=True).transform
 
