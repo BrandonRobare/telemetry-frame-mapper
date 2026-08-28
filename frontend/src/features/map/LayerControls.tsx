@@ -5,9 +5,7 @@ import { glassBackdrop } from '../../shared/motion/glassSupport'
 const LAYERS = [
   { key: 'footprints' as const, label: 'Footprints', color: 'var(--accent)' },
   { key: 'coverage' as const, label: 'Coverage', color: 'var(--sage)' },
-  { key: 'heatmap' as const, label: 'Heatmap', color: 'var(--warning-accent)' },
   { key: 'slope' as const, label: 'Slope', color: 'var(--danger-accent)' },
-  { key: 'targetArea' as const, label: 'Target Area', color: 'var(--tan)' },
 ]
 
 interface Props {

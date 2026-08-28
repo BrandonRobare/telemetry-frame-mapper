@@ -273,6 +273,10 @@ class _FakeFfmpeg:
         self._stderr_sink = stderr
         self._unread_pipe_bytes = 0
         self._output_path = Path(self.command[-1])
+        # Real ffmpeg opens its output the moment it starts, so a render that dies
+        # mid-loop leaves a partial file on disk for the caller to clean up.
+        self._output_path.parent.mkdir(parents=True, exist_ok=True)
+        self._output_path.write_bytes(b"")
 
     def _emit_stderr(self, blob: bytes) -> None:
         if self._stderr_sink is subprocess.PIPE:
@@ -342,10 +346,10 @@ def _flythrough_keyframes(duration_s: float = 4.0) -> list[dict]:
     ]
 
 
-def _render_flythrough(tmp_path: Path) -> Path:
+def _render_flythrough(tmp_path: Path, cancel: threading.Event | None = None) -> Path:
     return splat_trainer.render_flythrough(
         tmp_path / "splat.ply", tmp_path / "flythrough.mp4", _flythrough_keyframes(),
-        fps=30, width=8, height=8,
+        fps=30, width=8, height=8, cancel=cancel,
     )
 
 
@@ -396,6 +400,45 @@ def test_render_flythrough_reaps_ffmpeg_when_a_frame_fails(tmp_path: Path):
     # The lock has to be free for the next GPU job, whatever happened here.
     assert splat_trainer._GPU_LOCK.acquire(timeout=0)
     splat_trainer._GPU_LOCK.release()
+
+
+def test_render_flythrough_stops_on_cancel(tmp_path: Path):
+    """A set cancel Event must stop the frame loop within a frame (#733)."""
+    spawned: list[_FakeFfmpeg] = []
+    cancel = threading.Event()
+    calls = {"n": 0}
+
+    def cancelling_rasterize(*args, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 3:
+            cancel.set()
+        return _ArrayTensor(np.zeros((8, 8, 3)))
+
+    with (
+        _fake_render_stack(spawned, rasterize=cancelling_rasterize),
+        pytest.raises(splat_trainer.ReconstructionCancelled, match="Cancelled by user"),
+    ):
+        _render_flythrough(tmp_path, cancel=cancel)
+
+    # 121 frames without the cancel check; the render stopped one frame after the set.
+    assert spawned[0].stdin.frames_written == 3
+    process = spawned[0]
+    assert process.stdin.closed
+    assert process.killed, "ffmpeg was left running after the cancel"
+    assert not (tmp_path / "flythrough.mp4").exists(), "partial .mp4 survived the cancel"
+    # The lock has to be free for the next GPU job.
+    assert splat_trainer._GPU_LOCK.acquire(timeout=0)
+    splat_trainer._GPU_LOCK.release()
+
+
+def test_render_flythrough_runs_to_completion_without_a_cancel_event(tmp_path: Path):
+    """Callers that omit the Event keep the old behaviour (#733)."""
+    spawned: list[_FakeFfmpeg] = []
+    with _fake_render_stack(spawned):
+        result = _render_flythrough(tmp_path)
+
+    assert spawned[0].stdin.frames_written == 121
+    assert result.exists()
 
 
 def test_render_flythrough_surfaces_ffmpeg_stderr_when_encoding_fails(tmp_path: Path):

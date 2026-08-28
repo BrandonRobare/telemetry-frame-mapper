@@ -698,8 +698,13 @@ def render_flythrough(
     fps: int,
     width: int,
     height: int,
+    cancel: threading.Event | None = None,
 ) -> Path:
     """Render a keyframed flythrough MP4 by piping raw frames into ffmpeg.
+
+    ``cancel`` is polled once per frame; when set, ffmpeg is reaped, the partial
+    ``.mp4`` is removed and :class:`ReconstructionCancelled` is raised so the
+    render stops holding ``_GPU_LOCK``.
 
     Keyframe position/target are interpolated with :func:`smoothstep` so the
     exported video matches the in-browser preview exactly.
@@ -752,6 +757,8 @@ def render_flythrough(
                         # next keyframe — mirrors the frontend preview player.
                         frame_count = max(1, round(float(nxt["duration_s"]) * fps))
                         for frame in range(frame_count):
+                            if cancel is not None and cancel.is_set():
+                                raise ReconstructionCancelled("Cancelled by user")
                             ease = smoothstep(frame / frame_count)
                             eye = np.array(
                                 [
@@ -807,6 +814,12 @@ def render_flythrough(
                 process.kill()
                 process.wait(timeout=10)
                 stderr_file.close()
+        except ReconstructionCancelled:
+            # Runs after the inner finally has reaped ffmpeg, so nothing can be
+            # writing to the file when it goes: a half-encoded .mp4 must never
+            # be left where a completed render would be.
+            output_path.unlink(missing_ok=True)
+            raise
         finally:
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()

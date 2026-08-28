@@ -625,3 +625,44 @@ def test_run_extract_failure_skips_image_not_batch(tmp_path, setup_test_db):
         SessionLogEntry.event_type == "image_skipped",
     ).all()
     assert any("boom.jpg" in (log.message or "") for log in skip_logs)
+
+
+def test_run_logs_footprint_failure(tmp_path, setup_test_db):
+    """A footprint projection failure must be logged, not silently swallowed (#640)."""
+    from backend.db.models import Session as SessionModel
+    from backend.main import app
+    from backend.services.ingest_orchestrator import _run
+    from tests.conftest import TestSessionLocal
+
+    db = app.state.test_db_session
+    session = SessionModel(name="footprint-boom", folder_path=str(tmp_path),
+                           photo_count=0, usable_count=0)
+    db.add(session)
+    db.commit()
+    db.refresh(session)
+
+    _make_gps_jpg(tmp_path, "boom.jpg", lat=39.74, lon=-104.99)
+
+    ingest_cfg = {
+        "accepted_extensions": [".jpg", ".jpeg"],
+        "filter_zero_gps": False,
+        "thumbnail_size_px": 64,
+        "thumbnail_jpeg_quality": 75,
+    }
+
+    with patch("backend.core.config.get_ingest_config", return_value=ingest_cfg), \
+         patch(
+             "backend.services.ingest_orchestrator.compute_footprint",
+             side_effect=RuntimeError("projection exploded"),
+         ), \
+         patch("backend.services.ingest_orchestrator.logger") as mock_logger, \
+         patch("backend.core.config.load_config") as mock_load_cfg:
+        mock_load_cfg.return_value.processed_dir = str(tmp_path)
+        mock_load_cfg.return_value.thumbnail_size_px = 64
+        mock_load_cfg.return_value.fov_horizontal_deg = 83
+        mock_load_cfg.return_value.fov_vertical_deg = 53
+        mock_load_cfg.return_value.target_crs = "EPSG:32617"
+        _run(session.id, tmp_path, TestSessionLocal)
+
+    mock_logger.warning.assert_called_once()
+    assert "boom.jpg" in mock_logger.warning.call_args.args
