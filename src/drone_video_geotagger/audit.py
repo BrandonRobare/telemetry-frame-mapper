@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+from datetime import UTC
 from pathlib import Path
 
 from drone_video_geotagger.frames import FrameTag
@@ -32,6 +33,6 @@ def write_audit_csv(tags: list[FrameTag], csv_path: Path) -> None:
                     f"{tag.lon:.8f}",
                     f"{tag.rel_alt_m:.3f}",
                     f"{tag.abs_alt_m:.3f}",
-                    tag.timestamp.isoformat() if tag.timestamp else "",
+                    tag.timestamp.astimezone(UTC).isoformat() if tag.timestamp else "",
                 ]
             )
