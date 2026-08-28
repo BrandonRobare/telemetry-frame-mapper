@@ -4,8 +4,24 @@ from __future__ import annotations
 
 import json
 import os
+import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
+
+
+def _atomic_write_text(path: Path, text: str) -> None:
+    """Write *path* via a unique sibling temp file, then ``os.replace`` it into place.
+
+    A concurrent writer or a crash mid-write leaves the previous file intact (#641).
+    """
+    fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
+    os.close(fd)
+    tmp_path = Path(tmp_name)
+    try:
+        tmp_path.write_text(text, encoding="utf-8")
+        os.replace(tmp_path, path)
+    finally:
+        tmp_path.unlink(missing_ok=True)
 
 
 def _parse_obj_mesh(path: Path) -> tuple[list[tuple[float, float, float]], list[list[int]]]:
@@ -69,11 +85,12 @@ def write_usda_handoff(
             "Use surveyed GCP/checkpoint results to establish accuracy."
         ),
     }
-    sidecar_path.write_text(json.dumps(metadata, indent=2, sort_keys=True), encoding="utf-8")
+    _atomic_write_text(sidecar_path, json.dumps(metadata, indent=2, sort_keys=True))
     points = ", ".join(f"({x}, {y}, {z})" for x, y, z in vertices)
     counts = ", ".join(str(len(face)) for face in faces)
     indices = ", ".join(str(index) for face in faces for index in face)
-    usda_path.write_text(
+    _atomic_write_text(
+        usda_path,
         "#usda 1.0\n"
         "(\n"
         "    defaultPrim = \"ReconstructionMesh\"\n"
@@ -94,6 +111,5 @@ def write_usda_handoff(
         f"    int[] faceVertexIndices = [{indices}]\n"
         f"    point3f[] points = [{points}]\n"
         "}\n",
-        encoding="utf-8",
     )
     return usda_path, sidecar_path

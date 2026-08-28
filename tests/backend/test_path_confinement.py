@@ -71,3 +71,21 @@ def test_user_influenced_filesystem_boundaries_use_public_guard():
 
     reconstruction = (root / "backend/services/reconstruction.py").read_text()
     assert "def _safe_export_path" not in reconstruction
+
+
+@pytest.mark.parametrize("escaping", ["../escape.zip", "../../escape.zip"])
+def test_atomic_zip_rejects_paths_outside_root(tmp_path, escaping):
+    """_atomic_zip confines its own target before replacing or unlinking it (#641)."""
+    from backend.routers.export import _atomic_zip
+
+    root = tmp_path / "exports"
+    root.mkdir()
+    victim = tmp_path / "escape.zip"
+    victim.write_bytes(b"pre-existing")
+
+    with pytest.raises(ValueError, match="outside exports directory"):
+        with _atomic_zip(root / escaping, root):
+            pass
+
+    assert victim.read_bytes() == b"pre-existing"
+    assert not list(root.iterdir())

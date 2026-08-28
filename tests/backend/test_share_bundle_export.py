@@ -1,6 +1,9 @@
+from __future__ import annotations
+
 import json
 import math
 import zipfile
+from unittest.mock import patch
 
 import pytest
 
@@ -94,6 +97,65 @@ def test_share_bundle_tileset_valid_without_glb(client, tmp_path, monkeypatch):
     assert root["boundingVolume"]["region"] != [0, 0, 0, 0, 0, 0]
     assert tileset["geometricError"] > 0
     assert "content" not in root
+
+
+def _bundle_inputs(client, tmp_path):
+    exports = tmp_path / "exports"
+    exports.mkdir()
+    mesh = exports / "mesh.glb"
+    mesh.write_bytes(b"glb" * 4096)
+    db = _db(client)
+    session = _make_session_with_gps_images(db, tmp_path)
+    rec = Reconstruction(
+        session_id=session.id, status="complete", mesh_glb_path=str(mesh), frames_used=1
+    )
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+    return exports, exports / f"reconstruction_{rec.id}_share.zip", rec
+
+
+def test_share_bundle_crash_mid_write_keeps_previous_bundle(client, tmp_path):
+    """A crash while rebuilding must leave the previous bundle intact (#641)."""
+    from backend.services.share_bundle import build_share_bundle
+
+    exports, bundle, rec = _bundle_inputs(client, tmp_path)
+    build_share_bundle(bundle, rec, exports)
+    good = bundle.read_bytes()
+
+    with patch(
+        "backend.services.share_bundle.zipfile.ZipFile.write", side_effect=OSError("disk full")
+    ):
+        with pytest.raises(OSError, match="disk full"):
+            build_share_bundle(bundle, rec, exports)
+
+    assert bundle.read_bytes() == good
+    with zipfile.ZipFile(bundle) as zf:
+        assert zf.testzip() is None
+        assert "artifacts/mesh.glb" in zf.namelist()
+    assert not list(exports.glob("*.tmp"))
+
+
+def test_share_bundle_rebuild_never_exposes_a_partial_zip(client, tmp_path):
+    """The cesium-ion reader must never see a half-written bundle mid-rebuild (#641)."""
+    from backend.services.share_bundle import build_share_bundle
+
+    exports, bundle, rec = _bundle_inputs(client, tmp_path)
+    build_share_bundle(bundle, rec, exports)
+    good = bundle.read_bytes()
+
+    observed = []
+    real_write = zipfile.ZipFile.write
+
+    def observing_write(self, filename, arcname=None, *args, **kwargs):
+        observed.append(bundle.read_bytes())
+        return real_write(self, filename, arcname, *args, **kwargs)
+
+    with patch("backend.services.share_bundle.zipfile.ZipFile.write", observing_write):
+        build_share_bundle(bundle, rec, exports)
+
+    assert observed, "the rebuild never reached an artifact write"
+    assert all(seen == good for seen in observed)
 
 
 def test_share_bundle_rejects_path_outside_exports(tmp_path):

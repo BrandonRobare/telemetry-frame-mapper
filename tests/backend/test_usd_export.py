@@ -3,6 +3,9 @@ from __future__ import annotations
 import json
 import zipfile
 from pathlib import Path
+from unittest.mock import patch
+
+import pytest
 
 import backend.routers.export as export_router
 from backend.db.models import Reconstruction
@@ -72,6 +75,54 @@ def test_usd_handoff_contains_real_mesh_and_georeferencing(client, tmp_path, mon
     assert "int[] faceVertexIndices = [0, 1, 2]" in usda
     assert metadata["geo_transform"]["utm_zone"] == "17N"
     assert "without an accuracy claim" in metadata["accuracy"]
+
+
+def test_usd_handoff_crash_mid_write_keeps_previous_bundle(client, tmp_path, monkeypatch):
+    """A crash while rebuilding the handoff ZIP must leave the previous one intact (#641)."""
+    exports_dir = tmp_path / "exports"
+    monkeypatch.setattr(
+        export_router, "get_config", lambda: type("Cfg", (), {"exports_dir": str(exports_dir)})()
+    )
+    rec = _complete_mesh_reconstruction(client, exports_dir)
+    assert client.get(f"/export/reconstructions/{rec.id}/usd").status_code == 200
+    bundle_path = exports_dir / str(rec.id) / f"mesh_{rec.id}_usd_handoff.zip"
+    good = bundle_path.read_bytes()
+
+    with patch(
+        "backend.routers.export.zipfile.ZipFile.write", side_effect=OSError("disk full")
+    ):
+        response = client.get(f"/export/reconstructions/{rec.id}/usd")
+
+    assert response.status_code == 422
+    assert bundle_path.read_bytes() == good
+    with zipfile.ZipFile(bundle_path) as bundle:
+        assert bundle.testzip() is None
+    assert not list(bundle_path.parent.glob("*.tmp"))
+
+
+def test_usda_crash_mid_write_keeps_previous_mesh(tmp_path):
+    """A failed usda replace must not destroy the mesh.usda already on disk (#641)."""
+    from backend.services.usd_export import write_usda_handoff
+
+    output_dir = tmp_path / "exports" / "1"
+    source = tmp_path / "mesh.obj"
+    source.write_text("v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n", encoding="utf-8")
+    usda_path, sidecar_path = write_usda_handoff(
+        output_dir, source, reconstruction_id=1, session_id=1, geo_transform={}
+    )
+    good_usda = usda_path.read_text(encoding="utf-8")
+    good_sidecar = sidecar_path.read_text(encoding="utf-8")
+
+    source.write_text("v 9 9 9\nv 8 0 0\nv 0 8 0\nf 1 2 3\n", encoding="utf-8")
+    with patch("backend.services.usd_export.os.replace", side_effect=OSError("disk full")):
+        with pytest.raises(OSError, match="disk full"):
+            write_usda_handoff(
+                output_dir, source, reconstruction_id=1, session_id=1, geo_transform={}
+            )
+
+    assert usda_path.read_text(encoding="utf-8") == good_usda
+    assert sidecar_path.read_text(encoding="utf-8") == good_sidecar
+    assert not list(output_dir.glob("*.tmp"))
 
 
 def test_usd_handoff_rejects_obj_outside_exports(client, tmp_path, monkeypatch):
