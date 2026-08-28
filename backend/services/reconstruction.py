@@ -1701,11 +1701,13 @@ def _run_video_renderer(
     fps: int = 30,
     width: int = 1920,
     height: int = 1080,
+    cancel: threading.Event | None = None,
 ) -> Path:
     """Render an offline flythrough video when browser recording is unavailable."""
     output_path.parent.mkdir(parents=True, exist_ok=True)
     splat_trainer.render_flythrough(
-        splat_path, output_path, keyframes, fps=fps, width=width, height=height
+        splat_path, output_path, keyframes,
+        fps=fps, width=width, height=height, cancel=cancel,
     )
     if not output_path.exists():
         raise RuntimeError("Video renderer did not write an output file")
@@ -1780,12 +1782,21 @@ def _run_flythrough_job(entry, db, cancel: threading.Event) -> None:
             fps=fps,
             width=width,
             height=height,
+            cancel=cancel,
         )
         rec.flythrough_path = str(rendered)
         rec.flythrough_status = "complete"
         rec.flythrough_error = None
         db.commit()
         mark_complete(entry.id)
+    except ReconstructionCancelled:
+        # Must precede the Exception branch (it is a RuntimeError subclass):
+        # a cancelled render is not a failed one, and there is no error to show.
+        db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).update({
+            "flythrough_status": "cancelled",
+            "flythrough_error": None,
+        })
+        db.commit()
     except Exception as exc:
         db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).update({
             "flythrough_status": "failed",
