@@ -19,7 +19,7 @@ def extract_srt(ffmpeg: str | Path, video: Path, srt_path: Path) -> None:
                 "-i",
                 external_file_arg(video, ffmpeg),
                 "-map",
-                "0:2",
+                "0:s:0",
                 "-f",
                 "srt",
                 external_file_arg(srt_path, ffmpeg),

@@ -1,3 +1,4 @@
+import { useCallback } from 'react'
 import type { RefObject } from 'react'
 import proj4 from 'proj4'
 import type { GeoTransform } from '../../types/api'
@@ -135,7 +136,9 @@ export function useRayCast(
   containerRef: RefObject<HTMLDivElement | null>,
   groundY = 0,
 ) {
-  async function castRay(e: MouseEvent): Promise<RayCastResult | null> {
+  // Memoized: consumers keep `castRay` in effect dep arrays, so a fresh
+  // identity every render re-attached the canvas listeners on every render (#664).
+  const castRay = useCallback(async (e: MouseEvent): Promise<RayCastResult | null> => {
     const viewer = viewerRef.current
     const container = containerRef.current
     if (!viewer || !container) return null
@@ -162,7 +165,7 @@ export function useRayCast(
       worldPos: { x: target.x, y: target.y, z: target.z },
       screenPos: { x: e.clientX - rect.left, y: e.clientY - rect.top },
     }
-  }
+  }, [viewerRef, containerRef, groundY])
 
   return { castRay }
 }
