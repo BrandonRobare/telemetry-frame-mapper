@@ -2031,6 +2031,65 @@ def test_flythrough_job_success_updates_status(setup_test_db, tmp_path):
     assert Path(rec.flythrough_path).read_bytes() == b"mp4"
 
 
+def test_flythrough_job_marks_cancelled_not_failed(setup_test_db, tmp_path):
+    """A cancelled render is cancelled, not failed, and the Event reaches it (#733)."""
+    import threading
+    from unittest.mock import patch
+
+    from backend.main import app
+    from backend.services.reconstruction import _run_flythrough_job
+    from backend.services.splat_trainer import ReconstructionCancelled
+
+    db = app.state.test_db_session
+    s = _make_session(db)
+    splat = tmp_path / "splat.ply"
+    splat.write_bytes(b"ply")
+    rec = Reconstruction(
+        session_id=s.id,
+        preset="quick",
+        status="complete",
+        frames_used=1,
+        splat_path=str(splat),
+        flythrough_status="running",
+    )
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+
+    cancel = threading.Event()
+    cancel.set()
+    seen: dict = {}
+
+    def fake_render(_splat_path, _output_path, _keyframes, **kwargs):
+        seen.update(kwargs)
+        if kwargs["cancel"].is_set():
+            raise ReconstructionCancelled("Cancelled by user")
+        raise AssertionError("cancel Event never reached the renderer")
+
+    entry = SimpleNamespace(
+        id=1,
+        target_id=rec.id,
+        payload_json=json.dumps({
+            "keyframes": [
+                {"position": [0, 0, 3], "target": [0, 0, 0], "duration_s": 1},
+                {"position": [3, 0, 0], "target": [0, 0, 0], "duration_s": 1},
+            ],
+            "fps": 30, "width": 640, "height": 480,
+        }),
+    )
+
+    with patch("backend.services.reconstruction.get_config") as mock_cfg, \
+         patch("backend.services.reconstruction._run_video_renderer", side_effect=fake_render):
+        mock_cfg.return_value.exports_dir = str(tmp_path / "exports")
+        _run_flythrough_job(entry, db, cancel)
+
+    db.expire_all()
+    db.refresh(rec)
+    assert seen["cancel"] is cancel
+    assert rec.flythrough_status == "cancelled"
+    assert rec.flythrough_error is None
+
+
 def _write_ascii_ply(path: Path, rows: list[tuple[float, float, float]]) -> None:
     body = "\n".join(f"{x} {y} {z}" for x, y, z in rows)
     path.write_text(
