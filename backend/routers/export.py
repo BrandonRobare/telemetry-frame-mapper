@@ -11,7 +11,7 @@ from contextlib import contextmanager
 from datetime import timedelta
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
 from shapely.geometry import LineString, Point, shape
@@ -693,10 +693,22 @@ def _share_link_owner_payload(link: ShareLink) -> dict:
 @router.post("/reconstructions/{reconstruction_id}/share-link", status_code=201)
 def create_share_link(
     reconstruction_id: int,
+    request: Request,
     body: CreateShareLinkRequest = CreateShareLinkRequest(),
     db: DBSession = Depends(get_db),
 ):
     """Create a persisted opaque share link; its bearer token is returned only once."""
+    # The startup guard cannot see a link created after startup, so a process that
+    # lost the job-queue lock refuses to mint one whose unlock throttle it would
+    # then split across workers (#652).
+    if body.password and not request.app.state.owns_job_queue:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Password-protected share links require a single API process; this process "
+                "does not own the job queue lock."
+            ),
+        )
     from ..services.share_links import (
         SHARE_LINK_PREFIX,
         create_opaque_token,

@@ -29,3 +29,6 @@ especially welcome.
 PIN unlock sessions, share-link unlock sessions, and PIN/share throttles are process-local.
 In v2.0.3, run exactly one API process on one host; multi-process and cross-host API serving are
 unsupported. A remote GPU worker performs reconstruction work only and is not a second API process.
+The backend enforces this where the throttles matter: a process that does not own the job-queue
+lock refuses to start when PIN lock is enabled or a live password-protected share link exists, and
+refuses to create a password-protected share link.
