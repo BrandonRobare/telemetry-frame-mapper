@@ -138,7 +138,6 @@ def _reconstruction_config_from_data(data: dict) -> dict:
             "quick": {
                 "iterations": 1000,
                 "max_frames": 500,
-                "exhaustive_matching": False,
                 "max_gaussians": 350000,
                 "sh_degree": 1,
                 "downscale_factor": 4,
@@ -146,7 +145,6 @@ def _reconstruction_config_from_data(data: dict) -> dict:
             "full": {
                 "iterations": 30000,
                 "max_frames": None,
-                "exhaustive_matching": True,
                 "max_gaussians": 1000000,
                 "sh_degree": 2,
                 "downscale_factor": 2,

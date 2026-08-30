@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from unittest.mock import patch
 
 import httpx
@@ -34,8 +35,14 @@ def test_cesium_config_is_disabled_and_secret_free_by_default(tmp_path):
     assert "token" not in {key for key in config if key != "token_env"}
 
 
+def _bundle(tmp_path, payload=b"zip"):
+    path = tmp_path / "tiles.zip"
+    path.write_bytes(payload)
+    return path
+
+
 def test_upload_uses_ion_create_s3_put_and_completion_without_exposing_credentials(
-    monkeypatch,
+    tmp_path, monkeypatch
 ):
     monkeypatch.setenv("CESIUM_ION_TEST_TOKEN", "ion-secret")
     created = httpx.Response(
@@ -68,7 +75,7 @@ def test_upload_uses_ion_create_s3_put_and_completion_without_exposing_credentia
     with patch(
         "backend.services.cesium_ion.httpx.request", side_effect=[created, uploaded, completed]
     ) as request:
-        result = upload_tileset(_config(), "tiles.zip", b"zip", "Mission")
+        result = upload_tileset(_config(), "tiles.zip", _bundle(tmp_path), "Mission")
 
     assert result == {"asset_id": 81, "status": "AWAITING_FILES"}
     create, storage, complete = request.call_args_list
@@ -80,27 +87,73 @@ def test_upload_uses_ion_create_s3_put_and_completion_without_exposing_credentia
     }
     assert create.kwargs["headers"] == {"Authorization": "Bearer ion-secret"}
     assert storage.args == ("PUT", "https://assets.cesium.test/sources/81/tiles.zip")
-    assert storage.kwargs["content"] == b"zip"
+    assert not isinstance(storage.kwargs["content"], bytes | bytearray | str)
     assert "temporary-secret" not in str(storage.kwargs)
     assert complete.args == ("POST", "https://api.cesium.test/v1/assets/81/uploadComplete")
     assert complete.kwargs["headers"] == {"Authorization": "Bearer ion-secret"}
 
 
-def test_cesium_client_rejects_disabled_missing_token_and_unsafe_url(monkeypatch):
+def test_cesium_upload_signs_the_file_digest_and_streams_the_bundle_from_disk(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("CESIUM_ION_TEST_TOKEN", "ion-secret")
+    payload = b"PK\x03\x04" + b"tile" * 4096
+    bundle = _bundle(tmp_path, payload)
+    created = httpx.Response(
+        201,
+        json={
+            "assetMetadata": {"id": 81, "status": "AWAITING_FILES"},
+            "uploadLocation": {
+                "bucket": "assets.cesium.test",
+                "prefix": "sources/81/",
+                "endpoint": "https://assets.cesium.test",
+                "accessKey": "temporary-access",
+                "secretAccessKey": "temporary-secret",
+                "sessionToken": "temporary-session",
+            },
+            "onComplete": {
+                "method": "POST",
+                "url": "https://api.cesium.test/v1/assets/81/uploadComplete",
+                "fields": {},
+            },
+        },
+        request=httpx.Request("POST", "https://api.cesium.test/v1/assets"),
+    )
+    sent = {}
+
+    def _record(method, url, **kwargs):
+        if method == "PUT":
+            sent["headers"] = kwargs["headers"]
+            sent["body"] = kwargs["content"].read()
+            return httpx.Response(200, request=httpx.Request("PUT", url))
+        if url.endswith("/uploadComplete"):
+            return httpx.Response(204, request=httpx.Request("POST", url))
+        return created
+
+    with patch("backend.services.cesium_ion.httpx.request", side_effect=_record):
+        upload_tileset(_config(), "tiles.zip", bundle, "Mission")
+
+    assert sent["body"] == payload
+    assert sent["headers"]["x-amz-content-sha256"] == hashlib.sha256(payload).hexdigest()
+    assert "UNSIGNED-PAYLOAD" not in str(sent["headers"])
+
+
+def test_cesium_client_rejects_disabled_missing_token_and_unsafe_url(tmp_path, monkeypatch):
+    bundle = _bundle(tmp_path)
     with pytest.raises(CesiumIonError, match="disabled"):
-        upload_tileset(_config(enabled=False), "tiles.zip", b"zip", "Mission")
+        upload_tileset(_config(enabled=False), "tiles.zip", bundle, "Mission")
     with pytest.raises(CesiumIonError, match="missing"):
-        upload_tileset(_config(), "tiles.zip", b"zip", "Mission")
+        upload_tileset(_config(), "tiles.zip", bundle, "Mission")
     monkeypatch.setenv("CESIUM_ION_TEST_TOKEN", "secret")
     with pytest.raises(CesiumIonError, match="HTTPS"):
-        upload_tileset(_config(api_url="http://cesium.test/v1"), "tiles.zip", b"zip", "Mission")
+        upload_tileset(_config(api_url="http://cesium.test/v1"), "tiles.zip", bundle, "Mission")
 
 
-def test_cesium_client_rejects_unsafe_bundle_filename(monkeypatch):
+def test_cesium_client_rejects_unsafe_bundle_filename(tmp_path, monkeypatch):
     monkeypatch.setenv("CESIUM_ION_TEST_TOKEN", "secret")
 
     with pytest.raises(CesiumIonError, match="must be a filename"):
-        upload_tileset(_config(), "../tiles.zip", b"zip", "Mission")
+        upload_tileset(_config(), "../tiles.zip", _bundle(tmp_path), "Mission")
 
 
 def _db(client):
@@ -144,7 +197,7 @@ def test_cesium_route_builds_existing_bundle_and_returns_only_asset_status(
     assert response.status_code == 200
     assert response.json() == {"asset_id": 81, "status": "AWAITING_FILES"}
     assert upload.call_args.args[1] == f"reconstruction_{rec.id}_share.zip"
-    assert upload.call_args.args[2].startswith(b"PK")
+    assert upload.call_args.args[2].read_bytes().startswith(b"PK")
 
 
 def test_cesium_route_returns_actionable_safe_error(client, tmp_path, monkeypatch):

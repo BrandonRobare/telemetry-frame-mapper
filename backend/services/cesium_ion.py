@@ -89,7 +89,7 @@ def _signing_key(secret: str, date: str, region: str) -> bytes:
     return key
 
 
-def _upload_bundle(config: dict, upload: dict, filename: str, body: bytes) -> None:
+def _upload_bundle(config: dict, upload: dict, filename: str, bundle: Path) -> None:
     """Upload one ZIP with temporary S3 credentials returned by ion.
 
     Cesium provides a bucket/prefix plus short-lived AWS credentials.  Signing
@@ -111,7 +111,8 @@ def _upload_bundle(config: dict, upload: dict, filename: str, body: bytes) -> No
     now = datetime.now(UTC)
     timestamp, date = now.strftime("%Y%m%dT%H%M%SZ"), now.strftime("%Y%m%d")
     region = str(upload.get("region") or "us-east-1")
-    payload_hash = hashlib.sha256(body).hexdigest()
+    with bundle.open("rb") as handle:
+        payload_hash = hashlib.file_digest(handle, "sha256").hexdigest()
     headers = {
         "host": parsed.netloc,
         "x-amz-content-sha256": payload_hash,
@@ -140,19 +141,20 @@ def _upload_bundle(config: dict, upload: dict, filename: str, body: bytes) -> No
         f"SignedHeaders={signed_headers}, Signature={signature}"
     )
     try:
-        response = httpx.request(
-            "PUT",
-            url,
-            headers={**headers, "Authorization": authorization},
-            content=body,
-            timeout=config["timeout_seconds"],
-        )
+        with bundle.open("rb") as handle:
+            response = httpx.request(
+                "PUT",
+                url,
+                headers={**headers, "Authorization": authorization},
+                content=handle,
+                timeout=config["timeout_seconds"],
+            )
         response.raise_for_status()
     except httpx.HTTPError as exc:
         raise CesiumIonError("Cesium ion storage upload failed; check quota and retry") from exc
 
 
-def upload_tileset(config: dict, bundle_name: str, body: bytes, name: str) -> dict:
+def upload_tileset(config: dict, bundle_name: str, bundle: Path, name: str) -> dict:
     """Create one 3D Tiles asset, upload the ZIP, and start Cesium processing."""
     _base_url(config)
     _headers(config)
@@ -174,7 +176,7 @@ def upload_tileset(config: dict, bundle_name: str, body: bytes, name: str) -> di
     complete = created.get("onComplete")
     if not isinstance(upload, dict) or not isinstance(complete, dict):
         raise CesiumIonError(f"Cesium ion asset {asset_id} did not provide upload instructions")
-    _upload_bundle(config, upload, bundle_name, body)
+    _upload_bundle(config, upload, bundle_name, bundle)
     method, url = complete.get("method"), complete.get("url")
     if not isinstance(method, str) or not isinstance(url, str) or not url:
         raise CesiumIonError(f"Cesium ion asset {asset_id} did not provide completion instructions")
