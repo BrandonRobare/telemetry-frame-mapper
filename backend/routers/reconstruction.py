@@ -689,11 +689,10 @@ def _status_sse_payload(rec: Reconstruction) -> str:
     return f"event: status\ndata: {json.dumps(body, separators=(',', ':'))}\n\n"
 
 
-# Async twin of wait_for_reconstruction_status_change: the sync helper blocks on
-# a threading.Condition, which would pin an anyio worker thread for the life of
-# every open SSE connection.  Polling the (cheap, in-memory) version counter
-# costs a sleeping task instead; the interval only bounds how late a status
-# change reaches the browser.
+# Waiting on a threading.Condition here would pin an anyio worker thread for the
+# life of every open SSE connection.  Polling the (cheap, in-memory) version
+# counter costs a sleeping task instead; the interval only bounds how late a
+# status change reaches the browser.
 _STATUS_CHANGE_POLL_S = 0.25
 
 
