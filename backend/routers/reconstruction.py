@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import tempfile
 import time
 import zipfile
-from collections.abc import Iterator
+from collections.abc import AsyncIterator
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -13,6 +14,7 @@ from fastapi.responses import FileResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session as DBSession
 from starlette.background import BackgroundTask
+from starlette.concurrency import run_in_threadpool
 
 from ..core.config import get_config, get_render_config, get_webodm_config
 from ..core.paths import confine_path
@@ -49,7 +51,6 @@ from ..services.reconstruction import (
     start_mesh_export,
     start_reconstruction,
     start_semantic_labeling,
-    wait_for_reconstruction_status_change,
 )
 from ..services.semantic_labels import is_sidecar_stale, semantic_summary
 from ..services.splat_cleanup import cleanup_ply_file
@@ -688,9 +689,34 @@ def _status_sse_payload(rec: Reconstruction) -> str:
     return f"event: status\ndata: {json.dumps(body, separators=(',', ':'))}\n\n"
 
 
+# Waiting on a threading.Condition here would pin an anyio worker thread for the
+# life of every open SSE connection.  Polling the (cheap, in-memory) version
+# counter costs a sleeping task instead; the interval only bounds how late a
+# status change reaches the browser.
+_STATUS_CHANGE_POLL_S = 0.25
+
+
+async def _await_status_change(
+    rec_id: int,
+    last_version: int,
+    timeout_s: float = 15.0,
+) -> int:
+    deadline = time.monotonic() + timeout_s
+    while True:
+        version = current_reconstruction_status_version(rec_id)
+        if version > last_version:
+            return version
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return last_version
+        await asyncio.sleep(min(_STATUS_CHANGE_POLL_S, remaining))
+
+
 @router.get("/{reconstruction_id}/status/events")
-def stream_status_events(reconstruction_id: int, db: DBSession = Depends(get_db)):
-    rec = db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).first()
+async def stream_status_events(reconstruction_id: int, db: DBSession = Depends(get_db)):
+    rec = await run_in_threadpool(
+        lambda: db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).first()
+    )
     if not rec:
         raise HTTPException(status_code=404, detail="Reconstruction not found")
     # Release the FastAPI request-scoped session immediately — we create
@@ -701,22 +727,27 @@ def stream_status_events(reconstruction_id: int, db: DBSession = Depends(get_db)
 
     from backend.db.database import SessionLocal as _SessionLocal
 
-    def events() -> Iterator[str]:
+    def read_status() -> str | None:
+        sdb = _SessionLocal()
+        try:
+            rec = sdb.query(Reconstruction).filter(
+                Reconstruction.id == reconstruction_id
+            ).first()
+            return None if rec is None else _status_sse_payload(rec)
+        finally:
+            sdb.close()
+
+    async def events() -> AsyncIterator[str]:
         version = current_reconstruction_status_version(reconstruction_id)
         deadline = time.monotonic() + 3600.0  # 1h hard cap
         while time.monotonic() < deadline:
-            sdb = _SessionLocal()
-            try:
-                rec = sdb.query(Reconstruction).filter(
-                    Reconstruction.id == reconstruction_id
-                ).first()
-                if rec is None:
-                    yield "event: deleted\ndata: {}\n\n"
-                    return
-                yield _status_sse_payload(rec)
-            finally:
-                sdb.close()
-            new_version = wait_for_reconstruction_status_change(reconstruction_id, version)
+            # Only the short query holds a worker thread, never the whole stream.
+            payload = await run_in_threadpool(read_status)
+            if payload is None:
+                yield "event: deleted\ndata: {}\n\n"
+                return
+            yield payload
+            new_version = await _await_status_change(reconstruction_id, version)
             if new_version == version:
                 yield ": keepalive\n\n"
             else:
