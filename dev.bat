@@ -3,9 +3,10 @@ REM dev.bat — start backend + frontend for local development (run from the rep
 cd /d "%~dp0"
 
 echo Starting backend...
-REM Reload mode uses one API worker.
-REM Run uvicorn from the repo root: config.yaml and the .\processed static mount resolve from here
-start "Backend" cmd /k "uv sync --group backend --group dev && uv run --no-sync uvicorn backend.main:app --reload --port 8000"
+REM Reload mode uses one API worker; python -m backend validates the bind before serving.
+REM Run from the repo root: config.yaml (deployment host/port, default 127.0.0.1:8000) and the
+REM .\processed static mount resolve from here
+start "Backend" cmd /k "set BACKEND_RELOAD=1&& uv sync --group backend --group dev && uv run --no-sync python -m backend"
 
 where node >nul 2>nul
 if errorlevel 1 (

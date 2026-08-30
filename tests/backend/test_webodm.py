@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 from unittest.mock import patch
 
 import httpx
@@ -82,18 +83,65 @@ def test_webodm_client_uses_documented_project_task_and_poll_contract(tmp_path, 
     assert poll.args == ("GET", "https://webodm.example.test/api/projects/17/tasks/23/")
 
 
-def test_webodm_download_uses_documented_asset_endpoint(tmp_path, monkeypatch):
+class _StreamedResponse:
+    """A streaming response that has no ``.content``, so buffering would fail."""
+
+    def __init__(self, chunks, error=None):
+        self._chunks = chunks
+        self._error = error
+
+    def raise_for_status(self):
+        return self
+
+    def iter_bytes(self):
+        yield from self._chunks
+        if self._error is not None:
+            raise self._error
+
+
+def _fake_stream(response, calls):
+    @contextmanager
+    def stream(*args, **kwargs):
+        calls.append((args, kwargs))
+        yield response
+
+    return stream
+
+
+def test_webodm_download_streams_to_disk_without_buffering_the_asset(tmp_path, monkeypatch):
     monkeypatch.setenv("WEBODM_TEST_JWT", "test-secret")
-    response = httpx.Response(
-        200,
-        content=b"geotiff",
-        request=httpx.Request("GET", "https://webodm.example.test/api/projects/17/tasks/23/download/orthophoto.tif"),
-    )
-    with patch("backend.services.webodm.httpx.request", return_value=response) as request:
+    calls = []
+    response = _StreamedResponse([b"geo", b"tiff"])
+
+    with (
+        patch("backend.services.webodm.httpx.stream", _fake_stream(response, calls)),
+        patch("backend.services.webodm.httpx.request") as request,
+    ):
         saved = download_asset(_config(), 17, 23, "orthophoto.tif", tmp_path / "exports")
 
     assert saved.read_bytes() == b"geotiff"
-    assert request.call_args.args == ("GET", "https://webodm.example.test/api/projects/17/tasks/23/download/orthophoto.tif")
+    request.assert_not_called()
+    (args, kwargs) = calls[0]
+    assert args == (
+        "GET",
+        "https://webodm.example.test/api/projects/17/tasks/23/download/orthophoto.tif",
+    )
+    assert kwargs["headers"] == {"Authorization": "JWT test-secret"}
+    assert kwargs["timeout"] == 5
+    assert not list(saved.parent.glob("*.part"))
+
+
+def test_webodm_download_reports_and_cleans_up_a_failed_transfer(tmp_path, monkeypatch):
+    monkeypatch.setenv("WEBODM_TEST_JWT", "test-secret")
+    response = _StreamedResponse([b"geo"], error=httpx.ReadError("connection reset"))
+
+    with (
+        patch("backend.services.webodm.httpx.stream", _fake_stream(response, [])),
+        pytest.raises(WebODMError, match="WebODM request failed"),
+    ):
+        download_asset(_config(), 17, 23, "orthophoto.tif", tmp_path / "exports")
+
+    assert not list((tmp_path / "exports").glob("*"))
 
 
 def test_webodm_get_task_rejects_mismatched_response_identity(monkeypatch):

@@ -132,6 +132,71 @@ def test_legacy_upgrade_covers_every_model_column(isolated_engine):
         assert {column.name for column in table.columns} <= actual_columns
 
 
+# The FK columns revision 0016 indexes, and the columns it deliberately leaves
+# alone (composite-PK leading columns, plus FKs nothing filters on).
+FK_INDEXES = {
+    "sessions": {"ix_sessions_project_id"},
+    "images": {"ix_images_session_id"},
+    "footprints": {"ix_footprints_image_id"},
+    "flight_logs": {"ix_flight_logs_session_id"},
+    "flight_log_points": {"ix_flight_log_points_flight_log_id"},
+    "flight_entries": {"ix_flight_entries_session_id"},
+    "session_log_entries": {"ix_session_log_entries_session_id"},
+    "reconstructions": {
+        "ix_reconstructions_session_id",
+        "ix_reconstructions_parent_reconstruction_id",
+    },
+    "share_links": {"ix_share_links_reconstruction_id"},
+    "annotations": {"ix_annotations_reconstruction_id"},
+    "measurements": {"ix_measurements_reconstruction_id"},
+    "defects": {"ix_defects_session_id"},
+}
+
+
+def _index_names(inspector, table: str) -> set[str]:
+    return {index["name"] for index in inspector.get_indexes(table)}
+
+
+def test_fresh_db_indexes_the_filtered_foreign_key_columns(isolated_engine):
+    database_module.init_db()
+
+    inspector = sa.inspect(isolated_engine)
+    for table, expected in FK_INDEXES.items():
+        assert expected <= _index_names(inspector, table), table
+
+
+def test_legacy_upgrade_indexes_foreign_keys_and_replays_cleanly(isolated_engine):
+    """A v2.0.2 database gains the FK indexes, and 0016 can be replayed over them."""
+    schema = (
+        Path(__file__).parent / "db" / "v2_0_2_schema.sql"
+    ).read_text(encoding="utf-8")
+    db_path = str(isolated_engine.url).split("///")[1]
+    raw_conn = sqlite3.connect(db_path)
+    try:
+        raw_conn.executescript(schema)
+        raw_conn.commit()
+    finally:
+        raw_conn.close()
+
+    database_module.init_db()
+
+    inspector = sa.inspect(isolated_engine)
+    for table, expected in FK_INDEXES.items():
+        assert expected <= _index_names(inspector, table), table
+
+    # Rewind the stamp so 0016 runs a second time against a database that
+    # already carries every index it creates: it must be a no-op, not a
+    # "index already exists" failure.
+    with isolated_engine.begin() as conn:
+        conn.execute(sa.text("update alembic_version set version_num = '0015'"))
+
+    database_module.init_db()
+
+    inspector = sa.inspect(isolated_engine)
+    for table, expected in FK_INDEXES.items():
+        assert expected <= _index_names(inspector, table), table
+
+
 def test_init_db_is_idempotent(isolated_engine):
     database_module.init_db()
     # Calling init_db() a second time against the same, now-migrated database
