@@ -65,6 +65,31 @@ from .routers import uploads as uploads_router
 from .routers import webodm as webodm_router
 
 
+def _password_protected_share_exists() -> bool:
+    """Report whether any share link that can still be unlocked has a password.
+
+    Its unlock throttle lives in per-process memory just like the PIN one, so a
+    live protected link binds the API to the same single-process contract (#652).
+    Revoked and expired links are excluded: they can no longer be unlocked, so
+    one stale link must not brick the deployment forever.
+    """
+    from backend.db.database import SessionLocal
+    from backend.db.models import ShareLink
+    from backend.services.share_links import now_utc
+
+    with SessionLocal() as db:
+        return (
+            db.query(ShareLink)
+            .filter(
+                ShareLink.password_hash.isnot(None),
+                ShareLink.revoked_at.is_(None),
+                ShareLink.expires_at > now_utc(),
+            )
+            .first()
+            is not None
+        )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     configure_application_logging(get_logging_config())
@@ -75,11 +100,15 @@ async def lifespan(app: FastAPI):
     from backend.services.orthomosaic_export import reset_dangling_ortho_status
 
     owns_job_queue = start_worker()
-    if not owns_job_queue and pin_lock_config["enabled"]:
+    if not owns_job_queue and (
+        pin_lock_config["enabled"] or _password_protected_share_exists()
+    ):
         raise RuntimeError(
-            "PIN lock requires a single API process; another process already owns the job "
-            "queue lock."
+            "PIN lock and password-protected share links keep their unlock throttles in "
+            "process memory and require a single API process; another process already owns "
+            "the job queue lock."
         )
+    app.state.owns_job_queue = owns_job_queue
     if owns_job_queue:
         # Same startup-recovery pass as the job-queue reaper, and gated on the same
         # lock so a second process cannot fail another's in-flight export (#628).
@@ -144,6 +173,9 @@ api_key_config = get_api_key_config()
 app.state.pin_lock_sessions = {}
 app.state.pin_unlock_attempts = {}
 app.state.share_unlock_attempts = {}
+# Overwritten by the lifespan; the default keeps direct-import users (tests, tooling)
+# on the single-process path they actually are.
+app.state.owns_job_queue = True
 app.add_middleware(
     CORSMiddleware,
     allow_origins=deployment_config["cors_origins"],

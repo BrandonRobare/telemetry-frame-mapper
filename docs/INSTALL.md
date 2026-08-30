@@ -127,6 +127,13 @@ one API process on one host: do not add Uvicorn/Gunicorn workers or place multip
 or hosts behind a proxy. Multi-process and cross-host API serving are unsupported in v2.0.3; this
 limitation does not add cross-process coordination.
 
+Where splitting a throttle would weaken it, the contract is enforced rather than only documented.
+Only one process wins the job-queue lock; a process that loses it refuses to start when PIN lock is
+enabled or when a live password-protected share link exists. Because such a link can also be
+created after startup, `POST /export/reconstructions/{id}/share-link` returns `409` from a
+non-owning process when a password is supplied. Share links without a password are unaffected — they
+have no unlock throttle to split.
+
 ### Binding beyond loopback
 
 `deployment.host` defaults to `127.0.0.1`. If you set it to a LAN address or `0.0.0.0` while
