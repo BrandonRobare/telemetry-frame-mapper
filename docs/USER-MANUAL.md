@@ -203,8 +203,8 @@ progress from 0–100%:
 selected frames
    │  write COLMAP workspace (images + PINHOLE cameras.txt)         ~2%
    ▼
-COLMAP SfM:  feature_extractor → matcher (exhaustive=full,         10–95%
-   │         sequential=quick) → mapper → model_converter
+COLMAP SfM:  feature_extractor → matcher → mapper →                10–95%
+   │         model_converter
    │         → sparse/0 model (cameras, images, points3D)
    ▼
 geo-transform: solve COLMAP→UTM similarity from frame GPS (may fail → not georeferenced)
@@ -218,6 +218,23 @@ thumbnail:  render a 512×512 nadir-ish JPEG                        100%
    ▼
 exports/{id}/splat.ply  + LODs  + processed/thumbs/splat_{id}.jpg
 ```
+
+**Feature matching** is chosen by `reconstruction.matcher` in `config.yaml` —
+one global setting, *not* a per-preset one. Accepted values are `sequential`,
+`sequential_guided`, `exhaustive` (the default) and `exhaustive_guided`;
+`_guided` adds COLMAP's `--SiftMatching.guided_matching=1`, and anything
+unrecognised silently falls back to `exhaustive`. Sequential matching is O(N)
+and suits a single continuous flight line; exhaustive is O(N²) and is the most
+expensive stage in the pipeline on large captures.
+
+One override runs automatically: when the session has GPS, has at least
+`reconstruction.spatial_matcher_min_images` frames (default 150), and the
+installed COLMAP reports `spatial_matcher` support, the pipeline uses
+`spatial_matcher` instead of the configured matcher — O(N·k) rather than O(N²),
+tuned for lawnmower surveys (GPS priors, ignore Z, 50 neighbours, 100 m). Most
+real surveys therefore never use the `matcher` value at all; drop
+`spatial_matcher_min_images` below the frame count to see it take effect, or
+raise it above to force the configured matcher.
 
 Per-frame reprojection errors from COLMAP are stored and surfaced as badges in
 the Review tab. If torch/gsplat are not installed, the job completes gracefully
@@ -363,10 +380,10 @@ derives its full hyperparameter set from the preset's iteration count.
 | Opacity reset | disabled | every 3,000 |
 | Eval every / views | 250 / 4 | 1,000 / 4 |
 | SH warmup | +1 degree / 500 iters | +1 degree / 1,000 iters |
-| COLMAP matching | sequential | exhaustive |
 
 Use **quick** to validate a capture in minutes; **full** for a final,
-high-quality splat.
+high-quality splat. Presets only affect gsplat training — the COLMAP stages,
+feature matching included, run identically under both (see §2b).
 
 ### Graceful degradation (contracts)
 

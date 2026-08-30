@@ -9,9 +9,10 @@ if ! command -v uv >/dev/null 2>&1; then
   exit 1
 fi
 uv sync --group backend --group dev
-# Reload mode uses one API worker.
-# Run from the repo root: config.yaml and the ./processed static mount resolve from here
-uv run --no-sync uvicorn backend.main:app --reload --port 8000 &
+# Reload mode uses one API worker; python -m backend validates the bind before serving.
+# Run from the repo root: config.yaml (deployment host/port, default 127.0.0.1:8000) and the
+# ./processed static mount resolve from here
+BACKEND_RELOAD=1 uv run --no-sync python -m backend &
 BACKEND_PID=$!
 echo "Backend PID: $BACKEND_PID (http://localhost:8000)"
 
