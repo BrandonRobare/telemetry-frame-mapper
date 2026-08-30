@@ -1,5 +1,6 @@
 """Tests for the share links service and public viewer router."""
 
+import asyncio
 import time
 from datetime import timedelta
 
@@ -544,6 +545,60 @@ class TestPersistedShareLinks:
         assert metadata.json()["legacy_token_required"] is True
         artifact = client.get(f"/share/{rec.id}/pointcloud?token={SHARE_LINK_PREFIX}{legacy}")
         assert artifact.status_code == 200
+
+    def test_second_process_refused_when_a_password_protected_share_exists(
+        self, client, monkeypatch
+    ):
+        """#652 — the unlock throttle is process-local, so the guard must not be
+        conditional on PIN lock, which is off by default."""
+        from backend.services import job_queue
+
+        assert not main.pin_lock_config["enabled"]
+        rec = self._completed_reconstruction(client)
+        self._create(client, rec, password="secret")
+
+        monkeypatch.setattr(main, "configure_application_logging", lambda config: None)
+        monkeypatch.setattr(main, "init_db", lambda: None)
+        monkeypatch.setattr(job_queue, "start_worker", lambda: False)
+
+        async def open_lifespan():
+            async with main.lifespan(main.app):
+                pass
+
+        with pytest.raises(RuntimeError, match="single API process"):
+            asyncio.run(open_lifespan())
+
+    def test_only_live_password_protected_links_hold_the_contract(self, client):
+        from backend.db.models import ShareLink
+
+        rec = self._completed_reconstruction(client)
+        self._create(client, rec)
+        assert main._password_protected_share_exists() is False
+
+        created = self._create(client, rec, password="secret")
+        assert main._password_protected_share_exists() is True
+
+        db = _db(client)
+        link = db.query(ShareLink).filter(ShareLink.id == created["share_link_id"]).one()
+        link.revoked_at = now_utc()
+        db.commit()
+        assert main._password_protected_share_exists() is False
+
+    def test_password_protected_creation_refused_without_the_queue_lock(self, client):
+        rec = self._completed_reconstruction(client)
+        main.app.state.owns_job_queue = False
+        try:
+            refused = client.post(
+                f"/export/reconstructions/{rec.id}/share-link", json={"password": "secret"}
+            )
+            assert refused.status_code == 409
+            assert "single API process" in refused.json()["detail"]
+            assert (
+                client.post(f"/export/reconstructions/{rec.id}/share-link", json={}).status_code
+                == 201
+            )
+        finally:
+            main.app.state.owns_job_queue = True
 
 
 def _db(client):
