@@ -98,7 +98,6 @@ class PresetSettings(BaseModel):
     max_gaussians: int | None = Field(default=None, gt=0)
     sh_degree: int | None = Field(default=None, ge=1, le=3)
     downscale_factor: int | None = Field(default=None, gt=0)
-    exhaustive_matching: bool | None = None
 
 
 class PresetsSettings(BaseModel):
