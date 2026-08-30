@@ -3,6 +3,33 @@
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres to [Semantic Versioning](https://semver.org/).
 
 
+## [2.0.4] — 2026-08-30
+
+Subsystem-correctness release for defects found after v2.0.3 across reconstruction, export, storage lifecycle, uploads, the frontend, and the CLI.
+
+### Fixed
+
+- Splat training uses the sub-model the geo-transform came from, failures are recorded as failures, flythrough rendering neither deadlocks nor ignores cancellation, and a failed splat transform is no longer reported as success (#624, #625, #626, #645, #733).
+- Semantic labelling runs inside the GPU-capped job queue, a retry cannot resurrect a cancelled job, and the `quick` preset selects a real COLMAP matcher (#630, #634, #667).
+- Orthomosaic export preserves colour, writes atomically, and indexes rows from `y_max`; GCP lists match ODM's format; LAS export is bounded; elevation guards run before the work they protect (#627, #628, #629, #633, #636, #639).
+- Footprints derive their UTM zone from the flight, share-bundle/USD ZIPs and concurrent bundle downloads are atomic, WMS capabilities answer before an orthomosaic exists, and DEM sampling failures surface (#640, #641, #646, #682, #684).
+- Storage lifecycle deletes what disk pressure requires, escapes `LIKE` matching, and clears database paths it sweeps; TargetArea geometry and short DJI CSV rows are validated (#638, #642, #643, #644, #683).
+- Browser uploads bound chunk reads, serialize quota reservation, and complete idempotently; WebODM and Cesium ion transfers stream instead of buffering (#585, #601, #602, #637).
+- Flight-log offset preview is bounded, foreign-key filter columns are indexed, the SSE stream is async, path confinement is one guard, and share-unlock throttling holds the single-process contract (#635, #647, #648, #650, #652).
+- Remote reconstruction status, session switching, per-tab error boundaries, map panning, slope overlay caching, splat orbit performance, job-history search, dead layer toggles, and profile SVG export all behave correctly (#649, #655, #656, #662, #663, #664, #665, #666, #681).
+- CLI pipeline status is truthful, SRT parsing keeps partial blocks and DJI's `longtitude`, bare altitudes are not treated as relative, UTF-8 applies to every frame and file, `piexif` absence no longer hides GPS, audit timestamps are UTC, and SRT extraction selects the subtitle stream (#583, #674, #675, #676, #677, #678, #679, #685).
+- `dev.sh` and `dev.bat` route through the validated deployment bind (#632).
+
+### Changed
+
+- Windows-sensitive pytest suites now run on Windows in CI, not only the packaging smoke (#651).
+
+### Upgrade
+
+- Upgrade the complete source checkout or Windows installation; `frontend-dist.zip` alone does not install backend, CLI, migration, or packaging fixes.
+- Back up the SQLite database, configuration, and required artifacts before restart. Startup applies migration `0016`, which adds 13 indexes; it is additive and measured at 85 ms on a 400,000-image database.
+- See [release-notes/v2.0.4.md](release-notes/v2.0.4.md) for the full upgrade and rollback procedure.
+
 ## [2.0.3] — 2026-08-13
 
 Maintenance release for blocking correctness, data-integrity, deployment, and release-verification defects found after v2.0.2.

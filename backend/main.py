@@ -137,7 +137,7 @@ async def lifespan(app: FastAPI):
         shutdown_worker(timeout=10.0)
 
 
-app = FastAPI(title="Telemetry Frame Mapper API", version="2.0.3", lifespan=lifespan)
+app = FastAPI(title="Telemetry Frame Mapper API", version="2.0.4", lifespan=lifespan)
 app.include_router(sessions_router.router)
 app.include_router(target_areas_router.router)
 app.include_router(coverage_router.router)
