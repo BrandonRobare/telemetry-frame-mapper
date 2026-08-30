@@ -498,7 +498,7 @@ def upload_reconstruction_to_cesium_ion(reconstruction_id: int, db: DBSession = 
     try:
         build_share_bundle(bundle, rec, exports_dir)
         name = f"Reconstruction {rec.id}"
-        return upload_tileset(get_cesium_ion_config(), bundle.name, bundle.read_bytes(), name)
+        return upload_tileset(get_cesium_ion_config(), bundle.name, bundle, name)
     except (CesiumIonError, ValueError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 

@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import json
 import os
-from contextlib import ExitStack
+from collections.abc import Iterator
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -66,6 +67,23 @@ def _request(config: dict, method: str, path: str, **kwargs) -> httpx.Response:
         )
         response.raise_for_status()
         return response
+    except httpx.HTTPError as exc:
+        raise WebODMError(f"WebODM request failed: {exc}") from exc
+
+
+@contextmanager
+def _stream(config: dict, method: str, path: str, **kwargs) -> Iterator[httpx.Response]:
+    """Open a response whose body is consumed in chunks rather than buffered."""
+    try:
+        with httpx.stream(
+            method,
+            f"{_base_url(config)}{path}",
+            headers=_headers(config),
+            timeout=config["timeout_seconds"],
+            **kwargs,
+        ) as response:
+            response.raise_for_status()
+            yield response
     except httpx.HTTPError as exc:
         raise WebODMError(f"WebODM request failed: {exc}") from exc
 
@@ -132,16 +150,19 @@ def download_asset(
     filename = _ASSET_FILENAMES.get(asset)
     if filename is None:
         raise WebODMError("WebODM asset is not a supported mapping filename")
-    response = _request(
-        config, "GET", f"/api/projects/{project_id}/tasks/{task_id}/download/{filename}"
-    )
     destination = output_dir / filename
     destination.parent.mkdir(parents=True, exist_ok=True)
     temporary = destination.with_suffix(destination.suffix + ".part")
+    path = f"/api/projects/{project_id}/tasks/{task_id}/download/{filename}"
     try:
-        temporary.write_bytes(response.content)
+        with _stream(config, "GET", path) as response, temporary.open("wb") as out:
+            for chunk in response.iter_bytes():
+                out.write(chunk)
         temporary.replace(destination)
     except OSError as exc:
         temporary.unlink(missing_ok=True)
         raise WebODMError(f"Unable to save WebODM asset: {exc}") from exc
+    except WebODMError:
+        temporary.unlink(missing_ok=True)
+        raise
     return destination
