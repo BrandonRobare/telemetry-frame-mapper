@@ -58,7 +58,7 @@ class Session(Base):
     name = Column(String, nullable=False)
     folder_path = Column(String)
     import_mode = Column(String, default="full")
-    project_id = Column(Integer, ForeignKey("projects.id"), nullable=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=True, index=True)
     imported_at = Column(UtcDateTime, default=lambda: datetime.now(UTC))
     photo_count = Column(Integer, default=0)
     usable_count = Column(Integer, default=0)
@@ -95,7 +95,7 @@ class Session(Base):
 class Image(Base):
     __tablename__ = "images"
     id = Column(Integer, primary_key=True, index=True)
-    session_id = Column(Integer, ForeignKey("sessions.id"), nullable=False)
+    session_id = Column(Integer, ForeignKey("sessions.id"), nullable=False, index=True)
     filename = Column(String, nullable=False)
     filepath = Column(String, nullable=False)
     thumb_path = Column(String)
@@ -134,7 +134,7 @@ class Image(Base):
 class Footprint(Base):
     __tablename__ = "footprints"
     id = Column(Integer, primary_key=True, index=True)
-    image_id = Column(Integer, ForeignKey("images.id"), nullable=False)
+    image_id = Column(Integer, ForeignKey("images.id"), nullable=False, index=True)
     geom_wkt = Column(Text)
     geom_geojson = Column(Text)
     ground_width_m = Column(Float)
@@ -147,7 +147,7 @@ class Footprint(Base):
 class FlightLog(Base):
     __tablename__ = "flight_logs"
     id = Column(Integer, primary_key=True, index=True)
-    session_id = Column(Integer, ForeignKey("sessions.id"), nullable=False)
+    session_id = Column(Integer, ForeignKey("sessions.id"), nullable=False, index=True)
     filename = Column(String)
     filepath = Column(String)
     format = Column(String)
@@ -166,7 +166,7 @@ class FlightLog(Base):
 class FlightLogPoint(Base):
     __tablename__ = "flight_log_points"
     id = Column(Integer, primary_key=True, index=True)
-    flight_log_id = Column(Integer, ForeignKey("flight_logs.id"), nullable=False)
+    flight_log_id = Column(Integer, ForeignKey("flight_logs.id"), nullable=False, index=True)
     timestamp = Column(UtcDateTime)
     latitude = Column(Float)
     longitude = Column(Float)
@@ -189,7 +189,7 @@ class FlightEntry(Base):
     """Operator-recorded battery/flight metadata for a session (field records)."""
     __tablename__ = "flight_entries"
     id = Column(Integer, primary_key=True, index=True)
-    session_id = Column(Integer, ForeignKey("sessions.id"), nullable=False)
+    session_id = Column(Integer, ForeignKey("sessions.id"), nullable=False, index=True)
     battery_id = Column(String)
     start_pct = Column(Float)
     end_pct = Column(Float)
@@ -252,7 +252,7 @@ class MissionPlan(Base):
 class SessionLogEntry(Base):
     __tablename__ = "session_log_entries"
     id = Column(Integer, primary_key=True, index=True)
-    session_id = Column(Integer, ForeignKey("sessions.id"), nullable=True)
+    session_id = Column(Integer, ForeignKey("sessions.id"), nullable=True, index=True)
     timestamp = Column(UtcDateTime, default=lambda: datetime.now(UTC))
     event_type = Column(String)
     coverage_pct = Column(Float)
@@ -264,8 +264,10 @@ class SessionLogEntry(Base):
 class Reconstruction(Base):
     __tablename__ = "reconstructions"
     id = Column(Integer, primary_key=True, index=True)
-    session_id = Column(Integer, ForeignKey("sessions.id"), nullable=False)
-    parent_reconstruction_id = Column(Integer, ForeignKey("reconstructions.id"), nullable=True)
+    session_id = Column(Integer, ForeignKey("sessions.id"), nullable=False, index=True)
+    parent_reconstruction_id = Column(
+        Integer, ForeignKey("reconstructions.id"), nullable=True, index=True
+    )
     status = Column(String, default="pending")
     preset = Column(String, default="quick")
     progress_pct = Column(Float, default=0.0)
@@ -326,7 +328,9 @@ class ShareLink(Base):
 
     __tablename__ = "share_links"
     id = Column(Integer, primary_key=True, index=True)
-    reconstruction_id = Column(Integer, ForeignKey("reconstructions.id"), nullable=False)
+    reconstruction_id = Column(
+        Integer, ForeignKey("reconstructions.id"), nullable=False, index=True
+    )
     token_hash = Column(String, nullable=False, unique=True, index=True)
     expires_at = Column(UtcDateTime, nullable=False)
     password_hash = Column(Text)
@@ -362,7 +366,9 @@ class ReconstructionFrame(Base):
 class Annotation(Base):
     __tablename__ = "annotations"
     id = Column(Integer, primary_key=True, index=True)
-    reconstruction_id = Column(Integer, ForeignKey("reconstructions.id"), nullable=False)
+    reconstruction_id = Column(
+        Integer, ForeignKey("reconstructions.id"), nullable=False, index=True
+    )
     label = Column(String, nullable=False)
     lat = Column(Float, nullable=False)
     lon = Column(Float, nullable=False)
@@ -383,7 +389,9 @@ class Measurement(Base):
     """
     __tablename__ = "measurements"
     id = Column(Integer, primary_key=True, index=True)
-    reconstruction_id = Column(Integer, ForeignKey("reconstructions.id"), nullable=False)
+    reconstruction_id = Column(
+        Integer, ForeignKey("reconstructions.id"), nullable=False, index=True
+    )
     kind = Column(String, nullable=False)  # "distance" | "area" | "point"
     points_json = Column(Text, nullable=False)
     value = Column(Float)
@@ -401,7 +409,7 @@ class Defect(Base):
     """
     __tablename__ = "defects"
     id = Column(Integer, primary_key=True, index=True)
-    session_id = Column(Integer, ForeignKey("sessions.id"), nullable=False)
+    session_id = Column(Integer, ForeignKey("sessions.id"), nullable=False, index=True)
     category = Column(String, nullable=False)
     severity = Column(String)
     note = Column(Text)
