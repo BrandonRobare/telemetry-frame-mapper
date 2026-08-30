@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import io
 import json as _json
 import threading
@@ -1841,3 +1842,154 @@ def test_splat_transform_cleanup_failed_subprocess_is_not_201(client, tmp_path):
     assert resp.status_code == 422
     assert "network unreachable" in resp.json()["detail"]
     assert not (rec_dir / "splat_transform_cleaned.ply").exists()
+
+
+class _AsgiCall:
+    """Drive the ASGI app directly so an open SSE stream can be held while other
+    requests run on the same event loop (httpx's ASGITransport buffers the whole
+    response, so it cannot hold a stream open)."""
+
+    def __init__(self, app, path):
+        self.messages: asyncio.Queue = asyncio.Queue()
+        self.disconnected = asyncio.Event()
+        scope = {
+            "type": "http",
+            "asgi": {"version": "3.0", "spec_version": "2.1"},
+            "http_version": "1.1",
+            "method": "GET",
+            "scheme": "http",
+            "path": path,
+            "raw_path": path.encode(),
+            "query_string": b"",
+            "root_path": "",
+            "headers": [(b"host", b"testserver")],
+            "client": ("127.0.0.1", 123),
+            "server": ("testserver", 80),
+        }
+        self.task = asyncio.ensure_future(app(scope, self._receive, self.messages.put))
+
+    async def _receive(self):
+        await self.disconnected.wait()
+        return {"type": "http.disconnect"}
+
+    async def start(self):
+        message = await self.messages.get()
+        assert message["type"] == "http.response.start"
+        return message
+
+    async def body_chunk(self):
+        message = await self.messages.get()
+        assert message["type"] == "http.response.body"
+        return message.get("body", b"")
+
+    async def aclose(self):
+        self.disconnected.set()
+        self.task.cancel()
+        await asyncio.wait([self.task], timeout=2)
+
+
+@pytest.mark.asyncio
+async def test_concurrent_status_streams_leave_sync_endpoints_responsive(client):
+    """Every open SSE stream used to pin an anyio worker thread for the life of
+    the connection, starving the same threadpool that serves every sync route."""
+    import anyio.to_thread
+
+    from backend.main import app
+
+    db = _get_db(client)
+    s = _make_session_with_images(db)
+    rec = Reconstruction(
+        session_id=s.id, preset="quick", status="running_colmap",
+        progress_pct=5.0, frames_used=3, step="feature matching",
+    )
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+    expected = _status_sse_payload(rec).encode()
+
+    limiter = anyio.to_thread.current_default_thread_limiter()
+    original_tokens = limiter.total_tokens
+    limiter.total_tokens = 4  # far fewer threads than the streams we open
+    streams: list[_AsgiCall] = []
+
+    async def scenario():
+        for _ in range(12):
+            call = _AsgiCall(app, f"/reconstruction/{rec.id}/status/events")
+            streams.append(call)
+            start = await call.start()
+            assert start["status"] == 200
+            assert dict(start["headers"])[b"cache-control"] == b"no-cache"
+            assert dict(start["headers"])[b"x-accel-buffering"] == b"no"
+            assert await call.body_chunk() == expected
+        # An unrelated sync endpoint must still get a worker thread.
+        health = _AsgiCall(app, "/health")
+        streams.append(health)
+        assert (await health.start())["status"] == 200
+
+    try:
+        await asyncio.wait_for(scenario(), timeout=20)
+    finally:
+        limiter.total_tokens = original_tokens
+        for call in streams:
+            await call.aclose()
+
+
+@pytest.mark.asyncio
+async def test_status_stream_change_wait_polls_without_blocking_a_thread():
+    from backend.routers.reconstruction import _await_status_change
+    from backend.services.reconstruction import (
+        current_reconstruction_status_version,
+        notify_reconstruction_status_changed,
+    )
+
+    rec_id = 987654
+    version = current_reconstruction_status_version(rec_id)
+
+    # No change within the window: the caller falls through to a keepalive.
+    assert await _await_status_change(rec_id, version, timeout_s=0.2) == version
+
+    # A change published from a worker thread is picked up promptly.
+    threading.Timer(0.05, notify_reconstruction_status_changed, args=(rec_id,)).start()
+    assert await _await_status_change(rec_id, version, timeout_s=5.0) > version
+
+
+@pytest.mark.asyncio
+async def test_status_stream_frames_are_unchanged_across_keepalive_and_delete(client):
+    from backend.main import app
+
+    db = _get_db(client)
+    s = _make_session_with_images(db)
+    rec = Reconstruction(
+        session_id=s.id, preset="quick", status="running_gsplat",
+        progress_pct=70.0, frames_used=3, step="training",
+    )
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+    status_frame = _status_sse_payload(rec).encode()
+
+    async def _no_change(rec_id, last_version, timeout_s=15.0):
+        await asyncio.sleep(0.05)  # stand-in for the 15s change wait
+        return last_version
+
+    call = _AsgiCall(app, f"/reconstruction/{rec.id}/status/events")
+    try:
+        with patch("backend.routers.reconstruction._await_status_change", _no_change):
+            assert (await call.start())["status"] == 200
+            assert await call.body_chunk() == status_frame
+            assert await call.body_chunk() == b": keepalive\n\n"
+
+            db.delete(rec)
+            db.commit()
+
+            async def drain_until_deleted():
+                for _ in range(10):
+                    chunk = await call.body_chunk()
+                    if chunk == b"event: deleted\ndata: {}\n\n":
+                        return True
+                    assert chunk in (status_frame, b": keepalive\n\n")
+                return False
+
+            assert await asyncio.wait_for(drain_until_deleted(), timeout=5)
+    finally:
+        await call.aclose()
