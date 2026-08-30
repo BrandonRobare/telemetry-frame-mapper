@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import shutil
 import subprocess
 import sys
 import zipfile
 from pathlib import Path
+
+import pytest
 
 
 def _venv_script(venv: Path, name: str) -> Path:
@@ -13,6 +16,13 @@ def _venv_script(venv: Path, name: str) -> Path:
 
 
 def test_wheel_is_cli_only_and_every_console_script_runs(tmp_path: Path) -> None:
+    if shutil.which("uv") is None:
+        pytest.skip(
+            "uv not found on PATH — this test shells out to `uv build`/`uv venv`/`uv pip` "
+            "directly, which is separate from the pytest environment. Run via `uv run "
+            "--no-sync pytest` or ensure uv's install location is on PATH."
+        )
+
     repo_root = Path(__file__).parents[2]
     wheel_dir = tmp_path / "wheel"
     venv_dir = tmp_path / "wheel-venv"
