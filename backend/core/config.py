@@ -137,14 +137,12 @@ def _reconstruction_config_from_data(data: dict) -> dict:
         "presets": {
             "quick": {
                 "iterations": 1000,
-                "max_frames": 500,
                 "max_gaussians": 350000,
                 "sh_degree": 1,
                 "downscale_factor": 4,
             },
             "full": {
                 "iterations": 30000,
-                "max_frames": None,
                 "max_gaussians": 1000000,
                 "sh_degree": 2,
                 "downscale_factor": 2,

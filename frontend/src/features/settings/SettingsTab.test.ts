@@ -77,7 +77,6 @@ describe('AppSettings structure', () => {
   it('preset config holds required numeric fields', () => {
     const quickPreset = {
       iterations: 1000,
-      max_frames: 500,
       max_gaussians: 350000,
       sh_degree: 1,
       downscale_factor: 4,
@@ -86,17 +85,6 @@ describe('AppSettings structure', () => {
     expect(quickPreset.max_gaussians).toBeGreaterThan(0)
     expect([0, 1, 2, 3]).toContain(quickPreset.sh_degree)
     expect(quickPreset.downscale_factor).toBeGreaterThanOrEqual(1)
-  })
-
-  it('full preset allows null max_frames', () => {
-    const fullPreset = {
-      iterations: 30000,
-      max_frames: null as number | null,
-      max_gaussians: 1000000,
-      sh_degree: 2,
-      downscale_factor: 2,
-    }
-    expect(fullPreset.max_frames).toBeNull()
   })
 
   it('ingest accepted_extensions default is non-empty array', () => {

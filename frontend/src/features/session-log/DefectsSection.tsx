@@ -1,8 +1,16 @@
+import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiUrl, del, get } from '../../shared/api/client'
+import ConfirmDialog from '../../shared/components/ConfirmDialog'
+import { useToast } from '../../shared/hooks/useToast'
 import type { Defect } from '../../types/api'
 import { formatCategoryLabel, severityColorVar } from './defects'
 
+
+/** Names the specific row a delete button acts on. */
+function defectLabel(defect: Defect): string {
+  return `${formatCategoryLabel(defect.category)} defect${defect.note ? `: ${defect.note}` : ''}`
+}
 
 function useDefects(sessionId: number) {
   return useQuery<Defect[]>({
@@ -18,11 +26,15 @@ function thumbUrl(thumbPath: string | null): string | null {
 
 export default function DefectsSection({ sessionId }: { sessionId: number }) {
   const queryClient = useQueryClient()
+  const { addToast } = useToast()
   const { data: defects = [] } = useDefects(sessionId)
+  const [defectToDelete, setDefectToDelete] = useState<Defect | null>(null)
 
   const deleteDefect = useMutation({
     mutationFn: (defectId: number) => del(`/sessions/${sessionId}/defects/${defectId}`),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['defects', sessionId] }),
+    onError: (err: Error) => addToast(err.message || 'Delete failed', 'error'),
+    onSettled: () => setDefectToDelete(null),
   })
 
   return (
@@ -117,8 +129,9 @@ export default function DefectsSection({ sessionId }: { sessionId: number }) {
                 </td>
                 <td style={{ padding: '8px 12px', textAlign: 'right' }}>
                   <button
-                    onClick={() => deleteDefect.mutate(defect.id)}
-                    title="Delete defect"
+                    onClick={() => setDefectToDelete(defect)}
+                    aria-label={`Delete ${defectLabel(defect)}`}
+                    title={`Delete ${defectLabel(defect)}`}
                     className="text-xs cursor-pointer"
                     style={{
                       background: 'transparent',
@@ -135,6 +148,17 @@ export default function DefectsSection({ sessionId }: { sessionId: number }) {
           </tbody>
         </table>
       )}
+
+      <ConfirmDialog
+        open={defectToDelete !== null}
+        title="Delete defect?"
+        description={<>Delete <strong>{defectToDelete && defectLabel(defectToDelete)}</strong>? This cannot be undone.</>}
+        confirmLabel="Delete defect"
+        danger
+        loading={deleteDefect.isPending}
+        onCancel={() => setDefectToDelete(null)}
+        onConfirm={() => { if (defectToDelete) deleteDefect.mutate(defectToDelete.id) }}
+      />
     </section>
   )
 }
