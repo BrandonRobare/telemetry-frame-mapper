@@ -41,7 +41,6 @@ export interface IngestSettings {
 
 export interface PresetConfig {
   iterations: number
-  max_frames: number | null
   max_gaussians: number
   sh_degree: number
   downscale_factor: number

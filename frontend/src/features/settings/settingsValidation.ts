@@ -98,9 +98,6 @@ export function validatePresetConfig(form: PresetConfig) {
   const errors: ValidationErrors<Field> = {}
 
   put(errors, 'iterations', numberError(form.iterations, 'Iterations', 0, undefined, true))
-  if (form.max_frames !== null) {
-    put(errors, 'max_frames', numberError(form.max_frames, 'Max frames', 0, undefined, true))
-  }
   put(errors, 'max_gaussians', numberError(form.max_gaussians, 'Max gaussians', 0, undefined, true))
   put(errors, 'sh_degree', numberError(form.sh_degree, 'SH degree', 1, 3))
   put(errors, 'downscale_factor', numberError(form.downscale_factor, 'Downscale factor', 0, undefined, true))

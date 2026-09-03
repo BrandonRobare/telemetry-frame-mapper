@@ -95,7 +95,7 @@ def test_render_flythrough_without_ffmpeg_raises_install_guidance(tmp_path: Path
 
 
 def test_trainer_config_from_preset_quick_and_full_defaults():
-    quick = TrainerConfig.from_preset({"iterations": 1000, "max_frames": 500})
+    quick = TrainerConfig.from_preset({"iterations": 1000})
     assert quick.iterations == 1000
     assert quick.sh_degree == 1
     assert quick.downscale_factor == 4
@@ -109,7 +109,7 @@ def test_trainer_config_from_preset_quick_and_full_defaults():
     assert quick.ssim_lambda == 0.2
     assert quick.init_opacity == 0.1
 
-    full = TrainerConfig.from_preset({"iterations": 30000, "max_frames": None})
+    full = TrainerConfig.from_preset({"iterations": 30000})
     assert full.iterations == 30000
     assert full.sh_degree == 2
     assert full.downscale_factor == 2
