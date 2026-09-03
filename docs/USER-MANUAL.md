@@ -552,6 +552,77 @@ Only one backup runs at a time, so a slow remote copy is never overlapped by the
 run. `GET /storage/backup-schedule` reports operational status only — last run, next run, result —
 never target credentials or command output. The scheduler is off unless `enabled: true`.
 
+### Restoring a snapshot
+
+A snapshot is a plain directory, so recovery is one verification plus three copies. There is no
+restore endpoint and no restore button: restoring is a deliberate act performed against a stopped
+backend, because the backend migrates the database on startup.
+
+1. **Verify the snapshot before touching the install.** Every recorded file is re-hashed against
+   `manifest.json`; a file that is missing, resized, re-hashed differently, or not recorded at all
+   rejects the whole snapshot:
+
+   ```bash
+   python -m backend.services.artifact_backup "E:/telemetry-backups/artifact-backup-v1-..."
+   verified 4 files in artifact-backup-v1-20260902T031500Z-9c1f0ab3
+   ```
+
+   A non-zero exit means that copy is damaged — reach for an older snapshot rather than restoring
+   it. (`verify_backup()` in `backend/services/artifact_backup.py` is the same check in-process; it
+   raises `BackupError` and returns the manifest on success.)
+
+2. **Stop the backend, then restore the database.** Delete the sidecars first: a `-wal`/`-shm` pair
+   belongs to the database file that created it, and removing them is what guarantees the restored
+   file is read exactly as the snapshot left it. `data/` here is whatever `data_dir` points at.
+
+   ```bash
+   rm -f data/drone_mapping.db-wal data/drone_mapping.db-shm
+   cp "<snapshot>/database/drone_mapping.db" data/drone_mapping.db
+   ```
+
+3. **Restore the artifacts you backed up.** A snapshot holds only the directories that backup
+   selected, and copying them back is additive — files created after the snapshot are left alone:
+
+   ```bash
+   cp -R "<snapshot>/artifacts/processed/." processed/
+   cp -R "<snapshot>/artifacts/exports/." exports/
+   ```
+
+4. **Restore `config.yaml` and put the secrets back** — see the next section; the snapshot's copy is
+   sanitized and is not a drop-in replacement.
+
+5. **Start the backend.** `init_db()` runs `alembic upgrade head` against the restored database, so
+   a snapshot taken on an older release migrates forward on this first start. Confirm with
+   `GET /health`, then open one session and one reconstruction to confirm the artifacts resolve.
+
+To undo a bad Alembic upgrade, restore the database from the snapshot taken before it and pin the
+old release: Alembic migrations here are forward-only, so re-running the new build against the
+restored file simply upgrades it again.
+
+### Restoring the secrets a backup deliberately drops
+
+Backups sanitize `config.yaml` on the way out, replacing **the whole value** under any key matching
+`password`, `secret`, `token`, `credential`, or `api_key` with the string `***REDACTED***`. For the
+shipped configuration that is exactly three places:
+
+| Key in the snapshot's `config.yaml` | What was lost | Put back by hand |
+|---|---|---|
+| `api_key` (the entire block) | `enabled`, `key_hash_env` | the block, as a mapping |
+| `remote_worker.auth_token_env` | the env var's *name* | `REMOTE_WORKER_TOKEN` |
+| `cesium_ion.token_env` | the env var's *name* | `CESIUM_ION_TOKEN` |
+
+Copying the sanitized file over a working `config.yaml` without repairing it fails at startup with
+`api_key must be a mapping`, because `api_key` is now a string. Restore your own copy of
+`config.yaml` and treat the snapshot's as a reference for the non-secret settings.
+
+The secret *values* have never been in any backup — they live in environment variables and in
+rclone's own configuration, and none of them survive a rebuild of the host. Set the ones your
+deployment uses before the corresponding feature will work again: `DRONE_MAPPING_PIN_HASH`,
+`DRONE_MAPPING_API_KEY_HASH` (both scrypt hashes, not the PIN or key itself), `REMOTE_WORKER_TOKEN`,
+`WEBODM_JWT`, `CESIUM_ION_TOKEN`, `DJI_API_KEY`, plus the remote's credentials in the rclone config
+if you back up to rclone. Share links survive a database restore — their tokens are hashed with no
+host-specific secret, so an existing link keeps working until its recorded expiry.
+
 ## 7. Importing
 
 The Import dialog defaults to **Browser upload**: pick or drag a folder of frames and the app
