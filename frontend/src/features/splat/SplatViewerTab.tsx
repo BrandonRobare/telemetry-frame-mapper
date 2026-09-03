@@ -6,6 +6,8 @@ import { isLiveReconstructionStatus } from '../../shared/api/reconstructionStatu
 import { useMapStore } from '../../shared/stores/mapStore'
 import { Skeleton } from '../../shared/components/Skeleton'
 import EmptyState from '../../shared/components/EmptyState'
+import ConfirmDialog from '../../shared/components/ConfirmDialog'
+import { useToast } from '../../shared/hooks/useToast'
 import { easeOut } from '../../shared/motion'
 import type {
   Job,
@@ -905,6 +907,7 @@ function SplatCanvas({
   }>({ keyframeIndex: 0, paused: false, speed: 1, callout: null })
 
   const queryClient = useQueryClient()
+  const { addToast } = useToast()
   const { data: flythroughStatus } = useFlythroughStatus(reconstructionId)
   const groundY = useMemo(() => deriveGroundPlaneY(geoTransform), [geoTransform])
   const calloutPoints = useMemo<(NarrationPoint & PresentationCallout)[]>(() => {
@@ -933,6 +936,7 @@ function SplatCanvas({
       queryClient.invalidateQueries({ queryKey: ['annotations', reconstructionId] })
       onAnnotationCreated()
     },
+    onError: (err: Error) => addToast(err.message || 'Could not add the annotation', 'error'),
   })
 
   const renderVideo = useMutation({
@@ -1675,12 +1679,17 @@ interface AnnotationsListProps {
   annotations: Annotation[]
 }
 
-function AnnotationsList({ reconstructionId, annotations }: AnnotationsListProps) {
+/** Exported for the delete-confirmation test. */
+export function AnnotationsList({ reconstructionId, annotations }: AnnotationsListProps) {
   const queryClient = useQueryClient()
+  const { addToast } = useToast()
+  const [annotationToDelete, setAnnotationToDelete] = useState<Annotation | null>(null)
   const deleteAnnotation = useMutation({
     mutationFn: (id: number) =>
       del(`/reconstruction/${reconstructionId}/annotations/${id}`),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['annotations', reconstructionId] }),
+    onError: (err: Error) => addToast(err.message || 'Delete failed', 'error'),
+    onSettled: () => setAnnotationToDelete(null),
   })
 
   if (!annotations.length) return null
@@ -1710,12 +1719,13 @@ function AnnotationsList({ reconstructionId, annotations }: AnnotationsListProps
               {ann.label}
             </span>
             <button
-              onClick={() => deleteAnnotation.mutate(ann.id)}
+              onClick={() => setAnnotationToDelete(ann)}
               style={{
                 background: 'none', border: 'none', cursor: 'pointer',
                 color: 'var(--text-muted)', fontSize: 11, padding: '0 2px', lineHeight: 1,
               }}
-              title="Delete annotation"
+              aria-label={`Delete annotation ${ann.label}`}
+              title={`Delete annotation ${ann.label}`}
             >
               ×
             </button>
@@ -1732,6 +1742,16 @@ function AnnotationsList({ reconstructionId, annotations }: AnnotationsListProps
       >
         ↓ Export GeoJSON
       </a>
+      <ConfirmDialog
+        open={annotationToDelete !== null}
+        title="Delete annotation?"
+        description={<>Delete <strong>{annotationToDelete?.label}</strong>? This cannot be undone.</>}
+        confirmLabel="Delete annotation"
+        danger
+        loading={deleteAnnotation.isPending}
+        onCancel={() => setAnnotationToDelete(null)}
+        onConfirm={() => { if (annotationToDelete) deleteAnnotation.mutate(annotationToDelete.id) }}
+      />
     </div>
   )
 }
@@ -1776,6 +1796,7 @@ export default function SplatViewerTab() {
   const { data: semanticSummary } = useSemanticSummary(activeId, showSemanticOverlay)
   const { data: semanticOverlay } = useSemanticOverlay(activeId, showSemanticOverlay)
   const queryClient = useQueryClient()
+  const { addToast } = useToast()
   const semanticWorkflow = systemResources?.workflows.find((workflow) => workflow.key === 'semantic_labeling')
   const semanticAvailable = semanticWorkflow?.available ?? false
   const splitPaneCenter = useMemo(() => {
@@ -1787,6 +1808,7 @@ export default function SplatViewerTab() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['semantic-status', activeId] })
     },
+    onError: (err: Error) => addToast(err.message || 'Semantic labeling failed to start', 'error'),
   })
 
   const geoAvailable = !!geoTransform && geoTransform.utm_zone !== 'unknown'

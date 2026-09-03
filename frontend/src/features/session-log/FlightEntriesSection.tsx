@@ -1,6 +1,8 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { del, get, post } from '../../shared/api/client'
+import ConfirmDialog from '../../shared/components/ConfirmDialog'
+import { useToast } from '../../shared/hooks/useToast'
 import type { FlightEntry } from '../../types/api'
 import { formatDurationS, parseFlightEntryForm } from './flightEntries'
 
@@ -16,6 +18,13 @@ const inputStyle: React.CSSProperties = {
   minWidth: 0,
 }
 
+/** Names the specific row a delete button acts on. */
+function entryLabel(entry: FlightEntry): string {
+  return entry.battery_id
+    ? `battery ${entry.battery_id}`
+    : `flight recorded ${new Date(entry.created_at).toLocaleString()}`
+}
+
 function useFlightEntries(sessionId: number) {
   return useQuery<FlightEntry[]>({
     queryKey: ['flight-entries', sessionId],
@@ -25,9 +34,11 @@ function useFlightEntries(sessionId: number) {
 
 export default function FlightEntriesSection({ sessionId }: { sessionId: number }) {
   const queryClient = useQueryClient()
+  const { addToast } = useToast()
   const { data: entries = [] } = useFlightEntries(sessionId)
   const [form, setForm] = useState(EMPTY_FORM)
   const [formError, setFormError] = useState<string | null>(null)
+  const [entryToDelete, setEntryToDelete] = useState<FlightEntry | null>(null)
 
   const invalidate = () =>
     queryClient.invalidateQueries({ queryKey: ['flight-entries', sessionId] })
@@ -46,6 +57,8 @@ export default function FlightEntriesSection({ sessionId }: { sessionId: number 
   const deleteEntry = useMutation({
     mutationFn: (entryId: number) => del(`/sessions/${sessionId}/flight-entries/${entryId}`),
     onSuccess: invalidate,
+    onError: (err: Error) => addToast(err.message || 'Delete failed', 'error'),
+    onSettled: () => setEntryToDelete(null),
   })
 
   function submit() {
@@ -146,8 +159,9 @@ export default function FlightEntriesSection({ sessionId }: { sessionId: number 
                 </td>
                 <td style={{ padding: '8px 12px', textAlign: 'right' }}>
                   <button
-                    onClick={() => deleteEntry.mutate(entry.id)}
-                    title="Delete flight entry"
+                    onClick={() => setEntryToDelete(entry)}
+                    aria-label={`Delete ${entryLabel(entry)}`}
+                    title={`Delete ${entryLabel(entry)}`}
                     className="text-xs cursor-pointer"
                     style={{
                       background: 'transparent',
@@ -164,6 +178,17 @@ export default function FlightEntriesSection({ sessionId }: { sessionId: number 
           </tbody>
         </table>
       )}
+
+      <ConfirmDialog
+        open={entryToDelete !== null}
+        title="Delete flight entry?"
+        description={<>Delete the entry for <strong>{entryToDelete && entryLabel(entryToDelete)}</strong>? This cannot be undone.</>}
+        confirmLabel="Delete entry"
+        danger
+        loading={deleteEntry.isPending}
+        onCancel={() => setEntryToDelete(null)}
+        onConfirm={() => { if (entryToDelete) deleteEntry.mutate(entryToDelete.id) }}
+      />
     </section>
   )
 }

@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { get, patch, post } from '../../shared/api/client'
+import { useToast } from '../../shared/hooks/useToast'
 
 // ---------------------------------------------------------------------------
 // TypeScript types for the /settings contract
@@ -41,7 +42,6 @@ export interface IngestSettings {
 
 export interface PresetConfig {
   iterations: number
-  max_frames: number | null
   max_gaussians: number
   sh_degree: number
   downscale_factor: number
@@ -89,21 +89,25 @@ export function useSettings() {
 
 export function useUpdateSettings() {
   const qc = useQueryClient()
+  const { addToast } = useToast()
   return useMutation({
     mutationFn: (patch_body: Partial<AppSettings>) =>
       patch<AppSettings>('/settings', patch_body),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: SETTINGS_KEY })
     },
+    onError: (err: Error) => addToast(err.message || 'Saving settings failed', 'error'),
   })
 }
 
 export function useResetSettings() {
   const qc = useQueryClient()
+  const { addToast } = useToast()
   return useMutation({
     mutationFn: () => post<AppSettings>('/settings/reset'),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: SETTINGS_KEY })
     },
+    onError: (err: Error) => addToast(err.message || 'Reset failed', 'error'),
   })
 }

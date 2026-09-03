@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { patch } from '../../shared/api/client'
+import { useToast } from '../../shared/hooks/useToast'
 import type { Session } from '../../types/api'
 import { parseTagInput } from './sessionTags'
 
@@ -17,6 +18,7 @@ interface Props {
  */
 export default function SessionTagsNotes({ session }: Props) {
   const qc = useQueryClient()
+  const { addToast } = useToast()
   const [tagInput, setTagInput] = useState('')
   const [notesDraft, setNotesDraft] = useState(session.notes ?? '')
 
@@ -29,6 +31,7 @@ export default function SessionTagsNotes({ session }: Props) {
       qc.invalidateQueries({ queryKey: ['session', session.id] })
       qc.invalidateQueries({ queryKey: ['sessions'] })
     },
+    onError: (err: Error) => addToast(err.message || 'Save failed', 'error'),
   })
 
   const tags = session.tags ?? []

@@ -94,7 +94,6 @@ class PresetSettings(BaseModel):
     model_config = {"extra": "forbid"}
 
     iterations: int | None = Field(default=None, gt=0)
-    max_frames: int | None = Field(default=None, gt=0)
     max_gaussians: int | None = Field(default=None, gt=0)
     sh_degree: int | None = Field(default=None, ge=1, le=3)
     downscale_factor: int | None = Field(default=None, gt=0)

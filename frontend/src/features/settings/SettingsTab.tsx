@@ -72,7 +72,6 @@ export default function SettingsTab() {
         setConfirmResetOpen(false)
         addToast('Settings reset to defaults', 'success')
       },
-      onError: (err: Error) => addToast(err.message || 'Reset failed', 'error'),
     })
   }
 
