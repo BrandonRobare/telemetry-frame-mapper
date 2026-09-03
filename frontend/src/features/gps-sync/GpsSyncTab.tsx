@@ -30,7 +30,7 @@ interface OffsetPreviewRow {
    SC 2.5.8 as a chart (see .fm-target-exempt in index.css). This stepper walks
    the same list of previewed offsets with 24x24 controls, so the value is
    reachable by touch, tremor and keyboard without aiming at a bar. */
-function OffsetStepper({
+export function OffsetStepper({
   offsets,
   value,
   onChange,
