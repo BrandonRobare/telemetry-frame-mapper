@@ -116,6 +116,50 @@ def _manifest_files(snapshot: Path) -> list[dict]:
     ]
 
 
+def verify_backup(snapshot: Path) -> dict:
+    """Re-hash a snapshot against its own manifest and return that manifest.
+
+    Restoring is only safe once this passes: any recorded file that is missing,
+    resized, or re-hashed differently rejects the whole snapshot, as does any
+    file the manifest does not record.
+    """
+    snapshot = snapshot.resolve()
+    try:
+        manifest = json.loads((snapshot / "manifest.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise BackupError("Backup manifest is missing or unreadable") from exc
+    if (
+        not isinstance(manifest, dict)
+        or manifest.get("format") != "telemetry-frame-mapper-artifact-backup"
+        or manifest.get("version") != 1
+        or not isinstance(manifest.get("files"), list)
+    ):
+        raise BackupError("Backup manifest is not a version 1 artifact backup")
+
+    recorded: set[str] = set()
+    for entry in manifest["files"]:
+        try:
+            relative = entry["path"]
+            path = confine_path(snapshot / relative, snapshot)
+        except (KeyError, TypeError, ValueError) as exc:
+            raise BackupError("Backup manifest lists a file outside the snapshot") from exc
+        if not path.is_file() or path.stat().st_size != entry.get("bytes"):
+            raise BackupError(f"Backup file is missing or resized: {relative}")
+        if _sha256(path) != entry.get("sha256"):
+            raise BackupError(f"Backup file failed checksum verification: {relative}")
+        recorded.add(relative)
+
+    present = {
+        path.relative_to(snapshot).as_posix()
+        for path in snapshot.rglob("*")
+        if path.is_file() and path.name != "manifest.json"
+    }
+    unexpected = sorted(present - recorded)
+    if unexpected:
+        raise BackupError(f"Backup holds files the manifest does not record: {unexpected}")
+    return manifest
+
+
 def _snapshot_name() -> str:
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     return f"artifact-backup-v1-{stamp}-{uuid4().hex[:8]}"
@@ -268,3 +312,18 @@ def create_backup(
             raise BackupError("rclone copy failed") from exc
         result = _result(snapshot, manifest, remote_snapshot)
     return result
+
+
+if __name__ == "__main__":  # Verification step of the restore procedure in docs/USER-MANUAL.md.
+    import sys
+
+    if len(sys.argv) != 2:
+        raise SystemExit("usage: python -m backend.services.artifact_backup <snapshot-directory>")
+    directory = Path(sys.argv[1]).resolve()
+    try:
+        verified = verify_backup(directory)
+    except BackupError as exc:
+        raise SystemExit(f"backup verification failed: {exc}") from None
+    # The directory name, not manifest["snapshot_id"]: a local snapshot is built
+    # under a ".partial" staging name that the manifest still records.
+    print(f"verified {len(verified['files'])} files in {directory.name}")

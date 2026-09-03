@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from backend.core.config import AppConfig
-from backend.services.artifact_backup import BackupError, create_backup
+from backend.services.artifact_backup import BackupError, create_backup, verify_backup
 
 
 def _inputs(tmp_path: Path) -> tuple[AppConfig, Path, Path, Path]:
@@ -83,6 +83,59 @@ def test_local_backup_is_versioned_checksummed_and_uses_sqlite_snapshot(tmp_path
     assert result["manifest_sha256"] == hashlib.sha256(
         (snapshot / "manifest.json").read_bytes()
     ).hexdigest()
+
+
+def test_verify_backup_accepts_a_fresh_snapshot_and_rejects_every_tampering(tmp_path):
+    """A restore must refuse a snapshot that no longer matches its manifest (#610)."""
+    cfg, config, database, target = _inputs(tmp_path)
+    snapshot = Path(
+        create_backup(
+            destination="local",
+            local_destination=str(target),
+            artifacts=["processed", "exports"],
+            cfg=cfg,
+            config_path=config,
+            database_path=database,
+            backup_config={"local_destinations": [str(target)], "rclone_remote": ""},
+        )["destination"]
+    )
+
+    assert len(verify_backup(snapshot)["files"]) == 4
+
+    stray = snapshot / "artifacts" / "exports" / "planted.geojson"
+    stray.write_text('{"type":"FeatureCollection"}')
+    with pytest.raises(BackupError, match="does not record"):
+        verify_backup(snapshot)
+    stray.unlink()
+
+    # Same byte count, different content: this can only be caught by the hash.
+    report = snapshot / "artifacts" / "exports" / "report.geojson"
+    report.write_text('{"type":"FeatureCollectioX"}')
+    with pytest.raises(BackupError, match="failed checksum verification"):
+        verify_backup(snapshot)
+
+    report.unlink()
+    with pytest.raises(BackupError, match="missing or resized"):
+        verify_backup(snapshot)
+
+
+def test_verify_backup_rejects_a_manifest_that_escapes_the_snapshot(tmp_path):
+    outside = tmp_path / "outside.txt"
+    outside.write_text("not part of the snapshot")
+    snapshot = tmp_path / "artifact-backup-v1-hand-written"
+    snapshot.mkdir()
+    (snapshot / "manifest.json").write_text(
+        json.dumps(
+            {
+                "format": "telemetry-frame-mapper-artifact-backup",
+                "version": 1,
+                "files": [{"path": "../outside.txt", "bytes": 24, "sha256": "0" * 64}],
+            }
+        )
+    )
+
+    with pytest.raises(BackupError, match="outside the snapshot"):
+        verify_backup(snapshot)
 
 
 def test_local_backup_rejects_destination_outside_allowlist(tmp_path):
