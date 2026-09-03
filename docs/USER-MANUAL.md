@@ -505,6 +505,15 @@ sanitized `config.yaml`, and whichever of `imports`, `processed`, and `exports` 
 copied file is SHA-256 recorded in `manifest.json`. The database is copied through SQLite's backup
 API, so the WAL and SHM sidecars are deliberately not included.
 
+Startup takes its own copy as well. When the app starts against an existing database that is
+behind the migration head, it copies the database — through the same SQLite backup API — into a
+`pre-migration/` directory beside the database file, and only then runs the migration. A fresh
+database and one already at head are skipped, so an up-to-date install pays nothing. The copy is
+logged at INFO with its path and how long it took, and `backup.pre_migration_keep` (default 3)
+bounds how many are retained; the oldest is deleted first. If the copy cannot be written — a full
+disk, an unwritable directory — startup fails and the migration does not run, because that copy is
+the only rollback point.
+
 Destinations must be allowlisted in `config.yaml` first — a local path has to match an entry
 exactly:
 

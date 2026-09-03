@@ -208,3 +208,122 @@ def test_init_db_is_idempotent(isolated_engine):
     inspector = sa.inspect(isolated_engine)
     assert "reconstructions" in inspector.get_table_names()
     assert "alembic_version" in inspector.get_table_names()
+
+
+# --- pre-migration snapshots (#680) -----------------------------------------
+
+
+def _revision(db_path: Path) -> str | None:
+    """Read alembic_version straight from a SQLite file, engine uninvolved."""
+    conn = sqlite3.connect(db_path)
+    try:
+        row = conn.execute(
+            "select version_num from alembic_version"
+        ).fetchone()
+    except sqlite3.OperationalError:  # no alembic_version table at all
+        return None
+    finally:
+        conn.close()
+    return row[0] if row else None
+
+
+def _rewind_to_pending(isolated_engine) -> Path:
+    """Build a migrated database, then rewind its stamp so one revision is pending."""
+    database_module.init_db()
+    with isolated_engine.begin() as conn:
+        conn.execute(sa.text("update alembic_version set version_num = '0015'"))
+    return Path(isolated_engine.url.database)
+
+
+def test_fresh_database_takes_no_pre_migration_snapshot(isolated_engine, tmp_path):
+    database_module.init_db()
+
+    assert not (tmp_path / "pre-migration").exists()
+
+
+def test_database_at_head_takes_no_pre_migration_snapshot(isolated_engine, tmp_path):
+    database_module.init_db()
+    # Second startup against an up-to-date database: nothing to migrate, so
+    # nothing to snapshot — an install that never migrates must not pay the
+    # copy cost on every start.
+    database_module.init_db()
+
+    assert not (tmp_path / "pre-migration").exists()
+
+
+def test_pending_migration_is_snapshotted_before_the_upgrade_runs(
+    isolated_engine, tmp_path, monkeypatch
+):
+    db_path = _rewind_to_pending(isolated_engine)
+    snapshot_dir = tmp_path / "pre-migration"
+    seen: list[list[Path]] = []
+
+    real_upgrade = database_module.command.upgrade
+
+    def recording_upgrade(cfg, revision):
+        seen.append(sorted(snapshot_dir.glob("*.db")) if snapshot_dir.exists() else [])
+        return real_upgrade(cfg, revision)
+
+    monkeypatch.setattr(database_module.command, "upgrade", recording_upgrade)
+
+    database_module.init_db()
+
+    # Ordering, not just existence: the snapshot was already on disk at the
+    # moment alembic was asked to upgrade.
+    assert len(seen) == 1
+    assert len(seen[0]) == 1
+    snapshot = seen[0][0]
+    assert snapshot.parent == snapshot_dir
+    # And it holds the pre-upgrade state, not a copy taken afterwards.
+    assert _revision(snapshot) == "0015"
+    assert _revision(db_path) not in (None, "0015")
+
+
+def test_pre_migration_snapshots_keep_the_newest_and_evict_the_oldest(
+    isolated_engine, tmp_path, monkeypatch
+):
+    import backend.core.config as config_module
+
+    monkeypatch.setattr(
+        config_module, "get_backup_config", lambda *args, **kwargs: {"pre_migration_keep": 2}
+    )
+    _rewind_to_pending(isolated_engine)
+    snapshot_dir = tmp_path / "pre-migration"
+    snapshot_dir.mkdir()
+    # Timestamped names sort chronologically; oldest first.
+    older = [snapshot_dir / f"isolated-2020010{n}T000000.000000Z.db" for n in (1, 2, 3)]
+    for path in older:
+        path.write_bytes(b"")
+
+    database_module.init_db()
+
+    remaining = sorted(snapshot_dir.glob("*.db"))
+    assert len(remaining) == 2
+    assert remaining[0] == older[-1]  # newest of the pre-existing copies survives
+    assert remaining[1].name.startswith("isolated-")
+    assert remaining[1] not in older  # the copy just taken
+    assert not older[0].exists()
+    assert not older[1].exists()
+
+
+def test_failed_snapshot_blocks_startup_and_leaves_the_database_unmigrated(
+    isolated_engine, tmp_path, monkeypatch
+):
+    from backend.services import artifact_backup
+
+    db_path = _rewind_to_pending(isolated_engine)
+
+    def full_disk(source, destination):
+        raise OSError("No space left on device")
+
+    monkeypatch.setattr(artifact_backup, "copy_sqlite_database", full_disk)
+
+    with pytest.raises(RuntimeError) as excinfo:
+        database_module.init_db()
+
+    message = str(excinfo.value)
+    assert "Could not snapshot the database before migrating it" in message
+    assert "the app did not start" in message
+    assert "No space left on device" in message
+    # The migration must not have run behind the failed snapshot.
+    assert _revision(db_path) == "0015"

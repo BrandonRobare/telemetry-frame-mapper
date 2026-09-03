@@ -169,6 +169,10 @@ auto_import:
 backup:
   local_destinations: []
   rclone_remote: ""
+  # Copies taken beside the database in pre-migration/ just before startup runs a
+  # migration. Bounded by count; the oldest is deleted first. Startup fails if the
+  # copy cannot be written, because it is the only rollback point.
+  pre_migration_keep: 3
   # A named target keeps the scheduler from accepting arbitrary destinations.
   targets: {}
   schedule:

@@ -16,7 +16,6 @@ import yaml
 
 from backend.core.config import AppConfig, get_backup_config
 from backend.core.paths import confine_path
-from backend.db.database import engine
 
 ARTIFACT_DIRECTORIES = frozenset({"imports", "processed", "exports"})
 _RCLONE_REMOTE = re.compile(r"^[A-Za-z0-9_.-]+:(?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_.-]*$")
@@ -58,7 +57,15 @@ def _write_sanitized_config(source: Path, destination: Path) -> None:
     )
 
 
-def _sqlite_database_path() -> Path:
+def sqlite_database_path() -> Path:
+    """Resolve the file backing the database.
+
+    The engine is looked up at call time, not import time: backend.db.database
+    imports this module back (locally, to snapshot before migrating), and a
+    live lookup also honours a rebound engine.
+    """
+    from backend.db.database import engine
+
     if (
         engine.dialect.name != "sqlite"
         or not engine.url.database
@@ -68,7 +75,7 @@ def _sqlite_database_path() -> Path:
     return Path(engine.url.database).resolve()
 
 
-def _copy_sqlite_database(source: Path, destination: Path) -> None:
+def copy_sqlite_database(source: Path, destination: Path) -> None:
     if not source.is_file():
         raise BackupError("SQLite database is missing")
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -148,7 +155,7 @@ def _build_snapshot(
     config_path: Path,
     database_path: Path,
 ) -> dict:
-    _copy_sqlite_database(database_path, snapshot / "database" / database_path.name)
+    copy_sqlite_database(database_path, snapshot / "database" / database_path.name)
     _write_sanitized_config(config_path, snapshot / "config.yaml")
     roots = {
         "imports": Path(cfg.imports_dir),
@@ -198,7 +205,7 @@ def create_backup(
         raise ValueError(f"artifacts must be selected from {sorted(ARTIFACT_DIRECTORIES)}")
     artifacts = list(dict.fromkeys(artifacts))
     config_path = config_path.resolve()
-    database_path = (database_path or _sqlite_database_path()).resolve()
+    database_path = (database_path or sqlite_database_path()).resolve()
     if backup_config is None:
         backup_config = get_backup_config(str(config_path))
     snapshot_name = _snapshot_name()
