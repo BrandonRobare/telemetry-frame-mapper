@@ -28,7 +28,7 @@ export interface SiteTrend {
 export interface Session {
   id: number;
   name: string;
-  folder_path: string;
+  folder_path: string | null;
   import_mode: string;
   imported_at: string;
   photo_count: number;
