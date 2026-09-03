@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { post } from '../../shared/api/client'
+import { useToast } from '../../shared/hooks/useToast'
 import { useMapStore } from '../../shared/stores/mapStore'
 import type { BulkSessionOperation, BulkSessionResponse, Session } from '../../types/api'
 import { buildBulkRequest, canDelete, summarizeBulkResults } from './bulkSession'
@@ -23,6 +24,7 @@ const controlStyle: React.CSSProperties = {
 
 export default function BulkSessionOperations({ sessions }: Props) {
   const qc = useQueryClient()
+  const { addToast } = useToast()
   const { data: projects } = useProjects()
   const { selectedSessionId, setSession } = useMapStore()
   const [selectedIds, setSelectedIds] = useState<number[]>([])
@@ -47,6 +49,7 @@ export default function BulkSessionOperations({ sessions }: Props) {
       qc.invalidateQueries({ queryKey: ['sessions'] })
       qc.invalidateQueries({ queryKey: ['projects'] })
     },
+    onError: (err: Error) => addToast(err.message || 'Bulk operation failed', 'error'),
   })
 
   function toggle(sessionId: number) {
