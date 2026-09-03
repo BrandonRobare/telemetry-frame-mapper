@@ -151,9 +151,16 @@ Everything is read-only and reuses existing queries — no new endpoints.
 The app is installable: `frontend/public/manifest.webmanifest` sets
 `start_url` to `/mobile`, so "Add to Home Screen" opens straight to the
 quick-check view. A minimal service worker (`frontend/public/sw.js`,
-production-only) cache-first-serves the app shell (`/`, `/mobile`, the
-manifest, and icons) — it does not cache API responses or provide offline
-data sync.
+production-only) serves navigations network-first, so an installed app always
+gets the current build and each successful load refreshes the cached shell;
+the manifest and icons are served from that cache. Its cache is named after
+the build version (handed to it as `/sw.js?v=<version>` at registration), so a
+release installs a new worker and discards the previous shell.
+
+**This is a navigation fallback, not an offline app.** With no connection the
+worker returns the cached shell document, but the hashed JS/CSS chunks are
+never cached, so a cold offline launch cannot boot the app. There is no API
+caching and no offline data sync.
 
 ---
 
