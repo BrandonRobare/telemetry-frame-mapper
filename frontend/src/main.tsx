@@ -26,10 +26,12 @@ createRoot(document.getElementById('root')!).render(
 )
 
 // App-shell service worker for the PWA quick-check view (#364). Production-only:
-// registering it in dev fights Vite's HMR module graph.
+// registering it in dev fights Vite's HMR module graph. The ?v= is what makes a
+// release install a new worker with a fresh cache name (#588).
+declare const __APP_VERSION__: string
 if (import.meta.env.PROD && 'serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js').catch(() => {
+    navigator.serviceWorker.register(`/sw.js?v=${__APP_VERSION__}`).catch(() => {
       // Best-effort: the app works fully without it, just without shell caching.
     })
   })
