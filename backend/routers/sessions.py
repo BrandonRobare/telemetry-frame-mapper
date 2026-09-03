@@ -33,7 +33,7 @@ MAX_TAG_LENGTH = 40
 class SessionOut(BaseModel):
     id: int
     name: str
-    folder_path: str
+    folder_path: str | None
     imported_at: datetime.datetime | None
     photo_count: int
     usable_count: int
