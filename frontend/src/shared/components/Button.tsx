@@ -44,9 +44,14 @@ const sizeClasses: Record<ButtonSize, string> = {
   md: 'px-4 py-2',
 };
 
+/* minHeight/minWidth mirror the app-wide WCAG 2.2 SC 2.5.8 floor in index.css.
+   Kept here as well so the contract travels with the component and is visible
+   to anyone reading it — `sm` used to be px-3 py-1 with no minimum at all. */
+const TARGET_FLOOR = { minHeight: 24, minWidth: 24 } as const;
+
 const sizeStyles: Record<ButtonSize, React.CSSProperties> = {
-  sm: { fontSize: 'var(--text-xs)', lineHeight: 'var(--leading-normal)' },
-  md: { fontSize: 'var(--text-sm)', lineHeight: 'var(--leading-normal)' },
+  sm: { fontSize: 'var(--text-xs)', lineHeight: 'var(--leading-normal)', ...TARGET_FLOOR },
+  md: { fontSize: 'var(--text-sm)', lineHeight: 'var(--leading-normal)', ...TARGET_FLOOR },
 };
 
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button(

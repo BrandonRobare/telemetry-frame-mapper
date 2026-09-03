@@ -26,6 +26,79 @@ interface OffsetPreviewRow {
   mean_abs_delta_s: number | null
 }
 
+/* The offset histogram's bars are 4-8px targets and exempt from WCAG 2.2
+   SC 2.5.8 as a chart (see .fm-target-exempt in index.css). This stepper walks
+   the same list of previewed offsets with 24x24 controls, so the value is
+   reachable by touch, tremor and keyboard without aiming at a bar. */
+function OffsetStepper({
+  offsets,
+  value,
+  onChange,
+}: {
+  offsets: number[]
+  value: number
+  onChange: (offset: number) => void
+}) {
+  const index = offsets.findIndex((offset) => Math.abs(offset - value) < 0.001)
+  // Off-grid values (typed into the number field) step onto the nearest bar.
+  const nearest = offsets.reduce(
+    (best, offset, i) => (Math.abs(offset - value) < Math.abs(offsets[best] - value) ? i : best),
+    0,
+  )
+
+  function step(direction: -1 | 1) {
+    const from = index === -1 ? nearest : index
+    const next = index === -1 ? from : from + direction
+    onChange(offsets[Math.min(offsets.length - 1, Math.max(0, next))])
+  }
+
+  const stepStyle: React.CSSProperties = {
+    padding: '0 8px',
+    background: 'var(--surface-2)',
+    border: '1px solid var(--border-strong)',
+    borderRadius: 'var(--radius-sm)',
+    color: 'var(--text)',
+    fontFamily: 'inherit',
+    cursor: 'pointer',
+  }
+
+  return (
+    <div
+      role="group"
+      aria-label="Step through previewed offsets"
+      className="mt-2 flex items-center gap-2 text-xs"
+      style={{ color: 'var(--text-muted)' }}
+    >
+      <button
+        type="button"
+        onClick={() => step(-1)}
+        disabled={index === 0}
+        aria-label="Previous offset"
+        title="Previous offset"
+        style={{ ...stepStyle, opacity: index === 0 ? 0.5 : 1 }}
+      >
+        −
+      </button>
+      <span
+        aria-live="polite"
+        style={{ minWidth: 84, textAlign: 'center', fontFamily: 'var(--font-mono)', color: 'var(--text)' }}
+      >
+        {value.toFixed(1)} s
+      </span>
+      <button
+        type="button"
+        onClick={() => step(1)}
+        disabled={index === offsets.length - 1}
+        aria-label="Next offset"
+        title="Next offset"
+        style={{ ...stepStyle, opacity: index === offsets.length - 1 ? 0.5 : 1 }}
+      >
+        +
+      </button>
+    </div>
+  )
+}
+
 export default function GpsSyncTab() {
   const { selectedSessionId, setRequestedTab } = useMapStore()
   const { addToast } = useToast()
@@ -225,6 +298,9 @@ export default function GpsSyncTab() {
                   <span>Offset preview</span>
                   <InfoHint text="Bars show how many images would sync for nearby offsets. Use the peak with the smallest mean Δt." />
                 </div>
+                {/* Bars carry .fm-target-exempt: their size is the datum, so the
+                    24px target floor is waived here (see index.css). The stepper
+                    below is the conformant way to reach the same offsets. */}
                 <div className="flex h-24 items-end gap-1" aria-label="Offset preview graph">
                   {offsetPreviewQuery.data.map((row) => {
                     const height = row.total > 0 ? Math.max(4, (row.matched / row.total) * 96) : 4
@@ -235,7 +311,7 @@ export default function GpsSyncTab() {
                         type="button"
                         title={`offset ${row.offset_s}s: ${row.matched}/${row.total} matches, mean Δt ${row.mean_abs_delta_s ?? 'n/a'}s`}
                         onClick={() => setOffsetS(row.offset_s)}
-                        className="flex-1"
+                        className="fm-target-exempt flex-1"
                         style={{
                           height,
                           minWidth: 8,
@@ -246,6 +322,11 @@ export default function GpsSyncTab() {
                     )
                   })}
                 </div>
+                <OffsetStepper
+                  offsets={offsetPreviewQuery.data.map((row) => row.offset_s)}
+                  value={offsetS}
+                  onChange={setOffsetS}
+                />
               </div>
             )}
           </section>

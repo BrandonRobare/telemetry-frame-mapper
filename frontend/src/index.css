@@ -172,6 +172,49 @@ body {
   outline-offset: 2px;
 }
 
+/* ---------------------------------------------------------------------------
+   WCAG 2.2 SC 2.5.8 — minimum target size (24 x 24 CSS px)
+
+   A floor here rather than per component: ~78 raw <button>s bypass
+   shared/components/Button, so one rule covers them all and covers every
+   button written after this one. It is deliberately unconditional — the 44px
+   nav minimums further down are inside @media (max-width: 430px), but 2.5.8
+   applies at every viewport width.
+
+   Grow the box, never the glyph: min-height/min-width enlarge the hit area
+   while padding-free icon buttons keep centring their compact mark (see
+   InfoHint.tsx for the same pattern written by hand).
+--------------------------------------------------------------------------- */
+button,
+[role="button"],
+input[type="checkbox"],
+input[type="radio"],
+select {
+  min-height: 24px;
+  min-width: 24px;
+}
+
+/* Download links are button-shaped actions but not <button>s; min-height is
+   inert on an inline box, so give them a flex box to grow. */
+a[download] {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+}
+
+/* The documented spacing exception, and currently its only use.
+   SC 2.5.8 exempts a target whose size is "essential" to the information it
+   conveys. The GPS offset histogram (GpsSyncTab) draws each preview offset as
+   a <button> whose width and height ARE the datum; padding them to 24px
+   redraws the chart into something unreadable. The same offsets are reachable
+   from the 24x24 stepper rendered beside the chart, which is the accessible
+   path. Do not reach for this class to make a small control compile away —
+   an exception needs a chart-like reason and a conformant alternative. */
+.fm-target-exempt {
+  min-height: 0;
+  min-width: 0;
+}
+
 /* Leaflet's default attribution links are cold blue — warm them.
    Two classes outrank Leaflet's own .leaflet-container a (equal-specificity, later in cascade). */
 .leaflet-container .leaflet-control-attribution a {
