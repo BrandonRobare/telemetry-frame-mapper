@@ -47,8 +47,8 @@ const inputStyle: React.CSSProperties = {
 }
 
 const DEFAULT_PRESETS: Record<string, PresetConfig> = {
-  quick: { iterations: 1000, max_frames: 500, max_gaussians: 350000, sh_degree: 1, downscale_factor: 4 },
-  full:  { iterations: 30000, max_frames: null, max_gaussians: 1000000, sh_degree: 2, downscale_factor: 2 },
+  quick: { iterations: 1000, max_gaussians: 350000, sh_degree: 1, downscale_factor: 4 },
+  full:  { iterations: 30000, max_gaussians: 1000000, sh_degree: 2, downscale_factor: 2 },
 }
 
 const DEFAULT_RECONSTRUCTION: ReconstructionSettings = {
@@ -136,28 +136,6 @@ export default function SplatSettings() {
                   step={100}
                   value={p.iterations}
                   onChange={(e) => updatePreset(name, 'iterations', Number(e.target.value))}
-                  style={inputStyle}
-                />
-              </Field>
-
-              <Field
-                label="Max Frames"
-                hint="Leave blank for no limit (full preset)"
-                error={validationErrors[name]?.max_frames}
-              >
-                <input
-                  type="number"
-                  min={1}
-                  step={1}
-                  value={p.max_frames ?? ''}
-                  placeholder="unlimited"
-                  onChange={(e) =>
-                    updatePreset(
-                      name,
-                      'max_frames',
-                      e.target.value === '' ? null : Number(e.target.value)
-                    )
-                  }
                   style={inputStyle}
                 />
               </Field>

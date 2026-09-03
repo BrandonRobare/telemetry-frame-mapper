@@ -58,8 +58,8 @@ const DEFAULT: ReconstructionSettingsType = {
   matcher: 'exhaustive',
   camera_model: 'PINHOLE',
   presets: {
-    quick: { iterations: 1000, max_frames: 500, max_gaussians: 350000, sh_degree: 1, downscale_factor: 4 },
-    full:  { iterations: 30000, max_frames: null, max_gaussians: 1000000, sh_degree: 2, downscale_factor: 2 },
+    quick: { iterations: 1000, max_gaussians: 350000, sh_degree: 1, downscale_factor: 4 },
+    full:  { iterations: 30000, max_gaussians: 1000000, sh_degree: 2, downscale_factor: 2 },
   },
 }
 
