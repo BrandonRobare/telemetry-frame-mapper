@@ -53,7 +53,7 @@ def test_release_version_declarations_agree() -> None:
         "frontend/package.json": frontend_package["version"],
         "frontend/package-lock.json root": frontend_lock["version"],
         "frontend/package-lock.json package": frontend_lock["packages"][""]["version"],
-        "packaging/telemetry-frame-mapper.iss": _match_version(
+        "packaging/windows/telemetry-frame-mapper.iss": _match_version(
             r'^#define AppVersion "([^"]+)"$', windows_installer
         ),
         "uv.lock": locked_project["version"],
