@@ -98,7 +98,7 @@ def test_docker_launcher_uses_validated_deployment_bind(monkeypatch, tmp_path) -
 
 def test_packaged_launchers_use_one_api_worker() -> None:
     dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
-    windows_build = (ROOT / "packaging" / "build-windows.ps1").read_text(encoding="utf-8")
+    windows_build = (ROOT / "packaging" / "windows" / "build.ps1").read_text(encoding="utf-8")
 
     docker_cmd_lines = [line for line in dockerfile.splitlines() if line.startswith("CMD ")]
     docker_cmd = json.loads(docker_cmd_lines[-1].removeprefix("CMD "))

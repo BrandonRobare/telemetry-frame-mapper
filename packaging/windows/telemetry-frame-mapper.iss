@@ -9,7 +9,7 @@ AppVersion={#AppVersion}
 AppPublisher=BrandonRobare
 DefaultDirName={autopf}\{#AppName}
 DefaultGroupName={#AppName}
-OutputDir=..\dist-installer
+OutputDir=..\..\dist-installer
 OutputBaseFilename=telemetry-frame-mapper-{#AppVersion}-setup
 Compression=lzma
 SolidCompression=yes
@@ -17,7 +17,7 @@ WizardStyle=modern
 ArchitecturesInstallIn64BitMode=x64compatible
 
 [Files]
-Source: "..\dist\Telemetry Frame Mapper\*"; DestDir: "{app}"; Flags: recursesubdirs ignoreversion
+Source: "..\..\dist\Telemetry Frame Mapper\*"; DestDir: "{app}"; Flags: recursesubdirs ignoreversion
 
 [Icons]
 Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExeName}"; WorkingDir: "{localappdata}\Telemetry Frame Mapper"
