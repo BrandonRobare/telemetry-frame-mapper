@@ -18,8 +18,8 @@ FRONTEND_LOCK = ROOT / "frontend/package-lock.json"
 WINDOWS_INSTALLER = ROOT / "packaging/telemetry-frame-mapper.iss"
 UV_LOCK = ROOT / "uv.lock"
 CHANGELOG = ROOT / "CHANGELOG.md"
-RELEASE_NOTES = ROOT / "release-notes/v2.0.4.md"
-RELEASE_VERSION = "2.0.4"
+RELEASE_NOTES = ROOT / "release-notes/v2.0.5.md"
+RELEASE_VERSION = "2.0.5"
 
 
 def _match_version(pattern: str, text: str) -> str:
@@ -58,7 +58,9 @@ def test_release_version_declarations_agree() -> None:
         ),
         "uv.lock": locked_project["version"],
         "CHANGELOG.md": _match_version(r"^## \[([^]]+)\]", changelog),
-        "release-notes/v2.0.4.md": _match_version(
+        # Keyed off the constant so a future bump cannot leave this label naming
+        # the previous release's file while reading the current one.
+        f"release-notes/{RELEASE_NOTES.name}": _match_version(
             r"^# Telemetry Frame Mapper v([^\s]+)$", release_notes
         ),
     }
