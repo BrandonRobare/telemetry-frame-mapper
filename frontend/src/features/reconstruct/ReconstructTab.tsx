@@ -674,9 +674,7 @@ export default function ReconstructTab() {
                 size="sm"
                 onClick={() => cancelMutation.mutate(activeJob.id)}
                 disabled={cancelMutation.isPending}
-                style={{
-                  borderRadius: 4, padding: '3px 10px', fontSize: 12,
-                }}
+                style={{ borderRadius: 4, fontSize: 12 }}
               >
                 {cancelMutation.isPending ? 'Cancelling…' : 'Cancel'}
               </Button>
@@ -748,7 +746,7 @@ export default function ReconstructTab() {
                         href={apiUrl(`/reconstruction/${job.id}/splat?lod=full`)}
                         download={`splat_${job.id}.ply`}
                         style={{
-                          padding: '3px 10px', borderRadius: 'var(--radius-sm)', fontSize: 12,
+                          padding: '0 10px', borderRadius: 'var(--radius-sm)', fontSize: 12,
                           background: 'var(--accent-soft)',
                           border: '1px solid var(--accent-soft)',
                           color: 'var(--accent-strong)', textDecoration: 'none', whiteSpace: 'nowrap',

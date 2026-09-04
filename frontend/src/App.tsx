@@ -1,28 +1,36 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, lazy, Suspense } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useMapStore } from './shared/stores/mapStore'
 import { useSettingsStore } from './features/settings/settingsStore'
 import { ErrorBoundary } from './ErrorBoundary'
-import OverviewTab from './features/overview/OverviewTab'
 import LogoMark from './shared/components/LogoMark'
-import MapTab from './features/map/MapTab'
-import GpsSyncTab from './features/gps-sync/GpsSyncTab'
-import ReviewTab from './features/review/ReviewTab'
-import ExportTab from './features/export/ExportTab'
-import PlanTab from './features/plan/PlanTab'
-import SessionLogTab from './features/session-log/SessionLogTab'
-import ChecklistTab from './features/checklist/ChecklistTab'
-import ReconstructTab from './features/reconstruct/ReconstructTab'
-import JobsTab from './features/jobs/JobsTab'
-import StorageTab from './features/storage/StorageTab'
-import SplatViewerTab from './features/splat/SplatViewerTab'
-import CompareTab from './features/compare/CompareTab'
-import SettingsTab from './features/settings/SettingsTab'
 import { ToastStack } from './shared/components/ToastStack'
 import { GlassFilters } from './shared/components/GlassFilters'
 import ShareViewer from './features/share/ShareViewer'
 import MobileQuickCheck from './features/mobile/MobileQuickCheck'
 import { isMobileRoute } from './features/mobile/mobileRoute'
+import { SkeletonCard } from './shared/components/Skeleton'
+
+// Tab modules load on demand (#594). Measured before changing anything: the
+// static graph pulled the 230 kB `maps` chunk (leaflet, via MapTab/PlanTab/
+// CompareTab/MiniLeafletPane) onto /mobile and the share viewer, neither of
+// which renders a map. `three`, `@turf` and the splat library were already
+// dynamically imported inside their components, so this only defers what the
+// tab boundary itself was holding eager.
+const OverviewTab = lazy(() => import('./features/overview/OverviewTab'))
+const MapTab = lazy(() => import('./features/map/MapTab'))
+const GpsSyncTab = lazy(() => import('./features/gps-sync/GpsSyncTab'))
+const ReviewTab = lazy(() => import('./features/review/ReviewTab'))
+const ExportTab = lazy(() => import('./features/export/ExportTab'))
+const PlanTab = lazy(() => import('./features/plan/PlanTab'))
+const SessionLogTab = lazy(() => import('./features/session-log/SessionLogTab'))
+const ChecklistTab = lazy(() => import('./features/checklist/ChecklistTab'))
+const ReconstructTab = lazy(() => import('./features/reconstruct/ReconstructTab'))
+const JobsTab = lazy(() => import('./features/jobs/JobsTab'))
+const StorageTab = lazy(() => import('./features/storage/StorageTab'))
+const SplatViewerTab = lazy(() => import('./features/splat/SplatViewerTab'))
+const CompareTab = lazy(() => import('./features/compare/CompareTab'))
+const SettingsTab = lazy(() => import('./features/settings/SettingsTab'))
 import { StatusHud } from './shared/components/StatusHud'
 import { usePipelineStatus } from './shared/pipeline/usePipelineStatus'
 import { useJobCompletionNotifications } from './shared/notifications/useJobCompletionNotifications'
@@ -69,6 +77,17 @@ const TABS: { id: Tab; label: string; group: 'pipeline' | 'tools' }[] = [
 
 const PIPELINE_TABS = TABS.filter((t) => t.group === 'pipeline')
 const TOOL_TABS = TABS.filter((t) => t.group === 'tools')
+
+/* Announced, not silent: a screen reader hears the tab is loading rather than
+   landing in an empty region while the chunk arrives. */
+function TabLoading() {
+  return (
+    <div role="status" aria-live="polite" aria-busy="true" className="flex flex-1 p-4">
+      <span className="sr-only">Loading tab…</span>
+      <SkeletonCard style={{ flex: 1 }} />
+    </div>
+  )
+}
 
 function renderTab(tab: Tab, onImport: () => void) {
   switch (tab) {
@@ -355,7 +374,15 @@ export default function App() {
               form and panel state — deliberately not worth the trade.
             */}
             <ErrorBoundary key={activeTab} inline>
-              {renderTab(activeTab, () => setShowImport(true))}
+              {/*
+                Suspense sits inside the keyed ErrorBoundary and the
+                AnimatePresence motion.div (#594): outside either one, the
+                fallback would swap places with the exit animation and a
+                chunk-load failure would escape the per-tab boundary.
+              */}
+              <Suspense fallback={<TabLoading />}>
+                {renderTab(activeTab, () => setShowImport(true))}
+              </Suspense>
             </ErrorBoundary>
           </motion.div>
         </AnimatePresence>

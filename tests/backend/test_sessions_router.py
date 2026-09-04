@@ -413,3 +413,25 @@ def test_project_sessions_include_tags_and_notes(client):
     assert len(rows) == 1
     assert rows[0]["tags"] == []
     assert rows[0]["notes"] is None
+
+
+def test_list_sessions_survives_a_null_folder_path(client):
+    """Regression test for #795: a legacy row with a NULL ``folder_path`` used to fail
+    ``list[SessionOut]`` serialization and take down the whole listing, not just itself.
+
+    The app's own creation paths always write a string, so insert the bad row directly.
+    """
+    from backend.main import app
+
+    good = _make_session(client, name="Has a path")
+    db = app.state.test_db_session
+    bad = SessionModel(name="No path", folder_path=None, photo_count=0, usable_count=0)
+    db.add(bad)
+    db.commit()
+    db.refresh(bad)
+
+    resp = client.get("/sessions/")
+    assert resp.status_code == 200
+    by_id = {row["id"]: row for row in resp.json()}
+    assert good.id in by_id
+    assert by_id[bad.id]["folder_path"] is None

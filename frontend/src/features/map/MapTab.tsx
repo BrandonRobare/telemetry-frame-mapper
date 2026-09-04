@@ -103,7 +103,8 @@ export default function MapTab({ onImport }: Props) {
           style={{
             position: 'absolute', right: sidebarWidth, top: '50%',
             transform: 'translateY(-50%)', zIndex: 500,
-            width: 14, height: 36, cursor: 'pointer',
+            /* No width: the 24px WCAG target floor in index.css sizes it. */
+            height: 36, cursor: 'pointer',
             background: 'var(--surface)', border: '1px solid var(--border)',
             borderRight: 'none', borderRadius: '4px 0 0 4px',
             color: 'var(--text-muted)', fontSize: 12,

@@ -46,24 +46,24 @@ def test_get_reconstruction_config_preset_values():
     from backend.core.config import get_reconstruction_config
     cfg = get_reconstruction_config()
     quick = cfg["presets"]["quick"]
-    assert quick["max_frames"] == 500
+    assert quick["iterations"] == 1000
     full = cfg["presets"]["full"]
-    assert full["max_frames"] is None
+    assert full["iterations"] == 30000
 
 
 def test_preset_keys_all_reach_the_trainer():
-    """A preset key nothing consumes is dead config that looks live (#667).
+    """A preset key nothing consumes is dead config that looks live (#667, #776).
 
     Every preset key must name a TrainerConfig field, which is what
-    ``TrainerConfig.from_preset`` applies. ``max_frames`` is the one exception:
-    it is a settings-UI field, not a trainer hyperparameter.
+    ``TrainerConfig.from_preset`` applies. No exemptions: a key that is not a
+    trainer hyperparameter is read by nothing and must not be surfaced.
     """
     from dataclasses import fields
 
     from backend.core.config import get_reconstruction_config
     from backend.services.splat_trainer import TrainerConfig
 
-    consumed = {f.name for f in fields(TrainerConfig)} | {"max_frames"}
+    consumed = {f.name for f in fields(TrainerConfig)}
     for name, preset in get_reconstruction_config()["presets"].items():
         assert not set(preset) - consumed, f"preset {name} has keys nothing reads"
 

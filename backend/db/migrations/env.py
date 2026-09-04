@@ -17,9 +17,13 @@ config = context.config
 # under test.
 config.set_main_option("sqlalchemy.url", str(engine.url))
 
-# Interpret the config file for Python logging.
+# Interpret the config file for Python logging. `disable_existing_loggers` must
+# stay off: init_db() runs this inside the app's own process, and the default
+# would disable the already-configured "backend" logger for the rest of the
+# process — silencing the JSONL application log on every startup that upgrades
+# an existing database, which is exactly when an operator needs to read it.
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 # add your model's MetaData object here for 'autogenerate' support
 target_metadata = Base.metadata

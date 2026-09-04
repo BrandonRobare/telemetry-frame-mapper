@@ -16,7 +16,6 @@ import yaml
 
 from backend.core.config import AppConfig, get_backup_config
 from backend.core.paths import confine_path
-from backend.db.database import engine
 
 ARTIFACT_DIRECTORIES = frozenset({"imports", "processed", "exports"})
 _RCLONE_REMOTE = re.compile(r"^[A-Za-z0-9_.-]+:(?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_.-]*$")
@@ -58,7 +57,15 @@ def _write_sanitized_config(source: Path, destination: Path) -> None:
     )
 
 
-def _sqlite_database_path() -> Path:
+def sqlite_database_path() -> Path:
+    """Resolve the file backing the database.
+
+    The engine is looked up at call time, not import time: backend.db.database
+    imports this module back (locally, to snapshot before migrating), and a
+    live lookup also honours a rebound engine.
+    """
+    from backend.db.database import engine
+
     if (
         engine.dialect.name != "sqlite"
         or not engine.url.database
@@ -68,7 +75,7 @@ def _sqlite_database_path() -> Path:
     return Path(engine.url.database).resolve()
 
 
-def _copy_sqlite_database(source: Path, destination: Path) -> None:
+def copy_sqlite_database(source: Path, destination: Path) -> None:
     if not source.is_file():
         raise BackupError("SQLite database is missing")
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -107,6 +114,50 @@ def _manifest_files(snapshot: Path) -> list[dict]:
         for path in sorted(snapshot.rglob("*"))
         if path.is_file() and path.name != "manifest.json"
     ]
+
+
+def verify_backup(snapshot: Path) -> dict:
+    """Re-hash a snapshot against its own manifest and return that manifest.
+
+    Restoring is only safe once this passes: any recorded file that is missing,
+    resized, or re-hashed differently rejects the whole snapshot, as does any
+    file the manifest does not record.
+    """
+    snapshot = snapshot.resolve()
+    try:
+        manifest = json.loads((snapshot / "manifest.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise BackupError("Backup manifest is missing or unreadable") from exc
+    if (
+        not isinstance(manifest, dict)
+        or manifest.get("format") != "telemetry-frame-mapper-artifact-backup"
+        or manifest.get("version") != 1
+        or not isinstance(manifest.get("files"), list)
+    ):
+        raise BackupError("Backup manifest is not a version 1 artifact backup")
+
+    recorded: set[str] = set()
+    for entry in manifest["files"]:
+        try:
+            relative = entry["path"]
+            path = confine_path(snapshot / relative, snapshot)
+        except (KeyError, TypeError, ValueError) as exc:
+            raise BackupError("Backup manifest lists a file outside the snapshot") from exc
+        if not path.is_file() or path.stat().st_size != entry.get("bytes"):
+            raise BackupError(f"Backup file is missing or resized: {relative}")
+        if _sha256(path) != entry.get("sha256"):
+            raise BackupError(f"Backup file failed checksum verification: {relative}")
+        recorded.add(relative)
+
+    present = {
+        path.relative_to(snapshot).as_posix()
+        for path in snapshot.rglob("*")
+        if path.is_file() and path.name != "manifest.json"
+    }
+    unexpected = sorted(present - recorded)
+    if unexpected:
+        raise BackupError(f"Backup holds files the manifest does not record: {unexpected}")
+    return manifest
 
 
 def _snapshot_name() -> str:
@@ -148,7 +199,7 @@ def _build_snapshot(
     config_path: Path,
     database_path: Path,
 ) -> dict:
-    _copy_sqlite_database(database_path, snapshot / "database" / database_path.name)
+    copy_sqlite_database(database_path, snapshot / "database" / database_path.name)
     _write_sanitized_config(config_path, snapshot / "config.yaml")
     roots = {
         "imports": Path(cfg.imports_dir),
@@ -198,7 +249,7 @@ def create_backup(
         raise ValueError(f"artifacts must be selected from {sorted(ARTIFACT_DIRECTORIES)}")
     artifacts = list(dict.fromkeys(artifacts))
     config_path = config_path.resolve()
-    database_path = (database_path or _sqlite_database_path()).resolve()
+    database_path = (database_path or sqlite_database_path()).resolve()
     if backup_config is None:
         backup_config = get_backup_config(str(config_path))
     snapshot_name = _snapshot_name()
@@ -261,3 +312,18 @@ def create_backup(
             raise BackupError("rclone copy failed") from exc
         result = _result(snapshot, manifest, remote_snapshot)
     return result
+
+
+if __name__ == "__main__":  # Verification step of the restore procedure in docs/USER-MANUAL.md.
+    import sys
+
+    if len(sys.argv) != 2:
+        raise SystemExit("usage: python -m backend.services.artifact_backup <snapshot-directory>")
+    directory = Path(sys.argv[1]).resolve()
+    try:
+        verified = verify_backup(directory)
+    except BackupError as exc:
+        raise SystemExit(f"backup verification failed: {exc}") from None
+    # The directory name, not manifest["snapshot_id"]: a local snapshot is built
+    # under a ".partial" staging name that the manifest still records.
+    print(f"verified {len(verified['files'])} files in {directory.name}")

@@ -62,7 +62,6 @@ const reconstruction: ReconstructionSettings = {
 
 const preset: PresetConfig = {
   iterations: 1000,
-  max_frames: 500,
   max_gaussians: 350000,
   sh_degree: 1,
   downscale_factor: 4,

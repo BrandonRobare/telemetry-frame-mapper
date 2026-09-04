@@ -151,9 +151,16 @@ Everything is read-only and reuses existing queries — no new endpoints.
 The app is installable: `frontend/public/manifest.webmanifest` sets
 `start_url` to `/mobile`, so "Add to Home Screen" opens straight to the
 quick-check view. A minimal service worker (`frontend/public/sw.js`,
-production-only) cache-first-serves the app shell (`/`, `/mobile`, the
-manifest, and icons) — it does not cache API responses or provide offline
-data sync.
+production-only) serves navigations network-first, so an installed app always
+gets the current build and each successful load refreshes the cached shell;
+the manifest and icons are served from that cache. Its cache is named after
+the build version (handed to it as `/sw.js?v=<version>` at registration), so a
+release installs a new worker and discards the previous shell.
+
+**This is a navigation fallback, not an offline app.** With no connection the
+worker returns the cached shell document, but the hashed JS/CSS chunks are
+never cached, so a cold offline launch cannot boot the app. There is no API
+caching and no offline data sync.
 
 ---
 
@@ -498,6 +505,15 @@ sanitized `config.yaml`, and whichever of `imports`, `processed`, and `exports` 
 copied file is SHA-256 recorded in `manifest.json`. The database is copied through SQLite's backup
 API, so the WAL and SHM sidecars are deliberately not included.
 
+Startup takes its own copy as well. When the app starts against an existing database that is
+behind the migration head, it copies the database — through the same SQLite backup API — into a
+`pre-migration/` directory beside the database file, and only then runs the migration. A fresh
+database and one already at head are skipped, so an up-to-date install pays nothing. The copy is
+logged at INFO with its path and how long it took, and `backup.pre_migration_keep` (default 3)
+bounds how many are retained; the oldest is deleted first. If the copy cannot be written — a full
+disk, an unwritable directory — startup fails and the migration does not run, because that copy is
+the only rollback point.
+
 Destinations must be allowlisted in `config.yaml` first — a local path has to match an entry
 exactly:
 
@@ -535,6 +551,77 @@ backup:
 Only one backup runs at a time, so a slow remote copy is never overlapped by the next scheduled
 run. `GET /storage/backup-schedule` reports operational status only — last run, next run, result —
 never target credentials or command output. The scheduler is off unless `enabled: true`.
+
+### Restoring a snapshot
+
+A snapshot is a plain directory, so recovery is one verification plus three copies. There is no
+restore endpoint and no restore button: restoring is a deliberate act performed against a stopped
+backend, because the backend migrates the database on startup.
+
+1. **Verify the snapshot before touching the install.** Every recorded file is re-hashed against
+   `manifest.json`; a file that is missing, resized, re-hashed differently, or not recorded at all
+   rejects the whole snapshot:
+
+   ```bash
+   python -m backend.services.artifact_backup "E:/telemetry-backups/artifact-backup-v1-..."
+   verified 4 files in artifact-backup-v1-20260902T031500Z-9c1f0ab3
+   ```
+
+   A non-zero exit means that copy is damaged — reach for an older snapshot rather than restoring
+   it. (`verify_backup()` in `backend/services/artifact_backup.py` is the same check in-process; it
+   raises `BackupError` and returns the manifest on success.)
+
+2. **Stop the backend, then restore the database.** Delete the sidecars first: a `-wal`/`-shm` pair
+   belongs to the database file that created it, and removing them is what guarantees the restored
+   file is read exactly as the snapshot left it. `data/` here is whatever `data_dir` points at.
+
+   ```bash
+   rm -f data/drone_mapping.db-wal data/drone_mapping.db-shm
+   cp "<snapshot>/database/drone_mapping.db" data/drone_mapping.db
+   ```
+
+3. **Restore the artifacts you backed up.** A snapshot holds only the directories that backup
+   selected, and copying them back is additive — files created after the snapshot are left alone:
+
+   ```bash
+   cp -R "<snapshot>/artifacts/processed/." processed/
+   cp -R "<snapshot>/artifacts/exports/." exports/
+   ```
+
+4. **Restore `config.yaml` and put the secrets back** — see the next section; the snapshot's copy is
+   sanitized and is not a drop-in replacement.
+
+5. **Start the backend.** `init_db()` runs `alembic upgrade head` against the restored database, so
+   a snapshot taken on an older release migrates forward on this first start. Confirm with
+   `GET /health`, then open one session and one reconstruction to confirm the artifacts resolve.
+
+To undo a bad Alembic upgrade, restore the database from the snapshot taken before it and pin the
+old release: Alembic migrations here are forward-only, so re-running the new build against the
+restored file simply upgrades it again.
+
+### Restoring the secrets a backup deliberately drops
+
+Backups sanitize `config.yaml` on the way out, replacing **the whole value** under any key matching
+`password`, `secret`, `token`, `credential`, or `api_key` with the string `***REDACTED***`. For the
+shipped configuration that is exactly three places:
+
+| Key in the snapshot's `config.yaml` | What was lost | Put back by hand |
+|---|---|---|
+| `api_key` (the entire block) | `enabled`, `key_hash_env` | the block, as a mapping |
+| `remote_worker.auth_token_env` | the env var's *name* | `REMOTE_WORKER_TOKEN` |
+| `cesium_ion.token_env` | the env var's *name* | `CESIUM_ION_TOKEN` |
+
+Copying the sanitized file over a working `config.yaml` without repairing it fails at startup with
+`api_key must be a mapping`, because `api_key` is now a string. Restore your own copy of
+`config.yaml` and treat the snapshot's as a reference for the non-secret settings.
+
+The secret *values* have never been in any backup — they live in environment variables and in
+rclone's own configuration, and none of them survive a rebuild of the host. Set the ones your
+deployment uses before the corresponding feature will work again: `DRONE_MAPPING_PIN_HASH`,
+`DRONE_MAPPING_API_KEY_HASH` (both scrypt hashes, not the PIN or key itself), `REMOTE_WORKER_TOKEN`,
+`WEBODM_JWT`, `CESIUM_ION_TOKEN`, `DJI_API_KEY`, plus the remote's credentials in the rclone config
+if you back up to rclone. Share links survive a database restore — their tokens are hashed with no
+host-specific secret, so an existing link keeps working until its recorded expiry.
 
 ## 7. Importing
 

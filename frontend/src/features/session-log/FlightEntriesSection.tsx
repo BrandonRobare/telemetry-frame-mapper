@@ -1,6 +1,8 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { del, get, post } from '../../shared/api/client'
+import ConfirmDialog from '../../shared/components/ConfirmDialog'
+import { useToast } from '../../shared/hooks/useToast'
 import type { FlightEntry } from '../../types/api'
 import { formatDurationS, parseFlightEntryForm } from './flightEntries'
 
@@ -16,6 +18,13 @@ const inputStyle: React.CSSProperties = {
   minWidth: 0,
 }
 
+/** Names the specific row a delete button acts on. */
+function entryLabel(entry: FlightEntry): string {
+  return entry.battery_id
+    ? `battery ${entry.battery_id}`
+    : `flight recorded ${new Date(entry.created_at).toLocaleString()}`
+}
+
 function useFlightEntries(sessionId: number) {
   return useQuery<FlightEntry[]>({
     queryKey: ['flight-entries', sessionId],
@@ -25,9 +34,11 @@ function useFlightEntries(sessionId: number) {
 
 export default function FlightEntriesSection({ sessionId }: { sessionId: number }) {
   const queryClient = useQueryClient()
+  const { addToast } = useToast()
   const { data: entries = [] } = useFlightEntries(sessionId)
   const [form, setForm] = useState(EMPTY_FORM)
   const [formError, setFormError] = useState<string | null>(null)
+  const [entryToDelete, setEntryToDelete] = useState<FlightEntry | null>(null)
 
   const invalidate = () =>
     queryClient.invalidateQueries({ queryKey: ['flight-entries', sessionId] })
@@ -46,6 +57,8 @@ export default function FlightEntriesSection({ sessionId }: { sessionId: number 
   const deleteEntry = useMutation({
     mutationFn: (entryId: number) => del(`/sessions/${sessionId}/flight-entries/${entryId}`),
     onSuccess: invalidate,
+    onError: (err: Error) => addToast(err.message || 'Delete failed', 'error'),
+    onSettled: () => setEntryToDelete(null),
   })
 
   function submit() {
@@ -109,61 +122,78 @@ export default function FlightEntriesSection({ sessionId }: { sessionId: number 
       </div>
 
       {/* Entries list */}
+      {/* Scrolls in its own box: the 24px target floor (#606) keeps the action
+            column from shrinking, and the app shell is overflow-hidden, so at 320px
+            an unwrapped table is clipped rather than reachable. */}
       {entries.length > 0 && (
-        <table
-          style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, color: 'var(--text)' }}
-        >
-          <thead>
-            <tr style={{ borderBottom: '1px solid var(--border)' }}>
-              {['Battery', 'Start', 'End', 'Duration', 'Note', ''].map((h, i) => (
-                <th
-                  key={i}
-                  className="text-left text-xs font-medium"
-                  style={{ padding: '6px 12px', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}
-                >
-                  {h}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {entries.map((entry) => (
-              <tr key={entry.id} style={{ borderBottom: '1px solid var(--border)' }}>
-                <td style={{ padding: '8px 12px', fontFamily: 'var(--font-mono)' }}>
-                  {entry.battery_id ?? '—'}
-                </td>
-                <td style={{ padding: '8px 12px', color: 'var(--text-muted)' }}>
-                  {entry.start_pct != null ? `${entry.start_pct.toFixed(0)}%` : '—'}
-                </td>
-                <td style={{ padding: '8px 12px', color: 'var(--text-muted)' }}>
-                  {entry.end_pct != null ? `${entry.end_pct.toFixed(0)}%` : '—'}
-                </td>
-                <td style={{ padding: '8px 12px', color: 'var(--text-muted)' }}>
-                  {formatDurationS(entry.duration_s)}
-                </td>
-                <td style={{ padding: '8px 12px', color: 'var(--text-muted)' }}>
-                  {entry.notes ?? '—'}
-                </td>
-                <td style={{ padding: '8px 12px', textAlign: 'right' }}>
-                  <button
-                    onClick={() => deleteEntry.mutate(entry.id)}
-                    title="Delete flight entry"
-                    className="text-xs cursor-pointer"
-                    style={{
-                      background: 'transparent',
-                      border: '1px solid var(--border-strong)',
-                      color: 'var(--text-muted)',
-                      padding: '2px 8px',
-                    }}
+        <div style={{ overflowX: 'auto' }}>
+          <table
+            style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, color: 'var(--text)' }}
+          >
+            <thead>
+              <tr style={{ borderBottom: '1px solid var(--border)' }}>
+                {['Battery', 'Start', 'End', 'Duration', 'Note', ''].map((h, i) => (
+                  <th
+                    key={i}
+                    className="text-left text-xs font-medium"
+                    style={{ padding: '6px 12px', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}
                   >
-                    ✕
-                  </button>
-                </td>
+                    {h}
+                  </th>
+                ))}
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {entries.map((entry) => (
+                <tr key={entry.id} style={{ borderBottom: '1px solid var(--border)' }}>
+                  <td style={{ padding: '8px 12px', fontFamily: 'var(--font-mono)' }}>
+                    {entry.battery_id ?? '—'}
+                  </td>
+                  <td style={{ padding: '8px 12px', color: 'var(--text-muted)' }}>
+                    {entry.start_pct != null ? `${entry.start_pct.toFixed(0)}%` : '—'}
+                  </td>
+                  <td style={{ padding: '8px 12px', color: 'var(--text-muted)' }}>
+                    {entry.end_pct != null ? `${entry.end_pct.toFixed(0)}%` : '—'}
+                  </td>
+                  <td style={{ padding: '8px 12px', color: 'var(--text-muted)' }}>
+                    {formatDurationS(entry.duration_s)}
+                  </td>
+                  <td style={{ padding: '8px 12px', color: 'var(--text-muted)' }}>
+                    {entry.notes ?? '—'}
+                  </td>
+                  <td style={{ padding: '8px 12px', textAlign: 'right' }}>
+                    <button
+                      onClick={() => setEntryToDelete(entry)}
+                      aria-label={`Delete ${entryLabel(entry)}`}
+                      title={`Delete ${entryLabel(entry)}`}
+                      className="text-xs cursor-pointer"
+                      style={{
+                        background: 'transparent',
+                        border: '1px solid var(--border-strong)',
+                        color: 'var(--text-muted)',
+                        padding: '2px 8px',
+                      }}
+                    >
+                      ✕
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
+
+      <ConfirmDialog
+        open={entryToDelete !== null}
+        title="Delete flight entry?"
+        description={<>Delete the entry for <strong>{entryToDelete && entryLabel(entryToDelete)}</strong>? This cannot be undone.</>}
+        confirmLabel="Delete entry"
+        danger
+        loading={deleteEntry.isPending}
+        onCancel={() => setEntryToDelete(null)}
+        onConfirm={() => { if (entryToDelete) deleteEntry.mutate(entryToDelete.id) }}
+      />
     </section>
   )
 }

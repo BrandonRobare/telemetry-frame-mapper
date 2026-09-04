@@ -375,9 +375,7 @@ function FileBrowser() {
             size="sm"
             key={d}
             onClick={() => setDir(d)}
-            style={{
-              padding: '4px 12px', borderRadius: 'var(--radius-sm)', fontSize: 12,
-            }}
+            style={{ borderRadius: 'var(--radius-sm)', fontSize: 12 }}
           >
             {d}
           </Button>
@@ -418,10 +416,7 @@ function FileBrowser() {
                     onClick={() => setFileToDelete(f)}
                     loading={deleting === f.path}
                     disabled={deleting !== null}
-                    style={{
-                      borderRadius: 'var(--radius-sm)', fontSize: 11,
-                      padding: '2px 8px',
-                    }}
+                    style={{ borderRadius: 'var(--radius-sm)', fontSize: 11 }}
                   >
                     Delete
                   </Button>
