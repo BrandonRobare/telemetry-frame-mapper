@@ -3,6 +3,38 @@
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres to [Semantic Versioning](https://semver.org/).
 
 
+## [2.0.5] — 2026-09-03
+
+UX, accessibility and durability release. Closes the v2.0.5 milestone; no new product surface.
+
+### Added
+
+- The database is snapshotted before startup migrations, into `pre-migration/` beside it, with bounded retention via `backup.pre_migration_keep` (default 3). A failed snapshot blocks startup; a fresh database or one already at head is skipped (#680).
+- A documented and tested restore path: `verify_backup` re-hashes every manifest entry and rejects missing, resized, re-hashed, unrecorded or path-escaping files, with a round-trip test that restores a v2.0.2 database to current migration head, plus the secrets step backups deliberately strip (#610).
+- A 24x24 stepper beside the GPS Sync offset histogram, so an offset is selectable without aiming at a 4-pixel bar (#606).
+
+### Fixed
+
+- Every interactive control meets the WCAG 2.2 AA 24x24 minimum target size, applied as an app-wide floor and mirrored in the shared `Button`; undersized controls on the Session Log went from 10 of 32 to 0 of 32 (#606).
+- Session Log tables scroll in their own box instead of spilling onto the page and being clipped at 320 px, which had put their delete buttons out of reach; page overflow there went from 201 px to 4 px (#606).
+- Deleting a defect, flight entry or splat annotation asks for confirmation, names the specific row, and reports a refused delete instead of silently leaving the row on screen; mutations that lacked error handling now surface failures (#590).
+- Alembic's `fileConfig()` no longer disables the configured `backend` logger, which silenced the JSONL application log for the rest of the process on every startup that upgraded an existing database (#610).
+- One session row with a `NULL` `folder_path` no longer 500s the entire session listing (#795).
+- Removed the dead `reconstruction.presets.*.max_frames` key, an editable, validated settings field that nothing consumed, so a frame cap an operator set was silently ignored (#776).
+- An installed PWA no longer pins itself to an old build: navigation is network-first, a successful response refreshes the cached shell, and the cache name is tied to the release version (#588).
+
+### Changed
+
+- Tab modules load on demand, and Leaflet is no longer force-grouped into a chunk the entry HTML modulepreloaded on every route. The entry chunk drops from 608 kB to 210 kB (gzip 173 kB to 65 kB) and `/mobile` from 1070 kB to 450 kB decoded (#594).
+- The offline claim was removed rather than faked: hashed JS/CSS chunks are not precached, so the service worker is a navigation fallback, not an offline app. `docs/USER-MANUAL.md` now states this (#588).
+
+### Upgrade
+
+- No new migration; the last was `0016` in v2.0.4.
+- New optional key `backup.pre_migration_keep` (default 3). Existing `config.yaml` files work unchanged.
+- An existing `config.yaml` that still carries `max_frames` keeps working, but the value is inert and `GET /settings` echoes it until removed by hand (#804).
+- Installed PWA clients pick up this release on their next online navigation, and `skipWaiting()` still swaps the worker in immediately.
+
 ## [2.0.4] — 2026-08-30
 
 Subsystem-correctness release for defects found after v2.0.3 across reconstruction, export, storage lifecycle, uploads, the frontend, and the CLI.

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "drone-video-geotagger"
-version = "2.0.4"
+version = "2.0.5"
 description = "Geotags DJI drone video frames with GPS EXIF metadata for WebODM/OpenDroneMap processing."
 readme = "README.md"
 requires-python = ">=3.11"
