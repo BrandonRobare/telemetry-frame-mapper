@@ -48,11 +48,14 @@ function renderApp(tab: string) {
 }
 
 describe('App per-tab error boundary', () => {
-  it('keeps the shell alive when a tab throws during render', () => {
+  it('keeps the shell alive when a tab throws during render', async () => {
     renderApp('review')
 
+    // Tabs are lazy (#594), so the throw arrives once the chunk resolves —
+    // the guarantee under test is unchanged, only its timing.
+    await waitFor(() => expect(screen.getByText(INLINE_ERROR)).toBeTruthy())
+
     // The failing tab is reduced to an inline panel...
-    expect(screen.getByText(INLINE_ERROR)).toBeTruthy()
     expect(screen.getByText('bad geometry in persisted state')).toBeTruthy()
 
     // ...and the shell around it is still mounted and usable.
@@ -64,7 +67,7 @@ describe('App per-tab error boundary', () => {
 
   it('clears the caught error when the operator switches tabs', async () => {
     renderApp('review')
-    expect(screen.getByText(INLINE_ERROR)).toBeTruthy()
+    await waitFor(() => expect(screen.getByText(INLINE_ERROR)).toBeTruthy())
 
     fireEvent.click(screen.getByRole('button', { name: 'Overview' }))
 
