@@ -75,7 +75,7 @@ semantic = [
   "transformers>=4.48",
   "safetensors",
 ]
-windows-package = [
+desktop-package = [
   "pyinstaller>=6.22.0",
 ]
 

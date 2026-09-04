@@ -1,5 +1,5 @@
 $ErrorActionPreference = "Stop"
-Set-Location (Split-Path -Parent $PSScriptRoot)
+Set-Location (Resolve-Path (Join-Path $PSScriptRoot "..\.."))
 
 $exe = Join-Path (Get-Location) "dist/Telemetry Frame Mapper/Telemetry Frame Mapper.exe"
 if (-not (Test-Path $exe)) {
