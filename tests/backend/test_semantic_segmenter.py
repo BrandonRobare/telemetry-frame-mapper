@@ -90,6 +90,38 @@ def test_load_segmenter_cuda_uses_float16(monkeypatch):
     assert seg._id_to_category_cache["fake-model"][20] == 3  # car -> vehicle
 
 
+def test_load_segmenter_metal_uses_mps_device(monkeypatch):
+    """Metal selection passes its PyTorch device string to transformers."""
+    import backend.services.semantic_segmenter as seg
+
+    captured: dict = {}
+
+    class FakeConfig:
+        id2label = {0: "wall"}
+
+    class FakeModel:
+        config = FakeConfig()
+
+    class FakePipe:
+        model = FakeModel()
+
+    class FakeTransformers:
+        @staticmethod
+        def pipeline(**kwargs):
+            captured.update(kwargs)
+            return FakePipe()
+
+    monkeypatch.setattr(seg, "_segmentation_deps", (FakeTransformers(), object()))
+    monkeypatch.setattr(seg.accelerator, "device_str", lambda **_kwargs: "mps")
+    seg._segmenter_cache.clear()
+    seg._id_to_category_cache.clear()
+
+    seg.load_segmenter(model_id="fake-metal-model")
+
+    assert captured["device"] == "mps"
+    assert "torch_dtype" not in captured
+
+
 def test_segmenter_lazy_import_error():
     """_import_segmentation_deps raises RuntimeError when deps are missing."""
     import importlib

@@ -19,6 +19,8 @@ from typing import Any
 
 import numpy as np
 
+from backend.services import accelerator
+
 logger = logging.getLogger(__name__)
 
 # -- label-string -> 6-class semantic mapping ---------------------------------
@@ -119,7 +121,7 @@ _id_to_category_cache: dict[str, np.ndarray] = {}
 def load_segmenter(
     model_id: str = "nvidia/segformer-b0-finetuned-ade-512-512",
     hf_home: str | None = None,
-    device: str = "cuda",
+    device: str | None = None,
 ) -> Any:
     """Load (or return cached) the SegFormer semantic segmentation pipeline.
 
@@ -132,8 +134,8 @@ def load_segmenter(
         If set, the ``HF_HOME`` environment variable is set before the first
         import of ``transformers`` so the cache lands in the desired location.
     device:
-        PyTorch device string.  ``"cuda"`` for fp16 GPU inference, ``"cpu"``
-        for fallback.
+        Optional PyTorch device preference. When omitted, the shared accelerator
+        detector selects CUDA, Metal, then CPU.
 
     Returns
     -------
@@ -147,23 +149,17 @@ def load_segmenter(
 
     transformers, _safetensors = _import_segmentation_deps()
 
-    if device == "cuda":
-        try:
-            import torch
-
-            if not torch.cuda.is_available():
-                logger.warning("CUDA requested but not available; falling back to CPU")
-                device = "cpu"
-        except Exception:
-            device = "cpu"
+    selected_device = accelerator.device_str(override=device)
+    if device == "cuda" and selected_device == "cpu":
+        logger.warning("CUDA requested but not available; falling back to CPU")
 
     pipeline_kwargs: dict[str, Any] = {
         "task": "image-segmentation",
         "model": model_id,
-        "device": device if device == "cpu" else 0,
+        "device": 0 if selected_device == "cuda" else selected_device,
     }
 
-    if device == "cuda":
+    if selected_device == "cuda":
         # transformers resolves string dtypes via ``getattr(torch, s)`` — must be
         # the bare attribute name, not ``"torch.float16"`` (which raises).
         pipeline_kwargs["torch_dtype"] = "float16"
