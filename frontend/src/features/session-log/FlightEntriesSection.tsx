@@ -122,61 +122,66 @@ export default function FlightEntriesSection({ sessionId }: { sessionId: number 
       </div>
 
       {/* Entries list */}
+      {/* Scrolls in its own box: the 24px target floor (#606) keeps the action
+            column from shrinking, and the app shell is overflow-hidden, so at 320px
+            an unwrapped table is clipped rather than reachable. */}
       {entries.length > 0 && (
-        <table
-          style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, color: 'var(--text)' }}
-        >
-          <thead>
-            <tr style={{ borderBottom: '1px solid var(--border)' }}>
-              {['Battery', 'Start', 'End', 'Duration', 'Note', ''].map((h, i) => (
-                <th
-                  key={i}
-                  className="text-left text-xs font-medium"
-                  style={{ padding: '6px 12px', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}
-                >
-                  {h}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {entries.map((entry) => (
-              <tr key={entry.id} style={{ borderBottom: '1px solid var(--border)' }}>
-                <td style={{ padding: '8px 12px', fontFamily: 'var(--font-mono)' }}>
-                  {entry.battery_id ?? '—'}
-                </td>
-                <td style={{ padding: '8px 12px', color: 'var(--text-muted)' }}>
-                  {entry.start_pct != null ? `${entry.start_pct.toFixed(0)}%` : '—'}
-                </td>
-                <td style={{ padding: '8px 12px', color: 'var(--text-muted)' }}>
-                  {entry.end_pct != null ? `${entry.end_pct.toFixed(0)}%` : '—'}
-                </td>
-                <td style={{ padding: '8px 12px', color: 'var(--text-muted)' }}>
-                  {formatDurationS(entry.duration_s)}
-                </td>
-                <td style={{ padding: '8px 12px', color: 'var(--text-muted)' }}>
-                  {entry.notes ?? '—'}
-                </td>
-                <td style={{ padding: '8px 12px', textAlign: 'right' }}>
-                  <button
-                    onClick={() => setEntryToDelete(entry)}
-                    aria-label={`Delete ${entryLabel(entry)}`}
-                    title={`Delete ${entryLabel(entry)}`}
-                    className="text-xs cursor-pointer"
-                    style={{
-                      background: 'transparent',
-                      border: '1px solid var(--border-strong)',
-                      color: 'var(--text-muted)',
-                      padding: '2px 8px',
-                    }}
+        <div style={{ overflowX: 'auto' }}>
+          <table
+            style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, color: 'var(--text)' }}
+          >
+            <thead>
+              <tr style={{ borderBottom: '1px solid var(--border)' }}>
+                {['Battery', 'Start', 'End', 'Duration', 'Note', ''].map((h, i) => (
+                  <th
+                    key={i}
+                    className="text-left text-xs font-medium"
+                    style={{ padding: '6px 12px', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}
                   >
-                    ✕
-                  </button>
-                </td>
+                    {h}
+                  </th>
+                ))}
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {entries.map((entry) => (
+                <tr key={entry.id} style={{ borderBottom: '1px solid var(--border)' }}>
+                  <td style={{ padding: '8px 12px', fontFamily: 'var(--font-mono)' }}>
+                    {entry.battery_id ?? '—'}
+                  </td>
+                  <td style={{ padding: '8px 12px', color: 'var(--text-muted)' }}>
+                    {entry.start_pct != null ? `${entry.start_pct.toFixed(0)}%` : '—'}
+                  </td>
+                  <td style={{ padding: '8px 12px', color: 'var(--text-muted)' }}>
+                    {entry.end_pct != null ? `${entry.end_pct.toFixed(0)}%` : '—'}
+                  </td>
+                  <td style={{ padding: '8px 12px', color: 'var(--text-muted)' }}>
+                    {formatDurationS(entry.duration_s)}
+                  </td>
+                  <td style={{ padding: '8px 12px', color: 'var(--text-muted)' }}>
+                    {entry.notes ?? '—'}
+                  </td>
+                  <td style={{ padding: '8px 12px', textAlign: 'right' }}>
+                    <button
+                      onClick={() => setEntryToDelete(entry)}
+                      aria-label={`Delete ${entryLabel(entry)}`}
+                      title={`Delete ${entryLabel(entry)}`}
+                      className="text-xs cursor-pointer"
+                      style={{
+                        background: 'transparent',
+                        border: '1px solid var(--border-strong)',
+                        color: 'var(--text-muted)',
+                        padding: '2px 8px',
+                      }}
+                    >
+                      ✕
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
 
       <ConfirmDialog

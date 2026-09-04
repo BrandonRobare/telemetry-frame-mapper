@@ -72,11 +72,12 @@ export default function SessionSidebar({ session, coverage, frameCount, isLoadin
   })
 
   if (!sidebarOpen) {
+    // No explicit width: the 24px WCAG target floor in index.css sizes the rail.
     return (
       <button
         onClick={toggleSidebar}
         className="shrink-0 flex items-center justify-center cursor-pointer border-none"
-        style={{ width: 20, background: 'var(--surface)', borderLeft: '1px solid var(--border)', color: 'var(--text-muted)' }}
+        style={{ background: 'var(--surface)', borderLeft: '1px solid var(--border)', color: 'var(--text-muted)' }}
         title="Expand sidebar"
       >
         ‹
