@@ -81,3 +81,21 @@ def test_empty_cache_is_a_noop_on_cpu():
     accelerator.empty_cache(torch)
 
     assert calls == []
+
+
+def test_gsplat_policy_never_selects_or_clears_metal_cache():
+    calls: list[str] = []
+    torch = SimpleNamespace(
+        cuda=SimpleNamespace(
+            is_available=lambda: False,
+            empty_cache=lambda: calls.append("cuda"),
+        ),
+        backends=SimpleNamespace(mps=SimpleNamespace(is_available=lambda: True)),
+        mps=SimpleNamespace(empty_cache=lambda: calls.append("metal")),
+    )
+
+    assert accelerator.device_str(torch, allow_metal=False) == "cpu"
+    assert accelerator.device_str(torch, override="metal", allow_metal=False) == "cpu"
+    accelerator.empty_cache(torch, allow_metal=False)
+
+    assert calls == []
