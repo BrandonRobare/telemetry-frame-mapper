@@ -17,14 +17,14 @@ The app's optional external tools are not redistributed: install `ffmpeg` and Ex
 From the repository root in PowerShell:
 
 ```powershell
-uv sync --frozen --group backend --group reconstruction --group windows-package
+uv sync --frozen --group backend --group reconstruction --group desktop-package
 Push-Location frontend
 npm ci
 npm run build
 Pop-Location
-uv run --frozen --no-sync powershell -ExecutionPolicy Bypass -File packaging/build-windows.ps1
-uv run --frozen --no-sync powershell -ExecutionPolicy Bypass -File packaging/smoke-windows.ps1
-ISCC.exe .\packaging\telemetry-frame-mapper.iss
+uv run --frozen --no-sync powershell -ExecutionPolicy Bypass -File packaging/windows/build.ps1
+uv run --frozen --no-sync powershell -ExecutionPolicy Bypass -File packaging/windows/smoke.ps1
+ISCC.exe .\packaging\windows\telemetry-frame-mapper.iss
 ```
 
 The smoke script starts the unpacked application against a fresh temporary `LOCALAPPDATA`, waits for `http://127.0.0.1:8000/health`, and verifies the SQLite database reached the current Alembic head. The installer is then written to `dist-installer\telemetry-frame-mapper-2.0.0-setup.exe`. Run it, launch **Telemetry Frame Mapper** from the Start menu, and confirm its persisted config and data directories exist under `%LOCALAPPDATA%\Telemetry Frame Mapper\`.

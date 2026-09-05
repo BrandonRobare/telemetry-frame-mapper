@@ -175,7 +175,7 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
 
       - name: Install locked packaging and test environment
-        run: uv sync --frozen --group backend --group windows-package --group dev
+        run: uv sync --frozen --group backend --group desktop-package --group dev
 
       # The Windows job intentionally runs the CLI suite plus settings atomic-write tests:
       # they exercise path, subprocess, and redirected-stream behavior where Windows differs.
@@ -193,7 +193,7 @@ jobs:
           npm run build
 
       - name: Build Windows bundle
-        run: uv run --frozen --no-sync powershell -ExecutionPolicy Bypass -File packaging/build-windows.ps1
+        run: uv run --frozen --no-sync powershell -ExecutionPolicy Bypass -File packaging/windows/build.ps1
 
       - name: Smoke Windows startup and migrations
-        run: uv run --frozen --no-sync powershell -ExecutionPolicy Bypass -File packaging/smoke-windows.ps1
+        run: uv run --frozen --no-sync powershell -ExecutionPolicy Bypass -File packaging/windows/smoke.ps1

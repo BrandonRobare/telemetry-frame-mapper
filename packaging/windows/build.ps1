@@ -1,15 +1,15 @@
-# Build the Windows application bundle used by packaging/telemetry-frame-mapper.iss.
+# Build the Windows application bundle used by packaging/windows/telemetry-frame-mapper.iss.
 # Run from the repository root after building frontend/dist.
 $ErrorActionPreference = "Stop"
-Set-Location (Split-Path -Parent $PSScriptRoot)
+$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
+Set-Location $repoRoot
 
 if (-not (Test-Path "frontend/dist/index.html")) {
     throw "frontend/dist/index.html is missing. Run: cd frontend; npm ci; npm run build"
 }
 
-$repoRoot = (Get-Location).Path
 python -m PyInstaller --noconfirm --clean --onedir --name "Telemetry Frame Mapper" --specpath build `
-    --runtime-hook "$repoRoot/packaging/runtime_hook.py" `
+    --runtime-hook "$repoRoot/packaging/common/runtime_paths.py" `
     --add-data "$repoRoot/config.yaml;." `
     --add-data "$repoRoot/alembic.ini;." `
     --add-data "$repoRoot/backend/db/migrations;backend/db/migrations" `
