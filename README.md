@@ -33,9 +33,9 @@ The published Python wheel is CLI-only:
 pip install drone-video-geotagger
 ```
 
-For the web app, use a cloned source checkout, the [Docker image](#docker), or the
-[Windows installer](docs/WINDOWS-INSTALLER.md). From a source checkout, install its
-source-only dependencies with:
+For the web app, use a cloned source checkout, the [Docker image](#docker), the
+[Windows installer](docs/WINDOWS-INSTALLER.md), or an arm64 unsigned local [macOS bundle](docs/MACOS-BUNDLE.md).
+From a source checkout, install its source-only dependencies with:
 
 ```bash
 uv sync --group backend --group dev
@@ -122,7 +122,7 @@ src/              CLI package (drone-video-geotagger, dvg-pipeline)
 backend/          FastAPI app (API server, DB models, services)
 frontend/         Vite + React frontend
 tests/            pytest suite (tests/cli/ and tests/backend/)
-packaging/        Windows installer build (PyInstaller + Inno Setup)
+packaging/        Windows installer and arm64 macOS bundle build scripts
 docs/             Documentation
 ```
 
@@ -142,6 +142,7 @@ docs/             Documentation
 | [CESIUM-ION.md](docs/CESIUM-ION.md) | Cesium ion tileset upload |
 | [VENDOR-PROJECT-IMPORT.md](docs/VENDOR-PROJECT-IMPORT.md) | Importing Pix4D / DroneDeploy projects |
 | [WINDOWS-INSTALLER.md](docs/WINDOWS-INSTALLER.md) | Building the distributable Windows installer |
+| [MACOS-BUNDLE.md](docs/MACOS-BUNDLE.md) | Building and validating the local arm64 macOS `.app` bundle |
 | [CHANGELOG.md](CHANGELOG.md) | Release history |
 
 ## Docker
