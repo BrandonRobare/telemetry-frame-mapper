@@ -107,8 +107,7 @@ def describe(
     torch: Any | None = None,
     *,
     override: str | None = None,
-    allow_metal: bool = True,
 ) -> dict[str, str]:
-    """Return the structured capability payload for the selected accelerator."""
-    selected = detect(torch, override=override, allow_metal=allow_metal)
+    """Return the structured capability payload for the machine accelerator."""
+    selected = detect(torch, override=override)
     return {"kind": selected.kind, "device": selected.device}

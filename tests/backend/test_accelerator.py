@@ -35,6 +35,14 @@ def test_detect_selects_available_accelerator(torch, kind, device):
     assert accelerator.describe(torch) == {"kind": kind, "device": device}
 
 
+def test_describe_reports_metal_hardware_without_consumer_policy():
+    torch = _torch(metal=True)
+
+    assert accelerator.describe(torch)["kind"] == "metal"
+    with pytest.raises(TypeError):
+        accelerator.describe(torch, allow_metal=False)
+
+
 def test_detect_honors_explicit_device_preference_when_available():
     torch = _torch(cuda=True, metal=True)
 
