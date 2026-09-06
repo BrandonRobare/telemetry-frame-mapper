@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 from backend.services.semantic_segmenter import build_id_to_category
@@ -19,6 +21,13 @@ _STUB_ID2LABEL = {
     26: "sea",
     39: "grandstand, covered stand",
 }
+
+
+def _torch(*, cuda: bool = False, metal: bool = False):
+    return SimpleNamespace(
+        cuda=SimpleNamespace(is_available=lambda: cuda),
+        backends=SimpleNamespace(mps=SimpleNamespace(is_available=lambda: metal)),
+    )
 
 
 def test_build_id_to_category_dominant_aerial_classes():
@@ -77,9 +86,7 @@ def test_load_segmenter_cuda_uses_float16(monkeypatch):
     seg._segmenter_cache.clear()
     seg._id_to_category_cache.clear()
 
-    torch = pytest.importorskip("torch")
-
-    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(seg.accelerator, "_import_torch", lambda: _torch(cuda=True))
 
     seg.load_segmenter(model_id="fake-model", device="cuda")
 
@@ -90,8 +97,8 @@ def test_load_segmenter_cuda_uses_float16(monkeypatch):
     assert seg._id_to_category_cache["fake-model"][20] == 3  # car -> vehicle
 
 
-def test_load_segmenter_metal_uses_mps_device(monkeypatch):
-    """Metal selection passes its PyTorch device string to transformers."""
+def test_load_segmenter_defaults_to_cpu_on_metal_only_torch(monkeypatch):
+    """MPS remains opt-in until its benchmark establishes a dtype policy."""
     import backend.services.semantic_segmenter as seg
 
     captured: dict = {}
@@ -112,13 +119,51 @@ def test_load_segmenter_metal_uses_mps_device(monkeypatch):
             return FakePipe()
 
     monkeypatch.setattr(seg, "_segmentation_deps", (FakeTransformers(), object()))
-    monkeypatch.setattr(seg.accelerator, "device_str", lambda **_kwargs: "mps")
+    monkeypatch.setattr(seg.accelerator, "_import_torch", lambda: _torch(metal=True))
     seg._segmenter_cache.clear()
     seg._id_to_category_cache.clear()
 
     seg.load_segmenter(model_id="fake-metal-model")
 
-    assert captured["device"] == "mps"
+    assert captured["device"] == "cpu"
+    assert "torch_dtype" not in captured
+
+
+@pytest.mark.parametrize(
+    ("device", "expected_device"),
+    [("cpu", "cpu"), ("mps", "mps")],
+)
+def test_load_segmenter_honors_explicit_device_on_metal_only_torch(
+    monkeypatch, device, expected_device
+):
+    """CPU stays explicit and MPS remains an opt-in seam on Metal-only hosts."""
+    import backend.services.semantic_segmenter as seg
+
+    captured: dict = {}
+
+    class FakeConfig:
+        id2label = {0: "wall"}
+
+    class FakeModel:
+        config = FakeConfig()
+
+    class FakePipe:
+        model = FakeModel()
+
+    class FakeTransformers:
+        @staticmethod
+        def pipeline(**kwargs):
+            captured.update(kwargs)
+            return FakePipe()
+
+    monkeypatch.setattr(seg, "_segmentation_deps", (FakeTransformers(), object()))
+    monkeypatch.setattr(seg.accelerator, "_import_torch", lambda: _torch(metal=True))
+    seg._segmenter_cache.clear()
+    seg._id_to_category_cache.clear()
+
+    seg.load_segmenter(model_id=f"fake-{device}-model", device=device)
+
+    assert captured["device"] == expected_device
     assert "torch_dtype" not in captured
 
 
