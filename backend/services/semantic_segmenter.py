@@ -135,7 +135,8 @@ def load_segmenter(
         import of ``transformers`` so the cache lands in the desired location.
     device:
         Optional PyTorch device preference. When omitted, the shared accelerator
-        detector selects CUDA, Metal, then CPU.
+        detector selects CUDA, then CPU. An explicit ``"mps"`` preference keeps
+        the future Metal path available without selecting it by default.
 
     Returns
     -------
@@ -149,7 +150,10 @@ def load_segmenter(
 
     transformers, _safetensors = _import_segmentation_deps()
 
-    selected_device = accelerator.device_str(override=device)
+    selected_device = accelerator.device_str(
+        override=device,
+        allow_metal=device is not None,
+    )
     if device == "cuda" and selected_device == "cpu":
         logger.warning("CUDA requested but not available; falling back to CPU")
 
