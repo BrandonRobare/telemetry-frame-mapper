@@ -431,7 +431,7 @@ def train_splats(
                 raise RuntimeError(f"CUDA out of memory: {exc}") from exc
             raise
         finally:
-            accelerator.empty_cache(torch)
+            accelerator.empty_cache(torch, allow_metal=False)
 
 
 def _train(
@@ -443,7 +443,7 @@ def _train(
     progress_cb: ProgressCallback,
     cancel: threading.Event,
 ) -> dict:
-    device = accelerator.device_str(torch)
+    device = accelerator.device_str(torch, allow_metal=False)
     progress = _ProgressThrottle(progress_cb)
     progress("loading COLMAP model", _PROGRESS_START, force=True)
 
@@ -647,7 +647,7 @@ def render_thumbnail(
     try:
         from PIL import Image
 
-        device = accelerator.device_str(torch)
+        device = accelerator.device_str(torch, allow_metal=False)
         cloud = ply_io.read_3dgs_ply(splat_path)
 
         # Frame the central mass of the scene, not stray fliers.
@@ -685,7 +685,7 @@ def render_thumbnail(
         return None
     finally:
         _GPU_LOCK.release()
-        accelerator.empty_cache(torch)
+        accelerator.empty_cache(torch, allow_metal=False)
 
 
 def render_flythrough(
@@ -724,7 +724,7 @@ def render_flythrough(
 
     width = min(int(width), _MAX_RENDER_WIDTH)
     height = min(int(height), _MAX_RENDER_HEIGHT)
-    device = accelerator.device_str(torch)
+    device = accelerator.device_str(torch, allow_metal=False)
 
     with _GPU_LOCK:
         try:
@@ -819,4 +819,4 @@ def render_flythrough(
             output_path.unlink(missing_ok=True)
             raise
         finally:
-            accelerator.empty_cache(torch)
+            accelerator.empty_cache(torch, allow_metal=False)
