@@ -1,3 +1,4 @@
+import importlib.util
 import re
 import stat
 import subprocess
@@ -8,6 +9,15 @@ MACOS_PACKAGING = ROOT / "packaging" / "macos"
 BUILD_SCRIPT = MACOS_PACKAGING / "build.sh"
 SMOKE_SCRIPT = MACOS_PACKAGING / "smoke.sh"
 RUNTIME_PATHS = ROOT / "packaging" / "common" / "runtime_paths.py"
+
+
+def _load_runtime_paths_module():
+    spec = importlib.util.spec_from_file_location("macos_runtime_paths_test_module", RUNTIME_PATHS)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def _read_executable_shell_script(path: Path) -> str:
@@ -56,6 +66,7 @@ def test_macos_smoke_script_uses_fresh_home_health_migrations_and_cleanup_contra
     assert 'dist/Telemetry Frame Mapper.app/Contents/MacOS/Telemetry Frame Mapper' in smoke
     assert "mktemp -d" in smoke
     assert 'HOME="$smoke_root"' in smoke
+    assert 'PATH="/usr/bin:/bin:/usr/sbin:/sbin"' in smoke
     assert 'health_url="http://127.0.0.1:8000/health"' in smoke
     assert 'curl --fail --silent --show-error --max-time 2 "$health_url"' in smoke
     assert "Packaged app exited before health check" in smoke
@@ -66,6 +77,41 @@ def test_macos_smoke_script_uses_fresh_home_health_migrations_and_cleanup_contra
     assert "kill -0 \"$app_pid\"" in smoke
     assert "rm -rf \"$smoke_root\"" in smoke
     assert "trap cleanup EXIT" in smoke
+
+
+def test_macos_runtime_hook_prepends_only_existing_missing_homebrew_paths() -> None:
+    runtime_paths = _load_runtime_paths_module()
+    environment = {"PATH": "/usr/bin:/bin:/usr/local/bin"}
+    existing = {"/opt/homebrew/bin", "/usr/local/bin"}
+
+    runtime_paths.prepend_macos_executable_paths(
+        platform="darwin",
+        environ=environment,
+        is_dir=existing.__contains__,
+    )
+
+    assert environment["PATH"] == "/opt/homebrew/bin:/usr/bin:/bin:/usr/local/bin"
+
+    no_homebrew_environment = {"PATH": "/usr/bin:/bin:/usr/sbin:/sbin"}
+    runtime_paths.prepend_macos_executable_paths(
+        platform="darwin",
+        environ=no_homebrew_environment,
+        is_dir=lambda _path: False,
+    )
+    assert no_homebrew_environment["PATH"] == "/usr/bin:/bin:/usr/sbin:/sbin"
+
+
+def test_runtime_hook_does_not_change_path_outside_macos() -> None:
+    runtime_paths = _load_runtime_paths_module()
+    environment = {"PATH": "/usr/bin:/bin"}
+
+    runtime_paths.prepend_macos_executable_paths(
+        platform="linux",
+        environ=environment,
+        is_dir=lambda _path: True,
+    )
+
+    assert environment["PATH"] == "/usr/bin:/bin"
 
 
 def test_macos_packaging_scripts_have_no_nonportable_environment_assumptions() -> None:

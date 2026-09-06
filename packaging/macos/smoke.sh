@@ -24,7 +24,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-HOME="$smoke_root" "$app" >"$stdout" 2>"$stderr" &
+HOME="$smoke_root" PATH="/usr/bin:/bin:/usr/sbin:/sbin" "$app" >"$stdout" 2>"$stderr" &
 app_pid=$!
 deadline=$((SECONDS + 90))
 health_url="http://127.0.0.1:8000/health"
