@@ -18,6 +18,7 @@ FRONTEND_LOCK = ROOT / "frontend/package-lock.json"
 WINDOWS_INSTALLER = ROOT / "packaging/windows/telemetry-frame-mapper.iss"
 UV_LOCK = ROOT / "uv.lock"
 CHANGELOG = ROOT / "CHANGELOG.md"
+CONTRIBUTING = ROOT / "CONTRIBUTING.md"
 RELEASE_NOTES = ROOT / "release-notes/v2.0.5.md"
 RELEASE_VERSION = "2.0.5"
 
@@ -85,6 +86,16 @@ def test_ci_uses_locked_uv_environment_and_audits_runtime_groups() -> None:
     assert "pip-audit -r /tmp/runtime-requirements.txt" in ci
     assert not re.search(r"^\s*pip install\b", ci, flags=re.MULTILINE)
     assert '"pip-audit==2.10.1"' in pyproject
+
+
+def test_contributing_python_gates_use_uv_on_stock_macos() -> None:
+    contributing = CONTRIBUTING.read_text(encoding="utf-8")
+
+    assert "uv run --no-sync python tests/test_supply_chain_configuration.py" in contributing
+    assert "uv run --no-sync pytest" in contributing
+    assert "uv run --no-sync ruff check ." in contributing
+    assert not re.search(r"^python\b", contributing, flags=re.MULTILINE)
+    assert not re.search(r"^ruff\b", contributing, flags=re.MULTILINE)
 
 
 def test_windows_ci_runs_documented_path_and_subprocess_sensitive_pytest_suites() -> None:
@@ -179,6 +190,7 @@ def test_dependabot_keeps_github_actions_updates_enabled() -> None:
 if __name__ == "__main__":
     test_release_version_declarations_agree()
     test_ci_uses_locked_uv_environment_and_audits_runtime_groups()
+    test_contributing_python_gates_use_uv_on_stock_macos()
     test_windows_ci_runs_documented_path_and_subprocess_sensitive_pytest_suites()
     test_reusable_ci_builds_and_smokes_the_wheel_distribution()
     test_tag_release_invokes_reusable_full_verification_before_publication()

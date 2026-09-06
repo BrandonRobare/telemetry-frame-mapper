@@ -43,8 +43,9 @@ To add a schema change:
 ## Test gates
 
 ```bash
+uv run --no-sync python tests/test_supply_chain_configuration.py
 uv run --no-sync pytest
-ruff check .
+uv run --no-sync ruff check .
 cd frontend && npm test -- --run
 ```
 

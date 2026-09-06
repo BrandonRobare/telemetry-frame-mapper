@@ -15,7 +15,7 @@ if [[ ! -f "frontend/dist/index.html" ]]; then
     exit 1
 fi
 
-python -m PyInstaller --noconfirm --clean --onedir --windowed --name "Telemetry Frame Mapper" --specpath build \
+uv run --frozen --no-sync python -m PyInstaller --noconfirm --clean --onedir --windowed --name "Telemetry Frame Mapper" --specpath build \
     --runtime-hook "$repo_root/packaging/common/runtime_paths.py" \
     --add-data "$repo_root/config.yaml:." \
     --add-data "$repo_root/alembic.ini:." \
