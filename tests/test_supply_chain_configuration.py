@@ -134,7 +134,14 @@ def test_tag_release_invokes_reusable_full_verification_before_publication() -> 
     release = RELEASE_WORKFLOW.read_text(encoding="utf-8")
 
     assert re.search(r'^\s{4}tags:\n\s{6}- "v\*"$', release, flags=re.MULTILINE)
-    for job in ("test", "frontend", "docker-build", "distribution", "windows-package"):
+    for job in (
+        "test",
+        "frontend",
+        "docker-build",
+        "distribution",
+        "windows-package",
+        "macos-package",
+    ):
         assert re.search(rf"^  {job}:\n", ci, flags=re.MULTILINE)
     assert re.search(
         r'^  verification:\n(?:.*\n)*?^    uses: \.\/\.github\/workflows\/ci\.yml$',
