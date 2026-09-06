@@ -53,8 +53,13 @@ def _normalize_override(override: str | None) -> AcceleratorKind | None:
         raise ValueError(f"Unsupported accelerator override: {override!r}") from exc
 
 
-def detect(torch: Any | None = None, *, override: str | None = None) -> Accelerator:
-    """Select CUDA, then Metal, then CPU, respecting an explicit preference.
+def detect(
+    torch: Any | None = None,
+    *,
+    override: str | None = None,
+    allow_metal: bool = True,
+) -> Accelerator:
+    """Select CUDA, then Metal when supported by the consumer, then CPU.
 
     An unavailable explicit CUDA or Metal preference safely falls back to CPU;
     it does not silently choose another accelerator.
@@ -64,33 +69,46 @@ def detect(torch: Any | None = None, *, override: str | None = None) -> Accelera
     if torch is None:
         return Accelerator("cpu", "cpu")
 
-    candidates: tuple[AcceleratorKind, ...] = (
-        (requested,) if requested else ("cuda", "metal", "cpu")
-    )
+    if requested:
+        candidates: tuple[AcceleratorKind, ...] = (requested,)
+    elif allow_metal:
+        candidates = ("cuda", "metal", "cpu")
+    else:
+        candidates = ("cuda", "cpu")
     for kind in candidates:
-        if _is_available(torch, kind):
+        if (kind != "metal" or allow_metal) and _is_available(torch, kind):
             return Accelerator(kind, "mps" if kind == "metal" else kind)
     return Accelerator("cpu", "cpu")
 
 
-def device_str(torch: Any | None = None, *, override: str | None = None) -> str:
-    """Return the selected PyTorch device string."""
-    return detect(torch, override=override).device
+def device_str(
+    torch: Any | None = None,
+    *,
+    override: str | None = None,
+    allow_metal: bool = True,
+) -> str:
+    """Return a selected PyTorch device string for a compatible consumer."""
+    return detect(torch, override=override, allow_metal=allow_metal).device
 
 
-def empty_cache(torch: Any | None = None) -> None:
-    """Release cached memory for the active accelerator; CPU has no cache."""
+def empty_cache(torch: Any | None = None, *, allow_metal: bool = True) -> None:
+    """Release cache for a compatible accelerator; CPU has no cache."""
     torch = torch if torch is not None else _import_torch()
     if torch is None:
         return
-    selected = detect(torch)
+    selected = detect(torch, allow_metal=allow_metal)
     if selected.kind == "cuda":
         torch.cuda.empty_cache()  # type: ignore[attr-defined]
     elif selected.kind == "metal":
         torch.mps.empty_cache()  # type: ignore[attr-defined]
 
 
-def describe(torch: Any | None = None, *, override: str | None = None) -> dict[str, str]:
+def describe(
+    torch: Any | None = None,
+    *,
+    override: str | None = None,
+    allow_metal: bool = True,
+) -> dict[str, str]:
     """Return the structured capability payload for the selected accelerator."""
-    selected = detect(torch, override=override)
+    selected = detect(torch, override=override, allow_metal=allow_metal)
     return {"kind": selected.kind, "device": selected.device}

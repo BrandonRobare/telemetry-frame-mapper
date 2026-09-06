@@ -169,6 +169,7 @@ def test_train_uses_largest_fragmented_colmap_submodel(tmp_path: Path):
         patch.object(
             splat_trainer.colmap_io, "read_model", return_value=no_images_model
         ) as read_model,
+        patch.object(splat_trainer.accelerator, "device_str", return_value="cpu") as device_str,
         pytest.raises(RuntimeError, match="no registered images"),
     ):
         splat_trainer._train(
@@ -177,6 +178,66 @@ def test_train_uses_largest_fragmented_colmap_submodel(tmp_path: Path):
         )
 
     read_model.assert_called_once_with(sparse / "1")
+    device_str.assert_called_once_with(torch, allow_metal=False)
+
+
+def test_train_splats_clears_cache_with_non_metal_policy(tmp_path: Path):
+    torch = MagicMock()
+
+    with (
+        patch.object(splat_trainer, "_import_training_deps", return_value=(torch, MagicMock())),
+        patch.object(splat_trainer, "_train", return_value={}),
+        patch.object(splat_trainer.accelerator, "empty_cache") as empty_cache,
+    ):
+        splat_trainer.train_splats(
+            tmp_path,
+            tmp_path / "splat.ply",
+            TrainerConfig.from_preset({"iterations": 1}),
+            _noop_progress,
+            threading.Event(),
+        )
+
+    empty_cache.assert_called_once_with(torch, allow_metal=False)
+
+
+def test_render_thumbnail_uses_non_metal_device_and_cache_policy(tmp_path: Path):
+    torch = MagicMock()
+
+    with (
+        patch.object(splat_trainer, "_import_training_deps", return_value=(torch, MagicMock())),
+        patch.object(splat_trainer.accelerator, "device_str", return_value="cpu") as device_str,
+        patch.object(splat_trainer.accelerator, "empty_cache") as empty_cache,
+    ):
+        result = splat_trainer.render_thumbnail(tmp_path / "splat.ply", tmp_path / "thumb.jpg")
+
+    assert result is None
+
+    device_str.assert_called_once_with(torch, allow_metal=False)
+    empty_cache.assert_called_once_with(torch, allow_metal=False)
+
+
+def test_render_flythrough_uses_non_metal_device_and_cache_policy(tmp_path: Path):
+    torch = MagicMock()
+
+    with (
+        patch.object(splat_trainer, "_import_training_deps", return_value=(torch, MagicMock())),
+        patch.object(splat_trainer.shutil, "which", return_value="/usr/bin/ffmpeg"),
+        patch.object(splat_trainer.accelerator, "device_str", return_value="cpu") as device_str,
+        patch.object(splat_trainer.accelerator, "empty_cache") as empty_cache,
+        patch.object(splat_trainer.ply_io, "read_3dgs_ply", side_effect=RuntimeError("bad splat")),
+        pytest.raises(RuntimeError, match="bad splat"),
+    ):
+        splat_trainer.render_flythrough(
+            tmp_path / "splat.ply",
+            tmp_path / "flythrough.mp4",
+            _flythrough_keyframes(),
+            fps=30,
+            width=8,
+            height=8,
+        )
+
+    device_str.assert_called_once_with(torch, allow_metal=False)
+    empty_cache.assert_called_once_with(torch, allow_metal=False)
 
 
 class _ArrayTensor:
