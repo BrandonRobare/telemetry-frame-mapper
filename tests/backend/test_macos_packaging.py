@@ -9,6 +9,7 @@ MACOS_PACKAGING = ROOT / "packaging" / "macos"
 BUILD_SCRIPT = MACOS_PACKAGING / "build.sh"
 SMOKE_SCRIPT = MACOS_PACKAGING / "smoke.sh"
 RUNTIME_PATHS = ROOT / "packaging" / "common" / "runtime_paths.py"
+CI_WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
 
 
 def _load_runtime_paths_module():
@@ -128,3 +129,38 @@ def test_macos_packaging_scripts_have_no_nonportable_environment_assumptions() -
         add_data_sources = re.findall(r'--add-data "([^"]+)"', source)
         assert all(";" not in add_data_source for add_data_source in add_data_sources)
         assert "\r\n" not in source
+
+
+def test_macos_ci_runs_full_arm64_bundle_and_real_tool_contract() -> None:
+    ci = CI_WORKFLOW.read_text(encoding="utf-8")
+    match = re.search(
+        r"^  macos-package:\n(?P<body>.*?)(?=^  [a-z][\w-]*:\n|\Z)",
+        ci,
+        flags=re.MULTILINE | re.DOTALL,
+    )
+
+    assert match is not None
+    body = match.group("body")
+    normalized_body = " ".join(body.split())
+    assert "runs-on: macos-latest" in body
+    assert 'test "$(uname -m)" = "arm64"' in body
+    assert "brew install ffmpeg exiftool colmap" in body
+    assert "for tool in ffmpeg exiftool colmap" in body
+    assert 'command -v "$tool"' in body
+    assert (
+        "uv sync --frozen --group backend --group reconstruction "
+        "--group desktop-package --group dev --group audit"
+    ) in normalized_body
+    assert "python tests/test_supply_chain_configuration.py" in body
+    assert "uv lock --check" in body
+    assert "pip-audit -r /tmp/macos-runtime-requirements.txt" in body
+    assert "uv run --frozen --no-sync ruff check ." in body
+    assert re.search(r"run: uv run --frozen --no-sync pytest\s*$", body, flags=re.MULTILINE)
+    assert "npm ci" in body
+    assert "npm run build" in body
+    assert "get_resources" in body
+    assert 'resources["colmap_capabilities"]["available"]' in body
+    assert "packaging/macos/build.sh" in body
+    assert "packaging/macos/smoke.sh" in body
+    assert "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a" in body
+    assert "dist/Telemetry Frame Mapper.app" in body

@@ -197,3 +197,116 @@ jobs:
 
       - name: Smoke Windows startup and migrations
         run: uv run --frozen --no-sync powershell -ExecutionPolicy Bypass -File packaging/windows/smoke.ps1
+
+  macos-package:
+    runs-on: macos-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Assert Apple Silicon runner
+        run: test "$(uname -m)" = "arm64"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: "0.11.16"
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install real external tools
+        run: brew install ffmpeg exiftool colmap
+
+      - name: Verify real external tools
+        run: |
+          set -euo pipefail
+          for tool in ffmpeg exiftool colmap; do
+            path="$(command -v "$tool")"
+            printf '%s=%s\n' "$tool" "$path"
+          done
+          ffmpeg -version
+          exiftool -ver
+          colmap -h
+
+      - name: Validate locked Python supply chain configuration
+        run: python tests/test_supply_chain_configuration.py
+
+      - name: Check Python lock metadata
+        run: uv lock --check
+
+      - name: Install locked macOS test and packaging environment
+        run: >-
+          uv sync --frozen --group backend --group reconstruction
+          --group desktop-package --group dev --group audit
+
+      - name: Audit locked runtime dependencies
+        run: |
+          uv export --frozen --no-dev --no-emit-project --group backend --group reconstruction --format requirements-txt --output-file /tmp/macos-runtime-requirements.txt
+          uv run --frozen --no-sync pip-audit -r /tmp/macos-runtime-requirements.txt
+
+      - name: Lint
+        run: uv run --frozen --no-sync ruff check .
+
+      - name: Run full Python suite
+        run: uv run --frozen --no-sync pytest
+
+      - name: Build frontend
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Probe packaged runtime dependencies
+        run: |
+          uv run --frozen --no-sync python - <<'PY'
+          import json
+          from pathlib import Path
+
+          from backend.routers.system import get_resources
+
+          resources = get_resources()
+          tools = {tool["key"]: tool for tool in resources["tools"]}
+          for key in ("ffmpeg", "exiftool", "colmap"):
+              assert tools[key]["available"], tools[key]
+              assert tools[key]["path"], tools[key]
+          assert resources["colmap_capabilities"]["available"], resources["colmap_capabilities"]
+          Path("macos-system-resources.json").write_text(
+              json.dumps(resources, indent=2, sort_keys=True), encoding="utf-8"
+          )
+          PY
+
+      - name: Build macOS bundle
+        run: |
+          set -o pipefail
+          uv run --frozen --no-sync bash packaging/macos/build.sh 2>&1 | tee macos-build.log
+
+      - name: Smoke macOS bundle
+        run: |
+          set -o pipefail
+          uv run --frozen --no-sync bash packaging/macos/smoke.sh 2>&1 | tee macos-smoke.log
+
+      - name: Package macOS evidence
+        run: |
+          ditto -c -k --keepParent "dist/Telemetry Frame Mapper.app" macos-arm64-bundle.zip
+          shasum -a 256 macos-arm64-bundle.zip > macos-arm64-bundle.zip.sha256
+
+      - name: Upload macOS bundle and evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: macos-arm64-${{ github.sha }}
+          path: |
+            macos-arm64-bundle.zip
+            macos-arm64-bundle.zip.sha256
+            macos-build.log
+            macos-smoke.log
+            macos-system-resources.json
