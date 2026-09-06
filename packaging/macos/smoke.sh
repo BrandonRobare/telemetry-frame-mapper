@@ -61,8 +61,8 @@ if [[ ! -f "$database" ]]; then
     exit 1
 fi
 
-actual_head="$(python -c "import sqlite3,sys; print(sqlite3.connect(sys.argv[1]).execute('select version_num from alembic_version').fetchone()[0])" "$database")"
-expected_head="$(python -c "from alembic.config import Config; from alembic.script import ScriptDirectory; print(ScriptDirectory.from_config(Config('alembic.ini')).get_current_head())")"
+actual_head="$(uv run --frozen --no-sync python -c "import sqlite3,sys; print(sqlite3.connect(sys.argv[1]).execute('select version_num from alembic_version').fetchone()[0])" "$database")"
+expected_head="$(uv run --frozen --no-sync python -c "from alembic.config import Config; from alembic.script import ScriptDirectory; print(ScriptDirectory.from_config(Config('alembic.ini')).get_current_head())")"
 if [[ "$actual_head" != "$expected_head" ]]; then
     printf 'Migration head mismatch: database=%s source=%s\n' "$actual_head" "$expected_head" >&2
     exit 1

@@ -34,7 +34,11 @@ def test_macos_build_script_uses_windowed_posix_pyinstaller_bundle_contract() ->
     assert "set -euo pipefail" in build
     assert '[[ "$(uname -m)" != "arm64" ]]' in build
     assert "frontend/dist/index.html" in build
-    assert "python -m PyInstaller --noconfirm --clean --onedir --windowed" in build
+    assert (
+        "uv run --frozen --no-sync python -m PyInstaller "
+        "--noconfirm --clean --onedir --windowed"
+    ) in build
+    assert not re.search(r"^\s*python\b", build, flags=re.MULTILINE)
     assert '--name "Telemetry Frame Mapper"' in build
     assert "--runtime-hook \"$repo_root/packaging/common/runtime_paths.py\"" in build
     for asset in (
@@ -73,6 +77,8 @@ def test_macos_smoke_script_uses_fresh_home_health_migrations_and_cleanup_contra
     assert "Packaged app did not become healthy" in smoke
     assert "alembic_version" in smoke
     assert "get_current_head()" in smoke
+    assert smoke.count("uv run --frozen --no-sync python -c") == 2
+    assert "$(python -c" not in smoke
     assert "Migration head mismatch" in smoke
     assert "kill -0 \"$app_pid\"" in smoke
     assert "rm -rf \"$smoke_root\"" in smoke
