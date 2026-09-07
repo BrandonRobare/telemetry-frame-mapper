@@ -64,7 +64,11 @@ from backend.services.semantic_labels import (
     write_sidecar,
 )
 from backend.services.semantic_segmenter import segment_frame
-from backend.services.splat_trainer import ReconstructionCancelled, TrainerConfig
+from backend.services.splat_backends import (
+    ReconstructionCancelled,
+    TrainerConfig,
+    get_training_backend,
+)
 
 # Tracks the running COLMAP subprocess per reconstruction so cancel can
 # terminate it immediately instead of waiting for the current step to finish.
@@ -878,7 +882,7 @@ def _run_gsplat(
 ) -> dict:
     """Train a Gaussian splat. Returns {gaussian_count, psnr, ssim, training_metrics}."""
     config = TrainerConfig.from_preset(preset_cfg)
-    return splat_trainer.train_splats(colmap_dir, output_path, config, progress_cb, cancel)
+    return get_training_backend().train(colmap_dir, output_path, config, progress_cb, cancel)
 
 
 def _generate_lod(splat_path: Path) -> tuple[Path, Path]:
