@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from unittest.mock import patch
 
 import piexif
+import pytest
 from PIL import Image as PILImage
 
 
@@ -222,8 +224,13 @@ def test_run_imports_nested_browser_style_paths(tmp_path, setup_test_db):
     assert image.filename == "DJI_0001.jpg"
 
 
+@pytest.mark.xfail(
+    sys.platform == "darwin",
+    reason="default APFS collapses case-variant thumbnail paths; tracked by #831",
+    strict=True,
+)
 def test_run_disambiguates_duplicate_nested_basenames_and_thumbnails(tmp_path, setup_test_db):
-    """Recursive imports retain distinct records and thumbnails for duplicate leaf names."""
+    """Case-variant sibling names retain distinct records and thumbnail contents."""
     from backend.db.models import Image as ImageModel
     from backend.db.models import Session as SessionModel
     from backend.main import app
@@ -234,8 +241,10 @@ def test_run_disambiguates_duplicate_nested_basenames_and_thumbnails(tmp_path, s
     second_folder = tmp_path / "flight-b"
     first_folder.mkdir()
     second_folder.mkdir()
-    first = _make_no_gps_jpg(first_folder, "DJI_0001.jpg")
-    second = _make_no_gps_jpg(second_folder, "DJI_0001.jpg")
+    first = first_folder / "IMG.JPG"
+    second = second_folder / "img.jpg"
+    PILImage.new("RGB", (100, 100), color=(255, 0, 0)).save(first, "JPEG")
+    PILImage.new("RGB", (100, 100), color=(0, 0, 255)).save(second, "JPEG")
     db = app.state.test_db_session
     session = SessionModel(
         name="duplicate names",
@@ -268,7 +277,9 @@ def test_run_disambiguates_duplicate_nested_basenames_and_thumbnails(tmp_path, s
     assert {image.filepath for image in images} == {str(first), str(second)}
     assert len({image.filename for image in images}) == 2
     assert len({image.thumb_path for image in images}) == 2
-    assert all(Path(image.thumb_path).is_file() for image in images)
+    thumbnails = [Path(image.thumb_path) for image in images]
+    assert all(thumbnail.is_file() for thumbnail in thumbnails)
+    assert len({thumbnail.read_bytes() for thumbnail in thumbnails}) == 2
 
 
 def test_run_marks_empty_folder_as_an_error(tmp_path, setup_test_db):

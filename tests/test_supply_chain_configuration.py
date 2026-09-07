@@ -112,6 +112,10 @@ def test_windows_ci_runs_documented_path_and_subprocess_sensitive_pytest_suites(
     assert "Test Windows-sensitive Python suites" in body
     assert "tests/cli" in body
     assert "tests/backend/test_settings_router.py" in body
+    assert (
+        "tests/backend/test_ingest_orchestrator.py::"
+        "test_run_disambiguates_duplicate_nested_basenames_and_thumbnails"
+    ) in body
     assert "The Windows job intentionally runs the CLI suite" in body
     assert "path, subprocess, and redirected-stream behavior" in body
 
