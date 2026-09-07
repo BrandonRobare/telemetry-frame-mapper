@@ -78,3 +78,30 @@ def test_unknown_backend_override_is_rejected() -> None:
 
     with pytest.raises(ValueError, match="Unsupported splat trainer backend"):
         get_training_backend("metal")
+
+
+def test_reconstruction_delegates_the_complete_training_boundary(monkeypatch, tmp_path) -> None:
+    from backend.services import reconstruction
+
+    expected = {"gaussian_count": 11, "psnr": 22.0, "ssim": 0.81, "training_metrics": []}
+    backend = SimpleNamespace(train=MagicMock(return_value=expected))
+    monkeypatch.setattr(reconstruction, "get_training_backend", lambda: backend)
+    progress = MagicMock()
+    cancel = threading.Event()
+    colmap_dir = tmp_path / "colmap"
+    output_path = tmp_path / "splat.ply"
+
+    result = reconstruction._run_gsplat(
+        colmap_dir,
+        output_path,
+        {"iterations": 1000, "max_gaussians": 1234},
+        progress,
+        cancel,
+    )
+
+    assert result == expected
+    args = backend.train.call_args.args
+    assert args[:2] == (colmap_dir, output_path)
+    assert args[2].iterations == 1000
+    assert args[2].max_gaussians == 1234
+    assert args[3:] == (progress, cancel)
