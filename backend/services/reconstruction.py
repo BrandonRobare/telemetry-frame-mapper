@@ -881,8 +881,15 @@ def _run_gsplat(
     colmap_dir: Path, output_path: Path, preset_cfg: dict, progress_cb, cancel: threading.Event
 ) -> dict:
     """Train a Gaussian splat. Returns {gaussian_count, psnr, ssim, training_metrics}."""
+    backend = get_training_backend()
+    if not backend.is_available():
+        raise RuntimeError(
+            "Gaussian-splat training skipped because no compatible CUDA accelerator or compiled "
+            "gsplat backend is available. The reconstruction will complete with COLMAP sparse "
+            "cloud only."
+        )
     config = TrainerConfig.from_preset(preset_cfg)
-    return get_training_backend().train(colmap_dir, output_path, config, progress_cb, cancel)
+    return backend.train(colmap_dir, output_path, config, progress_cb, cancel)
 
 
 def _generate_lod(splat_path: Path) -> tuple[Path, Path]:

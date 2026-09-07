@@ -84,7 +84,7 @@ def test_reconstruction_delegates_the_complete_training_boundary(monkeypatch, tm
     from backend.services import reconstruction
 
     expected = {"gaussian_count": 11, "psnr": 22.0, "ssim": 0.81, "training_metrics": []}
-    backend = SimpleNamespace(train=MagicMock(return_value=expected))
+    backend = SimpleNamespace(is_available=lambda: True, train=MagicMock(return_value=expected))
     monkeypatch.setattr(reconstruction, "get_training_backend", lambda: backend)
     progress = MagicMock()
     cancel = threading.Event()
@@ -105,3 +105,25 @@ def test_reconstruction_delegates_the_complete_training_boundary(monkeypatch, tm
     assert args[2].iterations == 1000
     assert args[2].max_gaussians == 1234
     assert args[3:] == (progress, cancel)
+
+
+def test_reconstruction_rejects_unusable_backend_before_progress_or_training(
+    monkeypatch, tmp_path
+) -> None:
+    from backend.services import reconstruction
+
+    backend = SimpleNamespace(is_available=lambda: False, train=MagicMock())
+    monkeypatch.setattr(reconstruction, "get_training_backend", lambda: backend)
+    progress = MagicMock()
+
+    with pytest.raises(RuntimeError, match="no compatible CUDA accelerator"):
+        reconstruction._run_gsplat(
+            tmp_path / "colmap",
+            tmp_path / "splat.ply",
+            {"iterations": 1000},
+            progress,
+            threading.Event(),
+        )
+
+    backend.train.assert_not_called()
+    progress.assert_not_called()
