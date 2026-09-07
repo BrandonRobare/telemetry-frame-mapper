@@ -966,6 +966,35 @@ def test_run_pipeline_gsplat_missing_completes_colmap_only(setup_test_db):
     assert rec.progress_pct == 100.0
 
 
+def test_run_pipeline_unusable_backend_completes_colmap_only_before_training(setup_test_db):
+    import threading
+    from unittest.mock import MagicMock, patch
+
+    from backend.main import app
+    from backend.services.reconstruction import _run_pipeline_legacy as _run_pipeline
+    from tests.conftest import TestSessionLocal
+
+    db = app.state.test_db_session
+    with tempfile.TemporaryDirectory() as tmp:
+        rec, img, colmap_dir = _pipeline_fixture(db, tmp)
+        backend = SimpleNamespace(is_available=lambda: False, train=MagicMock())
+        with patch("backend.services.reconstruction._write_colmap_workspace", MagicMock()), \
+             patch("backend.services.reconstruction._run_colmap", MagicMock(return_value=1)), \
+             patch("backend.services.reconstruction.get_training_backend", return_value=backend), \
+             patch("backend.services.reconstruction.SessionLocal", TestSessionLocal), \
+             patch("backend.services.reconstruction.get_config") as mock_cfg:
+            mock_cfg.return_value.data_dir = tmp
+            mock_cfg.return_value.exports_dir = tmp
+            mock_cfg.return_value.processed_dir = tmp
+            _run_pipeline(rec.id, "quick", colmap_dir, [img.id], threading.Event())
+        db.refresh(rec)
+
+    assert rec.status == "complete"
+    assert rec.step == "colmap_only"
+    assert rec.progress_pct == 100.0
+    backend.train.assert_not_called()
+
+
 def test_run_pipeline_cancel_before_colmap_marks_cancelled(setup_test_db):
     import threading
     from unittest.mock import MagicMock, patch
@@ -1201,6 +1230,7 @@ def test_run_pipeline_trainer_result_persisted_and_lod_generated(setup_test_db):
         with patch("backend.services.reconstruction._write_colmap_workspace", MagicMock()), \
              patch("backend.services.reconstruction._run_colmap", MagicMock(return_value=4)), \
              patch("backend.services.splat_trainer.train_splats", fake_train), \
+             patch("backend.services.splat_backends.cuda_gsplat.is_available", return_value=True), \
              patch("backend.services.reconstruction.SessionLocal", TestSessionLocal), \
              patch("backend.services.reconstruction.get_config") as mock_cfg:
             mock_cfg.return_value.data_dir = tmp
