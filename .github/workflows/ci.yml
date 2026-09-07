@@ -185,6 +185,7 @@ jobs:
           uv run --frozen --no-sync pytest
           tests/cli
           tests/backend/test_settings_router.py
+          tests/backend/test_ingest_orchestrator.py::test_run_disambiguates_duplicate_nested_basenames_and_thumbnails
 
       - name: Build frontend
         working-directory: frontend

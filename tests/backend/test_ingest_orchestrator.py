@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from unittest.mock import patch
 
 import piexif
+import pytest
 from PIL import Image as PILImage
 
 
@@ -222,6 +224,11 @@ def test_run_imports_nested_browser_style_paths(tmp_path, setup_test_db):
     assert image.filename == "DJI_0001.jpg"
 
 
+@pytest.mark.xfail(
+    sys.platform == "darwin",
+    reason="default APFS collapses case-variant thumbnail paths; tracked by #831",
+    strict=True,
+)
 def test_run_disambiguates_duplicate_nested_basenames_and_thumbnails(tmp_path, setup_test_db):
     """Case-variant sibling names retain distinct records and thumbnail contents."""
     from backend.db.models import Image as ImageModel
