@@ -413,6 +413,32 @@ class CudaGsplatBackend:
 CUDA_GSPLAT_BACKEND = CudaGsplatBackend()
 
 
+class CudaGsplatRendererBackend:
+    """Server-side CUDA rasterizer used by thumbnails and flythroughs."""
+
+    def is_available(self) -> bool:
+        return is_available()
+
+    def rasterize(
+        self,
+        torch,
+        cloud,
+        viewmat,
+        width: int,
+        height: int,
+        device: str,
+        *,
+        sh_degree: int | None = None,
+    ):
+        _, gsplat = _import_training_deps()
+        return _rasterize_cloud(
+            torch, gsplat, cloud, viewmat, width, height, device, sh_degree=sh_degree
+        )
+
+
+CUDA_GSPLAT_RENDERER_BACKEND = CudaGsplatRendererBackend()
+
+
 def _train(
     torch,
     gsplat,
@@ -617,8 +643,13 @@ def render_thumbnail(
     Returns None when torch/gsplat are unavailable, the GPU is busy
     (non-blocking lock acquire), or rendering fails for any reason.
     """
+    from backend.services.splat_backends import get_renderer_backend
+
+    renderer = get_renderer_backend()
+    if not renderer.is_available():
+        return None
     try:
-        torch, gsplat = _import_training_deps()
+        torch, _ = _import_training_deps()
     except RuntimeError:
         return None
     if not _GPU_LOCK.acquire(timeout=0):
@@ -653,8 +684,8 @@ def render_thumbnail(
 
         viewmat = _look_at_viewmat(eye, center)
         with torch.no_grad():
-            render = _rasterize_cloud(
-                torch, gsplat, cloud, viewmat, width, height, device, sh_degree=0
+            render = renderer.rasterize(
+                torch, cloud, viewmat, width, height, device, sh_degree=0
             )
         pixels = (render.cpu().numpy() * 255.0).astype(np.uint8)
         out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -686,8 +717,16 @@ def render_flythrough(
     Keyframe position/target are interpolated with :func:`smoothstep` so the
     exported video matches the in-browser preview exactly.
     """
+    from backend.services.splat_backends import get_renderer_backend
+
+    renderer = get_renderer_backend()
+    if not renderer.is_available():
+        raise RuntimeError(
+            "gsplat video rendering has no compatible CUDA accelerator or compiled backend. "
+            "Use browser recording instead."
+        )
     try:
-        torch, gsplat = _import_training_deps()
+        torch, _ = _import_training_deps()
     except RuntimeError as exc:
         raise RuntimeError(
             "gsplat video rendering is not installed. Use browser recording or install "
@@ -753,20 +792,27 @@ def render_flythrough(
                                     )
                                 ]
                             )
-                            render = _rasterize_cloud(
-                                torch, gsplat, cloud, _look_at_viewmat(eye, target),
-                                width, height, device,
+                            render = renderer.rasterize(
+                                torch,
+                                cloud,
+                                _look_at_viewmat(eye, target),
+                                width,
+                                height,
+                                device,
                             )
                             pixels = (render.cpu().numpy() * 255.0).astype(np.uint8)
                             process.stdin.write(pixels.tobytes())
                     last = keyframes[-1]
-                    render = _rasterize_cloud(
-                        torch, gsplat, cloud,
+                    render = renderer.rasterize(
+                        torch,
+                        cloud,
                         _look_at_viewmat(
                             np.array(last["position"], dtype=np.float64),
                             np.array(last["target"], dtype=np.float64),
                         ),
-                        width, height, device,
+                        width,
+                        height,
+                        device,
                     )
                     process.stdin.write(
                         (render.cpu().numpy() * 255.0).astype(np.uint8).tobytes()

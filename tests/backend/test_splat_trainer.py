@@ -69,7 +69,7 @@ def test_render_flythrough_without_torch_mentions_browser_recording(tmp_path: Pa
         patch.dict(sys.modules, _NO_GPU_STACK),
         pytest.raises(
             RuntimeError,
-            match="Use browser recording or install optional reconstruction dependencies",
+            match="no compatible CUDA accelerator.*Use browser recording",
         ),
     ):
         splat_trainer.render_flythrough(
@@ -85,6 +85,7 @@ def test_render_flythrough_without_ffmpeg_raises_install_guidance(tmp_path: Path
     ]
     with (
         patch.dict(sys.modules, {"torch": MagicMock(), "gsplat": MagicMock()}),
+        patch("backend.services.splat_backends.cuda_gsplat.is_available", return_value=True),
         patch("backend.services.splat_trainer.shutil.which", return_value=None),
         pytest.raises(RuntimeError, match="ffmpeg.*browser recording"),
     ):
@@ -204,6 +205,7 @@ def test_render_thumbnail_uses_non_metal_device_and_cache_policy(tmp_path: Path)
     torch = MagicMock()
 
     with (
+        patch("backend.services.splat_backends.cuda_gsplat.is_available", return_value=True),
         patch.object(splat_trainer, "_import_training_deps", return_value=(torch, MagicMock())),
         patch.object(splat_trainer.accelerator, "device_str", return_value="cpu") as device_str,
         patch.object(splat_trainer.accelerator, "empty_cache") as empty_cache,
@@ -220,6 +222,7 @@ def test_render_flythrough_uses_non_metal_device_and_cache_policy(tmp_path: Path
     torch = MagicMock()
 
     with (
+        patch("backend.services.splat_backends.cuda_gsplat.is_available", return_value=True),
         patch.object(splat_trainer, "_import_training_deps", return_value=(torch, MagicMock())),
         patch.object(splat_trainer.shutil, "which", return_value="/usr/bin/ffmpeg"),
         patch.object(splat_trainer.accelerator, "device_str", return_value="cpu") as device_str,
@@ -385,6 +388,7 @@ def _fake_render_stack(spawned: list, *, exit_code: int = 0, rasterize=None):
         return process
 
     with (
+        patch("backend.services.splat_backends.cuda_gsplat.is_available", return_value=True),
         patch.object(
             splat_trainer, "_import_training_deps", return_value=(torch, MagicMock())
         ),

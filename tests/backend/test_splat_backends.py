@@ -127,3 +127,63 @@ def test_reconstruction_rejects_unusable_backend_before_progress_or_training(
 
     backend.train.assert_not_called()
     progress.assert_not_called()
+
+
+def test_thumbnail_returns_none_before_importing_unusable_renderer(monkeypatch, tmp_path) -> None:
+    from backend.services import splat_backends, splat_trainer
+
+    backend = SimpleNamespace(is_available=lambda: False)
+    monkeypatch.setattr(splat_backends, "get_renderer_backend", lambda: backend)
+    import_deps = MagicMock(side_effect=AssertionError("renderer dependencies must not import"))
+    monkeypatch.setattr(splat_trainer, "_import_training_deps", import_deps)
+
+    assert splat_trainer.render_thumbnail(tmp_path / "input.ply", tmp_path / "out.jpg") is None
+    import_deps.assert_not_called()
+
+
+def test_flythrough_names_accelerator_and_browser_fallback_before_import(
+    monkeypatch, tmp_path
+) -> None:
+    from backend.services import splat_backends, splat_trainer
+
+    backend = SimpleNamespace(is_available=lambda: False)
+    monkeypatch.setattr(splat_backends, "get_renderer_backend", lambda: backend)
+    import_deps = MagicMock(side_effect=AssertionError("renderer dependencies must not import"))
+    monkeypatch.setattr(splat_trainer, "_import_training_deps", import_deps)
+
+    with pytest.raises(
+        RuntimeError,
+        match="no compatible CUDA accelerator.*Use browser recording",
+    ):
+        splat_trainer.render_flythrough(
+            tmp_path / "input.ply",
+            tmp_path / "out.mp4",
+            [{"position": [0, 0, 0]}, {"position": [1, 1, 1]}],
+            fps=30,
+            width=1280,
+            height=720,
+        )
+
+    import_deps.assert_not_called()
+
+
+def test_renderer_protocol_is_narrow_and_backend_neutral() -> None:
+    from backend.services.splat_backends.base import SplatRendererBackend
+
+    public_methods = {name for name in vars(SplatRendererBackend) if not name.startswith("_")}
+    assert public_methods == {"is_available", "rasterize"}
+
+
+def test_cuda_renderer_preserves_flythrough_sh_degree_derivation(monkeypatch) -> None:
+    from backend.services.splat_backends import cuda_gsplat
+
+    rasterize = MagicMock(return_value="render")
+    monkeypatch.setattr(cuda_gsplat, "_import_training_deps", lambda: ("torch", "gsplat"))
+    monkeypatch.setattr(cuda_gsplat, "_rasterize_cloud", rasterize)
+
+    result = cuda_gsplat.CUDA_GSPLAT_RENDERER_BACKEND.rasterize(
+        "torch", "cloud", "view", 1280, 720, "cuda"
+    )
+
+    assert result == "render"
+    assert rasterize.call_args.kwargs["sh_degree"] is None

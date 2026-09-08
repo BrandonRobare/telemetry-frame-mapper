@@ -4,7 +4,7 @@ import threading
 from collections.abc import Callable
 from dataclasses import dataclass, fields
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
 
 ProgressCallback = Callable[[str, float], None]
 TrainingResult = dict[str, object]
@@ -79,3 +79,21 @@ class SplatTrainerBackend(Protocol):
         progress_cb: ProgressCallback,
         cancel: threading.Event,
     ) -> TrainingResult: ...
+
+
+class SplatRendererBackend(Protocol):
+    """Backend-neutral boundary for optional server-side splat rasterization."""
+
+    def is_available(self) -> bool: ...
+
+    def rasterize(
+        self,
+        torch: Any,
+        cloud: Any,
+        viewmat: Any,
+        width: int,
+        height: int,
+        device: str,
+        *,
+        sh_degree: int | None = None,
+    ) -> Any: ...
