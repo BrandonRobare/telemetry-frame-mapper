@@ -31,7 +31,7 @@ from backend.db.models import (
     SessionComparison,
     SessionFrameSelection,
 )
-from backend.services import ply_io, splat_trainer
+from backend.services import accelerator, ply_io, splat_trainer
 from backend.services.camera_calibration import calibration_profile_for_images
 from backend.services.colmap_io import _pick_best_submodel
 from backend.services.job_queue import (
@@ -67,6 +67,7 @@ from backend.services.semantic_segmenter import segment_frame
 from backend.services.splat_backends import (
     ReconstructionCancelled,
     TrainerConfig,
+    get_renderer_backend,
     get_training_backend,
 )
 
@@ -1277,31 +1278,31 @@ def _export_point_cloud(
 # Semantic label sidecar generation
 # ---------------------------------------------------------------------------
 
-def render_expected_depth(cloud: ply_io.GaussianCloud, view: dict, *, device: str = "cuda"):
-    """Render expected depth for one COLMAP view using gsplat ED mode."""
-    import gsplat
+def render_expected_depth(
+    cloud: ply_io.GaussianCloud, view: dict, *, device: str | None = None
+):
+    """Render expected depth for one COLMAP view through the selected rasterizer."""
     import torch
 
-    means = torch.from_numpy(cloud.means).float().to(device)
-    quats = torch.from_numpy(cloud.quats).float().to(device)
-    scales = torch.from_numpy(cloud.scales).float().to(device)
-    opacities = torch.from_numpy(cloud.opacities).float().to(device)
-    colors = torch.zeros((len(cloud.means), 1, 3), dtype=torch.float32, device=device)
-    renders, _, _ = gsplat.rasterization(
-        means=means,
-        quats=quats,
-        scales=torch.exp(scales),
-        opacities=torch.sigmoid(opacities),
-        colors=colors,
-        viewmats=torch.from_numpy(view["viewmat"][None]).float().to(device),
-        Ks=torch.from_numpy(view["intrinsics"][None]).float().to(device),
-        width=int(view["width"]),
-        height=int(view["height"]),
-        render_mode="ED",
+    renderer = get_renderer_backend()
+    if not renderer.is_available():
+        raise RuntimeError("Expected-depth rendering requires a compatible CUDA splat backend")
+    resolved_device = (
+        device if device is not None else accelerator.device_str(torch, allow_metal=False)
+    )
+    depth = renderer.rasterize(
+        torch,
+        cloud,
+        view["viewmat"],
+        int(view["width"]),
+        int(view["height"]),
+        resolved_device,
         sh_degree=0,
+        intrinsics=view["intrinsics"],
+        render_mode="ED",
         packed=True,
     )
-    return renders[0, ..., 0].detach().cpu().numpy()
+    return depth.detach().cpu().numpy()
 
 
 def _training_downscale_factor(preset: str | None) -> int:

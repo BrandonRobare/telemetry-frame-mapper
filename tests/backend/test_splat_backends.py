@@ -187,3 +187,51 @@ def test_cuda_renderer_preserves_flythrough_sh_degree_derivation(monkeypatch) ->
 
     assert result == "render"
     assert rasterize.call_args.kwargs["sh_degree"] is None
+
+
+def test_cuda_renderer_preserves_expected_depth_gsplat_contract(monkeypatch) -> None:
+    from backend.services.splat_backends import cuda_gsplat
+
+    tensor = MagicMock()
+    tensor.float.return_value = tensor
+    tensor.to.return_value = tensor
+    depth = MagicMock()
+    renders = MagicMock()
+    renders.__getitem__.return_value = depth
+    torch = MagicMock(float32="float32")
+    torch.from_numpy.return_value = tensor
+    torch.zeros.return_value = tensor
+    torch.exp.return_value = tensor
+    torch.sigmoid.return_value = tensor
+    gsplat = MagicMock()
+    gsplat.rasterization.return_value = (renders, None, None)
+    monkeypatch.setattr(cuda_gsplat, "_import_training_deps", lambda: (torch, gsplat))
+    cloud = SimpleNamespace(
+        means=MagicMock(__len__=lambda _self: 1),
+        quats="quats",
+        scales="scales",
+        opacities="opacities",
+    )
+    viewmat = MagicMock()
+    intrinsics = MagicMock()
+
+    result = cuda_gsplat.CUDA_GSPLAT_RENDERER_BACKEND.rasterize(
+        torch,
+        cloud,
+        viewmat,
+        640,
+        480,
+        "cpu",
+        sh_degree=0,
+        intrinsics=intrinsics,
+        render_mode="ED",
+        packed=True,
+    )
+
+    assert result is depth
+    kwargs = gsplat.rasterization.call_args.kwargs
+    assert kwargs["render_mode"] == "ED"
+    assert kwargs["sh_degree"] == 0
+    assert kwargs["packed"] is True
+    assert kwargs["width"] == 640
+    assert kwargs["height"] == 480
