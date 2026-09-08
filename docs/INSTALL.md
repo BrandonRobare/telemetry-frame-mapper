@@ -33,6 +33,16 @@ without any external binaries installed).
 For a packaged Windows application instead of a developer checkout, see the
 [Windows installer workflow](WINDOWS-INSTALLER.md).
 
+### Metal splat training (macOS)
+
+Apple-Silicon splat training is optional and requires macOS 14+, Python 3.12–3.13, and the platform-scoped dependency group:
+
+```bash
+uv sync --frozen --group backend --group reconstruction --group splat-metal
+```
+
+The group pins `msplat==1.1.4`; its marker prevents installation on non-arm64 macOS, Linux, Windows, and unsupported Python versions. If the young, single-maintainer project becomes unavailable or incompatible, omit `splat-metal`: the application remains usable and reconstruction completes as `colmap_only`. CUDA users continue to follow the separate manual torch/gsplat procedure above.
+
 ## 2. External binaries
 
 The CLI shells out to `ffmpeg` and `exiftool`; reconstruction shells out to `colmap`. Each must be on `PATH` (the CLI also accepts `--ffmpeg` / `--exiftool` paths explicitly).

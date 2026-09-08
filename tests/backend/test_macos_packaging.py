@@ -149,7 +149,7 @@ def test_macos_ci_runs_full_arm64_bundle_and_real_tool_contract() -> None:
     assert 'command -v "$tool"' in body
     assert (
         "uv sync --frozen --group backend --group reconstruction "
-        "--group desktop-package --group dev --group audit"
+        "--group desktop-package --group splat-metal --group dev --group audit"
     ) in normalized_body
     assert "python tests/test_supply_chain_configuration.py" in body
     assert "uv lock --check" in body

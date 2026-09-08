@@ -20,6 +20,9 @@ UV_LOCK = ROOT / "uv.lock"
 CHANGELOG = ROOT / "CHANGELOG.md"
 CONTRIBUTING = ROOT / "CONTRIBUTING.md"
 RELEASE_NOTES = ROOT / "release-notes/v2.0.5.md"
+V3_RELEASE_NOTES = ROOT / "release-notes/v3.0.0.md"
+MACOS_BUNDLE_DOC = ROOT / "docs/MACOS-BUNDLE.md"
+INSTALL_DOC = ROOT / "docs/INSTALL.md"
 RELEASE_VERSION = "2.0.5"
 
 
@@ -86,6 +89,41 @@ def test_ci_uses_locked_uv_environment_and_audits_runtime_groups() -> None:
     assert "pip-audit -r /tmp/runtime-requirements.txt" in ci
     assert not re.search(r"^\s*pip install\b", ci, flags=re.MULTILINE)
     assert '"pip-audit==2.10.1"' in pyproject
+
+
+def test_msplat_group_is_platform_pinned_locked_and_gated() -> None:
+    project = tomllib.loads(PYPROJECT.read_text(encoding="utf-8"))
+    lock = tomllib.loads(UV_LOCK.read_text(encoding="utf-8"))
+    dependency = project["dependency-groups"]["splat-metal"]
+    assert len(dependency) == 1
+    assert dependency[0].startswith("msplat==1.1.4;")
+    for marker in (
+        "sys_platform == 'darwin'",
+        "platform_machine == 'arm64'",
+        "python_version >= '3.12'",
+        "python_version < '3.14'",
+    ):
+        assert marker in dependency[0]
+
+    msplat = next(package for package in lock["package"] if package["name"] == "msplat")
+    assert msplat["version"] == "1.1.4"
+    assert "sdist" not in msplat
+    wheel_names = {Path(wheel["url"]).name for wheel in msplat["wheels"]}
+    assert wheel_names == {
+        "msplat-1.1.4-cp312-cp312-macosx_14_0_arm64.whl",
+        "msplat-1.1.4-cp313-cp313-macosx_14_0_arm64.whl",
+    }
+
+    ci = CI_WORKFLOW.read_text(encoding="utf-8")
+    assert ci.count("--group splat-metal") == 2
+    for path in (MACOS_BUNDLE_DOC, INSTALL_DOC):
+        text = path.read_text(encoding="utf-8")
+        assert "--group splat-metal" in text
+        assert "macOS 14" in text
+    notes = V3_RELEASE_NOTES.read_text(encoding="utf-8")
+    assert "msplat==1.1.4" in notes
+    assert "single-maintainer" in notes
+    assert "colmap_only" in notes
 
 
 def test_contributing_python_gates_use_uv_on_stock_macos() -> None:
@@ -201,6 +239,7 @@ def test_dependabot_keeps_github_actions_updates_enabled() -> None:
 if __name__ == "__main__":
     test_release_version_declarations_agree()
     test_ci_uses_locked_uv_environment_and_audits_runtime_groups()
+    test_msplat_group_is_platform_pinned_locked_and_gated()
     test_contributing_python_gates_use_uv_on_stock_macos()
     test_windows_ci_runs_documented_path_and_subprocess_sensitive_pytest_suites()
     test_reusable_ci_builds_and_smokes_the_wheel_distribution()
