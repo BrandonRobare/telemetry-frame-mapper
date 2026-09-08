@@ -127,3 +127,48 @@ def test_reconstruction_rejects_unusable_backend_before_progress_or_training(
 
     backend.train.assert_not_called()
     progress.assert_not_called()
+
+
+def test_thumbnail_returns_none_before_importing_unusable_renderer(monkeypatch, tmp_path) -> None:
+    from backend.services import splat_backends, splat_trainer
+
+    backend = SimpleNamespace(is_available=lambda: False)
+    monkeypatch.setattr(splat_backends, "get_renderer_backend", lambda: backend)
+    import_deps = MagicMock(side_effect=AssertionError("renderer dependencies must not import"))
+    monkeypatch.setattr(splat_trainer, "_import_training_deps", import_deps)
+
+    assert splat_trainer.render_thumbnail(tmp_path / "input.ply", tmp_path / "out.jpg") is None
+    import_deps.assert_not_called()
+
+
+def test_flythrough_names_accelerator_and_browser_fallback_before_import(
+    monkeypatch, tmp_path
+) -> None:
+    from backend.services import splat_backends, splat_trainer
+
+    backend = SimpleNamespace(is_available=lambda: False)
+    monkeypatch.setattr(splat_backends, "get_renderer_backend", lambda: backend)
+    import_deps = MagicMock(side_effect=AssertionError("renderer dependencies must not import"))
+    monkeypatch.setattr(splat_trainer, "_import_training_deps", import_deps)
+
+    with pytest.raises(
+        RuntimeError,
+        match="no compatible CUDA accelerator.*Use browser recording",
+    ):
+        splat_trainer.render_flythrough(
+            tmp_path / "input.ply",
+            tmp_path / "out.mp4",
+            [{"position": [0, 0, 0]}, {"position": [1, 1, 1]}],
+            fps=30,
+            width=1280,
+            height=720,
+        )
+
+    import_deps.assert_not_called()
+
+
+def test_renderer_protocol_is_narrow_and_backend_neutral() -> None:
+    from backend.services.splat_backends.base import SplatRendererBackend
+
+    public_methods = {name for name in vars(SplatRendererBackend) if not name.startswith("_")}
+    assert public_methods == {"is_available", "rasterize"}
