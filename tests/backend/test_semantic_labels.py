@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import inspect
 import json
+import sys
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 
@@ -14,6 +18,44 @@ from backend.services.semantic_labels import (
     read_sidecar,
     write_sidecar,
 )
+
+
+def test_render_expected_depth_resolves_non_cuda_default_through_accelerator() -> None:
+    from backend.services import reconstruction
+
+    depth = MagicMock()
+    depth.detach.return_value.cpu.return_value.numpy.return_value = np.array([[1.0]])
+    renderer = SimpleNamespace(
+        is_available=lambda: True,
+        rasterize=MagicMock(return_value=depth),
+    )
+    torch = MagicMock()
+    cloud = SimpleNamespace()
+    view = {
+        "viewmat": np.eye(4, dtype=np.float32),
+        "intrinsics": np.eye(3, dtype=np.float32),
+        "width": 1,
+        "height": 1,
+    }
+
+    with (
+        patch.dict(sys.modules, {"torch": torch}),
+        patch.object(reconstruction, "get_renderer_backend", return_value=renderer),
+        patch.object(reconstruction.accelerator, "device_str", return_value="cpu") as device_str,
+    ):
+        result = reconstruction.render_expected_depth(cloud, view)
+
+    device_str.assert_called_once_with(torch, allow_metal=False)
+    device_parameter = inspect.signature(reconstruction.render_expected_depth).parameters["device"]
+    assert device_parameter.default is None
+    args = renderer.rasterize.call_args.args
+    assert args == (torch, cloud, view["viewmat"], 1, 1, "cpu")
+    kwargs = renderer.rasterize.call_args.kwargs
+    assert kwargs["sh_degree"] == 0
+    assert kwargs["intrinsics"] is view["intrinsics"]
+    assert kwargs["render_mode"] == "ED"
+    assert kwargs["packed"] is True
+    np.testing.assert_array_equal(result, np.array([[1.0]]))
 
 
 def _make_labels_confidence(n: int, seed: int = 42) -> tuple[np.ndarray, np.ndarray]:

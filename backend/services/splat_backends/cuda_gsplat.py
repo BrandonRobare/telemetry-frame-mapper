@@ -429,11 +429,40 @@ class CudaGsplatRendererBackend:
         device: str,
         *,
         sh_degree: int | None = None,
+        intrinsics=None,
+        render_mode: str | None = None,
+        packed: bool = True,
     ):
         _, gsplat = _import_training_deps()
-        return _rasterize_cloud(
-            torch, gsplat, cloud, viewmat, width, height, device, sh_degree=sh_degree
+        if render_mode is None:
+            if intrinsics is not None:
+                raise ValueError("intrinsics require an explicit render mode")
+            return _rasterize_cloud(
+                torch, gsplat, cloud, viewmat, width, height, device, sh_degree=sh_degree
+            )
+        if render_mode != "ED" or intrinsics is None:
+            raise ValueError(f"Unsupported splat render mode: {render_mode!r}")
+
+        means = torch.from_numpy(cloud.means).float().to(device)
+        quats = torch.from_numpy(cloud.quats).float().to(device)
+        scales = torch.from_numpy(cloud.scales).float().to(device)
+        opacities = torch.from_numpy(cloud.opacities).float().to(device)
+        colors = torch.zeros((len(cloud.means), 1, 3), dtype=torch.float32, device=device)
+        renders, _, _ = gsplat.rasterization(
+            means=means,
+            quats=quats,
+            scales=torch.exp(scales),
+            opacities=torch.sigmoid(opacities),
+            colors=colors,
+            viewmats=torch.from_numpy(viewmat[None]).float().to(device),
+            Ks=torch.from_numpy(intrinsics[None]).float().to(device),
+            width=int(width),
+            height=int(height),
+            render_mode="ED",
+            sh_degree=sh_degree,
+            packed=packed,
         )
+        return renders[0, ..., 0]
 
 
 CUDA_GSPLAT_RENDERER_BACKEND = CudaGsplatRendererBackend()

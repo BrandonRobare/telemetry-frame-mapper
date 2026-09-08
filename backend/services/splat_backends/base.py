@@ -96,4 +96,7 @@ class SplatRendererBackend(Protocol):
         device: str,
         *,
         sh_degree: int | None = None,
+        intrinsics: Any | None = None,
+        render_mode: str | None = None,
+        packed: bool = True,
     ) -> Any: ...
