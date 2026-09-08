@@ -326,6 +326,9 @@ semantic = [
     { name = "safetensors" },
     { name = "transformers" },
 ]
+splat-metal = [
+    { name = "msplat", marker = "python_full_version >= '3.12' and python_full_version < '3.14' and platform_machine == 'arm64' and sys_platform == 'darwin'" },
+]
 
 [package.metadata]
 requires-dist = [{ name = "pyyaml", specifier = "==6.0.3" }]
@@ -368,6 +371,7 @@ semantic = [
     { name = "safetensors" },
     { name = "transformers", specifier = ">=4.48" },
 ]
+splat-metal = [{ name = "msplat", marker = "python_full_version >= '3.12' and python_full_version < '3.14' and platform_machine == 'arm64' and sys_platform == 'darwin'", specifier = "==1.1.4" }]
 
 [[package]]
 name = "fastapi"
@@ -986,6 +990,18 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/2f/e1/aab6c946570496b78e67804721f3d5e2d62a93081b9b37df77764ef56347/msgpack-1.2.1-cp314-cp314t-win32.whl", hash = "sha256:c1c79a604a2969a868a78b6ebd27a887e00c624f14f66b3038e0590cb23332d1", size = 70914, upload-time = "2026-06-18T16:13:49.385Z" },
     { url = "https://files.pythonhosted.org/packages/13/0a/e608956488a2af014cfe6e3d665e090b8ee42aa14b07f8f95b8880d66b09/msgpack-1.2.1-cp314-cp314t-win_amd64.whl", hash = "sha256:f12038a35fabd52e56a3547bab42401af49a45caa6dd00b34c44de235bc93ee2", size = 77999, upload-time = "2026-06-18T16:13:50.467Z" },
     { url = "https://files.pythonhosted.org/packages/d2/8a/27e2e57055176e366a46b85d02d68e7a5bcfbdd8474c9706375d965f24d3/msgpack-1.2.1-cp314-cp314t-win_arm64.whl", hash = "sha256:0adcf06ffde0777c0e1a9b771a2b1c4226ba1bbf748c8efcc02fcdeca3299107", size = 71160, upload-time = "2026-06-18T16:13:51.498Z" },
+]
+
+[[package]]
+name = "msplat"
+version = "1.1.4"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy", version = "2.5.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12' and python_full_version < '3.14' and sys_platform != 'emscripten' and sys_platform != 'win32'" },
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/22/00/2b51ba9d4714362120213d7dda8ced59fb38bda1e257880abe81b9ea757e/msplat-1.1.4-cp312-cp312-macosx_14_0_arm64.whl", hash = "sha256:ab15f991c12df7734956b2580ad2be8870fd47a78692bd5ad4294ca2bc283962", size = 754134, upload-time = "2026-08-25T21:57:00.802Z" },
+    { url = "https://files.pythonhosted.org/packages/4f/31/7083e9f2409d46e5a9ab8778200ce2fac3ec0d672dc9fd23a581a607feed/msplat-1.1.4-cp313-cp313-macosx_14_0_arm64.whl", hash = "sha256:27dde15d5012838c02693f52eb03734000c6773d980a973830e07f4dfca4f425", size = 754089, upload-time = "2026-08-25T21:57:07.957Z" },
 ]
 
 [[package]]

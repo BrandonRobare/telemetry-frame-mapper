@@ -248,11 +248,11 @@ jobs:
       - name: Install locked macOS test and packaging environment
         run: >-
           uv sync --frozen --group backend --group reconstruction
-          --group desktop-package --group dev --group audit
+          --group desktop-package --group splat-metal --group dev --group audit
 
       - name: Audit locked runtime dependencies
         run: |
-          uv export --frozen --no-dev --no-emit-project --group backend --group reconstruction --format requirements-txt --output-file /tmp/macos-runtime-requirements.txt
+          uv export --frozen --no-dev --no-emit-project --group backend --group reconstruction --group splat-metal --format requirements-txt --output-file /tmp/macos-runtime-requirements.txt
           uv run --frozen --no-sync pip-audit -r /tmp/macos-runtime-requirements.txt
 
       - name: Lint
