@@ -8,6 +8,8 @@ from dataclasses import dataclass
 import psutil
 from fastapi import APIRouter
 
+from backend.services.splat_backends import get_training_backend
+
 try:
     import pynvml
 
@@ -129,7 +131,17 @@ def _module_available(*names: str) -> bool:
 
 def _python_dependency_statuses() -> dict[str, dict[str, object]]:
     torch_available = _module_available("torch")
-    gsplat_available = _module_available("gsplat")
+    gsplat_installed = _module_available("gsplat")
+    gsplat_available = get_training_backend().is_available()
+    if gsplat_available:
+        gsplat_error = None
+    elif gsplat_installed:
+        gsplat_error = (
+            "gsplat is installed but no compatible CUDA accelerator or compiled backend is "
+            "available"
+        )
+    else:
+        gsplat_error = "gsplat is not installed"
     sugar_available = shutil.which("sugar_trainers") is not None or _module_available(
         "sugar_scene", "sugar_utils"
     )
@@ -153,7 +165,7 @@ def _python_dependency_statuses() -> dict[str, dict[str, object]]:
             "version": None,
             "path": None,
             "install_commands": PYTHON_DEPENDENCIES["gsplat"]["install"],
-            "error": None,
+            "error": gsplat_error,
         },
         "sugar": {
             "key": "sugar",
@@ -175,8 +187,9 @@ def _python_dependency_statuses() -> dict[str, dict[str, object]]:
         },
     }
 
-    # Avoid importing gsplat/SuGaR here: gsplat may trigger CUDA extension work in some
-    # environments. Torch import is the only reliable way to expose CUDA state/version.
+    # The backend's cached probe is the single source of truth for gsplat usability.
+    # It checks the compiled extension without running a rasterization/JIT workload.
+    # SuGaR remains import-spec-only because it has no equivalent capability probe.
     if torch_available:
         try:
             import torch  # type: ignore
@@ -191,12 +204,16 @@ def _python_dependency_statuses() -> dict[str, dict[str, object]]:
         except Exception as exc:  # pragma: no cover - depends on local installation
             statuses["torch"].update({"available": False, "error": str(exc)})
 
-    for key in ("gsplat", "sugar"):
-        if statuses[key]["available"]:
-            spec = importlib.util.find_spec("gsplat" if key == "gsplat" else "sugar_scene")
-            origin = getattr(spec, "origin", None)
-            if origin is not None:
-                statuses[key]["path"] = origin
+    if gsplat_installed:
+        spec = importlib.util.find_spec("gsplat")
+        origin = getattr(spec, "origin", None)
+        if origin is not None:
+            statuses["gsplat"]["path"] = origin
+    if statuses["sugar"]["available"]:
+        spec = importlib.util.find_spec("sugar_scene")
+        origin = getattr(spec, "origin", None)
+        if origin is not None:
+            statuses["sugar"]["path"] = origin
 
     return statuses
 
