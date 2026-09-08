@@ -31,9 +31,15 @@ def test_system_resources_returns_fields(client):
 
 
 def test_system_resources_reports_tools_unavailable(client):
+    backend = SimpleNamespace(is_available=MagicMock(return_value=False))
     with (
         patch("backend.routers.system.shutil.which", return_value=None),
         patch("backend.routers.system.importlib.util.find_spec", return_value=None),
+        patch("backend.routers.system.get_training_backend", return_value=backend),
+        patch(
+            "backend.routers.system.accelerator.detect",
+            return_value=SimpleNamespace(kind="cpu", device="cpu"),
+        ),
     ):
         resp = client.get("/system/resources")
 

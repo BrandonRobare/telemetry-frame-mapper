@@ -1229,8 +1229,10 @@ def test_run_pipeline_trainer_result_persisted_and_lod_generated(setup_test_db):
         rec, img, colmap_dir = _pipeline_fixture(db, tmp)
         with patch("backend.services.reconstruction._write_colmap_workspace", MagicMock()), \
              patch("backend.services.reconstruction._run_colmap", MagicMock(return_value=4)), \
-             patch("backend.services.splat_trainer.train_splats", fake_train), \
-             patch("backend.services.splat_backends.cuda_gsplat.is_available", return_value=True), \
+             patch(
+                 "backend.services.reconstruction.get_training_backend",
+                 return_value=SimpleNamespace(is_available=lambda: True, train=fake_train),
+             ), \
              patch("backend.services.reconstruction.SessionLocal", TestSessionLocal), \
              patch("backend.services.reconstruction.get_config") as mock_cfg:
             mock_cfg.return_value.data_dir = tmp
