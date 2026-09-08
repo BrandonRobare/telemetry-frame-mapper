@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 
@@ -53,9 +54,11 @@ def test_system_resources_reports_tools_unavailable(client):
 
 
 def test_system_resources_reports_tools_available(client):
+    backend = SimpleNamespace(is_available=MagicMock(return_value=True))
     with (
         patch("backend.routers.system.shutil.which", return_value="C:/colmap/bin/colmap.exe"),
         patch("backend.routers.system.importlib.util.find_spec", return_value=object()),
+        patch("backend.routers.system.get_training_backend", return_value=backend),
     ):
         resp = client.get("/system/resources")
 
@@ -63,6 +66,35 @@ def test_system_resources_reports_tools_available(client):
     body = resp.json()
     assert body["colmap_available"] is True
     assert body["gsplat_available"] is True
+    backend.is_available.assert_called_once_with()
+
+
+def test_system_resources_reports_installed_but_unusable_gsplat_with_reason(client):
+    backend = SimpleNamespace(is_available=MagicMock(return_value=False))
+
+    def fake_spec(name: str):
+        if name == "gsplat":
+            return SimpleNamespace(origin="/venv/gsplat/__init__.py")
+        return None
+
+    with (
+        patch("backend.routers.system.shutil.which", return_value=None),
+        patch("backend.routers.system.importlib.util.find_spec", side_effect=fake_spec),
+        patch("backend.routers.system.get_training_backend", return_value=backend),
+    ):
+        resp = client.get("/system/resources")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    tools = {tool["key"]: tool for tool in body["tools"]}
+    assert body["gsplat_available"] is False
+    assert tools["gsplat"]["available"] is False
+    assert tools["gsplat"]["path"] == "/venv/gsplat/__init__.py"
+    assert "no compatible CUDA accelerator" in tools["gsplat"]["error"]
+    workflows = {workflow["key"]: workflow for workflow in body["workflows"]}
+    assert workflows["gaussian_splat_training"]["available"] is False
+    assert "gsplat" in workflows["gaussian_splat_training"]["missing"]
+    backend.is_available.assert_called_once_with()
 
 
 def test_system_resources_reports_versions_and_workflows(client):
