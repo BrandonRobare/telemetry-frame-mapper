@@ -414,11 +414,11 @@ def get_resources():
         "colmap_available": binaries["colmap"]["available"],
         "colmap_capabilities": colmap_probe,
         "splat_transform_available": bool(splat_transform_probe.get("available")),
-        # Backward-compatible aggregate used by existing clients.
-        "gsplat_available": bool(
+        "gsplat_available": python_deps["gsplat"]["available"],
+        "msplat_available": python_deps["msplat"]["available"],
+        "splat_training_available": bool(
             python_deps["gsplat"]["available"] or python_deps["msplat"]["available"]
         ),
-        "msplat_available": python_deps["msplat"]["available"],
         "splat_backend": (
             "metal_msplat"
             if python_deps["msplat"]["available"]

@@ -8,6 +8,7 @@ import sys
 import threading
 import time
 from pathlib import Path
+from typing import cast
 
 import pytest
 from PIL import Image
@@ -70,12 +71,12 @@ def _write_colmap_fixture(root: Path) -> Path:
     (sparse / "points3D.bin").write_bytes(points)
     return root
 
-def _config(*, iterations: int) -> TrainerConfig:
+def _config(*, iterations: int, max_gaussians: int = 2_000) -> TrainerConfig:
     return TrainerConfig(
         iterations=iterations,
         sh_degree=0,
         downscale_factor=1,
-        max_gaussians=2_000,
+        max_gaussians=max_gaussians,
         refine_start_iter=500,
         refine_stop_iter=4_000,
     )
@@ -138,3 +139,25 @@ def test_real_msplat_cancels_mid_training_with_recoverable_outputs(tmp_path: Pat
     assert metadata["native_checkpoint"] == checkpoint.name
     assert checkpoint.exists() and output.exists()
     assert ply_io.read_3dgs_ply(output).means.shape[0] == metadata["gaussian_count"]
+
+
+def test_real_msplat_freezes_before_cap_and_finishes_training(tmp_path: Path) -> None:
+    from backend.services.splat_backends import metal_msplat
+
+    workspace = _write_colmap_fixture(tmp_path / "cap-colmap")
+    output = tmp_path / "capped.ply"
+    progress: list[str] = []
+
+    result = metal_msplat.METAL_MSPLAT_BACKEND.train(
+        workspace,
+        output,
+        _config(iterations=1_300, max_gaussians=50),
+        lambda message, _pct: progress.append(message),
+        threading.Event(),
+    )
+
+    gaussian_count = cast(int, result["gaussian_count"])
+    assert gaussian_count <= 50
+    assert any("densification frozen" in message for message in progress)
+    assert progress[-1] == "exporting splat PLY"
+    assert ply_io.read_3dgs_ply(output).means.shape[0] == gaussian_count

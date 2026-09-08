@@ -336,6 +336,7 @@ export interface SystemResources {
   colmap_available: boolean
   gsplat_available: boolean
   msplat_available?: boolean
+  splat_training_available?: boolean
   splat_backend?: 'cuda_gsplat' | 'metal_msplat' | null
   tools: SystemTool[]
   workflows: WorkflowStatus[]

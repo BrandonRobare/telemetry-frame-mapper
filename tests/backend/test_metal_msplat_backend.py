@@ -29,20 +29,21 @@ def _config(*, iterations: int = 3, max_gaussians: int = 100) -> TrainerConfig:
     )
 
 
-def _runtime(tmp_path: Path, counts: list[int]):
+def _runtime(tmp_path: Path, counts: list[int], *, start_iteration: int = 0):
+    dataset = SimpleNamespace(num_train=0)
     runtime = SimpleNamespace(
-        load_dataset=MagicMock(return_value="dataset"),
+        load_dataset=MagicMock(return_value=dataset),
         TrainingConfig=MagicMock(return_value="native-config"),
         sync=MagicMock(),
     )
     trainer = MagicMock()
-    trainer.iteration = 0
+    trainer.iteration = start_iteration
     trainer.splat_count = counts[0]
     state = {"index": 0}
 
     def step():
         state["index"] += 1
-        trainer.iteration = state["index"]
+        trainer.iteration = start_iteration + state["index"]
         trainer.splat_count = counts[min(state["index"], len(counts) - 1)]
         return SimpleNamespace(
             iteration=trainer.iteration,
@@ -129,23 +130,56 @@ def test_metal_training_maps_config_steps_syncs_and_exports(tmp_path: Path) -> N
     assert progress.call_args_list[-1].args == ("exporting splat PLY", 99.0)
 
 
-def test_metal_training_stops_densification_at_gaussian_cap(tmp_path: Path) -> None:
+def test_metal_training_freezes_densification_and_completes_at_gaussian_cap(
+    tmp_path: Path,
+) -> None:
     from backend.services.splat_backends import metal_msplat
 
-    runtime, trainer = _runtime(tmp_path, [20, 40, 120, 140, 160])
+    runtime, adaptive = _runtime(tmp_path, [20, 40])
+    _unused, frozen = _runtime(tmp_path, [40] * 8, start_iteration=1)
+    runtime.GaussianTrainer.side_effect = [adaptive, frozen]
     progress = MagicMock()
+    config = _config(iterations=8, max_gaussians=100)
+    config.refine_start_iter = 0
+    config.refine_every = 1
+    config.reset_every = 10
+    output = tmp_path / "splat.ply"
     result = metal_msplat._train(
         runtime,
         tmp_path / "colmap",
-        tmp_path / "splat.ply",
-        _config(iterations=5, max_gaussians=100),
+        output,
+        config,
         progress,
         threading.Event(),
     )
 
-    assert trainer.step.call_count == 2
-    assert result["gaussian_count"] == 120
-    assert any("gaussian cap reached" in call.args[0] for call in progress.call_args_list)
+    assert adaptive.step.call_count == 1
+    assert frozen.step.call_count == 7
+    assert frozen.load_checkpoint.called
+    assert runtime.TrainingConfig.call_count == 2
+    frozen_kwargs = runtime.TrainingConfig.call_args_list[1].kwargs
+    assert frozen_kwargs["warmup_length"] == config.iterations + 1
+    assert frozen_kwargs["densify_grad_thresh"] == float("inf")
+    assert not output.with_suffix(".ply.cap-freeze.msplat").exists()
+    assert result["gaussian_count"] == 40
+    assert any("densification frozen" in call.args[0] for call in progress.call_args_list)
+
+
+def test_metal_training_rejects_initial_cloud_above_cap(tmp_path: Path) -> None:
+    from backend.services.splat_backends import metal_msplat
+
+    runtime, trainer = _runtime(tmp_path, [101])
+    trainer = runtime.GaussianTrainer.return_value
+    with pytest.raises(RuntimeError, match="initialized 101 Gaussians.*cap of 100"):
+        metal_msplat._train(
+            runtime,
+            tmp_path / "colmap",
+            tmp_path / "splat.ply",
+            _config(max_gaussians=100),
+            MagicMock(),
+            threading.Event(),
+        )
+    trainer.step.assert_not_called()
 
 
 class _CancelAfterOneStep:

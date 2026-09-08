@@ -47,6 +47,7 @@ def test_system_resources_reports_tools_unavailable(client):
     body = resp.json()
     assert body["colmap_available"] is False
     assert body["gsplat_available"] is False
+    assert body["splat_training_available"] is False
     assert {tool["key"] for tool in body["tools"]} == {
         "ffmpeg",
         "exiftool",
@@ -77,6 +78,7 @@ def test_system_resources_reports_tools_available(client):
     body = resp.json()
     assert body["colmap_available"] is True
     assert body["gsplat_available"] is True
+    assert body["splat_training_available"] is True
     backend.is_available.assert_called_once_with()
 
 
@@ -145,7 +147,8 @@ def test_system_resources_enables_native_metal_training_without_torch(client):
         "missing": [],
     }
     assert body["msplat_available"] is True
-    assert body["gsplat_available"] is True
+    assert body["gsplat_available"] is False
+    assert body["splat_training_available"] is True
     assert body["splat_backend"] == "metal_msplat"
     backend.is_available.assert_called_once_with()
 
