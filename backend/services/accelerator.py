@@ -7,6 +7,7 @@ accelerator kinds used by capability payloads: ``cuda``, ``metal``, and ``cpu``.
 
 from __future__ import annotations
 
+import platform
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -27,6 +28,14 @@ def _import_torch() -> Any | None:
     except ImportError:
         return None
     return torch
+
+
+def _native_metal_available() -> bool:
+    """Detect Apple-Silicon Metal without requiring the optional PyTorch stack."""
+    return platform.system() == "Darwin" and platform.machine().lower() in {
+        "arm64",
+        "aarch64",
+    }
 
 
 def _is_available(torch: Any, kind: AcceleratorKind) -> bool:
@@ -64,9 +73,11 @@ def detect(
     An unavailable explicit CUDA or Metal preference safely falls back to CPU;
     it does not silently choose another accelerator.
     """
-    torch = torch if torch is not None else _import_torch()
     requested = _normalize_override(override)
+    torch = torch if torch is not None else _import_torch()
     if torch is None:
+        if allow_metal and requested in (None, "metal") and _native_metal_available():
+            return Accelerator("metal", "mps")
         return Accelerator("cpu", "cpu")
 
     if requested:

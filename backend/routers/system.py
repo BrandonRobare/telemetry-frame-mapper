@@ -8,6 +8,7 @@ from dataclasses import dataclass
 import psutil
 from fastapi import APIRouter
 
+from backend.services import accelerator
 from backend.services.splat_backends import get_training_backend
 
 try:
@@ -79,6 +80,10 @@ PYTHON_DEPENDENCIES = {
         "label": "gsplat",
         "install": {"pip": "uv pip install gsplat"},
     },
+    "msplat": {
+        "label": "msplat",
+        "install": {"macos": "uv sync --group splat-metal"},
+    },
     "sugar": {
         "label": "SuGaR",
         "install": {"pip": "uv pip install git+https://github.com/Anttwo/SuGaR.git"},
@@ -132,7 +137,11 @@ def _module_available(*names: str) -> bool:
 def _python_dependency_statuses() -> dict[str, dict[str, object]]:
     torch_available = _module_available("torch")
     gsplat_installed = _module_available("gsplat")
-    gsplat_available = get_training_backend().is_available()
+    msplat_installed = _module_available("msplat")
+    accelerator_kind = accelerator.detect().kind
+    splat_available = get_training_backend().is_available()
+    gsplat_available = splat_available and accelerator_kind != "metal"
+    msplat_available = splat_available and accelerator_kind == "metal"
     if gsplat_available:
         gsplat_error = None
     elif gsplat_installed:
@@ -142,6 +151,14 @@ def _python_dependency_statuses() -> dict[str, dict[str, object]]:
         )
     else:
         gsplat_error = "gsplat is not installed"
+    if msplat_available:
+        msplat_error = None
+    elif msplat_installed:
+        msplat_error = (
+            "msplat is installed but no supported Apple-Silicon Metal runtime is available"
+        )
+    else:
+        msplat_error = "msplat is not installed"
     sugar_available = shutil.which("sugar_trainers") is not None or _module_available(
         "sugar_scene", "sugar_utils"
     )
@@ -167,6 +184,15 @@ def _python_dependency_statuses() -> dict[str, dict[str, object]]:
             "install_commands": PYTHON_DEPENDENCIES["gsplat"]["install"],
             "error": gsplat_error,
         },
+        "msplat": {
+            "key": "msplat",
+            "label": PYTHON_DEPENDENCIES["msplat"]["label"],
+            "available": msplat_available,
+            "version": None,
+            "path": None,
+            "install_commands": PYTHON_DEPENDENCIES["msplat"]["install"],
+            "error": msplat_error,
+        },
         "sugar": {
             "key": "sugar",
             "label": PYTHON_DEPENDENCIES["sugar"]["label"],
@@ -187,8 +213,8 @@ def _python_dependency_statuses() -> dict[str, dict[str, object]]:
         },
     }
 
-    # The backend's cached probe is the single source of truth for gsplat usability.
-    # It checks the compiled extension without running a rasterization/JIT workload.
+    # The selected trainer's cached probe is the source of truth for splat usability.
+    # It checks native capability without starting a training/JIT workload.
     # SuGaR remains import-spec-only because it has no equivalent capability probe.
     if torch_available:
         try:
@@ -209,6 +235,11 @@ def _python_dependency_statuses() -> dict[str, dict[str, object]]:
         origin = getattr(spec, "origin", None)
         if origin is not None:
             statuses["gsplat"]["path"] = origin
+    if msplat_installed:
+        spec = importlib.util.find_spec("msplat")
+        origin = getattr(spec, "origin", None)
+        if origin is not None:
+            statuses["msplat"]["path"] = origin
     if statuses["sugar"]["available"]:
         spec = importlib.util.find_spec("sugar_scene")
         origin = getattr(spec, "origin", None)
@@ -258,6 +289,7 @@ def _workflow_statuses(
     colmap = bool(binaries["colmap"]["available"])
     torch_cuda = bool(python_deps["torch"].get("cuda_available"))
     gsplat = bool(python_deps["gsplat"]["available"])
+    msplat = bool(python_deps.get("msplat", {}).get("available"))
     # pynvml supplies live utilisation/VRAM telemetry and is optional. Whether a
     # usable NVIDIA GPU exists is answered by torch.cuda.is_available(), which is
     # what the training code actually requires. Gating capabilities on pynvml alone
@@ -284,17 +316,22 @@ def _workflow_statuses(
         {
             "key": "gaussian_splat_training",
             "label": "Gaussian splat training",
-            "available": colmap and torch_cuda and gsplat and nvidia_gpu,
-            "missing": [
-                key
-                for key, ok in (
-                    ("colmap", colmap),
-                    ("torch_cuda", torch_cuda),
-                    ("gsplat", gsplat),
-                    ("nvidia_gpu", nvidia_gpu),
-                )
-                if not ok
-            ],
+            "available": colmap and (msplat or (torch_cuda and gsplat and nvidia_gpu)),
+            "missing": (
+                []
+                if colmap and (msplat or (torch_cuda and gsplat and nvidia_gpu))
+                else [
+                    key
+                    for key, ok in (
+                        ("colmap", colmap),
+                        ("torch_cuda", torch_cuda),
+                        ("gsplat", gsplat),
+                        ("nvidia_gpu", nvidia_gpu),
+                        ("msplat", msplat),
+                    )
+                    if not ok
+                ]
+            ),
         },
         {
             "key": "sugar_refinement",
@@ -377,6 +414,16 @@ def get_resources():
         "colmap_available": binaries["colmap"]["available"],
         "colmap_capabilities": colmap_probe,
         "splat_transform_available": bool(splat_transform_probe.get("available")),
-        # Spec lookup only — importing gsplat can trigger a multi-minute CUDA JIT compile.
-        "gsplat_available": python_deps["gsplat"]["available"],
+        # Backward-compatible aggregate used by existing clients.
+        "gsplat_available": bool(
+            python_deps["gsplat"]["available"] or python_deps["msplat"]["available"]
+        ),
+        "msplat_available": python_deps["msplat"]["available"],
+        "splat_backend": (
+            "metal_msplat"
+            if python_deps["msplat"]["available"]
+            else "cuda_gsplat"
+            if python_deps["gsplat"]["available"]
+            else None
+        ),
     }

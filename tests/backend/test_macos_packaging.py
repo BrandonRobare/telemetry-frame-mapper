@@ -58,6 +58,7 @@ def test_macos_build_script_uses_windowed_posix_pyinstaller_bundle_contract() ->
     ]
     assert all(";" not in source for source in add_data_sources)
     assert "--collect-all backend" in build
+    assert "--collect-all msplat" in build
     assert "--collect-all drone_video_geotagger" in build
     assert build.rstrip().endswith("backend/__main__.py")
     assert "resolve_app_data_dir" in RUNTIME_PATHS.read_text(encoding="utf-8")

@@ -73,11 +73,37 @@ def test_backend_protocol_has_only_training_boundary_responsibilities() -> None:
     assert public_methods == {"is_available", "train"}
 
 
+def test_training_backend_follows_detected_accelerator(monkeypatch) -> None:
+    from backend.services import accelerator, splat_backends
+
+    monkeypatch.setattr(
+        splat_backends.accelerator,
+        "detect",
+        lambda: accelerator.Accelerator("metal", "mps"),
+    )
+    assert splat_backends.get_training_backend() is splat_backends.METAL_MSPLAT_BACKEND
+
+    monkeypatch.setattr(
+        splat_backends.accelerator,
+        "detect",
+        lambda: accelerator.Accelerator("cuda", "cuda"),
+    )
+    assert splat_backends.get_training_backend() is splat_backends.CUDA_GSPLAT_BACKEND
+
+
+def test_training_backend_explicit_overrides_are_stable() -> None:
+    from backend.services import splat_backends
+
+    assert splat_backends.get_training_backend("metal") is splat_backends.METAL_MSPLAT_BACKEND
+    assert splat_backends.get_training_backend("msplat") is splat_backends.METAL_MSPLAT_BACKEND
+    assert splat_backends.get_training_backend("cuda") is splat_backends.CUDA_GSPLAT_BACKEND
+
+
 def test_unknown_backend_override_is_rejected() -> None:
     from backend.services.splat_backends import get_training_backend
 
     with pytest.raises(ValueError, match="Unsupported splat trainer backend"):
-        get_training_backend("metal")
+        get_training_backend("opencl")
 
 
 def test_reconstruction_delegates_the_complete_training_boundary(monkeypatch, tmp_path) -> None:
@@ -116,7 +142,7 @@ def test_reconstruction_rejects_unusable_backend_before_progress_or_training(
     monkeypatch.setattr(reconstruction, "get_training_backend", lambda: backend)
     progress = MagicMock()
 
-    with pytest.raises(RuntimeError, match="no compatible CUDA accelerator"):
+    with pytest.raises(RuntimeError, match="no usable Gaussian-splat training backend"):
         reconstruction._run_gsplat(
             tmp_path / "colmap",
             tmp_path / "splat.ply",
