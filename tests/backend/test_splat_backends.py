@@ -172,3 +172,18 @@ def test_renderer_protocol_is_narrow_and_backend_neutral() -> None:
 
     public_methods = {name for name in vars(SplatRendererBackend) if not name.startswith("_")}
     assert public_methods == {"is_available", "rasterize"}
+
+
+def test_cuda_renderer_preserves_flythrough_sh_degree_derivation(monkeypatch) -> None:
+    from backend.services.splat_backends import cuda_gsplat
+
+    rasterize = MagicMock(return_value="render")
+    monkeypatch.setattr(cuda_gsplat, "_import_training_deps", lambda: ("torch", "gsplat"))
+    monkeypatch.setattr(cuda_gsplat, "_rasterize_cloud", rasterize)
+
+    result = cuda_gsplat.CUDA_GSPLAT_RENDERER_BACKEND.rasterize(
+        "torch", "cloud", "view", 1280, 720, "cuda"
+    )
+
+    assert result == "render"
+    assert rasterize.call_args.kwargs["sh_degree"] is None

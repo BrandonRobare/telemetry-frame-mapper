@@ -95,5 +95,5 @@ class SplatRendererBackend(Protocol):
         height: int,
         device: str,
         *,
-        sh_degree: int = 0,
+        sh_degree: int | None = None,
     ) -> Any: ...

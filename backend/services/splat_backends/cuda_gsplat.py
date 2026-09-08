@@ -428,7 +428,7 @@ class CudaGsplatRendererBackend:
         height: int,
         device: str,
         *,
-        sh_degree: int = 0,
+        sh_degree: int | None = None,
     ):
         _, gsplat = _import_training_deps()
         return _rasterize_cloud(
