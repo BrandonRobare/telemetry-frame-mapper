@@ -311,3 +311,50 @@ jobs:
             macos-build.log
             macos-smoke.log
             macos-system-resources.json
+
+  semantic-mps-benchmark:
+    if: github.event_name == 'pull_request' && github.head_ref == 'wave6/823-semantic-mps-benchmark'
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Assert Apple Silicon runner
+        run: test "$(uname -m)" = "arm64"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: "0.11.16"
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+
+      - name: Install locked semantic environment
+        run: uv sync --frozen --group backend --group semantic --group dev
+
+      - name: Install benchmark PyTorch wheels
+        run: uv pip install torch==2.14.0 torchvision==0.29.0
+
+      - name: Record environment
+        run: uv pip freeze > semantic-mps-environment.txt
+
+      - name: Benchmark warmed CPU and MPS paths
+        env:
+          HF_HOME: ${{ runner.temp }}/huggingface
+        run: >-
+          uv run --no-sync python scripts/benchmark_semantic_mps.py
+          --output semantic-mps-benchmark.json --repeats 2
+
+      - name: Upload benchmark evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: semantic-mps-${{ github.sha }}
+          if-no-files-found: warn
+          path: |
+            semantic-mps-benchmark.json
+            semantic-mps-environment.txt
