@@ -130,7 +130,6 @@ function ToolStatusCard({ tool }: { tool: SystemTool }) {
         <div title={tool.version ?? undefined} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           Version: {tool.version ?? 'Unknown'}
         </div>
-        {tool.cuda_available != null && <div>CUDA: {tool.cuda_available ? 'Yes' : 'No'}</div>}
         {tool.error && <div style={{ color: 'var(--danger)' }}>Error: {tool.error}</div>}
       </div>
       <Button
@@ -167,6 +166,16 @@ function WorkflowStatusPill({ workflow }: { workflow: WorkflowStatus }) {
   )
 }
 
+function formatAcceleratorStatus(resources: SystemResources): string {
+  const { accelerator } = resources
+  const backend = accelerator.splat_backend === 'cuda_gsplat'
+    ? 'CUDA gsplat ready'
+    : accelerator.splat_backend === 'metal_msplat'
+      ? 'Metal msplat ready'
+      : 'No splat backend'
+  return `${accelerator.description} · ${accelerator.device} · ${backend}`
+}
+
 function SystemHealthDashboard({ resources }: { resources: SystemResources }) {
   return (
     <section
@@ -180,10 +189,11 @@ function SystemHealthDashboard({ resources }: { resources: SystemResources }) {
         <h2 className="text-sm font-semibold" style={{ color: 'var(--text)', margin: 0, marginRight: 'auto' }}>
           System Health
         </h2>
-        <span className="text-xs" style={{ color: resources.gpu_available ? 'var(--success)' : 'var(--text-muted)' }}>
-          {resources.gpu_available
-            ? `${resources.gpu_name ?? 'NVIDIA GPU'} · ${resources.vram_total_gb ?? '?'} GB VRAM`
-            : 'No NVIDIA GPU detected'}
+        <span
+          className="text-xs"
+          style={{ color: resources.accelerator.splat_backend_available ? 'var(--success)' : 'var(--text-muted)' }}
+        >
+          {formatAcceleratorStatus(resources)}
         </span>
       </div>
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>

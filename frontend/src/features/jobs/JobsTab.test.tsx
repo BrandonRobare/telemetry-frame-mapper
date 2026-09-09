@@ -22,9 +22,14 @@ const resources: SystemResources = {
   vram_used_gb: null,
   vram_total_gb: null,
   gpu_name: null,
-  gpu_available: false,
+  accelerator: {
+    kind: 'cpu',
+    device: 'cpu',
+    description: 'CPU',
+    splat_backend: null,
+    splat_backend_available: false,
+  },
   colmap_available: false,
-  gsplat_available: false,
   tools: [],
   workflows: [],
 }
@@ -94,6 +99,45 @@ afterEach(() => {
   cleanup()
   vi.unstubAllGlobals()
 })
+
+describe('JobsTab system accelerator', () => {
+  it.each([
+    ['cuda', 'cuda', 'NVIDIA RTX', 'cuda_gsplat', true, 'NVIDIA RTX · cuda · CUDA gsplat ready'],
+    ['metal', 'mps', 'Apple Metal', 'metal_msplat', true, 'Apple Metal · mps · Metal msplat ready'],
+    ['cpu', 'cpu', 'CPU', null, false, 'CPU · cpu · No splat backend'],
+  ] as const)(
+    'renders %s hardware truthfully',
+    async (
+      kind: 'cuda' | 'metal' | 'cpu',
+      device: 'cuda' | 'mps' | 'cpu',
+      description: string,
+      backend: 'cuda_gsplat' | 'metal_msplat' | null,
+      available: boolean,
+      expected: string,
+    ) => {
+      const systemResources: SystemResources = {
+        ...resources,
+        accelerator: {
+          kind,
+          device,
+          description,
+          splat_backend: backend,
+          splat_backend_available: available,
+        },
+      }
+      vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+        if (url.startsWith('/jobs/?')) return jsonResponse([])
+        if (url === '/system/resources') return jsonResponse(systemResources)
+        throw new Error(`Unexpected request: ${url}`)
+      }))
+
+      renderJobsTab()
+
+      expect(await screen.findByText(expected)).toBeTruthy()
+    },
+  )
+})
+
 
 describe('JobsTab reconstruction statuses', () => {
   it('renders a cancelling job in the Active list without firing the root ErrorBoundary', async () => {

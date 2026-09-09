@@ -321,6 +321,14 @@ export interface BackupScheduleStatus {
   result: { status: 'success' | 'failed' | 'configuration_error'; snapshot_id?: string } | null
 }
 
+export interface SystemAccelerator {
+  kind: 'cuda' | 'metal' | 'cpu'
+  device: 'cuda' | 'mps' | 'cpu'
+  description: string
+  splat_backend: 'cuda_gsplat' | 'metal_msplat' | null
+  splat_backend_available: boolean
+}
+
 export interface SystemResources {
   cpu_pct: number
   ram_used_gb: number
@@ -332,12 +340,8 @@ export interface SystemResources {
   vram_used_gb: number | null
   vram_total_gb: number | null
   gpu_name: string | null
-  gpu_available: boolean
+  accelerator: SystemAccelerator
   colmap_available: boolean
-  gsplat_available: boolean
-  msplat_available?: boolean
-  splat_training_available?: boolean
-  splat_backend?: 'cuda_gsplat' | 'metal_msplat' | null
   tools: SystemTool[]
   workflows: WorkflowStatus[]
 }
@@ -348,7 +352,6 @@ export interface SystemTool {
   available: boolean
   path: string | null
   version: string | null
-  cuda_available?: boolean
   install_commands: Record<string, string>
   error: string | null
 }

@@ -45,9 +45,22 @@ def test_system_resources_reports_tools_unavailable(client):
 
     assert resp.status_code == 200
     body = resp.json()
+    assert body["accelerator"] == {
+        "kind": "cpu",
+        "device": "cpu",
+        "description": "CPU",
+        "splat_backend": None,
+        "splat_backend_available": False,
+    }
+    for legacy_key in (
+        "gpu_available",
+        "gsplat_available",
+        "msplat_available",
+        "splat_training_available",
+        "splat_backend",
+    ):
+        assert legacy_key not in body
     assert body["colmap_available"] is False
-    assert body["gsplat_available"] is False
-    assert body["splat_training_available"] is False
     assert {tool["key"] for tool in body["tools"]} == {
         "ffmpeg",
         "exiftool",
@@ -71,14 +84,30 @@ def test_system_resources_reports_tools_available(client):
             "backend.routers.system.accelerator.detect",
             return_value=SimpleNamespace(kind="cuda", device="cuda"),
         ),
+        patch(
+            "backend.routers.system._gpu_status",
+            return_value={
+                "available": True,
+                "name": "NVIDIA RTX",
+                "gpu_pct": 0,
+                "vram_used_gb": 1,
+                "vram_total_gb": 8,
+            },
+        ),
     ):
         resp = client.get("/system/resources")
 
     assert resp.status_code == 200
     body = resp.json()
     assert body["colmap_available"] is True
-    assert body["gsplat_available"] is True
-    assert body["splat_training_available"] is True
+    assert body["accelerator"] == {
+        "kind": "cuda",
+        "device": "cuda",
+        "description": "NVIDIA RTX",
+        "splat_backend": "cuda_gsplat",
+        "splat_backend_available": True,
+    }
+    assert all("cuda_available" not in tool for tool in body["tools"])
     backend.is_available.assert_called_once_with()
 
 
@@ -98,19 +127,35 @@ def test_system_resources_reports_installed_but_unusable_gsplat_with_reason(clie
             "backend.routers.system.accelerator.detect",
             return_value=SimpleNamespace(kind="cuda", device="cuda"),
         ),
+        patch(
+            "backend.routers.system._gpu_status",
+            return_value={
+                "available": False,
+                "name": None,
+                "gpu_pct": None,
+                "vram_used_gb": None,
+                "vram_total_gb": None,
+            },
+        ),
     ):
         resp = client.get("/system/resources")
 
     assert resp.status_code == 200
     body = resp.json()
     tools = {tool["key"]: tool for tool in body["tools"]}
-    assert body["gsplat_available"] is False
+    assert body["accelerator"] == {
+        "kind": "cuda",
+        "device": "cuda",
+        "description": "CUDA accelerator",
+        "splat_backend": None,
+        "splat_backend_available": False,
+    }
     assert tools["gsplat"]["available"] is False
     assert tools["gsplat"]["path"] == "/venv/gsplat/__init__.py"
     assert "no compatible CUDA accelerator" in tools["gsplat"]["error"]
     workflows = {workflow["key"]: workflow for workflow in body["workflows"]}
     assert workflows["gaussian_splat_training"]["available"] is False
-    assert "gsplat" in workflows["gaussian_splat_training"]["missing"]
+    assert "splat_backend" in workflows["gaussian_splat_training"]["missing"]
     backend.is_available.assert_called_once_with()
 
 
@@ -146,10 +191,13 @@ def test_system_resources_enables_native_metal_training_without_torch(client):
         "available": True,
         "missing": [],
     }
-    assert body["msplat_available"] is True
-    assert body["gsplat_available"] is False
-    assert body["splat_training_available"] is True
-    assert body["splat_backend"] == "metal_msplat"
+    assert body["accelerator"] == {
+        "kind": "metal",
+        "device": "mps",
+        "description": "Apple Metal",
+        "splat_backend": "metal_msplat",
+        "splat_backend_available": True,
+    }
     backend.is_available.assert_called_once_with()
 
 
@@ -213,34 +261,39 @@ def test_gpu_workflows_do_not_require_pynvml():
 
     binaries = {k: {"available": True} for k in ("ffmpeg", "exiftool", "colmap")}
     python_deps = {
-        "torch": {"available": True, "cuda_available": True},
+        "torch": {"available": True},
         "gsplat": {"available": True},
         "sugar": {"available": True},
         "transformers": {"available": True},
     }
-    no_pynvml = {"available": False, "name": None}
+    cuda_accelerator = {"kind": "cuda", "splat_backend_available": True}
 
-    workflows = {w["key"]: w for w in _workflow_statuses(binaries, python_deps, no_pynvml)}
+    workflows = {
+        w["key"]: w for w in _workflow_statuses(binaries, python_deps, cuda_accelerator)
+    }
 
     for key in ("gaussian_splat_training", "sugar_refinement", "semantic_labeling"):
         assert workflows[key]["available"] is True, f"{key} gated on pynvml"
-        assert "nvidia_gpu" not in workflows[key]["missing"]
+        assert "accelerator_cuda" not in workflows[key]["missing"]
 
 
 def test_gpu_workflows_still_report_missing_without_cuda():
-    """With no CUDA device, nvidia_gpu must still be reported missing."""
+    """CPU-only hosts must report the structured accelerator/backend gaps."""
     from backend.routers.system import _workflow_statuses
 
     binaries = {k: {"available": True} for k in ("ffmpeg", "exiftool", "colmap")}
     python_deps = {
-        "torch": {"available": True, "cuda_available": False},
-        "gsplat": {"available": True},
+        "torch": {"available": True},
+        "gsplat": {"available": False},
         "sugar": {"available": True},
         "transformers": {"available": True},
     }
-    no_pynvml = {"available": False, "name": None}
+    cpu_accelerator = {"kind": "cpu", "splat_backend_available": False}
 
-    workflows = {w["key"]: w for w in _workflow_statuses(binaries, python_deps, no_pynvml)}
+    workflows = {
+        w["key"]: w for w in _workflow_statuses(binaries, python_deps, cpu_accelerator)
+    }
 
     assert workflows["gaussian_splat_training"]["available"] is False
-    assert "nvidia_gpu" in workflows["gaussian_splat_training"]["missing"]
+    assert workflows["gaussian_splat_training"]["missing"] == ["splat_backend"]
+    assert "accelerator_cuda" in workflows["semantic_labeling"]["missing"]
