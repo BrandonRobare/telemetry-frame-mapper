@@ -45,7 +45,7 @@ def _sync(torch, device: str) -> None:
         torch.mps.synchronize()
 
 
-def _infer(segmenter, image: np.ndarray, torch, device: str):
+def _infer(segmenter, image: np.ndarray, torch, device: str, category_lut: np.ndarray):
     inputs = segmenter.image_processor(images=Image.fromarray(image), return_tensors="pt")
     inputs = {key: value.to(device) for key, value in inputs.items()}
     with torch.inference_mode():
@@ -54,7 +54,9 @@ def _infer(segmenter, image: np.ndarray, torch, device: str):
             logits, size=image.shape[:2], mode="bilinear", align_corners=False
         )
         confidence, labels = torch.softmax(logits, dim=1).max(dim=1)
-    return labels[0].cpu().numpy().astype(np.uint8), confidence[0].cpu().numpy().astype(np.float16)
+    ade_labels = labels[0].cpu().numpy()
+    app_labels = category_lut[ade_labels].astype(np.uint8)
+    return app_labels, confidence[0].cpu().numpy().astype(np.float16)
 
 
 def _run_device(device: str, images: list[np.ndarray], repeats: int):
@@ -64,15 +66,18 @@ def _run_device(device: str, images: list[np.ndarray], repeats: int):
 
     semantic_segmenter._segmenter_cache.clear()
     segmenter = semantic_segmenter.load_segmenter(MODEL_ID, device=device)
+    category_lut = semantic_segmenter.build_id_to_category(
+        semantic_segmenter._pipe_id2label(segmenter)
+    )
     segmenter.model.eval()
-    _infer(segmenter, images[0], torch, device)
+    _infer(segmenter, images[0], torch, device, category_lut)
     _sync(torch, device)
     durations: list[float] = []
     outputs = []
     for _ in range(repeats):
         _sync(torch, device)
         started = time.perf_counter()
-        current = [_infer(segmenter, image, torch, device) for image in images]
+        current = [_infer(segmenter, image, torch, device, category_lut) for image in images]
         _sync(torch, device)
         durations.append(time.perf_counter() - started)
         outputs = current
@@ -98,6 +103,7 @@ def _compare(cpu_outputs, mps_outputs) -> dict[str, float | str]:
     mps_conf = np.stack([confidence.astype(np.float32) for _, confidence in mps_outputs])
     agreement = float(np.mean(np.stack(cpu_labels) == np.stack(mps_labels)))
     return {
+        "label_space": "app_supercategories_0_5",
         "label_agreement": agreement,
         "confidence_mae": float(np.mean(np.abs(cpu_conf - mps_conf))),
         "cpu_label_sha256": _digest(cpu_labels),
