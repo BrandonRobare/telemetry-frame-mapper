@@ -198,7 +198,8 @@ def _train(
                         runtime, config, output_path, freeze_densification=True
                     )
                     trainer = runtime.GaussianTrainer(dataset, frozen_config)
-                    loaded_iteration = int(trainer.load_checkpoint(str(checkpoint)))
+                    trainer.load_checkpoint(str(checkpoint))
+                    loaded_iteration = int(trainer.iteration)
                     if loaded_iteration != completed_iteration:
                         raise RuntimeError(
                             "msplat restored an unexpected iteration while freezing densification"
