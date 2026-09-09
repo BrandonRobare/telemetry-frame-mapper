@@ -353,6 +353,7 @@ export interface SystemTool {
   path: string | null
   version: string | null
   install_commands: Record<string, string>
+  install_hint: string | null
   error: string | null
 }
 

@@ -71,6 +71,13 @@ def test_system_resources_reports_tools_unavailable(client):
         "sugar",
         "transformers",
     }
+    tools = {tool["key"]: tool for tool in body["tools"]}
+    assert tools["torch"]["install_commands"] == {
+        "cpu": "uv pip install torch torchvision"
+    }
+    assert tools["gsplat"]["install_commands"] == {}
+    assert tools["msplat"]["install_commands"] == {}
+    assert tools["sugar"]["install_commands"] == {}
     assert body["workflows"][0]["available"] is False
 
 
@@ -107,6 +114,11 @@ def test_system_resources_reports_tools_available(client):
         "splat_backend": "cuda_gsplat",
         "splat_backend_available": True,
     }
+    tools = {tool["key"]: tool for tool in body["tools"]}
+    assert tools["torch"]["install_commands"] == {}
+    assert "docs/SETUP.md" in tools["torch"]["install_hint"]
+    assert tools["gsplat"]["install_commands"] == {}
+    assert "docs/SETUP.md" in tools["gsplat"]["install_hint"]
     assert all("cuda_available" not in tool for tool in body["tools"])
     backend.is_available.assert_called_once_with()
 
@@ -185,6 +197,16 @@ def test_system_resources_enables_native_metal_training_without_torch(client):
     assert tools["msplat"]["available"] is True
     assert tools["msplat"]["path"] == "/venv/msplat/__init__.py"
     assert tools["gsplat"]["available"] is False
+    assert tools["gsplat"]["install_commands"] == {}
+    assert tools["gsplat"]["install_hint"] == (
+        "gsplat is CUDA-only; Apple-Silicon splat training uses msplat."
+    )
+    assert tools["torch"]["install_commands"] == {
+        "macos": "uv pip install torch torchvision"
+    }
+    assert "download.pytorch.org" not in str(body)
+    assert tools["msplat"]["install_commands"] == {}
+    assert "docs/INSTALL.md" in tools["msplat"]["install_hint"]
     assert workflows["gaussian_splat_training"] == {
         "key": "gaussian_splat_training",
         "label": "Gaussian splat training",

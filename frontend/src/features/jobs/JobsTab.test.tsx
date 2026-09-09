@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import JobsTab from './JobsTab'
+import { formatInstallCommands } from './systemHealth'
 import { ErrorBoundary } from '../../ErrorBoundary'
 import type { Job, SystemResources } from '../../types/api'
 
@@ -101,6 +102,12 @@ afterEach(() => {
 })
 
 describe('JobsTab system accelerator', () => {
+  it('formats a single platform install as a runnable command', () => {
+    expect(formatInstallCommands({ macos: 'uv pip install torch torchvision' })).toBe(
+      'uv pip install torch torchvision',
+    )
+  })
+
   it.each([
     ['cuda', 'cuda', 'NVIDIA RTX', 'cuda_gsplat', true, 'NVIDIA RTX · cuda · CUDA gsplat ready'],
     ['metal', 'mps', 'Apple Metal', 'metal_msplat', true, 'Apple Metal · mps · Metal msplat ready'],
@@ -136,6 +143,32 @@ describe('JobsTab system accelerator', () => {
       expect(await screen.findByText(expected)).toBeTruthy()
     },
   )
+
+  it('shows unsupported guidance without an empty copy action', async () => {
+    const systemResources: SystemResources = {
+      ...resources,
+      accelerator: {
+        kind: 'metal', device: 'mps', description: 'Apple Metal',
+        splat_backend: 'metal_msplat', splat_backend_available: true,
+      },
+      tools: [{
+        key: 'gsplat', label: 'gsplat', available: false, path: null, version: null,
+        install_commands: {},
+        install_hint: 'gsplat is CUDA-only; Apple-Silicon splat training uses msplat.',
+        error: 'gsplat is not installed',
+      }],
+    }
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.startsWith('/jobs/?')) return jsonResponse([])
+      if (url === '/system/resources') return jsonResponse(systemResources)
+      throw new Error(`Unexpected request: ${url}`)
+    }))
+
+    renderJobsTab()
+
+    expect(await screen.findByText(/gsplat is CUDA-only/)).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Copy install' })).toBeNull()
+  })
 })
 
 
