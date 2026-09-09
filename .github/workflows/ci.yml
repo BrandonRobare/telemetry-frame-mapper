@@ -346,7 +346,7 @@ jobs:
         env:
           HF_HOME: ${{ runner.temp }}/huggingface
         run: >-
-          uv run --no-sync python scripts/benchmark_semantic_mps.py
+          uv run --no-sync python -m scripts.benchmark_semantic_mps
           --output semantic-mps-benchmark.json --repeats 2
 
       - name: Upload benchmark evidence
