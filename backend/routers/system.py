@@ -69,30 +69,19 @@ BINARY_CHECKS = (
 )
 
 PYTHON_DEPENDENCIES = {
-    "torch": {
-        "label": "PyTorch",
-        "install": {
-            "cuda": "uv pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124",
-            "cpu": "uv pip install torch torchvision",
-        },
-    },
-    "gsplat": {
-        "label": "gsplat",
-        "install": {"pip": "uv pip install gsplat"},
-    },
-    "msplat": {
-        "label": "msplat",
-        "install": {"macos": "uv sync --group splat-metal"},
-    },
-    "sugar": {
-        "label": "SuGaR",
-        "install": {"pip": "uv pip install git+https://github.com/Anttwo/SuGaR.git"},
-    },
-    "transformers": {
-        "label": "transformers",
-        "install": {"pip": "uv sync --group backend --group semantic"},
-    },
+    "torch": {"label": "PyTorch"},
+    "gsplat": {"label": "gsplat"},
+    "msplat": {"label": "msplat"},
+    "sugar": {"label": "SuGaR"},
+    "transformers": {"label": "transformers"},
 }
+
+_CUDA_SETUP_URL = (
+    "https://github.com/BrandonRobare/telemetry-frame-mapper/blob/main/docs/SETUP.md"
+)
+_INSTALL_URL = (
+    "https://github.com/BrandonRobare/telemetry-frame-mapper/blob/main/docs/INSTALL.md"
+)
 
 
 def _first_line(text: str) -> str | None:
@@ -126,12 +115,41 @@ def _binary_status(check: BinaryCheck) -> dict[str, object]:
         "path": path,
         "version": version,
         "install_commands": check.install,
+        "install_hint": None,
         "error": error,
     }
 
 
 def _module_available(*names: str) -> bool:
     return any(importlib.util.find_spec(name) is not None for name in names)
+
+
+def _python_install_guidance(
+    key: str, accelerator_kind: str
+) -> tuple[dict[str, str], str | None]:
+    if key == "transformers":
+        return {"project": "uv sync --frozen --group backend --group semantic"}, None
+    if key == "torch":
+        if accelerator_kind == "cuda":
+            return {}, f"CUDA setup is toolkit-specific; follow {_CUDA_SETUP_URL}."
+        platform_key = "macos" if accelerator_kind == "metal" else "cpu"
+        return {platform_key: "uv pip install torch torchvision"}, None
+    if key == "gsplat":
+        if accelerator_kind == "cuda":
+            return {}, f"gsplat needs the validated CUDA build matrix; follow {_CUDA_SETUP_URL}."
+        if accelerator_kind == "metal":
+            return {}, "gsplat is CUDA-only; Apple-Silicon splat training uses msplat."
+        return {}, "gsplat requires a usable CUDA accelerator."
+    if key == "msplat":
+        return {}, (
+            "msplat requires arm64 macOS 14+ with Python 3.12–3.13; "
+            f"follow {_INSTALL_URL}."
+        )
+    if key == "sugar":
+        if accelerator_kind == "cuda":
+            return {}, f"SuGaR requires the validated CUDA stack; follow {_CUDA_SETUP_URL}."
+        return {}, "SuGaR refinement requires CUDA."
+    raise KeyError(f"Unknown Python dependency guidance key: {key}")
 
 
 def _python_dependency_statuses(accelerator_kind: str) -> dict[str, dict[str, object]]:
@@ -164,6 +182,9 @@ def _python_dependency_statuses(accelerator_kind: str) -> dict[str, dict[str, ob
     )
     transformers_available = _module_available("transformers", "safetensors")
 
+    guidance = {
+        key: _python_install_guidance(key, accelerator_kind) for key in PYTHON_DEPENDENCIES
+    }
     statuses: dict[str, dict[str, object]] = {
         "torch": {
             "key": "torch",
@@ -171,7 +192,8 @@ def _python_dependency_statuses(accelerator_kind: str) -> dict[str, dict[str, ob
             "available": torch_available,
             "version": None,
             "path": None,
-            "install_commands": PYTHON_DEPENDENCIES["torch"]["install"],
+            "install_commands": guidance["torch"][0],
+            "install_hint": guidance["torch"][1],
             "error": None,
         },
         "gsplat": {
@@ -180,7 +202,8 @@ def _python_dependency_statuses(accelerator_kind: str) -> dict[str, dict[str, ob
             "available": gsplat_available,
             "version": None,
             "path": None,
-            "install_commands": PYTHON_DEPENDENCIES["gsplat"]["install"],
+            "install_commands": guidance["gsplat"][0],
+            "install_hint": guidance["gsplat"][1],
             "error": gsplat_error,
         },
         "msplat": {
@@ -189,7 +212,8 @@ def _python_dependency_statuses(accelerator_kind: str) -> dict[str, dict[str, ob
             "available": msplat_available,
             "version": None,
             "path": None,
-            "install_commands": PYTHON_DEPENDENCIES["msplat"]["install"],
+            "install_commands": guidance["msplat"][0],
+            "install_hint": guidance["msplat"][1],
             "error": msplat_error,
         },
         "sugar": {
@@ -198,7 +222,8 @@ def _python_dependency_statuses(accelerator_kind: str) -> dict[str, dict[str, ob
             "available": sugar_available,
             "version": None,
             "path": shutil.which("sugar_trainers"),
-            "install_commands": PYTHON_DEPENDENCIES["sugar"]["install"],
+            "install_commands": guidance["sugar"][0],
+            "install_hint": guidance["sugar"][1],
             "error": None,
         },
         "transformers": {
@@ -207,7 +232,8 @@ def _python_dependency_statuses(accelerator_kind: str) -> dict[str, dict[str, ob
             "available": transformers_available,
             "version": None,
             "path": None,
-            "install_commands": PYTHON_DEPENDENCIES["transformers"]["install"],
+            "install_commands": guidance["transformers"][0],
+            "install_hint": guidance["transformers"][1],
             "error": None,
         },
     }

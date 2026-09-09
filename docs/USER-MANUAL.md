@@ -107,6 +107,8 @@ ingest, analysis, planning, reconstruction, and export.
   compression via the external Node tool, see `splat_transform.py` instead.
 - **System reporting:** CPU/RAM and optional CUDA utilisation/VRAM telemetry, plus
   structured accelerator kind/device/splat-backend usability and per-tool status.
+  Unavailable tools show only guidance compatible with the detected accelerator;
+  unsupported backends explain the constraint instead of offering a broken command.
 
 ### Frontend — React web app (14 tabs)
 

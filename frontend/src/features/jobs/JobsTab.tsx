@@ -13,6 +13,7 @@ import { Button } from '../../shared/components/Button'
 import { Badge } from '../../shared/components/Badge'
 import { useToast } from '../../shared/hooks/useToast'
 import { filterReconstructionLogLines } from './logPanel'
+import { formatInstallCommands } from './systemHealth'
 
 const HISTORY_PAGE_SIZE = 10
 // `/jobs/` has no search parameter, so a search can only see what the client
@@ -92,15 +93,10 @@ function ResourceBar() {
   )
 }
 
-function formatInstallCommands(tool: SystemTool) {
-  return Object.entries(tool.install_commands)
-    .map(([platform, command]) => `${platform}: ${command}`)
-    .join('\n')
-}
-
 function ToolStatusCard({ tool }: { tool: SystemTool }) {
   const { addToast } = useToast()
-  const installText = formatInstallCommands(tool)
+  const installText = formatInstallCommands(tool.install_commands)
+  const canCopyInstall = !tool.available && installText.length > 0
   async function copyInstallCommands() {
     try {
       await navigator.clipboard.writeText(installText)
@@ -131,19 +127,22 @@ function ToolStatusCard({ tool }: { tool: SystemTool }) {
           Version: {tool.version ?? 'Unknown'}
         </div>
         {tool.error && <div style={{ color: 'var(--danger)' }}>Error: {tool.error}</div>}
+        {!tool.available && tool.install_hint && <div>{tool.install_hint}</div>}
       </div>
-      <Button
-        type="button"
-        variant="ghost"
-        size="sm"
-        onClick={copyInstallCommands}
-        style={{
-          marginTop: 8,
-          padding: '4px 8px',
-        }}
-      >
-        Copy install
-      </Button>
+      {canCopyInstall && (
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          onClick={copyInstallCommands}
+          style={{
+            marginTop: 8,
+            padding: '4px 8px',
+          }}
+        >
+          Copy install
+        </Button>
+      )}
     </div>
   )
 }
