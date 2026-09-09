@@ -16,6 +16,7 @@ from importlib.metadata import version
 from pathlib import Path
 
 import numpy as np
+from PIL import Image
 
 MODEL_ID = "nvidia/segformer-b0-finetuned-ade-512-512"
 MIN_SPEEDUP = 1.20
@@ -44,6 +45,18 @@ def _sync(torch, device: str) -> None:
         torch.mps.synchronize()
 
 
+def _infer(segmenter, image: np.ndarray, torch, device: str):
+    inputs = segmenter.image_processor(images=Image.fromarray(image), return_tensors="pt")
+    inputs = {key: value.to(device) for key, value in inputs.items()}
+    with torch.inference_mode():
+        logits = segmenter.model(**inputs).logits
+        logits = torch.nn.functional.interpolate(
+            logits, size=image.shape[:2], mode="bilinear", align_corners=False
+        )
+        confidence, labels = torch.softmax(logits, dim=1).max(dim=1)
+    return labels[0].cpu().numpy().astype(np.uint8), confidence[0].cpu().numpy().astype(np.float16)
+
+
 def _run_device(device: str, images: list[np.ndarray], repeats: int):
     import torch  # type: ignore[import-not-found]
 
@@ -51,17 +64,15 @@ def _run_device(device: str, images: list[np.ndarray], repeats: int):
 
     semantic_segmenter._segmenter_cache.clear()
     segmenter = semantic_segmenter.load_segmenter(MODEL_ID, device=device)
-    semantic_segmenter.segment_frame(images[0], segmenter=segmenter, model_id=MODEL_ID)
+    segmenter.model.eval()
+    _infer(segmenter, images[0], torch, device)
     _sync(torch, device)
     durations: list[float] = []
     outputs = []
     for _ in range(repeats):
         _sync(torch, device)
         started = time.perf_counter()
-        current = [
-            semantic_segmenter.segment_frame(image, segmenter=segmenter, model_id=MODEL_ID)
-            for image in images
-        ]
+        current = [_infer(segmenter, image, torch, device) for image in images]
         _sync(torch, device)
         durations.append(time.perf_counter() - started)
         outputs = current
