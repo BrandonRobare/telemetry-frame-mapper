@@ -134,12 +134,12 @@ def _module_available(*names: str) -> bool:
     return any(importlib.util.find_spec(name) is not None for name in names)
 
 
-def _python_dependency_statuses() -> dict[str, dict[str, object]]:
+def _python_dependency_statuses(accelerator_kind: str) -> dict[str, dict[str, object]]:
     torch_available = _module_available("torch")
     gsplat_installed = _module_available("gsplat")
     msplat_installed = _module_available("msplat")
-    accelerator_kind = accelerator.detect().kind
-    splat_available = get_training_backend().is_available()
+    backend_override = "metal" if accelerator_kind == "metal" else "cuda"
+    splat_available = get_training_backend(backend_override).is_available()
     gsplat_available = splat_available and accelerator_kind != "metal"
     msplat_available = splat_available and accelerator_kind == "metal"
     if gsplat_available:
@@ -171,7 +171,6 @@ def _python_dependency_statuses() -> dict[str, dict[str, object]]:
             "available": torch_available,
             "version": None,
             "path": None,
-            "cuda_available": False,
             "install_commands": PYTHON_DEPENDENCIES["torch"]["install"],
             "error": None,
         },
@@ -224,7 +223,6 @@ def _python_dependency_statuses() -> dict[str, dict[str, object]]:
                 {
                     "version": getattr(torch, "__version__", None),
                     "path": getattr(torch, "__file__", None),
-                    "cuda_available": bool(torch.cuda.is_available()),
                 }
             )
         except Exception as exc:  # pragma: no cover - depends on local installation
@@ -247,6 +245,34 @@ def _python_dependency_statuses() -> dict[str, dict[str, object]]:
             statuses["sugar"]["path"] = origin
 
     return statuses
+
+
+def _accelerator_status(
+    hardware: dict[str, str],
+    python_deps: dict[str, dict[str, object]],
+    gpu: dict[str, object],
+) -> dict[str, object]:
+    kind = hardware["kind"]
+    backend = (
+        "cuda_gsplat"
+        if python_deps["gsplat"]["available"]
+        else "metal_msplat"
+        if python_deps["msplat"]["available"]
+        else None
+    )
+    if kind == "cuda":
+        description = str(gpu["name"] or "CUDA accelerator")
+    elif kind == "metal":
+        description = "Apple Metal"
+    else:
+        description = "CPU"
+    return {
+        "kind": kind,
+        "device": hardware["device"],
+        "description": description,
+        "splat_backend": backend,
+        "splat_backend_available": backend is not None,
+    }
 
 
 def _gpu_status() -> dict[str, object]:
@@ -282,21 +308,14 @@ def _gpu_status() -> dict[str, object]:
 def _workflow_statuses(
     binaries: dict[str, dict[str, object]],
     python_deps: dict[str, dict[str, object]],
-    gpu: dict[str, object],
+    accelerator_info: dict[str, object],
 ) -> list[dict[str, object]]:
     ffmpeg = bool(binaries["ffmpeg"]["available"])
     exiftool = bool(binaries["exiftool"]["available"])
     colmap = bool(binaries["colmap"]["available"])
-    torch_cuda = bool(python_deps["torch"].get("cuda_available"))
-    gsplat = bool(python_deps["gsplat"]["available"])
-    msplat = bool(python_deps.get("msplat", {}).get("available"))
-    # pynvml supplies live utilisation/VRAM telemetry and is optional. Whether a
-    # usable NVIDIA GPU exists is answered by torch.cuda.is_available(), which is
-    # what the training code actually requires. Gating capabilities on pynvml alone
-    # reported every GPU workflow as unavailable on any install lacking it — and
-    # that flag disables the "Compute semantic labels" button, so Semantic Splats
-    # was unreachable from the UI even on a working CUDA machine.
-    nvidia_gpu = bool(gpu["available"]) or torch_cuda
+    torch_available = bool(python_deps["torch"]["available"])
+    accelerator_kind = str(accelerator_info["kind"])
+    splat_backend_available = bool(accelerator_info["splat_backend_available"])
     sugar = bool(python_deps["sugar"]["available"])
     transformers = bool(python_deps["transformers"]["available"])
 
@@ -316,34 +335,27 @@ def _workflow_statuses(
         {
             "key": "gaussian_splat_training",
             "label": "Gaussian splat training",
-            "available": colmap and (msplat or (torch_cuda and gsplat and nvidia_gpu)),
-            "missing": (
-                []
-                if colmap and (msplat or (torch_cuda and gsplat and nvidia_gpu))
-                else [
-                    key
-                    for key, ok in (
-                        ("colmap", colmap),
-                        ("torch_cuda", torch_cuda),
-                        ("gsplat", gsplat),
-                        ("nvidia_gpu", nvidia_gpu),
-                        ("msplat", msplat),
-                    )
-                    if not ok
-                ]
-            ),
-        },
-        {
-            "key": "sugar_refinement",
-            "label": "SuGaR refinement",
-            "available": colmap and torch_cuda and sugar and nvidia_gpu,
+            "available": colmap and splat_backend_available,
             "missing": [
                 key
                 for key, ok in (
                     ("colmap", colmap),
-                    ("torch_cuda", torch_cuda),
+                    ("splat_backend", splat_backend_available),
+                )
+                if not ok
+            ],
+        },
+        {
+            "key": "sugar_refinement",
+            "label": "SuGaR refinement",
+            "available": colmap and accelerator_kind == "cuda" and torch_available and sugar,
+            "missing": [
+                key
+                for key, ok in (
+                    ("colmap", colmap),
+                    ("accelerator_cuda", accelerator_kind == "cuda"),
+                    ("torch", torch_available),
                     ("sugar", sugar),
-                    ("nvidia_gpu", nvidia_gpu),
                 )
                 if not ok
             ],
@@ -351,15 +363,19 @@ def _workflow_statuses(
         {
             "key": "semantic_labeling",
             "label": "Semantic labeling",
-            "available": colmap and torch_cuda and gsplat and transformers and nvidia_gpu,
+            "available": (
+                colmap
+                and accelerator_kind == "cuda"
+                and splat_backend_available
+                and transformers
+            ),
             "missing": [
                 key
                 for key, ok in (
                     ("colmap", colmap),
-                    ("torch_cuda", torch_cuda),
-                    ("gsplat", gsplat),
+                    ("accelerator_cuda", accelerator_kind == "cuda"),
+                    ("splat_backend", splat_backend_available),
                     ("transformers", transformers),
-                    ("nvidia_gpu", nvidia_gpu),
                 )
                 if not ok
             ],
@@ -377,9 +393,11 @@ def get_resources():
     if io:
         disk_io_mbps = round((io.read_bytes + io.write_bytes) / 1024 / 1024, 2)
 
+    hardware = accelerator.describe()
     gpu = _gpu_status()
     binaries = {check.key: _binary_status(check) for check in BINARY_CHECKS}
-    python_deps = _python_dependency_statuses()
+    python_deps = _python_dependency_statuses(hardware["kind"])
+    accelerator_info = _accelerator_status(hardware, python_deps, gpu)
 
     colmap_probe: dict[str, object] = {}
     try:
@@ -408,22 +426,10 @@ def get_resources():
         "vram_used_gb": gpu["vram_used_gb"],
         "vram_total_gb": gpu["vram_total_gb"],
         "gpu_name": gpu["name"],
-        "gpu_available": gpu["available"],
+        "accelerator": accelerator_info,
         "tools": [*binaries.values(), *python_deps.values()],
-        "workflows": _workflow_statuses(binaries, python_deps, gpu),
+        "workflows": _workflow_statuses(binaries, python_deps, accelerator_info),
         "colmap_available": binaries["colmap"]["available"],
         "colmap_capabilities": colmap_probe,
         "splat_transform_available": bool(splat_transform_probe.get("available")),
-        "gsplat_available": python_deps["gsplat"]["available"],
-        "msplat_available": python_deps["msplat"]["available"],
-        "splat_training_available": bool(
-            python_deps["gsplat"]["available"] or python_deps["msplat"]["available"]
-        ),
-        "splat_backend": (
-            "metal_msplat"
-            if python_deps["msplat"]["available"]
-            else "cuda_gsplat"
-            if python_deps["gsplat"]["available"]
-            else None
-        ),
     }

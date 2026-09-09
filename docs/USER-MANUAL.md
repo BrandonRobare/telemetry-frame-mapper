@@ -105,8 +105,8 @@ ingest, analysis, planning, reconstruction, and export.
   are written sorted by opacity descending. `preview`/`medium` additionally
   prune by opacity keep-ratio (10%/50%) before writing. For heavier SPZ/SOG
   compression via the external Node tool, see `splat_transform.py` instead.
-- **System reporting:** CPU/RAM/GPU/VRAM resource readout and
-  `colmap_available` / `gsplat_available` tool-presence flags.
+- **System reporting:** CPU/RAM and optional CUDA utilisation/VRAM telemetry, plus
+  structured accelerator kind/device/splat-backend usability and per-tool status.
 
 ### Frontend — React web app (14 tabs)
 
