@@ -335,12 +335,15 @@ export interface SystemResources {
   gpu_available: boolean
   colmap_available: boolean
   gsplat_available: boolean
+  msplat_available?: boolean
+  splat_training_available?: boolean
+  splat_backend?: 'cuda_gsplat' | 'metal_msplat' | null
   tools: SystemTool[]
   workflows: WorkflowStatus[]
 }
 
 export interface SystemTool {
-  key: 'ffmpeg' | 'exiftool' | 'colmap' | 'torch' | 'gsplat' | 'sugar'
+  key: 'ffmpeg' | 'exiftool' | 'colmap' | 'torch' | 'gsplat' | 'msplat' | 'sugar'
   label: string
   available: boolean
   path: string | null

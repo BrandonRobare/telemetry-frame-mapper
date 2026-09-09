@@ -31,9 +31,15 @@ def test_system_resources_returns_fields(client):
 
 
 def test_system_resources_reports_tools_unavailable(client):
+    backend = SimpleNamespace(is_available=MagicMock(return_value=False))
     with (
         patch("backend.routers.system.shutil.which", return_value=None),
         patch("backend.routers.system.importlib.util.find_spec", return_value=None),
+        patch("backend.routers.system.get_training_backend", return_value=backend),
+        patch(
+            "backend.routers.system.accelerator.detect",
+            return_value=SimpleNamespace(kind="cpu", device="cpu"),
+        ),
     ):
         resp = client.get("/system/resources")
 
@@ -41,12 +47,14 @@ def test_system_resources_reports_tools_unavailable(client):
     body = resp.json()
     assert body["colmap_available"] is False
     assert body["gsplat_available"] is False
+    assert body["splat_training_available"] is False
     assert {tool["key"] for tool in body["tools"]} == {
         "ffmpeg",
         "exiftool",
         "colmap",
         "torch",
         "gsplat",
+        "msplat",
         "sugar",
         "transformers",
     }
@@ -59,6 +67,10 @@ def test_system_resources_reports_tools_available(client):
         patch("backend.routers.system.shutil.which", return_value="C:/colmap/bin/colmap.exe"),
         patch("backend.routers.system.importlib.util.find_spec", return_value=object()),
         patch("backend.routers.system.get_training_backend", return_value=backend),
+        patch(
+            "backend.routers.system.accelerator.detect",
+            return_value=SimpleNamespace(kind="cuda", device="cuda"),
+        ),
     ):
         resp = client.get("/system/resources")
 
@@ -66,6 +78,7 @@ def test_system_resources_reports_tools_available(client):
     body = resp.json()
     assert body["colmap_available"] is True
     assert body["gsplat_available"] is True
+    assert body["splat_training_available"] is True
     backend.is_available.assert_called_once_with()
 
 
@@ -81,6 +94,10 @@ def test_system_resources_reports_installed_but_unusable_gsplat_with_reason(clie
         patch("backend.routers.system.shutil.which", return_value=None),
         patch("backend.routers.system.importlib.util.find_spec", side_effect=fake_spec),
         patch("backend.routers.system.get_training_backend", return_value=backend),
+        patch(
+            "backend.routers.system.accelerator.detect",
+            return_value=SimpleNamespace(kind="cuda", device="cuda"),
+        ),
     ):
         resp = client.get("/system/resources")
 
@@ -94,6 +111,45 @@ def test_system_resources_reports_installed_but_unusable_gsplat_with_reason(clie
     workflows = {workflow["key"]: workflow for workflow in body["workflows"]}
     assert workflows["gaussian_splat_training"]["available"] is False
     assert "gsplat" in workflows["gaussian_splat_training"]["missing"]
+    backend.is_available.assert_called_once_with()
+
+
+def test_system_resources_enables_native_metal_training_without_torch(client):
+    backend = SimpleNamespace(is_available=MagicMock(return_value=True))
+
+    def fake_spec(name: str):
+        if name == "msplat":
+            return SimpleNamespace(origin="/venv/msplat/__init__.py")
+        return None
+
+    with (
+        patch("backend.routers.system.shutil.which", return_value="/opt/homebrew/bin/colmap"),
+        patch("backend.routers.system.importlib.util.find_spec", side_effect=fake_spec),
+        patch("backend.routers.system.get_training_backend", return_value=backend),
+        patch(
+            "backend.routers.system.accelerator.detect",
+            return_value=SimpleNamespace(kind="metal", device="mps"),
+        ),
+    ):
+        response = client.get("/system/resources")
+
+    assert response.status_code == 200
+    body = response.json()
+    tools = {tool["key"]: tool for tool in body["tools"]}
+    workflows = {workflow["key"]: workflow for workflow in body["workflows"]}
+    assert tools["msplat"]["available"] is True
+    assert tools["msplat"]["path"] == "/venv/msplat/__init__.py"
+    assert tools["gsplat"]["available"] is False
+    assert workflows["gaussian_splat_training"] == {
+        "key": "gaussian_splat_training",
+        "label": "Gaussian splat training",
+        "available": True,
+        "missing": [],
+    }
+    assert body["msplat_available"] is True
+    assert body["gsplat_available"] is False
+    assert body["splat_training_available"] is True
+    assert body["splat_backend"] == "metal_msplat"
     backend.is_available.assert_called_once_with()
 
 

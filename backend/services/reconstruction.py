@@ -885,9 +885,9 @@ def _run_gsplat(
     backend = get_training_backend()
     if not backend.is_available():
         raise RuntimeError(
-            "Gaussian-splat training skipped because no compatible CUDA accelerator or compiled "
-            "gsplat backend is available. The reconstruction will complete with COLMAP sparse "
-            "cloud only."
+            "Gaussian-splat training skipped because no usable Gaussian-splat training backend "
+            "is available for the detected accelerator. The reconstruction will complete with "
+            "COLMAP sparse cloud only."
         )
     config = TrainerConfig.from_preset(preset_cfg)
     return backend.train(colmap_dir, output_path, config, progress_cb, cancel)

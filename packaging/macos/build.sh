@@ -22,5 +22,6 @@ uv run --frozen --no-sync python -m PyInstaller --noconfirm --clean --onedir --w
     --add-data "$repo_root/backend/db/migrations:backend/db/migrations" \
     --add-data "$repo_root/frontend/dist:frontend/dist" \
     --collect-all backend \
+    --collect-all msplat \
     --collect-all drone_video_geotagger \
     backend/__main__.py

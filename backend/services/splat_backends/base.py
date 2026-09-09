@@ -9,6 +9,9 @@ from typing import Any, Protocol
 ProgressCallback = Callable[[str, float], None]
 TrainingResult = dict[str, object]
 
+# Every in-process accelerator trainer and renderer shares one device-work lock.
+_GPU_LOCK = threading.Lock()
+
 
 class ReconstructionCancelled(RuntimeError):
     """Raised when a reconstruction backend saves state and stops on request."""

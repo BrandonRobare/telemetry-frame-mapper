@@ -35,6 +35,15 @@ def test_detect_selects_available_accelerator(torch, kind, device):
     assert accelerator.describe(torch) == {"kind": kind, "device": device}
 
 
+def test_detects_native_metal_without_torch(monkeypatch) -> None:
+    monkeypatch.setattr(accelerator, "_import_torch", lambda: None)
+    monkeypatch.setattr(accelerator, "_native_metal_available", lambda: True)
+
+    assert accelerator.detect() == accelerator.Accelerator("metal", "mps")
+    assert accelerator.detect(override="cuda") == accelerator.Accelerator("cpu", "cpu")
+    assert accelerator.detect(allow_metal=False) == accelerator.Accelerator("cpu", "cpu")
+
+
 def test_describe_reports_metal_hardware_without_consumer_policy():
     torch = _torch(metal=True)
 

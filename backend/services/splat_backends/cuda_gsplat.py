@@ -50,14 +50,12 @@ import numpy as np
 
 from backend.services import accelerator, colmap_io, ply_io
 from backend.services.splat_backends.base import (
+    _GPU_LOCK,
     ProgressCallback,
     ReconstructionCancelled,
     TrainerConfig,
     TrainingResult,
 )
-
-# One GPU job at a time — the target card (RTX 3050 Ti) has 4 GB of VRAM.
-_GPU_LOCK = threading.Lock()
 
 # Progress window owned by training: COLMAP reports 0-40, the UI completes at 100
 # (the 99.0-100 tail covers LOD/thumbnail generation, which has no progress callbacks).

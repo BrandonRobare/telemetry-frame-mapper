@@ -25,4 +25,6 @@ The build emits `dist/Telemetry Frame Mapper.app`. The smoke script launches the
 
 `splat-metal` pins `msplat==1.1.4` only for arm64 macOS and Python 3.12–3.13. Other platforms never install it. If that young, single-maintainer dependency becomes unavailable, omit the group: reconstruction continues with the supported `colmap_only` result instead of making the base application depend on it.
 
-`build/` and `dist/` are local artifacts and are not committed. A real arm64 macOS execution remains a required gate for the macOS CI follow-up (#789); this workflow does not claim release readiness.
+On a supported Mac the app selects msplat automatically; there is no backend setting. Metal progress is synchronized before it reaches the UI, and cancellation writes a partial PLY plus a native `.checkpoint.msplat` file so the job can terminate as cancelled without masquerading as `colmap_only` success.
+
+`build/` and `dist/` are local artifacts and are not committed. The required arm64 macOS CI job installs msplat, runs a native training/cancellation smoke, bundles it into the application, and executes the packaged startup smoke.
