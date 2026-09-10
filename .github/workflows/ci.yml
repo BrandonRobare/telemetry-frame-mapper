@@ -372,7 +372,7 @@ jobs:
           mkdir -p "$workspace/sparse"
           ln -s "$fixture/images" "$workspace/images"
           colmap feature_extractor --database_path "$workspace/database.db" --image_path "$workspace/images" --ImageReader.camera_model PINHOLE --ImageReader.single_camera 1 --SiftExtraction.max_num_features 4096 --FeatureExtraction.max_image_size 2400 --FeatureExtraction.num_threads 4 2>&1 | tee colmap-feature.log
-          colmap spatial_matcher --database_path "$workspace/database.db" --SpatialMatching.is_gps 1 --SpatialMatching.ignore_z 1 --SpatialMatching.max_num_neighbors 50 --SpatialMatching.max_distance 100 2>&1 | tee colmap-matching.log
+          colmap spatial_matcher --database_path "$workspace/database.db" --SpatialMatching.ignore_z 1 --SpatialMatching.max_num_neighbors 50 --SpatialMatching.max_distance 100 2>&1 | tee colmap-matching.log
           colmap mapper --database_path "$workspace/database.db" --image_path "$workspace/images" --output_path "$workspace/sparse" --Mapper.num_threads 4 2>&1 | tee colmap-mapper.log
           best="$(find "$workspace/sparse" -mindepth 1 -maxdepth 1 -type d | sort -n | head -1)"
           test -n "$best"

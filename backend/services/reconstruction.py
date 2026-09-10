@@ -286,7 +286,6 @@ def _run_colmap(
     # Spatial matcher tuning: sane defaults for drone lawnmower surveys
     if colmap_matcher == "spatial_matcher":
         matcher_cmd += [
-            "--SpatialMatching.is_gps", "1",
             "--SpatialMatching.ignore_z", "1",
             "--SpatialMatching.max_num_neighbors", "50",
             "--SpatialMatching.max_distance", "100",

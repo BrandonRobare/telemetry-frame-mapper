@@ -397,6 +397,43 @@ def test_run_colmap_returns_registered_image_count(tmp_path):
     assert result == 3
 
 
+def test_run_colmap_spatial_matcher_omits_removed_colmap_4_gps_flag(tmp_path):
+    import threading
+    from unittest.mock import patch
+
+    from backend.services.reconstruction import _run_colmap
+
+    colmap_dir = tmp_path / "colmap"
+    colmap_dir.mkdir()
+    _write_fake_images_txt(colmap_dir, 3)
+    captured: list[list[str]] = []
+
+    def capture(cmd, **_kwargs):
+        captured.append(cmd)
+        return _fake_colmap_popen()
+
+    with (
+        patch("backend.services.reconstruction.subprocess.Popen", side_effect=capture),
+        patch(
+            "backend.services.colmap_capabilities.get_capabilities",
+            return_value={"features": {"spatial_matcher": True}},
+        ),
+    ):
+        _run_colmap(
+            colmap_dir,
+            lambda *_args: None,
+            threading.Event(),
+            images_have_gps=True,
+            image_count=200,
+        )
+
+    matcher = next(command for command in captured if "spatial_matcher" in command)
+    assert "--SpatialMatching.is_gps" not in matcher
+    assert "--SpatialMatching.ignore_z" in matcher
+    assert "--SpatialMatching.max_num_neighbors" in matcher
+    assert "--SpatialMatching.max_distance" in matcher
+
+
 def test_run_colmap_converts_the_submodel_not_the_sparse_root(tmp_path):
     """model_converter must target sparse/<n>, never sparse/ itself.
 
