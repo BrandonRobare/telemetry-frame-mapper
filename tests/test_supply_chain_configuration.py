@@ -118,6 +118,10 @@ def test_msplat_group_is_platform_pinned_locked_and_gated() -> None:
     assert ci.count("--group splat-metal") == 3
     assert "metal-preset-benchmark" in ci
     assert "4e8031630f4193494c79b1c1d3524108826d1ba9" in ci
+    assert "--FeatureExtraction.max_image_size 1200" in ci
+    assert "--SiftExtraction.max_num_features 2048" in ci
+    assert "--SpatialMatching.max_num_neighbors 8" in ci
+    assert "len(model.images) >= 70" in ci
     for path in (MACOS_BUNDLE_DOC, INSTALL_DOC):
         text = path.read_text(encoding="utf-8")
         assert "--group splat-metal" in text
