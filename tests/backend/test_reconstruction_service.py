@@ -1018,6 +1018,10 @@ def test_run_pipeline_unusable_backend_completes_colmap_only_before_training(set
         with patch("backend.services.reconstruction._write_colmap_workspace", MagicMock()), \
              patch("backend.services.reconstruction._run_colmap", MagicMock(return_value=1)), \
              patch("backend.services.reconstruction.get_training_backend", return_value=backend), \
+             patch(
+                 "backend.services.reconstruction.accelerator.detect",
+                 return_value=SimpleNamespace(kind="metal", device="mps"),
+             ), \
              patch("backend.services.reconstruction.SessionLocal", TestSessionLocal), \
              patch("backend.services.reconstruction.get_config") as mock_cfg:
             mock_cfg.return_value.data_dir = tmp
@@ -1029,6 +1033,7 @@ def test_run_pipeline_unusable_backend_completes_colmap_only_before_training(set
     assert rec.status == "complete"
     assert rec.step == "colmap_only"
     assert rec.progress_pct == 100.0
+    assert json.loads(rec.effective_splat_settings)["splat_backend"] is None
     backend.train.assert_not_called()
 
 

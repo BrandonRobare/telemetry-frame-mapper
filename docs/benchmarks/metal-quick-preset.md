@@ -4,6 +4,8 @@ Issue: [#820](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/820
 Run: [34484368719](https://github.com/BrandonRobare/telemetry-frame-mapper/actions/runs/34484368719)
 Artifact: `10156768777`
 
+The hardware run was produced from branch commit `ad947ab23e84bf2f1962c37e7f22e689201cdb0a`. The benchmark harness and Metal trainer used by that run are unchanged in the final policy commit; the later commit applies the measured 1,250-iteration result to production configuration. This is predecessor-commit measurement evidence, not an exact-head end-to-end run of the final policy.
+
 ## Fixture and protocol
 
 The fixture is the 77-image OpenDroneMap Aukerman aerial survey, CC0-1.0, pinned at source commit `4e8031630f4193494c79b1c1d3524108826d1ba9`. The benchmark generated one fixed COLMAP 4.1.1 sparse model with a 1200-pixel extraction bound, at most 2048 SIFT features, and GPS spatial pairing with eight neighbors, a 100 m radius, and altitude ignored. It registered 75 views and produced 10,883 sparse points.

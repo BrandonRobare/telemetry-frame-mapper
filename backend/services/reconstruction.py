@@ -2412,11 +2412,15 @@ def _run_pipeline(entry, db, cancel: threading.Event) -> None:
                 # success". Key on the message family, not the exception type —
                 # every other trainer RuntimeError is a real failure.
                 _log_rec(reconstruction_id, f"Gaussian Splatting skipped: {exc}")
+                effective_splat_settings["splat_backend"] = None
                 _update_rec(
                     db, reconstruction_id,
                     status="complete",
                     step="colmap_only",
                     progress_pct=100.0,
+                    effective_splat_settings=json.dumps(
+                        effective_splat_settings, sort_keys=True
+                    ),
                     completed_at=datetime.now(UTC),
                 )
                 _log_rec(reconstruction_id, "Pipeline complete (COLMAP only)")
