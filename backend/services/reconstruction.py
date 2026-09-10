@@ -78,6 +78,14 @@ from backend.services.splat_backends import (
 _running_subprocess: dict[int, subprocess.Popen] = {}
 _running_subprocess_lock = threading.Lock()
 
+
+def _splat_backend_name(accelerator_kind: str) -> str | None:
+    if accelerator_kind == "metal":
+        return "metal_msplat"
+    if accelerator_kind == "cuda":
+        return "cuda_gsplat"
+    return None
+
 _rec_logs: dict[int, list[str]] = {}
 _rec_logs_lock = threading.Lock()
 
@@ -2250,9 +2258,7 @@ def _run_pipeline(entry, db, cancel: threading.Event) -> None:
             "preset": preset,
             "accelerator_kind": selected_accelerator.kind,
             "device": selected_accelerator.device,
-            "splat_backend": (
-                "metal_msplat" if selected_accelerator.kind == "metal" else "cuda_gsplat"
-            ),
+            "splat_backend": _splat_backend_name(selected_accelerator.kind),
             **asdict(trainer_config),
         }
 

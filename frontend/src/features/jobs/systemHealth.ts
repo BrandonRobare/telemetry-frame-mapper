@@ -5,10 +5,11 @@ export function formatInstallCommands(commands: Record<string, string>): string 
 }
 
 export function formatEffectiveSplatSettings(settings: {
-  splat_backend: string
+  splat_backend: string | null
   iterations: number
   max_gaussians: number
 }): string {
+  if (settings.splat_backend === null) return 'COLMAP only · no splat training backend'
   const backend = settings.splat_backend === 'metal_msplat'
     ? 'Metal msplat'
     : settings.splat_backend === 'cuda_gsplat'

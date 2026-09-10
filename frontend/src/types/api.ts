@@ -133,7 +133,7 @@ export interface EffectiveSplatSettings {
   preset: string;
   accelerator_kind: 'cuda' | 'metal' | 'cpu';
   device: 'cuda' | 'mps' | 'cpu';
-  splat_backend: 'cuda_gsplat' | 'metal_msplat';
+  splat_backend: 'cuda_gsplat' | 'metal_msplat' | null;
   iterations: number;
   max_gaussians: number;
   sh_degree: number;

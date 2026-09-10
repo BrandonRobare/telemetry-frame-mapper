@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from ..core.config import (
     AppConfig,
     default_ingest_config,
-    default_reconstruction_config,
+    default_reconstruction_file_config,
     default_render_config,
     get_config,
     get_ingest_config,
@@ -442,7 +442,7 @@ def reset_settings() -> dict:
     init_fields = {name for name, fld in AppConfig.__dataclass_fields__.items() if fld.init}
     app_defaults = {name: getattr(cfg, name) for name in init_fields}
 
-    recon_defaults = default_reconstruction_config()
+    recon_defaults = default_reconstruction_file_config()
     ingest_defaults = default_ingest_config()
     render_defaults = default_render_config()
 

@@ -70,6 +70,15 @@ def test_resolve_reconstruction_preset_applies_metal_policy_without_changing_cud
     assert metal["downscale_factor"] == cuda["downscale_factor"]
 
 
+def test_default_file_config_omits_accelerator_managed_values() -> None:
+    from backend.core.config import default_reconstruction_file_config
+
+    config = default_reconstruction_file_config()
+
+    assert "iterations" not in config["presets"]["quick"]
+    assert config["presets"]["quick"]["max_gaussians"] == 350000
+
+
 def test_resolve_reconstruction_preset_keeps_operator_values_above_metal_policy(tmp_path):
     from backend.core.config import resolve_reconstruction_preset
 
@@ -78,11 +87,9 @@ def test_resolve_reconstruction_preset_keeps_operator_values_above_metal_policy(
         "reconstruction:\n"
         "  presets:\n"
         "    quick:\n"
-        "      sh_degree: 3\n"
-        "  preset_overrides:\n"
-        "    quick:\n"
         "      iterations: 1000\n"
-        "      max_gaussians: 456789\n",
+        "      max_gaussians: 456789\n"
+        "      sh_degree: 3\n",
         encoding="utf-8",
     )
 

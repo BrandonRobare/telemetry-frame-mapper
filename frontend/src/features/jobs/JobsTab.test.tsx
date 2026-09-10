@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import JobsTab from './JobsTab'
-import { formatInstallCommands } from './systemHealth'
+import { formatEffectiveSplatSettings, formatInstallCommands } from './systemHealth'
 import { ErrorBoundary } from '../../ErrorBoundary'
 import type { Job, SystemResources } from '../../types/api'
 
@@ -174,6 +174,14 @@ describe('JobsTab system accelerator', () => {
 
 
 describe('JobsTab reconstruction statuses', () => {
+  it('renders CPU fallback as COLMAP-only rather than CUDA', () => {
+    expect(formatEffectiveSplatSettings({
+      splat_backend: null,
+      iterations: 1000,
+      max_gaussians: 350000,
+    })).toBe('COLMAP only · no splat training backend')
+  })
+
   it('renders the effective splat settings recorded for the job', async () => {
     const settingsJob: Job = {
       ...cancellingJob,

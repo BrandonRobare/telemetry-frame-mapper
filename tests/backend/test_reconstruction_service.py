@@ -1052,6 +1052,14 @@ def test_run_pipeline_records_the_effective_metal_training_settings(setup_test_d
     assert trainer_config.max_gaussians == settings["max_gaussians"]
 
 
+def test_effective_backend_name_never_labels_cpu_as_cuda() -> None:
+    from backend.services.reconstruction import _splat_backend_name
+
+    assert _splat_backend_name("cuda") == "cuda_gsplat"
+    assert _splat_backend_name("metal") == "metal_msplat"
+    assert _splat_backend_name("cpu") is None
+
+
 def test_run_pipeline_cancel_before_colmap_marks_cancelled(setup_test_db):
     import threading
     from unittest.mock import MagicMock, patch
