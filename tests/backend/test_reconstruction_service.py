@@ -1298,6 +1298,10 @@ def test_run_pipeline_trainer_result_persisted_and_lod_generated(setup_test_db):
                  "backend.services.reconstruction.get_training_backend",
                  return_value=SimpleNamespace(is_available=lambda: True, train=fake_train),
              ), \
+             patch(
+                 "backend.services.reconstruction.accelerator.detect",
+                 return_value=SimpleNamespace(kind="cuda", device="cuda"),
+             ), \
              patch("backend.services.reconstruction.SessionLocal", TestSessionLocal), \
              patch("backend.services.reconstruction.get_config") as mock_cfg:
             mock_cfg.return_value.data_dir = tmp
