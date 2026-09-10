@@ -64,7 +64,7 @@ def test_resolve_reconstruction_preset_applies_metal_policy_without_changing_cud
         "sh_degree": 1,
         "downscale_factor": 4,
     }
-    assert metal["iterations"] > cuda["iterations"]
+    assert metal["iterations"] == 1250
     assert metal["max_gaussians"] == cuda["max_gaussians"]
     assert metal["sh_degree"] == cuda["sh_degree"]
     assert metal["downscale_factor"] == cuda["downscale_factor"]

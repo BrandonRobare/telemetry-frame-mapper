@@ -332,6 +332,9 @@ The `quick` preset may inherit accelerator-specific defaults when a field is omi
 `reconstruction.presets` in `config.yaml`. Any configured preset value remains authoritative,
 even if it equals the cross-platform default. Each reconstruction status and Jobs row records
 the actual accelerator, backend, iteration count, Gaussian cap, and trainer fields used.
+Metal `quick` defaults to 1,250 iterations while CUDA remains at 1,000; the 350,000
+Gaussian cap is unchanged. The public survey measurement and limits are documented in
+[`benchmarks/metal-quick-preset.md`](benchmarks/metal-quick-preset.md).
 
 ![Data flow of the gaussian-splat trainer: COLMAP produces poses and points; our custom code seeds Gaussians and runs a training loop that calls gsplat and torch, applies a VRAM cap, and exports a splat PLY. Purple boxes are our code; orange boxes are external dependencies.](images/splat-trainer.svg)
 

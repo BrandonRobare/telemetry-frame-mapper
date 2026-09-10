@@ -96,8 +96,8 @@ reconstruction:
       colmap_camera_model: PINHOLE
   presets:
     quick:
-      # Omitted values inherit accelerator policy. Set iterations here to
-      # override it explicitly for every accelerator.
+      # Omitted iterations use accelerator policy (Metal 1250, CUDA 1000).
+      # Set iterations here to override it explicitly for every accelerator.
       max_gaussians: 350000
       sh_degree: 1
       downscale_factor: 4

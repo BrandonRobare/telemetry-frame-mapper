@@ -1082,7 +1082,7 @@ def test_run_pipeline_records_the_effective_metal_training_settings(setup_test_d
     assert settings["preset"] == "quick"
     assert settings["accelerator_kind"] == "metal"
     assert settings["splat_backend"] == "metal_msplat"
-    assert settings["iterations"] > 1000
+    assert settings["iterations"] == 1250
     assert settings["max_gaussians"] == 350000
     trainer_config = train.call_args.args[2]
     assert trainer_config.iterations == settings["iterations"]

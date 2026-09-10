@@ -1,0 +1,97 @@
+{
+  "cap_probe": {
+    "gaussian_count": 26912,
+    "iterations": 1250,
+    "max_gaussians": 500000,
+    "maximum_rss_bytes": 3171287040,
+    "output_sha256": "f5aeb645ff86bf40143a267e8ac83c2bdfaee0ae638ede46ea6c45b4dc28781c",
+    "wall_seconds": 69.5419529159999
+  },
+  "cap_protocol": {
+    "base_cap": 350000,
+    "maximum_memory_fraction": 0.7,
+    "minimum_count_gain": 1.1,
+    "probe_cap": 500000
+  },
+  "error": null,
+  "fixture": {
+    "image_count": 75,
+    "image_manifest_sha256": "e03b500730f4a94c5dc6a67d7978d336c0c4b2bdde3e7ee28bd0151da96fefb3",
+    "license": "CC0-1.0",
+    "name": "OpenDroneMap Aukerman",
+    "source_commit": "4e8031630f4193494c79b1c1d3524108826d1ba9",
+    "sparse_model_sha256": "06722b99e2482ce493bfa7ce203e9dcd9c0cb0ca1287fe52451db5da35c8428a",
+    "sparse_point_count": 10883
+  },
+  "hardware": {
+    "machine": "arm64",
+    "memory_bytes": 7516192768,
+    "platform": "macOS-26.6.2-arm64-arm-64bit",
+    "processor": "arm"
+  },
+  "passed": true,
+  "protocol": {
+    "candidates": [
+      1250,
+      1500,
+      2000,
+      2500,
+      3000
+    ],
+    "minimum_growth_ratio": 1.25,
+    "selection": "smallest candidate meeting the growth gate"
+  },
+  "runs": [
+    {
+      "gaussian_count": 27215,
+      "growth_ratio": 2.500689148212809,
+      "iterations": 1250,
+      "maximum_rss_bytes": 2577924096,
+      "output_sha256": "b9908be4d3cf030cba44f8d777196bb2068fcce985d852316a3632c0335147e5",
+      "wall_seconds": 72.84685741600015
+    },
+    {
+      "gaussian_count": 35123,
+      "growth_ratio": 3.227327023798585,
+      "iterations": 1500,
+      "maximum_rss_bytes": 3092348928,
+      "output_sha256": "c90c79667a9ba2bbb2036bb016aaf5537dfbde29093c9f1839038764ed034ce4",
+      "wall_seconds": 80.85363333399982
+    },
+    {
+      "gaussian_count": 35393,
+      "growth_ratio": 3.252136359459708,
+      "iterations": 2000,
+      "maximum_rss_bytes": 3092348928,
+      "output_sha256": "35050de55f4e959e672aa43463a086f25534b887d388bb28078edb130db7f38a",
+      "wall_seconds": 104.88825179100013
+    },
+    {
+      "gaussian_count": 36815,
+      "growth_ratio": 3.382798860608288,
+      "iterations": 2500,
+      "maximum_rss_bytes": 3125215232,
+      "output_sha256": "e73ee63925a24104de0163fc0e75c065de8b854b12e4d4347a025a47ebe1da15",
+      "wall_seconds": 129.51702587499994
+    },
+    {
+      "gaussian_count": 37240,
+      "growth_ratio": 3.421850592667463,
+      "iterations": 3000,
+      "maximum_rss_bytes": 3171287040,
+      "output_sha256": "c65e7b00571a6e5863e0b66833c6420dffde6fcbba81e18806055f4d11130b21",
+      "wall_seconds": 144.58611304100032
+    }
+  ],
+  "runtime": {
+    "msplat": "1.1.4",
+    "python": "3.12.10"
+  },
+  "selected_iterations": 1250,
+  "selected_max_gaussians": 350000,
+  "settings": {
+    "downscale_factor": 4,
+    "max_gaussians": 350000,
+    "sh_degree": 1
+  }
+}

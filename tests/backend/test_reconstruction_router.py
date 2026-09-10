@@ -1149,7 +1149,7 @@ def test_status_includes_effective_splat_settings(client):
         "accelerator_kind": "metal",
         "device": "mps",
         "splat_backend": "metal_msplat",
-        "iterations": 3000,
+        "iterations": 1250,
         "max_gaussians": 350000,
     }
     rec = Reconstruction(

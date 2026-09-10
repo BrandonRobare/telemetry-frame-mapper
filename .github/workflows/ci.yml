@@ -2,6 +2,13 @@ name: CI
 
 on:
   workflow_call:
+  workflow_dispatch:
+    inputs:
+      run_metal_preset_benchmark:
+        description: Run the pinned Aukerman survey benchmark on Apple Silicon
+        required: false
+        type: boolean
+        default: false
   push:
     branches: [main]
   pull_request:
@@ -313,7 +320,7 @@ jobs:
             macos-system-resources.json
 
   metal-preset-benchmark:
-    if: github.event_name == 'pull_request' && github.head_ref == 'wave8/820-metal-presets'
+    if: github.event_name == 'workflow_dispatch' && inputs.run_metal_preset_benchmark
     runs-on: macos-latest
     timeout-minutes: 90
     steps:
