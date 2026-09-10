@@ -2,6 +2,13 @@ name: CI
 
 on:
   workflow_call:
+  workflow_dispatch:
+    inputs:
+      run_metal_preset_benchmark:
+        description: Run the pinned Aukerman survey benchmark on Apple Silicon
+        required: false
+        type: boolean
+        default: false
   push:
     branches: [main]
   pull_request:
@@ -311,3 +318,103 @@ jobs:
             macos-build.log
             macos-smoke.log
             macos-system-resources.json
+
+  metal-preset-benchmark:
+    if: github.event_name == 'workflow_dispatch' && inputs.run_metal_preset_benchmark
+    runs-on: macos-latest
+    timeout-minutes: 90
+    steps:
+      - name: Check out code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Assert Apple Silicon runner
+        run: test "$(uname -m)" = "arm64"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: "0.11.16"
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+
+      - name: Install real COLMAP and locked Metal environment
+        run: |
+          brew install colmap
+          uv sync --frozen --group backend --group reconstruction --group splat-metal --group dev
+
+      - name: Fetch and verify pinned CC0 Aukerman survey
+        env:
+          FIXTURE_COMMIT: 4e8031630f4193494c79b1c1d3524108826d1ba9
+        run: |
+          set -euo pipefail
+          fixture="$RUNNER_TEMP/aukerman-source"
+          git init "$fixture"
+          git -C "$fixture" remote add origin https://github.com/OpenDroneMap/odm_data_aukerman.git
+          git -C "$fixture" fetch --depth 1 origin "$FIXTURE_COMMIT"
+          git -C "$fixture" checkout --detach FETCH_HEAD
+          test "$(git -C "$fixture" rev-parse HEAD)" = "$FIXTURE_COMMIT"
+          test "$(find "$fixture/images" -type f | wc -l | tr -d ' ')" = "77"
+          test "$(shasum -a 256 "$fixture/license.txt" | cut -d ' ' -f 1)" = "36ffd9dc085d529a7e60e1276d73ae5a030b020313e6c5408593a6ae2af39673"
+          FIXTURE="$fixture" python - <<'PY'
+          import hashlib
+          import os
+          from pathlib import Path
+
+          root = Path(os.environ["FIXTURE"])
+          lines = []
+          for path in sorted((root / "images").iterdir()):
+              if path.is_file():
+                  lines.append(f"{hashlib.sha256(path.read_bytes()).hexdigest()}  {path.name}")
+          Path("aukerman-images.sha256").write_text("\n".join(lines) + "\n")
+          PY
+
+      - name: Generate fixed COLMAP sparse model
+        run: |
+          set -euo pipefail
+          fixture="$RUNNER_TEMP/aukerman-source"
+          workspace="$RUNNER_TEMP/aukerman-colmap"
+          mkdir -p "$workspace/sparse"
+          ln -s "$fixture/images" "$workspace/images"
+          colmap feature_extractor --database_path "$workspace/database.db" --image_path "$workspace/images" --ImageReader.camera_model PINHOLE --ImageReader.single_camera 1 --SiftExtraction.max_num_features 2048 --FeatureExtraction.max_image_size 1200 --FeatureExtraction.num_threads 4 2>&1 | tee colmap-feature.log
+          colmap spatial_matcher --database_path "$workspace/database.db" --SpatialMatching.ignore_z 1 --SpatialMatching.max_num_neighbors 8 --SpatialMatching.max_distance 100 2>&1 | tee colmap-matching.log
+          colmap mapper --database_path "$workspace/database.db" --image_path "$workspace/images" --output_path "$workspace/sparse" --Mapper.num_threads 4 2>&1 | tee colmap-mapper.log
+          best="$(find "$workspace/sparse" -mindepth 1 -maxdepth 1 -type d | sort -n | head -1)"
+          test -n "$best"
+          colmap model_converter --input_path "$best" --output_path "$best" --output_type TXT
+          colmap model_analyzer --path "$best" | tee colmap-model.txt
+          BEST="$best" uv run --frozen --no-sync python -c 'import os; from pathlib import Path; from backend.services import colmap_io; model = colmap_io.read_model(Path(os.environ["BEST"])); assert len(model.images) >= 70, f"only {len(model.images)}/77 views registered"'
+          tar -czf aukerman-colmap-sparse.tar.gz -C "$workspace" sparse
+
+      - name: Measure Metal quick-preset candidates
+        env:
+          FIXTURE_COMMIT: 4e8031630f4193494c79b1c1d3524108826d1ba9
+        run: |
+          set -euo pipefail
+          manifest_sha="$(shasum -a 256 aukerman-images.sha256 | cut -d ' ' -f 1)"
+          uv pip freeze > metal-preset-environment.txt
+          colmap --version >> metal-preset-environment.txt
+          uv run --frozen --no-sync python -m scripts.benchmark_metal_presets \
+            --colmap-dir "$RUNNER_TEMP/aukerman-colmap" \
+            --fixture-commit "$FIXTURE_COMMIT" \
+            --image-manifest-sha256 "$manifest_sha" \
+            --candidates 1250,1500,2000,2500,3000 \
+            --minimum-growth-ratio 1.25 \
+            --output metal-preset-benchmark.json
+
+      - name: Upload Metal preset evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: metal-preset-${{ github.sha }}
+          if-no-files-found: warn
+          retention-days: 14
+          path: |
+            aukerman-colmap-sparse.tar.gz
+            aukerman-images.sha256
+            colmap-*.log
+            colmap-model.txt
+            metal-preset-benchmark.json
+            metal-preset-environment.txt

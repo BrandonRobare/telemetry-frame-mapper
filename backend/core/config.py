@@ -118,6 +118,20 @@ def default_reconstruction_config() -> dict:
     return _reconstruction_config_from_data({})
 
 
+def default_reconstruction_file_config() -> dict:
+    """Return resettable file defaults without accelerator-managed fields."""
+    from backend.services import accelerator
+
+    config = default_reconstruction_config()
+    for preset_name, preset in config["presets"].items():
+        managed: set[str] = set()
+        for kind in ("cuda", "metal", "cpu"):
+            managed.update(accelerator.preset_overrides(kind, preset_name))
+        for key in managed:
+            preset.pop(key, None)
+    return config
+
+
 def _reconstruction_config_from_data(data: dict) -> dict:
     defaults: dict = {
         "default_preset": "quick",
@@ -174,6 +188,43 @@ def get_reconstruction_config(path: str = "config.yaml") -> dict:
     except FileNotFoundError:
         data = {}
     return _reconstruction_config_from_data(data)
+
+
+def resolve_reconstruction_preset(
+    preset: str,
+    accelerator_kind: str,
+    path: str = "config.yaml",
+) -> dict:
+    """Resolve base defaults, accelerator policy, then operator choices.
+
+    Only keys omitted from ``reconstruction.presets`` inherit accelerator
+    policy. Any configured value is authoritative, even when it equals the
+    cross-platform base default.
+    """
+    from backend.services import accelerator
+
+    base_presets = default_reconstruction_config()["presets"]
+    if preset not in base_presets:
+        raise KeyError(f"Unknown reconstruction preset: {preset}")
+    try:
+        with open(path) as f:
+            data = yaml.safe_load(f) or {}
+    except FileNotFoundError:
+        data = {}
+
+    base = dict(base_presets[preset])
+    resolved = {
+        **base,
+        **accelerator.preset_overrides(accelerator_kind, preset),
+    }
+    reconstruction = data.get("reconstruction", {})
+    if not isinstance(reconstruction, dict):
+        reconstruction = {}
+    presets = reconstruction.get("presets", {})
+    configured = presets.get(preset, {}) if isinstance(presets, dict) else {}
+    if isinstance(configured, dict):
+        resolved.update(configured)
+    return resolved
 
 
 def get_remote_worker_config(path: str = "config.yaml") -> dict:

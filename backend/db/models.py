@@ -303,6 +303,7 @@ class Reconstruction(Base):
     completed_at = Column(UtcDateTime)
     duration_s = Column(Float)
     training_metrics = Column(Text)       # JSON: [{iter, psnr, ssim}, ...]
+    effective_splat_settings = Column(Text)  # JSON: actual accelerator/backend/trainer fields
     coverage_gaps_path = Column(String)   # path to cached coverage_gaps.json
     # JSON list of source session IDs for multi-session reconstructions
     source_session_ids = Column(Text)

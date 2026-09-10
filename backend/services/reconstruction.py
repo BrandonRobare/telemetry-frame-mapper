@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import threading
 import time
+from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path, PureWindowsPath
 
@@ -20,6 +21,7 @@ from backend.core.config import (
     get_reconstruction_config,
     get_remote_worker_config,
     get_render_config,
+    resolve_reconstruction_preset,
 )
 from backend.core.paths import confine_path
 from backend.db.database import SessionLocal
@@ -75,6 +77,14 @@ from backend.services.splat_backends import (
 # terminate it immediately instead of waiting for the current step to finish.
 _running_subprocess: dict[int, subprocess.Popen] = {}
 _running_subprocess_lock = threading.Lock()
+
+
+def _splat_backend_name(accelerator_kind: str) -> str | None:
+    if accelerator_kind == "metal":
+        return "metal_msplat"
+    if accelerator_kind == "cuda":
+        return "cuda_gsplat"
+    return None
 
 _rec_logs: dict[int, list[str]] = {}
 _rec_logs_lock = threading.Lock()
@@ -276,7 +286,6 @@ def _run_colmap(
     # Spatial matcher tuning: sane defaults for drone lawnmower surveys
     if colmap_matcher == "spatial_matcher":
         matcher_cmd += [
-            "--SpatialMatching.is_gps", "1",
             "--SpatialMatching.ignore_z", "1",
             "--SpatialMatching.max_num_neighbors", "50",
             "--SpatialMatching.max_distance", "100",
@@ -879,7 +888,11 @@ def _filter_images_to_target_area(images: list, geom_geojson: str) -> list:
 # ---------------------------------------------------------------------------
 
 def _run_gsplat(
-    colmap_dir: Path, output_path: Path, preset_cfg: dict, progress_cb, cancel: threading.Event
+    colmap_dir: Path,
+    output_path: Path,
+    preset_cfg: dict | TrainerConfig,
+    progress_cb,
+    cancel: threading.Event,
 ) -> dict:
     """Train a Gaussian splat. Returns {gaussian_count, psnr, ssim, training_metrics}."""
     backend = get_training_backend()
@@ -889,7 +902,11 @@ def _run_gsplat(
             "is available for the detected accelerator. The reconstruction will complete with "
             "COLMAP sparse cloud only."
         )
-    config = TrainerConfig.from_preset(preset_cfg)
+    config = (
+        preset_cfg
+        if isinstance(preset_cfg, TrainerConfig)
+        else TrainerConfig.from_preset(preset_cfg)
+    )
     return backend.train(colmap_dir, output_path, config, progress_cb, cancel)
 
 
@@ -2233,11 +2250,21 @@ def _run_pipeline(entry, db, cancel: threading.Event) -> None:
     try:
         images = db.query(Image).filter(Image.id.in_(image_ids)).all()
         recon_cfg = get_reconstruction_config()
-        preset_cfg = recon_cfg["presets"][preset]
+        selected_accelerator = accelerator.detect()
+        preset_cfg = resolve_reconstruction_preset(preset, selected_accelerator.kind)
+        trainer_config = TrainerConfig.from_preset(preset_cfg)
+        effective_splat_settings = {
+            "preset": preset,
+            "accelerator_kind": selected_accelerator.kind,
+            "device": selected_accelerator.device,
+            "splat_backend": _splat_backend_name(selected_accelerator.kind),
+            **asdict(trainer_config),
+        }
 
         _update_rec(
             db, reconstruction_id,
             status="running_colmap", step="writing workspace", progress_pct=2.0,
+            effective_splat_settings=json.dumps(effective_splat_settings, sort_keys=True),
         )
         _log_rec(reconstruction_id, "COLMAP: starting")
         calibration = calibration_profile_for_images(
@@ -2320,7 +2347,7 @@ def _run_pipeline(entry, db, cancel: threading.Event) -> None:
         splat_path.parent.mkdir(parents=True, exist_ok=True)
 
         try:
-            result = _run_gsplat(colmap_dir, splat_path, preset_cfg, progress_cb, cancel)
+            result = _run_gsplat(colmap_dir, splat_path, trainer_config, progress_cb, cancel)
             training_metrics = result.get("training_metrics")
             _log_rec(reconstruction_id, "Gaussian Splatting: complete")
             _log_rec(reconstruction_id, "LOD generation: starting")
@@ -2385,11 +2412,15 @@ def _run_pipeline(entry, db, cancel: threading.Event) -> None:
                 # success". Key on the message family, not the exception type —
                 # every other trainer RuntimeError is a real failure.
                 _log_rec(reconstruction_id, f"Gaussian Splatting skipped: {exc}")
+                effective_splat_settings["splat_backend"] = None
                 _update_rec(
                     db, reconstruction_id,
                     status="complete",
                     step="colmap_only",
                     progress_pct=100.0,
+                    effective_splat_settings=json.dumps(
+                        effective_splat_settings, sort_keys=True
+                    ),
                     completed_at=datetime.now(UTC),
                 )
                 _log_rec(reconstruction_id, "Pipeline complete (COLMAP only)")

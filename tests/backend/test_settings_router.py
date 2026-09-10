@@ -482,6 +482,9 @@ def test_reset_uses_explicit_defaults_without_creating_sentinel_file(client, tmp
     assert resp.status_code == 200
     assert not sentinel.exists()
     assert resp.json()["reconstruction"]["default_preset"] == "quick"
+    assert resp.json()["reconstruction"]["presets"]["quick"]["iterations"] == 1000
+    raw = yaml.safe_load(tmp_config.read_text())
+    assert "iterations" not in raw["reconstruction"]["presets"]["quick"]
 
 
 def test_reset_returns_full_response_shape(client, tmp_config):

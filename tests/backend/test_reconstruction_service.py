@@ -397,6 +397,43 @@ def test_run_colmap_returns_registered_image_count(tmp_path):
     assert result == 3
 
 
+def test_run_colmap_spatial_matcher_omits_removed_colmap_4_gps_flag(tmp_path):
+    import threading
+    from unittest.mock import patch
+
+    from backend.services.reconstruction import _run_colmap
+
+    colmap_dir = tmp_path / "colmap"
+    colmap_dir.mkdir()
+    _write_fake_images_txt(colmap_dir, 3)
+    captured: list[list[str]] = []
+
+    def capture(cmd, **_kwargs):
+        captured.append(cmd)
+        return _fake_colmap_popen()
+
+    with (
+        patch("backend.services.reconstruction.subprocess.Popen", side_effect=capture),
+        patch(
+            "backend.services.colmap_capabilities.get_capabilities",
+            return_value={"features": {"spatial_matcher": True}},
+        ),
+    ):
+        _run_colmap(
+            colmap_dir,
+            lambda *_args: None,
+            threading.Event(),
+            images_have_gps=True,
+            image_count=200,
+        )
+
+    matcher = next(command for command in captured if "spatial_matcher" in command)
+    assert "--SpatialMatching.is_gps" not in matcher
+    assert "--SpatialMatching.ignore_z" in matcher
+    assert "--SpatialMatching.max_num_neighbors" in matcher
+    assert "--SpatialMatching.max_distance" in matcher
+
+
 def test_run_colmap_converts_the_submodel_not_the_sparse_root(tmp_path):
     """model_converter must target sparse/<n>, never sparse/ itself.
 
@@ -981,6 +1018,10 @@ def test_run_pipeline_unusable_backend_completes_colmap_only_before_training(set
         with patch("backend.services.reconstruction._write_colmap_workspace", MagicMock()), \
              patch("backend.services.reconstruction._run_colmap", MagicMock(return_value=1)), \
              patch("backend.services.reconstruction.get_training_backend", return_value=backend), \
+             patch(
+                 "backend.services.reconstruction.accelerator.detect",
+                 return_value=SimpleNamespace(kind="metal", device="mps"),
+             ), \
              patch("backend.services.reconstruction.SessionLocal", TestSessionLocal), \
              patch("backend.services.reconstruction.get_config") as mock_cfg:
             mock_cfg.return_value.data_dir = tmp
@@ -992,7 +1033,73 @@ def test_run_pipeline_unusable_backend_completes_colmap_only_before_training(set
     assert rec.status == "complete"
     assert rec.step == "colmap_only"
     assert rec.progress_pct == 100.0
+    assert json.loads(rec.effective_splat_settings)["splat_backend"] is None
     backend.train.assert_not_called()
+
+
+def test_run_pipeline_records_the_effective_metal_training_settings(setup_test_db):
+    import threading
+    from unittest.mock import MagicMock, patch
+
+    from backend.main import app
+    from backend.services.reconstruction import _run_pipeline_legacy as _run_pipeline
+    from tests.conftest import TestSessionLocal
+
+    db = app.state.test_db_session
+    with tempfile.TemporaryDirectory() as tmp:
+        rec, img, colmap_dir = _pipeline_fixture(db, tmp)
+        result = {
+            "gaussian_count": 100,
+            "psnr": 25.0,
+            "ssim": 0.9,
+            "training_metrics": None,
+        }
+        with (
+            patch("backend.services.reconstruction._write_colmap_workspace", MagicMock()),
+            patch("backend.services.reconstruction._run_colmap", MagicMock(return_value=1)),
+            patch(
+                "backend.services.reconstruction._run_gsplat",
+                MagicMock(return_value=result),
+            ) as train,
+            patch(
+                "backend.services.reconstruction._generate_lod",
+                MagicMock(return_value=(Path(tmp) / "p.ply", Path(tmp) / "m.ply")),
+            ),
+            patch(
+                "backend.services.reconstruction._generate_thumbnail",
+                MagicMock(return_value=None),
+            ),
+            patch("backend.services.reconstruction.SessionLocal", TestSessionLocal),
+            patch(
+                "backend.services.reconstruction.accelerator.detect",
+                return_value=SimpleNamespace(kind="metal", device="mps"),
+            ),
+            patch("backend.services.reconstruction.get_config") as mock_cfg,
+        ):
+            mock_cfg.return_value.data_dir = tmp
+            mock_cfg.return_value.exports_dir = tmp
+            mock_cfg.return_value.processed_dir = tmp
+            _run_pipeline(rec.id, "quick", colmap_dir, [img.id], threading.Event())
+
+        db.refresh(rec)
+
+    settings = json.loads(rec.effective_splat_settings)
+    assert settings["preset"] == "quick"
+    assert settings["accelerator_kind"] == "metal"
+    assert settings["splat_backend"] == "metal_msplat"
+    assert settings["iterations"] == 1250
+    assert settings["max_gaussians"] == 350000
+    trainer_config = train.call_args.args[2]
+    assert trainer_config.iterations == settings["iterations"]
+    assert trainer_config.max_gaussians == settings["max_gaussians"]
+
+
+def test_effective_backend_name_never_labels_cpu_as_cuda() -> None:
+    from backend.services.reconstruction import _splat_backend_name
+
+    assert _splat_backend_name("cuda") == "cuda_gsplat"
+    assert _splat_backend_name("metal") == "metal_msplat"
+    assert _splat_backend_name("cpu") is None
 
 
 def test_run_pipeline_cancel_before_colmap_marks_cancelled(setup_test_db):
@@ -1232,6 +1339,10 @@ def test_run_pipeline_trainer_result_persisted_and_lod_generated(setup_test_db):
              patch(
                  "backend.services.reconstruction.get_training_backend",
                  return_value=SimpleNamespace(is_available=lambda: True, train=fake_train),
+             ), \
+             patch(
+                 "backend.services.reconstruction.accelerator.detect",
+                 return_value=SimpleNamespace(kind="cuda", device="cuda"),
              ), \
              patch("backend.services.reconstruction.SessionLocal", TestSessionLocal), \
              patch("backend.services.reconstruction.get_config") as mock_cfg:

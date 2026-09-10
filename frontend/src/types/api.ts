@@ -129,6 +129,26 @@ export interface CoverageGapCell {
   level: "sparse" | "thin" | "very_sparse";
 }
 
+export interface EffectiveSplatSettings {
+  preset: string;
+  accelerator_kind: 'cuda' | 'metal' | 'cpu';
+  device: 'cuda' | 'mps' | 'cpu';
+  splat_backend: 'cuda_gsplat' | 'metal_msplat' | null;
+  iterations: number;
+  max_gaussians: number;
+  sh_degree: number;
+  downscale_factor: number;
+  refine_start_iter: number;
+  refine_stop_iter: number;
+  refine_every: number;
+  reset_every: number;
+  eval_every: number;
+  eval_views: number;
+  ssim_lambda: number;
+  init_opacity: number;
+  sh_warmup_every: number;
+}
+
 export interface Reconstruction {
   id: number;
   session_id: number;
@@ -142,6 +162,7 @@ export interface Reconstruction {
   psnr: number | null;
   ssim: number | null;
   training_metrics: TrainingMetricPoint[] | null;
+  effective_splat_settings?: EffectiveSplatSettings | null;
   error_msg: string | null;
   geo_transform: string | null;
   splat_path: string | null;
@@ -293,6 +314,7 @@ export interface Job {
   started_at: string | null;
   completed_at: string | null;
   error_msg: string | null;
+  effective_splat_settings?: EffectiveSplatSettings | null;
 }
 
 export interface StorageSessionBreakdown {

@@ -51,6 +51,63 @@ def test_get_reconstruction_config_preset_values():
     assert full["iterations"] == 30000
 
 
+def test_resolve_reconstruction_preset_applies_metal_policy_without_changing_cuda(tmp_path):
+    from backend.core.config import resolve_reconstruction_preset
+
+    path = tmp_path / "missing.yaml"
+    cuda = resolve_reconstruction_preset("quick", "cuda", str(path))
+    metal = resolve_reconstruction_preset("quick", "metal", str(path))
+
+    assert cuda == {
+        "iterations": 1000,
+        "max_gaussians": 350000,
+        "sh_degree": 1,
+        "downscale_factor": 4,
+    }
+    assert metal["iterations"] == 1250
+    assert metal["max_gaussians"] == cuda["max_gaussians"]
+    assert metal["sh_degree"] == cuda["sh_degree"]
+    assert metal["downscale_factor"] == cuda["downscale_factor"]
+
+
+def test_default_file_config_omits_accelerator_managed_values() -> None:
+    from backend.core.config import default_reconstruction_file_config
+
+    config = default_reconstruction_file_config()
+
+    assert "iterations" not in config["presets"]["quick"]
+    assert config["presets"]["quick"]["max_gaussians"] == 350000
+
+
+def test_resolve_reconstruction_preset_keeps_operator_values_above_metal_policy(tmp_path):
+    from backend.core.config import resolve_reconstruction_preset
+
+    path = tmp_path / "config.yaml"
+    path.write_text(
+        "reconstruction:\n"
+        "  presets:\n"
+        "    quick:\n"
+        "      iterations: 1000\n"
+        "      max_gaussians: 456789\n"
+        "      sh_degree: 3\n",
+        encoding="utf-8",
+    )
+
+    resolved = resolve_reconstruction_preset("quick", "metal", str(path))
+
+    assert resolved["iterations"] == 1000
+    assert resolved["max_gaussians"] == 456789
+    assert resolved["sh_degree"] == 3
+    assert resolved["downscale_factor"] == 4
+
+
+def test_resolve_reconstruction_preset_rejects_unknown_preset(tmp_path):
+    from backend.core.config import resolve_reconstruction_preset
+
+    with pytest.raises(KeyError, match="Unknown reconstruction preset"):
+        resolve_reconstruction_preset("missing", "metal", str(tmp_path / "missing.yaml"))
+
+
 def test_preset_keys_all_reach_the_trainer():
     """A preset key nothing consumes is dead config that looks live (#667, #776).
 

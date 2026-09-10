@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import JobsTab from './JobsTab'
-import { formatInstallCommands } from './systemHealth'
+import { formatEffectiveSplatSettings, formatInstallCommands } from './systemHealth'
 import { ErrorBoundary } from '../../ErrorBoundary'
 import type { Job, SystemResources } from '../../types/api'
 
@@ -48,6 +48,7 @@ const cancellingJob: Job = {
   started_at: '2026-08-12T00:00:00Z',
   completed_at: null,
   error_msg: null,
+  effective_splat_settings: null,
 }
 
 /** 25 finished jobs, newest id first — the order `/jobs/` returns them in. */
@@ -173,6 +174,49 @@ describe('JobsTab system accelerator', () => {
 
 
 describe('JobsTab reconstruction statuses', () => {
+  it('renders CPU fallback as COLMAP-only rather than CUDA', () => {
+    expect(formatEffectiveSplatSettings({
+      splat_backend: null,
+      iterations: 1000,
+      max_gaussians: 350000,
+    })).toBe('COLMAP only · no splat training backend')
+  })
+
+  it('renders the effective splat settings recorded for the job', async () => {
+    const settingsJob: Job = {
+      ...cancellingJob,
+      id: 820,
+      effective_splat_settings: {
+        preset: 'quick',
+        accelerator_kind: 'metal',
+        device: 'mps',
+        splat_backend: 'metal_msplat',
+        iterations: 2400,
+        max_gaussians: 350000,
+        sh_degree: 1,
+        downscale_factor: 4,
+        refine_start_iter: 300,
+        refine_stop_iter: 800,
+        refine_every: 100,
+        reset_every: 2401,
+        eval_every: 250,
+        eval_views: 4,
+        ssim_lambda: 0.2,
+        init_opacity: 0.1,
+        sh_warmup_every: 500,
+      },
+    }
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.startsWith('/jobs/?')) return jsonResponse([settingsJob])
+      if (url === '/system/resources') return jsonResponse(resources)
+      throw new Error(`Unexpected request: ${url}`)
+    }))
+
+    renderJobsTab()
+
+    expect(await screen.findByText('Metal msplat · 2,400 iterations · 350,000 Gaussian cap')).toBeTruthy()
+  })
+
   it('renders a cancelling job in the Active list without firing the root ErrorBoundary', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       if (url.startsWith('/jobs/?')) return jsonResponse([cancellingJob])

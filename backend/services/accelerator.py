@@ -13,6 +13,14 @@ from typing import Any, Literal
 
 AcceleratorKind = Literal["cuda", "metal", "cpu"]
 
+_PRESET_OVERRIDES: dict[AcceleratorKind, dict[str, dict[str, int | float]]] = {
+    # Revalidated on the public Aukerman survey for #820. CUDA stays empty so
+    # its shipped preset values remain byte-for-byte unchanged.
+    "metal": {"quick": {"iterations": 1250}},
+    "cuda": {},
+    "cpu": {},
+}
+
 
 @dataclass(frozen=True)
 class Accelerator:
@@ -20,6 +28,11 @@ class Accelerator:
 
     kind: AcceleratorKind
     device: Literal["cuda", "mps", "cpu"]
+
+
+def preset_overrides(kind: AcceleratorKind, preset: str) -> dict[str, int | float]:
+    """Return a copy of accelerator defaults layered beneath operator values."""
+    return dict(_PRESET_OVERRIDES[kind].get(preset, {}))
 
 
 def _import_torch() -> Any | None:

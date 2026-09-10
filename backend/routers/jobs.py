@@ -48,6 +48,11 @@ def list_jobs(
             "started_at": r.started_at.isoformat() if r.started_at else None,
             "completed_at": r.completed_at.isoformat() if r.completed_at else None,
             "error_msg": r.error_msg,
+            "effective_splat_settings": (
+                _json.loads(r.effective_splat_settings)
+                if r.effective_splat_settings
+                else None
+            ),
         }
         for r in reconstructions
     ]
