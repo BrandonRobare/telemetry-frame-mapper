@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 import threading
 import time
@@ -173,6 +174,34 @@ def test_update_payload_preserves_existing_queue_payload(setup_test_db):
     assert get_job(entry.id)["remote_job_id"] == "worker-11"
     stored = db.query(JobQueueEntry).filter(JobQueueEntry.id == entry.id).first()
     assert stored.payload_json == '{"preset": "quick", "remote_job_id": "worker-11"}'
+
+
+def test_list_jobs_exposes_effective_splat_settings(setup_test_db):
+    from backend.main import app
+    from backend.routers.jobs import list_jobs as list_reconstruction_jobs
+
+    db = app.state.test_db_session
+    s = _make_session(db)
+    settings = {
+        "preset": "quick",
+        "accelerator_kind": "metal",
+        "splat_backend": "metal_msplat",
+        "iterations": 2400,
+        "max_gaussians": 350000,
+    }
+    rec = Reconstruction(
+        session_id=s.id,
+        preset="quick",
+        status="pending",
+        frames_used=77,
+        effective_splat_settings=json.dumps(settings),
+    )
+    db.add(rec)
+    db.commit()
+
+    jobs = list_reconstruction_jobs(skip=0, limit=50, status=None, db=db)
+
+    assert jobs[0]["effective_splat_settings"] == settings
 
 
 # ---------------------------------------------------------------------------

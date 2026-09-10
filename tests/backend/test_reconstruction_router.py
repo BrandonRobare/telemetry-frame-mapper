@@ -1139,6 +1139,38 @@ def test_status_includes_training_metrics(client):
     assert data["training_metrics"][0]["psnr"] == pytest.approx(18.2)
 
 
+def test_status_includes_effective_splat_settings(client):
+    import json
+
+    db = _get_db(client)
+    session = _make_session_with_images(db)
+    settings = {
+        "preset": "quick",
+        "accelerator_kind": "metal",
+        "device": "mps",
+        "splat_backend": "metal_msplat",
+        "iterations": 3000,
+        "max_gaussians": 350000,
+    }
+    rec = Reconstruction(
+        session_id=session.id,
+        status="complete",
+        preset="quick",
+        progress_pct=100.0,
+        frames_used=77,
+        step="done",
+        effective_splat_settings=json.dumps(settings),
+    )
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+
+    response = client.get(f"/reconstruction/{rec.id}/status")
+
+    assert response.status_code == 200
+    assert response.json()["effective_splat_settings"] == settings
+
+
 def test_status_training_metrics_null_when_not_set(client):
     db = _get_db(client)
     s = _make_session_with_images(db)

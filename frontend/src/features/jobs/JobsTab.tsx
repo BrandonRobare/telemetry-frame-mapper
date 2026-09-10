@@ -13,7 +13,7 @@ import { Button } from '../../shared/components/Button'
 import { Badge } from '../../shared/components/Badge'
 import { useToast } from '../../shared/hooks/useToast'
 import { filterReconstructionLogLines } from './logPanel'
-import { formatInstallCommands } from './systemHealth'
+import { formatEffectiveSplatSettings, formatInstallCommands } from './systemHealth'
 
 const HISTORY_PAGE_SIZE = 10
 // `/jobs/` has no search parameter, so a search can only see what the client
@@ -453,6 +453,11 @@ export default function JobsTab() {
                         </span>
                       )}
                     </div>
+                    {job.effective_splat_settings && (
+                      <p className="text-xs" style={{ color: 'var(--text-muted)', margin: '0 0 8px' }}>
+                        {formatEffectiveSplatSettings(job.effective_splat_settings)}
+                      </p>
+                    )}
                     <div style={{ height: 4, borderRadius: 2, background: 'var(--surface-2)', overflow: 'hidden' }}>
                       <div
                         style={{
@@ -551,7 +556,14 @@ export default function JobsTab() {
                         </Badge>
                       </td>
                       <td style={{ padding: '8px 10px', color: 'var(--text-muted)' }}>{job.session_id}</td>
-                      <td style={{ padding: '8px 10px', color: 'var(--text-muted)' }}>{job.preset}</td>
+                      <td style={{ padding: '8px 10px', color: 'var(--text-muted)' }}>
+                        <div>{job.preset}</div>
+                        {job.effective_splat_settings && (
+                          <div className="text-xs" style={{ marginTop: 2 }}>
+                            {formatEffectiveSplatSettings(job.effective_splat_settings)}
+                          </div>
+                        )}
+                      </td>
                       <td style={{ padding: '8px 10px', color: 'var(--text-muted)' }}>{job.frames_used}</td>
                       <td style={{ padding: '8px 10px', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
                         {job.started_at ? formatDuration(job.started_at, job.completed_at) : '—'}

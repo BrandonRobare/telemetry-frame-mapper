@@ -995,6 +995,63 @@ def test_run_pipeline_unusable_backend_completes_colmap_only_before_training(set
     backend.train.assert_not_called()
 
 
+def test_run_pipeline_records_the_effective_metal_training_settings(setup_test_db):
+    import threading
+    from unittest.mock import MagicMock, patch
+
+    from backend.main import app
+    from backend.services.reconstruction import _run_pipeline_legacy as _run_pipeline
+    from tests.conftest import TestSessionLocal
+
+    db = app.state.test_db_session
+    with tempfile.TemporaryDirectory() as tmp:
+        rec, img, colmap_dir = _pipeline_fixture(db, tmp)
+        result = {
+            "gaussian_count": 100,
+            "psnr": 25.0,
+            "ssim": 0.9,
+            "training_metrics": None,
+        }
+        with (
+            patch("backend.services.reconstruction._write_colmap_workspace", MagicMock()),
+            patch("backend.services.reconstruction._run_colmap", MagicMock(return_value=1)),
+            patch(
+                "backend.services.reconstruction._run_gsplat",
+                MagicMock(return_value=result),
+            ) as train,
+            patch(
+                "backend.services.reconstruction._generate_lod",
+                MagicMock(return_value=(Path(tmp) / "p.ply", Path(tmp) / "m.ply")),
+            ),
+            patch(
+                "backend.services.reconstruction._generate_thumbnail",
+                MagicMock(return_value=None),
+            ),
+            patch("backend.services.reconstruction.SessionLocal", TestSessionLocal),
+            patch(
+                "backend.services.reconstruction.accelerator.detect",
+                return_value=SimpleNamespace(kind="metal", device="mps"),
+            ),
+            patch("backend.services.reconstruction.get_config") as mock_cfg,
+        ):
+            mock_cfg.return_value.data_dir = tmp
+            mock_cfg.return_value.exports_dir = tmp
+            mock_cfg.return_value.processed_dir = tmp
+            _run_pipeline(rec.id, "quick", colmap_dir, [img.id], threading.Event())
+
+        db.refresh(rec)
+
+    settings = json.loads(rec.effective_splat_settings)
+    assert settings["preset"] == "quick"
+    assert settings["accelerator_kind"] == "metal"
+    assert settings["splat_backend"] == "metal_msplat"
+    assert settings["iterations"] > 1000
+    assert settings["max_gaussians"] == 350000
+    trainer_config = train.call_args.args[2]
+    assert trainer_config.iterations == settings["iterations"]
+    assert trainer_config.max_gaussians == settings["max_gaussians"]
+
+
 def test_run_pipeline_cancel_before_colmap_marks_cancelled(setup_test_db):
     import threading
     from unittest.mock import MagicMock, patch

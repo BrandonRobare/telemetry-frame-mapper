@@ -176,6 +176,54 @@ def get_reconstruction_config(path: str = "config.yaml") -> dict:
     return _reconstruction_config_from_data(data)
 
 
+def resolve_reconstruction_preset(
+    preset: str,
+    accelerator_kind: str,
+    path: str = "config.yaml",
+) -> dict:
+    """Resolve base defaults, accelerator policy, then operator choices.
+
+    Installed config files contain the shipped base values, so values equal to
+    the base do not mask a new accelerator default. Changed values are treated
+    as operator choices. ``preset_overrides`` explicitly forces even a value
+    that equals the base default.
+    """
+    from backend.services import accelerator
+
+    base_presets = default_reconstruction_config()["presets"]
+    if preset not in base_presets:
+        raise KeyError(f"Unknown reconstruction preset: {preset}")
+    try:
+        with open(path) as f:
+            data = yaml.safe_load(f) or {}
+    except FileNotFoundError:
+        data = {}
+
+    base = dict(base_presets[preset])
+    resolved = {
+        **base,
+        **accelerator.preset_overrides(accelerator_kind, preset),
+    }
+    reconstruction = data.get("reconstruction", {})
+    if not isinstance(reconstruction, dict):
+        reconstruction = {}
+    presets = reconstruction.get("presets", {})
+    configured = presets.get(preset, {}) if isinstance(presets, dict) else {}
+    if isinstance(configured, dict):
+        resolved.update(
+            {
+                key: value
+                for key, value in configured.items()
+                if key not in base or value != base[key]
+            }
+        )
+    forced_presets = reconstruction.get("preset_overrides", {})
+    forced = forced_presets.get(preset, {}) if isinstance(forced_presets, dict) else {}
+    if isinstance(forced, dict):
+        resolved.update(forced)
+    return resolved
+
+
 def get_remote_worker_config(path: str = "config.yaml") -> dict:
     """Return the explicitly opt-in network reconstruction worker settings.
 

@@ -164,6 +164,7 @@ class ReconstructionOut(BaseModel):
     psnr: float | None
     ssim: float | None
     training_metrics: list[dict] | None = None
+    effective_splat_settings: dict[str, object] | None = None
     error_msg: str | None
     geo_transform: str | None
     splat_path: str | None
@@ -185,6 +186,13 @@ class ReconstructionOut(BaseModel):
     @field_validator("training_metrics", mode="before")
     @classmethod
     def parse_training_metrics(cls, v: object) -> list[dict] | None:
+        if isinstance(v, str):
+            return json.loads(v)
+        return v  # type: ignore[return-value]
+
+    @field_validator("effective_splat_settings", mode="before")
+    @classmethod
+    def parse_effective_splat_settings(cls, v: object) -> dict[str, object] | None:
         if isinstance(v, str):
             return json.loads(v)
         return v  # type: ignore[return-value]
