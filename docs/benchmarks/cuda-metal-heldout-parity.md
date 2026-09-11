@@ -4,7 +4,7 @@ Issue: [#784](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/784
 
 Status: preregistered before #784 measurements. Do not edit thresholds after inspecting backend results; protocol corrections require a dated rationale and fresh runs of both backends.
 
-Protocol correction (2026-09-11): run `34606882358` proved the initial black-background harness executed at `c5ab4357d2b503faeee9f780328454fa671b9ea6`, but its PLY contained 10,194 non-finite rows out of 25,225. That run is invalid, not quality evidence. Because msplat 1.1.4 intentionally trains against magenta by default, both trainers and the common evaluator now use that same documented native background. The quality thresholds are unchanged, output-finiteness validation is mandatory, and both valid backend runs must use the revised policy fingerprint.
+Protocol corrections (2026-09-11): run `34606882358` proved the initial black-background harness executed at `c5ab4357d2b503faeee9f780328454fa671b9ea6`, but its PLY contained 10,194 non-finite rows out of 25,225. That run is invalid, not quality evidence. Because msplat 1.1.4 intentionally trains against magenta by default, both trainers and the common evaluator were switched to that same documented native background without changing the quality thresholds. The exact revised-policy run `34608642410` at `66044124b282372be9acc2f5cc3c046c55e1143c` still exported 4,869 invalid rows out of 27,362. The second failure is also invalid, so the hardware lane is stopped: Metal quality/throughput parity remains unproven, output finiteness is now a mandatory gate, and no CUDA run should be interpreted as completing #784 until the Metal defect is repaired or explicitly accepted as an experimental limitation.
 
 ## Objective
 

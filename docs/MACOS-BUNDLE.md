@@ -27,4 +27,6 @@ The build emits `dist/Telemetry Frame Mapper.app`. The smoke script launches the
 
 On a supported Mac the app selects msplat automatically; there is no backend setting. Metal progress is synchronized before it reaches the UI, and cancellation writes a partial PLY plus a native `.checkpoint.msplat` file so the job can terminate as cancelled without masquerading as `colmap_only` success.
 
+Metal splat training remains experimental for v3.0: two real arm64 held-out-gate runs exported non-finite Gaussian rows, so CUDA-quality parity is unproven. Omit `splat-metal` when a production workflow requires the supported `colmap_only` fallback; track the corrective evidence in [#784](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/784).
+
 `build/` and `dist/` are local artifacts and are not committed. The required arm64 macOS CI job installs msplat, runs a native training/cancellation smoke, bundles it into the application, and executes the packaged startup smoke.
