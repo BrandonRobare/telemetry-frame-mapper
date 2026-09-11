@@ -381,8 +381,13 @@ def _write_sums(directory: Path, members: list[str]) -> None:
 
 
 def _portable_tar(source: Path, destination: Path) -> None:
+    source_root = source.expanduser().resolve(strict=False)
+    destination_path = destination.expanduser().resolve(strict=False)
+    if destination_path == source_root or source_root in destination_path.parents:
+        raise RuntimeError("archive destination must be outside its source directory")
+    members = sorted(item for item in source.iterdir() if item.is_file())
     with tarfile.open(destination, "w:gz") as tar:
-        for path in sorted(item for item in source.iterdir() if item.is_file()):
+        for path in members:
             info = tar.gettarinfo(str(path), arcname=path.name)
             info.uid = info.gid = 0
             info.uname = info.gname = ""
@@ -582,6 +587,23 @@ def _render_bundle(
     return rows
 
 
+def validate_compare_paths(
+    cuda_bundle: Path,
+    metal_bundle: Path,
+    output: Path,
+    evidence_dir: Path,
+    evidence_bundle: Path,
+) -> None:
+    """Prevent source/output aliasing and self-including evidence archives."""
+    evidence_root = evidence_dir.expanduser().resolve(strict=False)
+    files = [cuda_bundle, metal_bundle, output, evidence_bundle]
+    resolved = [path.expanduser().resolve(strict=False) for path in files]
+    if len(set(resolved)) != len(resolved):
+        raise RuntimeError("comparison input and output paths must be distinct")
+    if any(path == evidence_root or evidence_root in path.parents for path in resolved):
+        raise RuntimeError("comparison files must be outside the evidence directory")
+
+
 def compare(
     cuda_bundle: Path,
     metal_bundle: Path,
@@ -593,6 +615,7 @@ def compare(
 ) -> dict[str, Any]:
     from backend.services.splat_backends import get_training_backend
 
+    validate_compare_paths(cuda_bundle, metal_bundle, output, evidence_dir, evidence_bundle)
     if not get_training_backend("cuda").is_available():
         raise RuntimeError("CUDA gsplat evaluator target is unavailable")
     if evidence_dir.exists() and any(evidence_dir.iterdir()):

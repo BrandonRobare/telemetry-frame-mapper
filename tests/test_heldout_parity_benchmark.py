@@ -295,6 +295,33 @@ def test_compare_verdict_and_count_alert(monkeypatch, tmp_path: Path) -> None:
         }
 
 
+def test_compare_rejects_overlapping_inputs_outputs_and_evidence(tmp_path: Path) -> None:
+    cuda = tmp_path / "cuda.tar.gz"
+    metal = tmp_path / "metal.tar.gz"
+    output = tmp_path / "comparison.json"
+    evidence = tmp_path / "evidence"
+    bundle = tmp_path / "comparison-evidence.tar.gz"
+    cases = [
+        (cuda, metal, evidence / "comparison.json", evidence, bundle),
+        (cuda, metal, output, evidence, evidence / "comparison.tar.gz"),
+        (cuda, metal, output, evidence, output),
+        (cuda, metal, cuda, evidence, bundle),
+    ]
+
+    for paths in cases:
+        with pytest.raises(RuntimeError, match="comparison"):
+            parity.validate_compare_paths(*paths)
+
+
+def test_portable_tar_rejects_self_inclusion(tmp_path: Path) -> None:
+    source = tmp_path / "evidence"
+    source.mkdir()
+    (source / "payload.txt").write_text("payload")
+
+    with pytest.raises(RuntimeError, match="outside its source"):
+        parity._portable_tar(source, source / "comparison-evidence.tar.gz")
+
+
 def test_cuda_config_defaults_and_benchmark_background_are_opt_in() -> None:
     default = TrainerConfig.from_preset({"iterations": 1000})
     benchmark = TrainerConfig.from_preset({**parity.POLICY})
