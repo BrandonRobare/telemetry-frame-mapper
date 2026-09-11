@@ -147,6 +147,27 @@ def test_metal_training_maps_config_steps_syncs_and_exports(tmp_path: Path) -> N
     assert progress.call_args_list[-1].args == ("exporting splat PLY", 99.0)
 
 
+def test_metal_benchmark_split_and_black_background_are_explicit(tmp_path: Path) -> None:
+    from backend.services.splat_backends import metal_msplat
+
+    runtime, _trainer = _runtime(tmp_path, [8, 9, 10, 11])
+    config = _config()
+    config.benchmark_heldout_split = True
+    config.benchmark_test_every = 8
+    config.benchmark_keep_crs = True
+    config.background_color = (0.0, 0.0, 0.0)
+
+    metal_msplat._train(
+        runtime, tmp_path / "colmap", tmp_path / "splat.ply", config, MagicMock(), threading.Event()
+    )
+
+    runtime.load_dataset.assert_called_once_with(
+        str(tmp_path / "colmap"), downscale_factor=2.0, eval_mode=True, test_every=8
+    )
+    assert runtime.TrainingConfig.call_args.kwargs["bg_color"] == [0.0, 0.0, 0.0]
+    assert runtime.TrainingConfig.call_args.kwargs["keep_crs"] is True
+
+
 def test_metal_training_freezes_densification_and_completes_at_gaussian_cap(
     tmp_path: Path,
 ) -> None:

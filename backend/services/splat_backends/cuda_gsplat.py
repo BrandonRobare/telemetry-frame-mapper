@@ -178,14 +178,23 @@ def _look_at_viewmat(eye: np.ndarray, target: np.ndarray) -> np.ndarray:
 
 def _render_intrinsics(width: int, height: int) -> np.ndarray:
     focal = height / (2.0 * math.tan(_RENDER_HALF_FOV_RAD))
-    return np.array(
-        [[focal, 0.0, width / 2.0], [0.0, focal, height / 2.0], [0.0, 0.0, 1.0]]
-    )
+    return np.array([[focal, 0.0, width / 2.0], [0.0, focal, height / 2.0], [0.0, 0.0, 1.0]])
 
 
-def _rasterize_cloud(torch, gsplat, cloud, viewmat: np.ndarray, width: int, height: int,
-                     device, sh_degree: int | None = None):
-    """One rasterization call for a loaded GaussianCloud; returns (H, W, 3) in [0, 1]."""
+def _rasterize_cloud(
+    torch,
+    gsplat,
+    cloud,
+    viewmat: np.ndarray,
+    width: int,
+    height: int,
+    device,
+    sh_degree: int | None = None,
+    *,
+    intrinsics: np.ndarray | None = None,
+    background_color: tuple[float, float, float] | None = None,
+):
+    """Rasterize a cloud, preserving synthetic thumbnail intrinsics by default."""
     means = torch.from_numpy(np.ascontiguousarray(cloud.means)).float().to(device)
     quats = torch.from_numpy(np.ascontiguousarray(cloud.quats)).float().to(device)
     scales = torch.from_numpy(np.ascontiguousarray(cloud.scales)).float().to(device)
@@ -200,20 +209,25 @@ def _rasterize_cloud(torch, gsplat, cloud, viewmat: np.ndarray, width: int, heig
         colors = sh0
         sh_degree = 0
     viewmats = torch.from_numpy(viewmat[None]).float().to(device)
-    ks = torch.from_numpy(_render_intrinsics(width, height)[None]).float().to(device)
-    renders, _, _ = gsplat.rasterization(
-        means=means,
-        quats=quats,
-        scales=torch.exp(scales),
-        opacities=torch.sigmoid(opacities),
-        colors=colors,
-        viewmats=viewmats,
-        Ks=ks,
-        width=width,
-        height=height,
-        sh_degree=sh_degree,
-        packed=True,
-    )
+    if intrinsics is None:
+        intrinsics = _render_intrinsics(width, height)
+    ks = torch.from_numpy(np.asarray(intrinsics)[None]).float().to(device)
+    kwargs = {
+        "means": means,
+        "quats": quats,
+        "scales": torch.exp(scales),
+        "opacities": torch.sigmoid(opacities),
+        "colors": colors,
+        "viewmats": viewmats,
+        "Ks": ks,
+        "width": width,
+        "height": height,
+        "sh_degree": sh_degree,
+        "packed": True,
+    }
+    if background_color is not None:
+        kwargs["backgrounds"] = torch.tensor([background_color], dtype=torch.float32, device=device)
+    renders, _, _ = gsplat.rasterization(**kwargs)
     return renders[0].clamp(0.0, 1.0)
 
 
@@ -293,18 +307,43 @@ def _write_cancel_checkpoint(
     cloud = _params_to_cloud(params)
     ply_io.write_3dgs_ply(output_path, cloud)
     _checkpoint_sidecar_path(output_path).write_text(
-        json.dumps({
-            "reason": "cancelled_by_user",
-            "completed_iterations": completed_iterations,
-            "gaussian_count": int(cloud.means.shape[0]),
-            "training_metrics": metrics or None,
-        }, indent=2),
+        json.dumps(
+            {
+                "reason": "cancelled_by_user",
+                "completed_iterations": completed_iterations,
+                "gaussian_count": int(cloud.means.shape[0]),
+                "training_metrics": metrics or None,
+            },
+            indent=2,
+        ),
         encoding="utf-8",
     )
     return output_path
 
 
-def _load_dataset(torch, colmap_dir: Path, model, downscale_factor: int):
+def _camera_intrinsics(camera, width: int, height: int) -> np.ndarray:
+    """Scale COLMAP's distortion-free camera matrix to an output image size."""
+    if camera.model == "PINHOLE":
+        fx, fy, cx, cy = (float(value) for value in camera.params)
+    else:  # SIMPLE_PINHOLE — colmap_io only loads distortion-free models
+        fx = fy = float(camera.params[0])
+        cx, cy = float(camera.params[1]), float(camera.params[2])
+    scale_x = width / camera.width
+    scale_y = height / camera.height
+    return np.array(
+        [[fx * scale_x, 0.0, cx * scale_x], [0.0, fy * scale_y, cy * scale_y], [0.0, 0.0, 1.0]]
+    )
+
+
+def _load_dataset(
+    torch,
+    colmap_dir: Path,
+    model,
+    downscale_factor: int,
+    *,
+    benchmark_heldout_split: bool = False,
+    benchmark_test_every: int = 8,
+):
     """Load training views as uint8 CPU tensors plus per-view viewmats/intrinsics.
 
     Images are cached as uint8 (not float32): 500 frames at 1000x750 are about
@@ -313,7 +352,16 @@ def _load_dataset(torch, colmap_dir: Path, model, downscale_factor: int):
     from PIL import Image
 
     views = []
-    for image in model.images:
+    images = (
+        sorted(model.images, key=lambda image: image.name)
+        if benchmark_heldout_split
+        else model.images
+    )
+    if benchmark_heldout_split:
+        if benchmark_test_every <= 1:
+            raise ValueError("benchmark_test_every must be greater than one")
+        images = [image for index, image in enumerate(images) if index % benchmark_test_every != 0]
+    for image in images:
         camera = model.cameras[image.camera_id]
         frame_path = colmap_dir / "images" / image.name
         if not frame_path.exists():
@@ -328,20 +376,7 @@ def _load_dataset(torch, colmap_dir: Path, model, downscale_factor: int):
                 img = img.resize(new_size, Image.LANCZOS)
             pixels = torch.from_numpy(np.asarray(img, dtype=np.uint8))
 
-        if camera.model == "PINHOLE":
-            fx, fy, cx, cy = (float(v) for v in camera.params)
-        else:  # SIMPLE_PINHOLE — colmap_io only loads distortion-free models
-            fx = fy = float(camera.params[0])
-            cx, cy = float(camera.params[1]), float(camera.params[2])
-        scale_x = new_size[0] / camera.width
-        scale_y = new_size[1] / camera.height
-        intrinsics = np.array(
-            [
-                [fx * scale_x, 0.0, cx * scale_x],
-                [0.0, fy * scale_y, cy * scale_y],
-                [0.0, 0.0, 1.0],
-            ]
-        )
+        intrinsics = _camera_intrinsics(camera, new_size[0], new_size[1])
         views.append(
             {
                 "pixels": pixels,  # uint8 CPU (H, W, 3)
@@ -485,7 +520,14 @@ def _train(
     if model.points_xyz.shape[0] == 0:
         raise RuntimeError("COLMAP model contains no sparse points")
 
-    views = _load_dataset(torch, colmap_dir, model, config.downscale_factor)
+    views = _load_dataset(
+        torch,
+        colmap_dir,
+        model,
+        config.downscale_factor,
+        benchmark_heldout_split=config.benchmark_heldout_split,
+        benchmark_test_every=config.benchmark_test_every,
+    )
     scene_scale = _scene_scale_from_cameras(model)
 
     # --- Parameter initialization from the sparse cloud -----------------------
@@ -507,9 +549,7 @@ def _train(
                 )
             ),
             "sh0": torch.nn.Parameter(((rgb - 0.5) / _SH_C0)[:, None, :].clone()),
-            "shN": torch.nn.Parameter(
-                torch.zeros(means_init.shape[0], num_rest, 3, device=device)
-            ),
+            "shN": torch.nn.Parameter(torch.zeros(means_init.shape[0], num_rest, 3, device=device)),
         }
     )
 
@@ -561,7 +601,7 @@ def _train(
         ks = torch.from_numpy(view["intrinsics"][None]).float().to(device)
         active_sh = min(step // max(1, config.sh_warmup_every), config.sh_degree)
 
-        renders, _, info = gsplat.rasterization(
+        raster_kwargs = dict(
             means=params["means"],
             quats=params["quats"],
             scales=torch.exp(params["scales"]),
@@ -572,13 +612,16 @@ def _train(
             width=view["width"],
             height=view["height"],
             sh_degree=active_sh,
-            packed=True,  # packed mode saves memory on sparse aerial scenes
+            packed=True,
         )
+        if config.background_color is not None:
+            raster_kwargs["backgrounds"] = torch.tensor(
+                [config.background_color], dtype=torch.float32, device=device
+            )
+        renders, _, info = gsplat.rasterization(**raster_kwargs)
         render = renders[0]
         l1_loss = (render - target).abs().mean()
-        ssim_value = _ssim(
-            torch, render.permute(2, 0, 1)[None], target.permute(2, 0, 1)[None]
-        )
+        ssim_value = _ssim(torch, render.permute(2, 0, 1)[None], target.permute(2, 0, 1)[None])
         loss = (1.0 - config.ssim_lambda) * l1_loss + config.ssim_lambda * (1.0 - ssim_value)
 
         strategy.step_pre_backward(params, optimizers, state, step, info)
@@ -603,7 +646,9 @@ def _train(
                 force=True,
             )
 
-        if (step + 1) % config.eval_every == 0 or step + 1 == config.iterations:
+        if config.eval_every > 0 and (
+            (step + 1) % config.eval_every == 0 or step + 1 == config.iterations
+        ):
             psnr_value, ssim_eval = _evaluate(torch, gsplat, params, views, config, device)
             metrics.append({"iter": step + 1, "psnr": psnr_value, "ssim": ssim_eval})
 
@@ -691,9 +736,7 @@ def render_thumbnail(
         low = np.percentile(cloud.means, 5, axis=0)
         high = np.percentile(cloud.means, 95, axis=0)
         center = (low + high) / 2.0
-        core = cloud.means[
-            np.all((cloud.means >= low) & (cloud.means <= high), axis=1)
-        ]
+        core = cloud.means[np.all((cloud.means >= low) & (cloud.means <= high), axis=1)]
         if core.shape[0] < 3:
             core = cloud.means
 
@@ -711,9 +754,7 @@ def render_thumbnail(
 
         viewmat = _look_at_viewmat(eye, center)
         with torch.no_grad():
-            render = renderer.rasterize(
-                torch, cloud, viewmat, width, height, device, sh_degree=0
-            )
+            render = renderer.rasterize(torch, cloud, viewmat, width, height, device, sh_degree=0)
         pixels = (render.cpu().numpy() * 255.0).astype(np.uint8)
         out_path.parent.mkdir(parents=True, exist_ok=True)
         Image.fromarray(pixels).save(out_path, format="JPEG", quality=quality)
@@ -776,10 +817,27 @@ def render_flythrough(
             cloud = ply_io.read_3dgs_ply(splat_path)
             output_path.parent.mkdir(parents=True, exist_ok=True)
             command = [
-                "ffmpeg", "-y", "-nostats", "-loglevel", "error",
-                "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{width}x{height}",
-                "-r", str(fps), "-i", "-",
-                "-c:v", "libx264", "-pix_fmt", "yuv420p", "-movflags", "+faststart",
+                "ffmpeg",
+                "-y",
+                "-nostats",
+                "-loglevel",
+                "error",
+                "-f",
+                "rawvideo",
+                "-pix_fmt",
+                "rgb24",
+                "-s",
+                f"{width}x{height}",
+                "-r",
+                str(fps),
+                "-i",
+                "-",
+                "-c:v",
+                "libx264",
+                "-pix_fmt",
+                "yuv420p",
+                "-movflags",
+                "+faststart",
                 str(output_path),
             ]
             # Diagnostics go to a temp file, never a pipe. Nothing can read a pipe
@@ -789,7 +847,9 @@ def render_flythrough(
             # writer, so no drain thread is needed.
             stderr_file = tempfile.TemporaryFile()
             process = subprocess.Popen(
-                command, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
+                command,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.DEVNULL,
                 stderr=stderr_file,
             )
             try:
@@ -814,9 +874,7 @@ def render_flythrough(
                             target = np.array(
                                 [
                                     a + (b - a) * ease
-                                    for a, b in zip(
-                                        current["target"], nxt["target"], strict=True
-                                    )
+                                    for a, b in zip(current["target"], nxt["target"], strict=True)
                                 ]
                             )
                             render = renderer.rasterize(
@@ -841,17 +899,13 @@ def render_flythrough(
                         height,
                         device,
                     )
-                    process.stdin.write(
-                        (render.cpu().numpy() * 255.0).astype(np.uint8).tobytes()
-                    )
+                    process.stdin.write((render.cpu().numpy() * 255.0).astype(np.uint8).tobytes())
                 process.stdin.close()
                 returncode = process.wait()
                 stderr_file.seek(0)
                 stderr = stderr_file.read().decode("utf-8", errors="replace")
                 if returncode != 0:
-                    raise RuntimeError(
-                        f"ffmpeg failed while encoding the flythrough: {stderr}"
-                    )
+                    raise RuntimeError(f"ffmpeg failed while encoding the flythrough: {stderr}")
                 if not output_path.exists():
                     raise RuntimeError("ffmpeg reported success but produced no output file")
                 return output_path

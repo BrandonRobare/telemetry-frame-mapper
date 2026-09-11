@@ -38,8 +38,9 @@ Do not use accelerator-dependent product defaults. Construct the same benchmark-
 | SH warm-up interval | 500 |
 | background | black `[0, 0, 0]` |
 | internal training-view evaluation | disabled |
+| exported coordinate frame | original COLMAP frame |
 
-The 1,250 iterations and 350,000 cap are the measured Metal `quick` policy from #820. The 625 refinement stop aligns gsplat with msplat 1.1.4's hard half-run split ceiling. A reset interval longer than the run prevents one backend from resetting opacity while the other does not.
+The 1,250 iterations and 350,000 cap are the measured Metal `quick` policy from #820. The 625 refinement stop aligns gsplat with msplat 1.1.4's hard half-run split ceiling. A reset interval longer than the run prevents one backend from resetting opacity while the other does not. CUDA already exports the original COLMAP frame; benchmark-mode Metal sets `keep_crs=true` so one evaluator can apply the same committed camera poses to both PLY files. Production defaults remain unchanged.
 
 Known non-identical implementation details—initial quaternion policy, camera-sampling order, optimizer implementation, and native densification internals—are part of the backend comparison and must be documented, not hidden as matched hyperparameters.
 
@@ -67,6 +68,8 @@ Each host uploads a bundle containing:
 - `SHA256SUMS` for bundle members.
 
 The comparison rejects mismatched schema, fixture, split, policy fingerprint, source commit, Git commit, missing sync, unavailable backend, OOM/cancellation, unreadable PLY, or missing metadata.
+
+The manual CUDA job requires an owner-controlled self-hosted Linux x64 runner labeled `cuda`, NVIDIA CUDA Toolkit 12.4, and a compatible driver. The workflow pins Python 3.12, torch 2.6.0+cu124, and gsplat 1.5.3, and executes a real CUDA rasterization smoke before the benchmark. The manual Metal job pins Python 3.12 and msplat 1.1.4 on the existing arm64 hosted runner. Neither hardware path is reachable from pull-request or push events.
 
 ## Held-out evaluator
 
