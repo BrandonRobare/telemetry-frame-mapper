@@ -71,11 +71,11 @@ Each host uploads a bundle containing:
 
 The comparison rejects mismatched schema, fixture, split, policy fingerprint, source commit, Git commit, missing sync, unavailable backend, OOM/cancellation, unreadable PLY, or missing metadata.
 
-The manual CUDA job requires an owner-controlled self-hosted Linux x64 runner labeled `cuda`, NVIDIA CUDA Toolkit 12.4, and a compatible driver. The workflow pins Python 3.12, torch 2.6.0+cu124, and gsplat 1.5.3, and executes a real CUDA rasterization smoke before the benchmark. The manual Metal job pins Python 3.12 and msplat 1.1.4 on the existing arm64 hosted runner. Neither hardware path is reachable from pull-request or push events.
+The manual CUDA job requires an owner-controlled self-hosted Linux x64 runner labeled `cuda`, NVIDIA CUDA Toolkit 12.4, and a compatible driver. The workflow pins Python 3.12, torch 2.6.0+cu124, and gsplat 1.5.3, and executes a real CUDA rasterization smoke before the benchmark. The manual Metal job pins Python 3.12 and msplat 1.1.4 on the existing arm64 hosted runner. Neither hardware path is reachable from pull-request or push events. Both jobs additionally require the repository owner to dispatch them and supply the exact reviewed commit through `heldout_parity_approved_sha`; checkout fails unless that value equals `GITHUB_SHA`.
 
 ## Held-out evaluator
 
-Evaluate both exported PLY files on one real CUDA host with the same application-owned gsplat/PyTorch evaluator, fixed held-out image bytes, COLMAP poses/intrinsics, downscale factor, preregistered magenta background, PSNR formula, and 11×11 Gaussian-window SSIM implementation. Store per-view PSNR, SSIM, and rendered-image SHA-256 plus arithmetic means. Retain the rendered evaluation outputs in the evidence artifact so counts and metrics are independently auditable.
+Evaluate both exported PLY files on one real CUDA host with the same application-owned gsplat/PyTorch evaluator, fixed held-out image bytes, COLMAP poses/intrinsics, downscale factor, preregistered magenta background, PSNR formula, and 11×11 Gaussian-window SSIM implementation. Store per-view PSNR, SSIM, and rendered-image SHA-256 plus arithmetic means. The compare command requires an empty evidence directory and an output evidence bundle; it retains both source run bundles, every rendered PNG, canonical comparison JSON, and a checksum manifest.
 
 ## Preregistered decision
 
@@ -95,6 +95,11 @@ uv lock --check
 uv run --frozen --no-sync ruff check .
 uv run --frozen --no-sync pytest -q
 cd frontend && npm audit --audit-level=moderate && npm test -- --run && npm run lint && npm run build
+
+sha=$(git rev-parse HEAD)
+gh workflow run ci.yml --ref wave8/784-cuda-metal-parity -f heldout_parity_target=metal -f heldout_parity_approved_sha="$sha"
+
+uv run --frozen --no-sync python -m scripts.benchmark_heldout_parity compare --cuda-bundle heldout-cuda.tar.gz --metal-bundle heldout-metal.tar.gz --source /path/to/pinned/odm_data_aukerman --output heldout-cuda-metal-aukerman.json --evidence-dir heldout-comparison --evidence-bundle heldout-comparison.tar.gz
 ```
 
 Real-hardware completion additionally requires a CUDA usability/JIT-rasterization smoke, native Metal/msplat smoke, exact artifact/run/head verification, comparison output at the public PLY boundary, exact-head CI/CodeQL, and independent review.

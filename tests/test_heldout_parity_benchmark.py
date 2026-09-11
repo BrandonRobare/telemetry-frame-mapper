@@ -49,6 +49,7 @@ def test_benchmark_policy_is_exact_and_fingerprinted() -> None:
     assert config.benchmark_test_every == 8
     assert config.benchmark_keep_crs is True
     assert config.background_color == (0.6130, 0.0101, 0.3984)
+    assert tuple(parity.POLICY["background_color"]) == parity.EVALUATOR_BACKGROUND
     assert (
         parity.policy_fingerprint()
         == hashlib.sha256(parity._canonical(parity.POLICY).encode("ascii")).hexdigest()
@@ -147,6 +148,38 @@ def test_bundle_validation_rejects_run_json_ply_identity_drift(tmp_path: Path) -
         parity._read_bundle(bundle)
 
 
+def test_failed_run_checksums_retained_ply(monkeypatch, tmp_path: Path) -> None:
+    fixture = {"fixture_id": "fixture", "source_commit": "source"}
+    monkeypatch.setattr(parity, "load_fixture", lambda fixture_dir=None: (tmp_path, fixture))
+    monkeypatch.setattr(parity, "_source_images", lambda source, commit: tmp_path)
+    monkeypatch.setattr(parity, "validate_fixture", lambda *args: (fixture, tmp_path))
+    monkeypatch.setattr(parity, "_runtime_metadata", lambda kind: {"kind": kind})
+    monkeypatch.setattr(parity, "_git_commit", lambda repository: "commit")
+
+    def fail_worker(command, **kwargs):
+        evidence = Path(command[command.index("--output-dir") + 1])
+        (evidence / "splat.ply").write_bytes(b"invalid-ply")
+        kwargs["stdout"].write("failed\n")
+        return SimpleNamespace(returncode=1)
+
+    monkeypatch.setattr(parity.subprocess, "run", fail_worker)
+    output = tmp_path / "failed.tar.gz"
+    with pytest.raises(RuntimeError, match="evidence bundle"):
+        parity.run("metal", tmp_path, output)
+
+    with tarfile.open(output) as archive:
+        names = {member.name for member in archive.getmembers()}
+        assert "splat.ply" in names
+        failure_file = archive.extractfile("failure.json")
+        sums_file = archive.extractfile("SHA256SUMS")
+        assert failure_file is not None
+        assert sums_file is not None
+        failure = json.load(failure_file)
+        assert failure["splat_sha256"] == hashlib.sha256(b"invalid-ply").hexdigest()
+        sums = sums_file.read().decode()
+        assert f"{failure['splat_sha256']}  splat.ply" in sums
+
+
 def test_protocol_metadata_rejects_policy_fixture_and_sync_drift() -> None:
     _, fixture = parity.load_fixture()
     valid = {
@@ -236,7 +269,16 @@ def test_compare_verdict_and_count_alert(monkeypatch, tmp_path: Path) -> None:
     )
     monkeypatch.setattr(parity, "_render_bundle", lambda *args: next(rendered))
 
-    result = parity.compare(cuda, metal, tmp_path, tmp_path / "comparison.json")
+    evidence_dir = tmp_path / "evidence"
+    evidence_bundle = tmp_path / "comparison-evidence.tar.gz"
+    result = parity.compare(
+        cuda,
+        metal,
+        tmp_path,
+        tmp_path / "comparison.json",
+        evidence_dir,
+        evidence_bundle,
+    )
 
     assert result["verdict"] == "PASS"
     assert result["count_alert"] is True
@@ -244,6 +286,13 @@ def test_compare_verdict_and_count_alert(monkeypatch, tmp_path: Path) -> None:
     assert result["timing"]["metal_to_cuda_wall_ratio"] == 1.0
     assert result["timing"]["metal_to_cuda_throughput_ratio"] == 1.0
     assert json.loads((tmp_path / "comparison.json").read_text())["verdict"] == "PASS"
+    with tarfile.open(evidence_bundle) as archive:
+        assert {member.name for member in archive.getmembers()} == {
+            "SHA256SUMS",
+            "comparison.json",
+            "cuda-run.tar.gz",
+            "metal-run.tar.gz",
+        }
 
 
 def test_cuda_config_defaults_and_benchmark_background_are_opt_in() -> None:
@@ -296,6 +345,9 @@ def test_hardware_workflow_is_manual_branch_gated_and_version_pinned() -> None:
     assert "heldout-parity-metal:" in workflow
     assert "heldout-parity-cuda:" in workflow
     assert workflow.count("github.event_name == 'workflow_dispatch'") >= 3
+    assert workflow.count("github.actor == github.repository_owner") == 2
+    assert "heldout_parity_approved_sha:" in workflow
+    assert workflow.count('test "${GITHUB_SHA}" = "${APPROVED_SHA}"') == 2
     assert workflow.count("refs/heads/wave8/784-cuda-metal-parity") >= 4
     assert "runs-on: [self-hosted, linux, x64, cuda]" in workflow
     assert "torch==2.6.0" in workflow

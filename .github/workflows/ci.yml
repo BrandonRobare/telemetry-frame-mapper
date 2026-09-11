@@ -15,6 +15,11 @@ on:
         type: choice
         options: [none, metal, cuda]
         default: none
+      heldout_parity_approved_sha:
+        description: Exact reviewed commit for a #784 hardware run
+        required: false
+        type: string
+        default: ""
   push:
     branches: [main]
   pull_request:
@@ -428,16 +433,21 @@ jobs:
   heldout-parity-metal:
     if: >
       github.event_name == 'workflow_dispatch' &&
+      github.actor == github.repository_owner &&
       github.ref == 'refs/heads/wave8/784-cuda-metal-parity' &&
+      inputs.heldout_parity_approved_sha != '' &&
       inputs.heldout_parity_target == 'metal'
     runs-on: macos-latest
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Verify exact branch checkout
+        env:
+          APPROVED_SHA: ${{ inputs.heldout_parity_approved_sha }}
         run: |
           test "${GITHUB_REF}" = "refs/heads/wave8/784-cuda-metal-parity"
           test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"
+          test "${GITHUB_SHA}" = "${APPROVED_SHA}"
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           version: "0.11.16"
@@ -473,16 +483,21 @@ jobs:
     # Owner-dispatched only. Public pull requests and pushes cannot queue this trusted runner.
     if: >
       github.event_name == 'workflow_dispatch' &&
+      github.actor == github.repository_owner &&
       github.ref == 'refs/heads/wave8/784-cuda-metal-parity' &&
+      inputs.heldout_parity_approved_sha != '' &&
       inputs.heldout_parity_target == 'cuda'
     runs-on: [self-hosted, linux, x64, cuda]
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Verify exact branch checkout
+        env:
+          APPROVED_SHA: ${{ inputs.heldout_parity_approved_sha }}
         run: |
           test "${GITHUB_REF}" = "refs/heads/wave8/784-cuda-metal-parity"
           test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"
+          test "${GITHUB_SHA}" = "${APPROVED_SHA}"
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           version: "0.11.16"

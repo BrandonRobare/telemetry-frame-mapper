@@ -28,6 +28,7 @@ import numpy as np
 
 FIXTURE_ID = "aukerman-colmap-v1"
 SCHEMA_VERSION = 1
+EVALUATOR_BACKGROUND = (0.6130, 0.0101, 0.3984)
 POLICY = {
     "iterations": 1250,
     "sh_degree": 1,
@@ -44,7 +45,7 @@ POLICY = {
     "benchmark_heldout_split": True,
     "benchmark_test_every": 8,
     "benchmark_keep_crs": True,
-    "background_color": [0.6130, 0.0101, 0.3984],
+    "background_color": list(EVALUATOR_BACKGROUND),
 }
 PSNR_DELTA_MIN = -1.0
 SSIM_DELTA_MIN = -0.030
@@ -411,6 +412,7 @@ def run(kind: str, source: Path, output: Path, fixture_dir: Path | None = None) 
             )
         runtime = _runtime_metadata(kind)
         if process.returncode != 0 or not worker_result.is_file():
+            failed_ply = evidence / "splat.ply"
             failure = {
                 "schema_version": SCHEMA_VERSION,
                 "status": "failed",
@@ -422,9 +424,14 @@ def run(kind: str, source: Path, output: Path, fixture_dir: Path | None = None) 
                 "runtime": runtime,
                 "backend_log_sha256": _sha256(log_path),
             }
+            failure_members = ["backend.log", "environment.txt", "failure.json"]
+            if failed_ply.is_file():
+                failure["splat_sha256"] = _sha256(failed_ply)
+                failure["splat_size_bytes"] = failed_ply.stat().st_size
+                failure_members.append("splat.ply")
             (evidence / "failure.json").write_text(_canonical(failure) + "\n", encoding="utf-8")
             (evidence / "environment.txt").write_text(_environment_text(runtime), encoding="utf-8")
-            _write_sums(evidence, ["backend.log", "environment.txt", "failure.json"])
+            _write_sums(evidence, failure_members)
             output.parent.mkdir(parents=True, exist_ok=True)
             _portable_tar(evidence, output)
             raise RuntimeError(f"{kind} benchmark worker failed; evidence bundle: {output}")
@@ -546,7 +553,7 @@ def _render_bundle(
                 size[1],
                 device,
                 intrinsics=intrinsics,
-                background_color=(0.0, 0.0, 0.0),
+                background_color=EVALUATOR_BACKGROUND,
             )
             target = torch_runtime.from_numpy(target_np).to(device).float() / 255.0
             psnr = cuda_gsplat._psnr(torch_runtime, render, target)
@@ -580,13 +587,17 @@ def compare(
     metal_bundle: Path,
     source: Path,
     output: Path,
+    evidence_dir: Path,
+    evidence_bundle: Path,
     fixture_dir: Path | None = None,
-    evidence_dir: Path | None = None,
 ) -> dict[str, Any]:
     from backend.services.splat_backends import get_training_backend
 
     if not get_training_backend("cuda").is_available():
         raise RuntimeError("CUDA gsplat evaluator target is unavailable")
+    if evidence_dir.exists() and any(evidence_dir.iterdir()):
+        raise RuntimeError("comparison evidence directory must be empty")
+    evidence_dir.mkdir(parents=True, exist_ok=True)
     root, fixture = load_fixture(fixture_dir)
     images = _source_images(source, fixture["source_commit"])
     with tempfile.TemporaryDirectory(prefix="heldout-compare-") as temporary:
@@ -646,8 +657,18 @@ def compare(
             "count_alert": ratio < 0.50 or ratio > 2.00,
             "verdict": verdict,
         }
+    comparison_text = _canonical(result) + "\n"
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(_canonical(result) + "\n", encoding="utf-8")
+    output.write_text(comparison_text, encoding="utf-8")
+    (evidence_dir / "comparison.json").write_text(comparison_text, encoding="utf-8")
+    shutil.copy2(cuda_bundle, evidence_dir / "cuda-run.tar.gz")
+    shutil.copy2(metal_bundle, evidence_dir / "metal-run.tar.gz")
+    evidence_members = sorted(
+        path.name for path in evidence_dir.iterdir() if path.is_file() and path.name != "SHA256SUMS"
+    )
+    _write_sums(evidence_dir, evidence_members)
+    evidence_bundle.parent.mkdir(parents=True, exist_ok=True)
+    _portable_tar(evidence_dir, evidence_bundle)
     return result
 
 
@@ -664,8 +685,9 @@ def main() -> int:
     compare_parser.add_argument("--metal-bundle", type=Path, required=True)
     compare_parser.add_argument("--source", type=Path, required=True)
     compare_parser.add_argument("--output", type=Path, required=True)
+    compare_parser.add_argument("--evidence-dir", type=Path, required=True)
+    compare_parser.add_argument("--evidence-bundle", type=Path, required=True)
     compare_parser.add_argument("--fixture-dir", type=Path)
-    compare_parser.add_argument("--evidence-dir", type=Path)
     worker_parser = commands.add_parser("worker")
     worker_parser.add_argument("--kind", choices=("cuda", "metal"), required=True)
     worker_parser.add_argument("--colmap-dir", type=Path, required=True)
@@ -680,8 +702,9 @@ def main() -> int:
             args.metal_bundle,
             args.source,
             args.output,
-            args.fixture_dir,
             args.evidence_dir,
+            args.evidence_bundle,
+            args.fixture_dir,
         )
     else:
         return worker(args.kind, args.colmap_dir, args.output_dir, args.result)
