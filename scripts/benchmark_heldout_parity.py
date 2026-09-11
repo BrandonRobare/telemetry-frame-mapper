@@ -203,6 +203,29 @@ def _sync_target(kind: str) -> None:
         raise ValueError(f"unsupported target: {kind}")
 
 
+def _worker_command(
+    kind: str, staged: Path, evidence: Path, worker_result: Path
+) -> tuple[list[str], Path]:
+    repository = Path(__file__).parents[1]
+    return (
+        [
+            sys.executable,
+            "-m",
+            "scripts.benchmark_heldout_parity",
+            "worker",
+            "--kind",
+            kind,
+            "--colmap-dir",
+            str(staged),
+            "--output-dir",
+            str(evidence),
+            "--result",
+            str(worker_result),
+        ],
+        repository,
+    )
+
+
 def _runtime_metadata(kind: str) -> dict[str, Any]:
     versions: dict[str, str | None] = {}
     for package in ("numpy", "pillow", "torch", "gsplat", "msplat"):
@@ -344,21 +367,15 @@ def run(kind: str, source: Path, output: Path, fixture_dir: Path | None = None) 
         evidence.mkdir()
         worker_result = workspace / "worker.json"
         log_path = evidence / "backend.log"
-        command = [
-            sys.executable,
-            str(Path(__file__).resolve()),
-            "worker",
-            "--kind",
-            kind,
-            "--colmap-dir",
-            str(staged),
-            "--output-dir",
-            str(evidence),
-            "--result",
-            str(worker_result),
-        ]
+        command, worker_cwd = _worker_command(kind, staged, evidence, worker_result)
         with log_path.open("w", encoding="utf-8") as log:
-            process = subprocess.run(command, stdout=log, stderr=subprocess.STDOUT, check=False)
+            process = subprocess.run(
+                command,
+                cwd=worker_cwd,
+                stdout=log,
+                stderr=subprocess.STDOUT,
+                check=False,
+            )
         runtime = _runtime_metadata(kind)
         if process.returncode != 0 or not worker_result.is_file():
             failure = {

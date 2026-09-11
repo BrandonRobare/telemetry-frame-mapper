@@ -55,6 +55,15 @@ def test_benchmark_policy_is_exact_and_fingerprinted() -> None:
     )
 
 
+def test_worker_subprocess_uses_module_mode_from_repository_root(tmp_path: Path) -> None:
+    command, cwd = parity._worker_command(
+        "metal", tmp_path / "colmap", tmp_path / "evidence", tmp_path / "result.json"
+    )
+
+    assert command[1:3] == ["-m", "scripts.benchmark_heldout_parity"]
+    assert cwd == Path(parity.__file__).parents[1]
+
+
 def test_fixture_metadata_has_preregistered_split_counts() -> None:
     _, fixture = parity.load_fixture()
 
