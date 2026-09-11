@@ -48,7 +48,7 @@ def test_benchmark_policy_is_exact_and_fingerprinted() -> None:
     assert config.benchmark_heldout_split is True
     assert config.benchmark_test_every == 8
     assert config.benchmark_keep_crs is True
-    assert config.background_color == (0.0, 0.0, 0.0)
+    assert config.background_color == (0.6130, 0.0101, 0.3984)
     assert (
         parity.policy_fingerprint()
         == hashlib.sha256(parity._canonical(parity.POLICY).encode("ascii")).hexdigest()
@@ -62,6 +62,23 @@ def test_worker_subprocess_uses_module_mode_from_repository_root(tmp_path: Path)
 
     assert command[1:3] == ["-m", "scripts.benchmark_heldout_parity"]
     assert cwd == Path(parity.__file__).parents[1]
+
+
+def test_export_validation_rejects_nonfinite_gaussians(tmp_path: Path) -> None:
+    from backend.services import ply_io
+
+    cloud = ply_io.GaussianCloud(
+        means=np.array([[0.0, 0.0, 1.0], [np.nan, 0.0, 2.0]], dtype=np.float32),
+        sh0=np.zeros((2, 3), dtype=np.float32),
+        shN=np.zeros((2, 3, 3), dtype=np.float32),
+        opacities=np.zeros(2, dtype=np.float32),
+        scales=np.zeros((2, 3), dtype=np.float32),
+        quats=np.array([[1.0, 0.0, 0.0, 0.0], [1.0, 0.0, 0.0, 0.0]], dtype=np.float32),
+    )
+    output = ply_io.write_3dgs_ply(tmp_path / "invalid.ply", cloud)
+
+    with pytest.raises(RuntimeError, match="1/2 non-finite or invalid Gaussians"):
+        parity.validate_exported_splat(output, 2)
 
 
 def test_fixture_metadata_has_preregistered_split_counts() -> None:
@@ -171,9 +188,14 @@ def test_worker_syncs_after_train_before_it_reports_result(monkeypatch, tmp_path
         "backend.services.splat_backends.get_training_backend", lambda kind: backend
     )
     monkeypatch.setattr(parity, "_sync_target", lambda kind: order.append("sync"))
+    monkeypatch.setattr(
+        parity,
+        "validate_exported_splat",
+        lambda path, count: order.append("validate"),
+    )
 
     assert parity.worker("cuda", tmp_path, tmp_path / "out", tmp_path / "result.json") == 0
-    assert order == ["train", "sync"]
+    assert order == ["train", "sync", "validate"]
     assert json.loads((tmp_path / "result.json").read_text())["sync_confirmation"] is True
 
 
@@ -233,7 +255,7 @@ def test_cuda_config_defaults_and_benchmark_background_are_opt_in() -> None:
     assert default.background_color is None
     assert benchmark.benchmark_heldout_split is True
     assert benchmark.benchmark_keep_crs is True
-    assert benchmark.background_color == (0.0, 0.0, 0.0)
+    assert benchmark.background_color == (0.6130, 0.0101, 0.3984)
 
 
 def test_cuda_split_sorts_only_benchmark_views_and_preserves_default_order(tmp_path: Path) -> None:

@@ -4,6 +4,8 @@ Issue: [#784](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/784
 
 Status: preregistered before #784 measurements. Do not edit thresholds after inspecting backend results; protocol corrections require a dated rationale and fresh runs of both backends.
 
+Protocol correction (2026-09-11): run `34606882358` proved the initial black-background harness executed at `c5ab4357d2b503faeee9f780328454fa671b9ea6`, but its PLY contained 10,194 non-finite rows out of 25,225. That run is invalid, not quality evidence. Because msplat 1.1.4 intentionally trains against magenta by default, both trainers and the common evaluator now use that same documented native background. The quality thresholds are unchanged, output-finiteness validation is mandatory, and both valid backend runs must use the revised policy fingerprint.
+
 ## Objective
 
 Measure one fixed public aerial scene through the production CUDA gsplat and Metal msplat trainer seams. The comparison answers whether the exported Metal splat remains within an explicitly acceptable held-out quality delta, and records hardware-qualified training throughput and convergence counts. It does not claim universal parity across scenes or hardware.
@@ -36,7 +38,7 @@ Do not use accelerator-dependent product defaults. Construct the same benchmark-
 | SSIM loss weight | 0.2 |
 | initial opacity | 0.1 |
 | SH warm-up interval | 500 |
-| background | black `[0, 0, 0]` |
+| background | msplat 1.1.4 native magenta `[0.6130, 0.0101, 0.3984]` |
 | internal training-view evaluation | disabled |
 | exported coordinate frame | original COLMAP frame |
 
@@ -73,7 +75,7 @@ The manual CUDA job requires an owner-controlled self-hosted Linux x64 runner la
 
 ## Held-out evaluator
 
-Evaluate both exported PLY files on one real CUDA host with the same application-owned gsplat/PyTorch evaluator, fixed held-out image bytes, COLMAP poses/intrinsics, downscale factor, black background, PSNR formula, and 11×11 Gaussian-window SSIM implementation. Store per-view PSNR, SSIM, and rendered-image SHA-256 plus arithmetic means. Retain the rendered evaluation outputs in the evidence artifact so counts and metrics are independently auditable.
+Evaluate both exported PLY files on one real CUDA host with the same application-owned gsplat/PyTorch evaluator, fixed held-out image bytes, COLMAP poses/intrinsics, downscale factor, preregistered magenta background, PSNR formula, and 11×11 Gaussian-window SSIM implementation. Store per-view PSNR, SSIM, and rendered-image SHA-256 plus arithmetic means. Retain the rendered evaluation outputs in the evidence artifact so counts and metrics are independently auditable.
 
 ## Preregistered decision
 

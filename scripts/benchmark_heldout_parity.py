@@ -24,6 +24,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+
 FIXTURE_ID = "aukerman-colmap-v1"
 SCHEMA_VERSION = 1
 POLICY = {
@@ -42,7 +44,7 @@ POLICY = {
     "benchmark_heldout_split": True,
     "benchmark_test_every": 8,
     "benchmark_keep_crs": True,
-    "background_color": [0.0, 0.0, 0.0],
+    "background_color": [0.6130, 0.0101, 0.3984],
 }
 PSNR_DELTA_MIN = -1.0
 SSIM_DELTA_MIN = -0.030
@@ -296,6 +298,33 @@ def _maximum_rss_bytes() -> int:
     return value if sys.platform == "darwin" else value * 1024
 
 
+def validate_exported_splat(path: Path, expected_count: int) -> int:
+    """Reject malformed or numerically invalid application PLY output."""
+    from backend.services import ply_io
+
+    cloud = ply_io.read_3dgs_ply(path)
+    count = int(cloud.means.shape[0])
+    finite = (
+        np.isfinite(cloud.means).all(axis=1)
+        & np.isfinite(cloud.scales).all(axis=1)
+        & np.isfinite(cloud.quats).all(axis=1)
+        & np.isfinite(cloud.opacities)
+        & np.isfinite(cloud.sh0).all(axis=1)
+        & np.isfinite(cloud.shN).all(axis=(1, 2))
+    )
+    with np.errstate(over="ignore", invalid="ignore"):
+        finite &= np.isfinite(np.exp(cloud.scales)).all(axis=1)
+    finite &= np.linalg.norm(cloud.quats, axis=1) > 1e-8
+    invalid = count - int(finite.sum())
+    if count == 0 or invalid:
+        raise RuntimeError(
+            f"exported splat contains {invalid}/{count} non-finite or invalid Gaussians"
+        )
+    if count != expected_count:
+        raise RuntimeError(f"backend reported {expected_count} Gaussians but exported {count}")
+    return count
+
+
 def worker(kind: str, colmap_dir: Path, output_dir: Path, result_path: Path) -> int:
     """Fresh-process training entry point; called only by the parent command."""
     from backend.services.splat_backends import get_training_backend
@@ -317,6 +346,10 @@ def worker(kind: str, colmap_dir: Path, output_dir: Path, result_path: Path) -> 
     elapsed = time.perf_counter() - started
     if not output.is_file():
         raise RuntimeError("backend completed without exporting splat.ply")
+    reported_count = result.get("gaussian_count")
+    if not isinstance(reported_count, int):
+        raise RuntimeError("backend returned an invalid gaussian_count")
+    validate_exported_splat(output, reported_count)
     result_path.write_text(
         _canonical(
             {
@@ -593,7 +626,7 @@ def compare(
             "comparison_git_commit": commit,
             "fixture": fixture,
             "policy_fingerprint": policy_fingerprint(),
-            "background_color": [0.0, 0.0, 0.0],
+            "background_color": [0.6130, 0.0101, 0.3984],
             "evaluator_runtime": _runtime_metadata("cuda"),
             "cuda": {"run": cuda_run, "views": cuda_views, "means": cuda_means},
             "metal": {"run": metal_run, "views": metal_views, "means": metal_means},
