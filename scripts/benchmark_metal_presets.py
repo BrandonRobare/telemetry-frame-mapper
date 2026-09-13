@@ -5,7 +5,6 @@ import hashlib
 import importlib.metadata
 import json
 import platform
-import resource
 import subprocess
 import sys
 import threading
@@ -65,6 +64,12 @@ def _tree_sha256(root: Path) -> str:
 
 
 def _maximum_rss_bytes() -> int:
+    # ru_maxrss is Unix-only; importing resource at module top broke the
+    # benchmark entirely on Windows (#878). Report 0 (unknown) there.
+    if sys.platform == "win32":
+        return 0
+    import resource
+
     value = int(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
     return value if sys.platform == "darwin" else value * 1024
 
