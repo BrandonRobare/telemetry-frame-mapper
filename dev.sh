@@ -8,7 +8,7 @@ if ! command -v uv >/dev/null 2>&1; then
   echo "uv is required for source development. See docs/INSTALL.md."
   exit 1
 fi
-uv sync --group backend --group dev
+uv sync --inexact --group backend --group dev
 # Reload mode uses one API worker; python -m backend validates the bind before serving.
 # Run from the repo root: config.yaml (deployment host/port, default 127.0.0.1:8000) and the
 # ./processed static mount resolve from here
