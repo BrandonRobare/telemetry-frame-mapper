@@ -119,7 +119,8 @@ def test_selected_model_view_points_cameras_at_selected_submodel(tmp_path: Path)
         images_bin = (view / "images.bin").resolve()
         assert images_bin == (colmap / "sparse" / "5" / "images.bin").resolve()
         assert (view / "images").resolve() == (colmap / "images").resolve()
-        assert (view / "points3D.bin").resolve() == (colmap / "sparse" / "5" / "points3D.bin").resolve()
+        points = (view / "points3D.bin").resolve()
+        assert points == (colmap / "sparse" / "5" / "points3D.bin").resolve()
     finally:
         if view is not None:
             shutil.rmtree(view)
@@ -161,7 +162,9 @@ def test_train_without_fragmentation_loads_workspace_root_directly(tmp_path: Pat
     colmap = tmp_path / "colmap"  # no sparse dir at all — msplat fallback path
     runtime, record = _runtime(tmp_path)
 
-    metal_msplat._train(runtime, colmap, tmp_path / "out" / "splat.ply", _config(), MagicMock(), threading.Event())
+    metal_msplat._train(
+        runtime, colmap, tmp_path / "out" / "splat.ply", _config(), MagicMock(), threading.Event()
+    )
 
     assert record["loaded_root"] == colmap
 
