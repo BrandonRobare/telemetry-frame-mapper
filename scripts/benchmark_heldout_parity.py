@@ -44,7 +44,6 @@ POLICY = {
     "eval_every": 0,
     "benchmark_heldout_split": True,
     "benchmark_test_every": 8,
-    "benchmark_keep_crs": True,
     "background_color": list(EVALUATOR_BACKGROUND),
 }
 PSNR_DELTA_MIN = -1.0

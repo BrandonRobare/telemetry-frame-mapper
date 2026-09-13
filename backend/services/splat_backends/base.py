@@ -37,7 +37,6 @@ class TrainerConfig:
     # Opt-in benchmark controls; product presets keep their historical behavior.
     benchmark_heldout_split: bool = False
     benchmark_test_every: int = 8
-    benchmark_keep_crs: bool = False
     background_color: tuple[float, float, float] | None = None
 
     @classmethod

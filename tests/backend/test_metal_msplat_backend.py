@@ -154,7 +154,6 @@ def test_metal_benchmark_split_and_black_background_are_explicit(tmp_path: Path)
     config = _config()
     config.benchmark_heldout_split = True
     config.benchmark_test_every = 8
-    config.benchmark_keep_crs = True
     config.background_color = (0.0, 0.0, 0.0)
 
     metal_msplat._train(
