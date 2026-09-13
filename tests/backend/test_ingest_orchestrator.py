@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 from unittest.mock import patch
 
 import piexif
-import pytest
 from PIL import Image as PILImage
 
 
@@ -224,13 +222,13 @@ def test_run_imports_nested_browser_style_paths(tmp_path, setup_test_db):
     assert image.filename == "DJI_0001.jpg"
 
 
-@pytest.mark.xfail(
-    sys.platform == "darwin",
-    reason="default APFS collapses case-variant thumbnail paths; tracked by #831",
-    strict=True,
-)
 def test_run_disambiguates_duplicate_nested_basenames_and_thumbnails(tmp_path, setup_test_db):
-    """Case-variant sibling names retain distinct records and thumbnail contents."""
+    """Case-variant sibling names retain distinct records and thumbnail contents.
+
+    Previously xfail-strict on macOS: default APFS collapsed the case-variant
+    thumb paths. Thumbnail names now carry the image id (#831), so the test
+    passes everywhere — the xfail was removed with the cause.
+    """
     from backend.db.models import Image as ImageModel
     from backend.db.models import Session as SessionModel
     from backend.main import app
@@ -280,6 +278,10 @@ def test_run_disambiguates_duplicate_nested_basenames_and_thumbnails(tmp_path, s
     thumbnails = [Path(image.thumb_path) for image in images]
     assert all(thumbnail.is_file() for thumbnail in thumbnails)
     assert len({thumbnail.read_bytes() for thumbnail in thumbnails}) == 2
+    # #831: the image id prefixes the thumb basename so case-variant siblings
+    # cannot collapse to one file on case-insensitive macOS APFS.
+    for image, thumbnail in zip(images, thumbnails, strict=True):
+        assert thumbnail.name == f"{image.id}_{image.filename}"
 
 
 def test_run_marks_empty_folder_as_an_error(tmp_path, setup_test_db):

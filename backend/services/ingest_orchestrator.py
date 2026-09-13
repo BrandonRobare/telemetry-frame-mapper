@@ -136,20 +136,12 @@ def _run(session_id: int, folder: Path, db_factory) -> None:
 
             # generate thumbnail into processed_dir/<session_id>/thumbs/
             thumb_path = None
-            try:
-                thumb_dir = Path(cfg.processed_dir) / str(session_id) / "thumbs"
-                thumb_dir.mkdir(parents=True, exist_ok=True)
-                dest = thumb_dir / filename
-                generate_thumbnail(str(accepted_file), str(dest), size=ingest_thumbnail_size)
-                thumb_path = str(dest)
-            except Exception:
-                thumb_path = None
 
             img = Image(
                 session_id=session_id,
                 filename=filename,
                 filepath=str(accepted_file),
-                thumb_path=thumb_path,
+                thumb_path=None,
                 timestamp=exif.get("timestamp"),
                 latitude=exif.get("latitude"),
                 longitude=exif.get("longitude"),
@@ -170,6 +162,21 @@ def _run(session_id: int, folder: Path, db_factory) -> None:
             )
             db.add(img)
             db.flush()
+
+            # Generate the thumbnail after the row exists so the file name can
+            # carry the image id: case-variant sibling basenames (IMG.JPG vs
+            # img.jpg) collapse to the same path on case-insensitive macOS
+            # APFS and silently overwrite each other's thumbnails (#831).
+            thumb_path = None
+            try:
+                thumb_dir = Path(cfg.processed_dir) / str(session_id) / "thumbs"
+                thumb_dir.mkdir(parents=True, exist_ok=True)
+                dest = thumb_dir / f"{img.id}_{filename}"
+                generate_thumbnail(str(accepted_file), str(dest), size=ingest_thumbnail_size)
+                thumb_path = str(dest)
+            except Exception:
+                thumb_path = None
+            img.thumb_path = thumb_path
 
             try:
                 sharpness = score_sharpness(str(accepted_file))
