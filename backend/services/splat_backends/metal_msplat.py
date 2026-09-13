@@ -213,7 +213,8 @@ def validate_exported_ply(path: Path, expected_count: int | None) -> int:
     details = ", ".join(f"{key}={value}" for key, value in sorted(problems.items()))
     if mismatch:
         details = f"{details}, " if details else ""
-        details += f"count={rows} expected={int(expected_count) if expected_count is not None else '?'}"
+        expected = int(expected_count) if expected_count is not None else "?"
+        details += f"count={rows} expected={expected}"
     raise RuntimeError(
         "msplat exported an invalid splat PLY "
         f"({details}); the artifact is retained at {path} and the "
