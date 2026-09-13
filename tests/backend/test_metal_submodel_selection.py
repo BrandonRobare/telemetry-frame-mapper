@@ -114,8 +114,10 @@ def test_selected_model_view_points_cameras_at_selected_submodel(tmp_path: Path)
     view = metal_msplat._selected_model_view(colmap)
     try:
         assert view is not None
-        assert (view / "cameras.bin").resolve() == (colmap / "sparse" / "5" / "cameras.bin").resolve()
-        assert (view / "images.bin").resolve() == (colmap / "sparse" / "5" / "images.bin").resolve()
+        cameras = (view / "cameras.bin").resolve()
+        assert cameras == (colmap / "sparse" / "5" / "cameras.bin").resolve()
+        images_bin = (view / "images.bin").resolve()
+        assert images_bin == (colmap / "sparse" / "5" / "images.bin").resolve()
         assert (view / "images").resolve() == (colmap / "images").resolve()
         assert (view / "points3D.bin").resolve() == (colmap / "sparse" / "5" / "points3D.bin").resolve()
     finally:
