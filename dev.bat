@@ -17,7 +17,7 @@ if errorlevel 1 (
 
 if exist frontend\ (
     echo Starting frontend...
-    start "Frontend" cmd /k "cd frontend && npm install && npm run dev"
+    start "Frontend" cmd /k "cd frontend && npm ci && npm run dev"
     echo Open http://localhost:5173
 ) else (
     echo frontend/ not found -- skipping frontend dev server

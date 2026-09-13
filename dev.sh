@@ -18,7 +18,7 @@ echo "Backend PID: $BACKEND_PID (http://localhost:8000)"
 
 if [ -d frontend ]; then
   echo "Starting frontend..."
-  (cd frontend && npm install && npm run dev) &
+  (cd frontend && npm ci && npm run dev) &
   FRONTEND_PID=$!
   echo "Frontend PID: $FRONTEND_PID"
   echo "Open http://localhost:5173"
