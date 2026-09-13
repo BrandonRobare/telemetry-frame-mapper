@@ -14,7 +14,10 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+
 from backend.services.colmap_io import _pick_best_submodel
+from backend.services.ply_io import GaussianCloud, read_3dgs_ply
 from backend.services.splat_backends.base import (
     _GPU_LOCK,
     ProgressCallback,
@@ -164,6 +167,59 @@ def _selected_model_view(colmap_dir: Path) -> Path | None:
         (view / "points3D.ply").symlink_to(selected / "points3D.ply")
     return view
 
+def _cloud_invalid_counts(cloud: GaussianCloud) -> dict[str, int]:
+    """Count rows with non-finite or structurally invalid Gaussian values."""
+    counts: dict[str, int] = {}
+    for name in ("means", "scales", "quats", "opacities", "sh0", "shN"):
+        values = getattr(cloud, name)
+        invalid = int(np.count_nonzero(~np.isfinite(values)))
+        if invalid:
+            counts[name] = invalid
+    # Log scales are exponentiated downstream (float32 render); a log-scale
+    # whose exponent overflows float32 is an invalid export even if the stored
+    # value is finite (#849/#851).
+    exponentiated = np.exp(cloud.scales.astype(np.float64))
+    overflowed = int(
+        np.count_nonzero(~np.isfinite(exponentiated) | (exponentiated > np.finfo(np.float32).max))
+    )
+    if overflowed:
+        counts["exponentiated_scales"] = overflowed
+    zero_norms = int(np.count_nonzero(np.linalg.norm(cloud.quats, axis=1) == 0.0))
+    if zero_norms:
+        counts["zero_norm_quaternions"] = zero_norms
+    return counts
+
+
+def validate_exported_ply(path: Path, expected_count: int | None) -> int:
+    """Reject a Metal export containing invalid Gaussian rows.
+
+    Reads the artifact with the same parser the rest of the pipeline consumes
+    and verifies every means/scale/quaternion/opacity/SH coefficient is finite,
+    exponentiated scales do not overflow, quaternion norms are non-zero, and
+    the serialized row count matches what the trainer reported.
+
+    Returns the serialized row count on success. On failure it raises with
+    per-field counts and leaves the artifact in place for diagnostics — an
+    invalid Metal export must never be recorded as a successful
+    reconstruction (#851), and invalid rows must not be dropped silently.
+    """
+    cloud = read_3dgs_ply(path)
+    rows = int(cloud.means.shape[0])
+    problems = _cloud_invalid_counts(cloud)
+    mismatch = expected_count is not None and rows != int(expected_count)
+    if not problems and not mismatch:
+        return rows
+    details = ", ".join(f"{key}={value}" for key, value in sorted(problems.items()))
+    if mismatch:
+        details = f"{details}, " if details else ""
+        expected = int(expected_count) if expected_count is not None else "?"
+        details += f"count={rows} expected={expected}"
+    raise RuntimeError(
+        "msplat exported an invalid splat PLY "
+        f"({details}); the artifact is retained at {path} and the "
+        "reconstruction is not recorded as successful"
+    )
+
 
 def _next_step_can_densify(trainer: Any, dataset: Any, config: TrainerConfig) -> bool:
     step = int(trainer.iteration) + 1
@@ -285,6 +341,10 @@ def _train(
     runtime.sync()
     trainer.export_ply(str(output_path))
     runtime.sync()
+    # A structurally valid but non-finite PLY must never be recorded as
+    # successful Metal output (#849/#851). Validate through the same parser the
+    # rest of the pipeline consumes; the failed job retains the artifact.
+    validate_exported_ply(output_path, expected_count=int(trainer.splat_count))
     return {
         "gaussian_count": int(trainer.splat_count),
         "psnr": None,
