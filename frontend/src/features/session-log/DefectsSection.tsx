@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiUrl, del, get } from '../../shared/api/client'
 import ConfirmDialog from '../../shared/components/ConfirmDialog'
 import { useToast } from '../../shared/hooks/useToast'
-import type { Defect } from '../../types/api'
+import type { Defect, Image } from '../../types/api'
 import { formatCategoryLabel, severityColorVar } from './defects'
 
 
@@ -19,9 +19,11 @@ function useDefects(sessionId: number) {
   })
 }
 
-function thumbUrl(thumbPath: string | null): string | null {
-  if (!thumbPath) return null
-  return apiUrl(`/${thumbPath.replace(/\\/g, '/')}`)
+function thumbUrl(img: Pick<Image, 'id' | 'thumb_path'>): string | null {
+  if (!img.thumb_path) return null
+  // Resolve through the backend endpoint (#857): raw paths can be absolute
+  // app-data paths on macOS or collide across sessions.
+  return apiUrl(`/images/${img.id}/thumb`)
 }
 
 export default function DefectsSection({ sessionId }: { sessionId: number }) {
@@ -94,7 +96,7 @@ export default function DefectsSection({ sessionId }: { sessionId: number }) {
                   <td style={{ padding: '8px 12px' }}>
                     <div className="flex items-center gap-1.5 flex-wrap">
                       {defect.images.map((img) => {
-                        const url = thumbUrl(img.thumb_path)
+                        const url = thumbUrl(img)
                         return (
                           <span
                             key={img.id}

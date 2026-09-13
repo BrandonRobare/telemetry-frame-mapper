@@ -89,11 +89,11 @@ const FLAG_BADGE: Record<Image['flag'], { bg: string; text: string; label: strin
 }
 
 // ---- thumb URL helper ----
+// Resolve every thumbnail through the backend endpoint: raw thumb_path
+// values may be absolute app-data paths on macOS or collide across
+// sessions — both are the endpoint's problem to resolve (#857/#876).
 function thumbUrl(img: Image): string {
-  if (img.thumb_path) {
-    return apiUrl(`/${img.thumb_path.replace(/\\/g, '/')}`)
-  }
-  return ''
+  return img.id ? apiUrl(`/images/${img.id}/thumb`) : ''
 }
 
 // ---- filename initials ----
