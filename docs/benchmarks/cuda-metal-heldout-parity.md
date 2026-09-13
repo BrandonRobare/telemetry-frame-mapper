@@ -42,7 +42,7 @@ Do not use accelerator-dependent product defaults. Construct the same benchmark-
 | internal training-view evaluation | disabled |
 | exported coordinate frame | original COLMAP frame |
 
-The 1,250 iterations and 350,000 cap are the measured Metal `quick` policy from #820. The 625 refinement stop aligns gsplat with msplat 1.1.4's hard half-run split ceiling. A reset interval longer than the run prevents one backend from resetting opacity while the other does not. CUDA already exports the original COLMAP frame; benchmark-mode Metal sets `keep_crs=true` so one evaluator can apply the same committed camera poses to both PLY files. Production defaults remain unchanged.
+The 1,250 iterations and 350,000 cap are the measured Metal `quick` policy from #820. The 625 refinement stop aligns gsplat with msplat 1.1.4's hard half-run split ceiling. A reset interval longer than the run prevents one backend from resetting opacity while the other does not. Both backends export the original COLMAP frame (Metal via `keep_crs=true` since #854), so one evaluator can apply the same committed camera poses to both PLY files. Production defaults remain unchanged.
 
 Known non-identical implementation details—initial quaternion policy, camera-sampling order, optimizer implementation, and native densification internals—are part of the backend comparison and must be documented, not hidden as matched hyperparameters.
 

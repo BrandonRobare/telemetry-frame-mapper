@@ -47,7 +47,6 @@ def test_benchmark_policy_is_exact_and_fingerprinted() -> None:
     assert config.eval_every == 0
     assert config.benchmark_heldout_split is True
     assert config.benchmark_test_every == 8
-    assert config.benchmark_keep_crs is True
     assert config.background_color == (0.6130, 0.0101, 0.3984)
     assert tuple(parity.POLICY["background_color"]) == parity.EVALUATOR_BACKGROUND
     assert (
@@ -327,10 +326,8 @@ def test_cuda_config_defaults_and_benchmark_background_are_opt_in() -> None:
     benchmark = TrainerConfig.from_preset({**parity.POLICY})
 
     assert default.benchmark_heldout_split is False
-    assert default.benchmark_keep_crs is False
     assert default.background_color is None
     assert benchmark.benchmark_heldout_split is True
-    assert benchmark.benchmark_keep_crs is True
     assert benchmark.background_color == (0.6130, 0.0101, 0.3984)
 
 
