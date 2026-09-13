@@ -86,11 +86,15 @@ export function useImportSession() {
     if (status === 'done') {
       queryClient.invalidateQueries({ queryKey: ['sessions'] })
       addToast('Session imported successfully', 'success')
-      queueMicrotask(() => setImportingSessionId(null))
+      // #860: retain the tracked session id so the modal's post-import
+      // Quick QA card can still observe the terminal progress. isImporting
+      // flips false for terminal states below; reset() clears it entirely
+      // when the modal closes or a new import starts.
     } else if (status === 'error') {
       addToast(progressQuery.data?.error || 'Import failed', 'error')
-      queueMicrotask(() => setImportingSessionId(null))
     }
+    // 'unknown' (#507) has no effect branch: the id stays tracked so the
+    // modal can surface the progress-unavailable panel until reset().
   }, [progressQuery.data?.status, progressQuery.data?.error, queryClient, addToast])
 
   const mutation = useMutation({
@@ -104,14 +108,18 @@ export function useImportSession() {
 
   return {
     ...mutation,
-    // Also clear the tracked session id so closing the modal fully resets. The effect
-    // above clears it on done/error, but 'unknown' (progress lost after an API restart,
-    // #507) has no effect branch — without this, reopening would resurface the dead import.
+    // Clear the tracked session id so reopening the modal starts fresh.
     reset: () => {
       mutation.reset()
       setImportingSessionId(null)
     },
     progress: progressQuery.data ?? null,
-    isImporting: importingSessionId !== null,
+    // A terminal status is no longer an active import: the modal must be
+    // closable and the QA card visible, while the retained `progress`
+    // payload keeps the final state readable (#860).
+    isImporting:
+      importingSessionId !== null
+      && progressQuery.data?.status !== 'done'
+      && progressQuery.data?.status !== 'error',
   }
 }
