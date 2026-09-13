@@ -19,7 +19,7 @@ function useDefects(sessionId: number) {
   })
 }
 
-function thumbUrl(img: Image): string | null {
+function thumbUrl(img: Pick<Image, 'id' | 'thumb_path'>): string | null {
   if (!img.thumb_path) return null
   // Resolve through the backend endpoint (#857): raw paths can be absolute
   // app-data paths on macOS or collide across sessions.
