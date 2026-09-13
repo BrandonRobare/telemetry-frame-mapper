@@ -166,6 +166,6 @@ def get_thumb(image_id: int, db: DBSession = Depends(get_db)):
             if not fallback.is_file():
                 raise HTTPException(
                     status_code=404, detail="Thumbnail file not found on disk"
-                )
+                ) from None
             thumb_path = Path("processed") / thumb_path.name
     return RedirectResponse(f"/{thumb_path.as_posix()}")
