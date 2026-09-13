@@ -122,6 +122,11 @@ def _native_config(
         densify_grad_thresh=math.inf if freeze_densification else _DENSIFY_GRAD_THRESHOLD,
         stop_screen_size_at=config.refine_stop_iter,
         downscale_factor=float(config.downscale_factor),
+        # msplat recenters/rescales COLMAP input while loading. ask it to
+        # restore the original positions/log-scales on export so the produced
+        # cloud stays in the COLMAP coordinate frame the application solved
+        # its geo-transform against (#854).
+        keep_crs=True,
         output=str(output_path.parent),
         save_every=-1,
     )

@@ -114,6 +114,7 @@ def test_metal_training_maps_config_steps_syncs_and_exports(tmp_path: Path) -> N
         "densify_grad_thresh": 0.0002,
         "stop_screen_size_at": 2_000,
         "downscale_factor": 2.0,
+        "keep_crs": True,
         "output": str(output.parent),
         "save_every": -1,
     }
@@ -160,6 +161,7 @@ def test_metal_training_freezes_densification_and_completes_at_gaussian_cap(
     frozen_kwargs = runtime.TrainingConfig.call_args_list[1].kwargs
     assert frozen_kwargs["warmup_length"] == config.iterations + 1
     assert frozen_kwargs["densify_grad_thresh"] == float("inf")
+    assert frozen_kwargs["keep_crs"] is True
     assert not output.with_suffix(".ply.cap-freeze.msplat").exists()
     assert result["gaussian_count"] == 40
     assert any("densification frozen" in call.args[0] for call in progress.call_args_list)
