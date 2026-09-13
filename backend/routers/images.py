@@ -139,6 +139,13 @@ def patch_image(image_id: int, body: ImagePatch, db: DBSession = Depends(get_db)
 
 @router.get("/{image_id}/thumb")
 def get_thumb(image_id: int, db: DBSession = Depends(get_db)):
+    """Redirect to the web-accessible thumbnail for an image.
+
+    The frontend resolves every thumbnail through this endpoint so a single
+    policy handles relative processed/ paths, absolute under-processed
+    paths, and absolute app-data paths on macOS (#857); clients must never
+    reconstruct thumbnail URLs from raw ``thumb_path`` values.
+    """
     img = db.query(Image).filter(Image.id == image_id).first()
     if not img:
         raise HTTPException(status_code=404, detail="Image not found")
@@ -149,6 +156,16 @@ def get_thumb(image_id: int, db: DBSession = Depends(get_db)):
         processed_dir = Path(get_config().processed_dir).resolve()
         try:
             thumb_path = Path("processed") / thumb_path.resolve().relative_to(processed_dir)
-        except ValueError:
+        except (ValueError, OSError):
+            # Absolute thumbnail outside the served processed directory
+            # (macOS app-data layout, Windows drives): map by basename — but
+            # only when that exact file exists, so a missing or colliding
+            # basename produces an explicit 404 instead of an unexplained
+            # static-mount miss (#876).
+            fallback = processed_dir / thumb_path.name
+            if not fallback.is_file():
+                raise HTTPException(
+                    status_code=404, detail="Thumbnail file not found on disk"
+                ) from None
             thumb_path = Path("processed") / thumb_path.name
     return RedirectResponse(f"/{thumb_path.as_posix()}")
