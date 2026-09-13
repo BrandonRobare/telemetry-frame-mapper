@@ -89,19 +89,28 @@ def test_real_msplat_trains_and_exports_viewer_compatible_ply(tmp_path: Path) ->
     output = tmp_path / "splat.ply"
     progress: list[tuple[str, float]] = []
 
-    result = metal_msplat.METAL_MSPLAT_BACKEND.train(
-        workspace,
-        output,
-        _config(iterations=3),
-        lambda message, pct: progress.append((message, pct)),
-        threading.Event(),
-    )
-
-    cloud = ply_io.read_3dgs_ply(output)
-    assert output.stat().st_size > 0
-    assert cloud.means.shape == (result["gaussian_count"], 3)
-    assert result["gaussian_count"] == 18
-    assert progress[-1] == ("exporting splat PLY", 99.0)
+    try:
+        result = metal_msplat.METAL_MSPLAT_BACKEND.train(
+            workspace,
+            output,
+            _config(iterations=3),
+            lambda message, pct: progress.append((message, pct)),
+            threading.Event(),
+        )
+    except RuntimeError as exc:
+        # #849: msplat 1.1.4 exports non-finite Gaussians on real arm64.
+        # #851's gate rejects that output; this is the fail-safe branch and the
+        # artifact must be retained for diagnostics. XPASS strict when msplat
+        # is fixed and training completes finitely.
+        assert "invalid splat PLY" in str(exc)
+        assert output.exists()
+        pytest.xfail(f"#849 msplat exports invalid Gaussians; gate rejected: {exc}")
+    else:
+        cloud = ply_io.read_3dgs_ply(output)
+        assert output.stat().st_size > 0
+        assert cloud.means.shape == (result["gaussian_count"], 3)
+        assert result["gaussian_count"] == 18
+        assert progress[-1] == ("exporting splat PLY", 99.0)
 
 
 def test_real_msplat_cancels_mid_training_with_recoverable_outputs(tmp_path: Path) -> None:
@@ -148,16 +157,22 @@ def test_real_msplat_freezes_before_cap_and_finishes_training(tmp_path: Path) ->
     output = tmp_path / "capped.ply"
     progress: list[str] = []
 
-    result = metal_msplat.METAL_MSPLAT_BACKEND.train(
-        workspace,
-        output,
-        _config(iterations=1_300, max_gaussians=50),
-        lambda message, _pct: progress.append(message),
-        threading.Event(),
-    )
-
-    gaussian_count = cast(int, result["gaussian_count"])
-    assert gaussian_count <= 50
-    assert any("densification frozen" in message for message in progress)
-    assert progress[-1] == "exporting splat PLY"
-    assert ply_io.read_3dgs_ply(output).means.shape[0] == gaussian_count
+    try:
+        result = metal_msplat.METAL_MSPLAT_BACKEND.train(
+            workspace,
+            output,
+            _config(iterations=1_300, max_gaussians=50),
+            lambda message, _pct: progress.append(message),
+            threading.Event(),
+        )
+    except RuntimeError as exc:
+        # #849: invalid frozen-phase export on real arm64; #851 rejects it.
+        assert "invalid splat PLY" in str(exc)
+        assert output.exists()
+        pytest.xfail(f"#849 msplat exports invalid Gaussians; gate rejected: {exc}")
+    else:
+        gaussian_count = cast(int, result["gaussian_count"])
+        assert gaussian_count <= 50
+        assert any("densification frozen" in message for message in progress)
+        assert progress[-1] == "exporting splat PLY"
+        assert ply_io.read_3dgs_ply(output).means.shape[0] == gaussian_count
