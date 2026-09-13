@@ -6,7 +6,7 @@ echo Starting backend...
 REM Reload mode uses one API worker; python -m backend validates the bind before serving.
 REM Run from the repo root: config.yaml (deployment host/port, default 127.0.0.1:8000) and the
 REM .\processed static mount resolve from here
-start "Backend" cmd /k "set BACKEND_RELOAD=1&& uv sync --group backend --group dev && uv run --no-sync python -m backend"
+start "Backend" cmd /k "set BACKEND_RELOAD=1&& uv sync --inexact --group backend --group dev && uv run --no-sync python -m backend"
 
 where node >nul 2>nul
 if errorlevel 1 (
