@@ -281,7 +281,11 @@ def _run_colmap(
 
     matcher_cmd = ["colmap", colmap_matcher, "--database_path", db_path]
     if guided_matching:
-        matcher_cmd.append("--SiftMatching.guided_matching=1")
+        # The guided-matching option moved namespaces in COLMAP 4.x
+        # (SiftMatching -> FeatureMatching); emit the namespace the installed
+        # binary accepts (#856).
+        guided_namespace = "FeatureMatching" if colmap_info.get("is_v4") else "SiftMatching"
+        matcher_cmd.append(f"--{guided_namespace}.guided_matching=1")
 
     # Spatial matcher tuning: sane defaults for drone lawnmower surveys
     if colmap_matcher == "spatial_matcher":
@@ -297,12 +301,20 @@ def _run_colmap(
     else:
         mapper_subcommand = "mapper"
 
+    # Thread options live under the mapper's own namespace: GLOMAP uses
+    # GlobalMapper.* in COLMAP 4.x and rejects the incremental Mapper.*
+    # options when invoked as `global_mapper` (#856).
+    mapper_thread_option = (
+        "--GlobalMapper.num_threads"
+        if mapper_subcommand == "global_mapper"
+        else "--Mapper.num_threads"
+    )
     mapper_cmd = [
         "colmap", mapper_subcommand,
         "--database_path", db_path,
         "--image_path", image_path,
         "--output_path", output_path,
-        f"--Mapper.num_threads={cfg['colmap_threads']}",
+        f"{mapper_thread_option}={cfg['colmap_threads']}",
     ]
 
     def model_converter_cmd() -> list[str]:
