@@ -9,6 +9,17 @@ on:
         required: false
         type: boolean
         default: false
+      heldout_parity_target:
+        description: Run the #784 held-out bundle on target hardware
+        required: false
+        type: choice
+        options: [none, metal, cuda]
+        default: none
+      heldout_parity_approved_sha:
+        description: Exact reviewed commit for a #784 hardware run
+        required: false
+        type: string
+        default: ""
   push:
     branches: [main]
   pull_request:
@@ -418,3 +429,138 @@ jobs:
             colmap-model.txt
             metal-preset-benchmark.json
             metal-preset-environment.txt
+
+  heldout-parity-metal:
+    if: >
+      github.event_name == 'workflow_dispatch' &&
+      github.actor == github.repository_owner &&
+      github.ref == 'refs/heads/wave8/784-cuda-metal-parity' &&
+      inputs.heldout_parity_approved_sha != '' &&
+      inputs.heldout_parity_target == 'metal'
+    runs-on: macos-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Verify exact branch checkout
+        env:
+          APPROVED_SHA: ${{ inputs.heldout_parity_approved_sha }}
+        run: |
+          test "${GITHUB_REF}" = "refs/heads/wave8/784-cuda-metal-parity"
+          test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"
+          test "${GITHUB_SHA}" = "${APPROVED_SHA}"
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: "0.11.16"
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+      - name: Install pinned Metal environment
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = "arm64"
+          uv sync --frozen --group backend --group reconstruction --group splat-metal
+          uv run --no-sync python -c 'import importlib.metadata, msplat; assert importlib.metadata.version("msplat") == "1.1.4"; msplat.sync()'
+      - name: Fetch pinned CC0 source
+        run: |
+          set -euo pipefail
+          git init "$RUNNER_TEMP/aukerman-source"
+          git -C "$RUNNER_TEMP/aukerman-source" remote add origin https://github.com/OpenDroneMap/odm_data_aukerman.git
+          git -C "$RUNNER_TEMP/aukerman-source" fetch --depth 1 origin 4e8031630f4193494c79b1c1d3524108826d1ba9
+          git -C "$RUNNER_TEMP/aukerman-source" checkout --detach FETCH_HEAD
+          test "$(git -C "$RUNNER_TEMP/aukerman-source" rev-parse HEAD)" = "4e8031630f4193494c79b1c1d3524108826d1ba9"
+      - name: Run Metal held-out bundle
+        run: uv run --frozen --no-sync python -m scripts.benchmark_heldout_parity run --kind metal --source "$RUNNER_TEMP/aukerman-source" --output heldout-metal.tar.gz
+      - name: Upload retained evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: heldout-metal-${{ github.sha }}
+          if-no-files-found: warn
+          path: heldout-metal.tar.gz
+          retention-days: 90
+
+  heldout-parity-cuda:
+    # Owner-dispatched only. Public pull requests and pushes cannot queue this trusted runner.
+    if: >
+      github.event_name == 'workflow_dispatch' &&
+      github.actor == github.repository_owner &&
+      github.ref == 'refs/heads/wave8/784-cuda-metal-parity' &&
+      inputs.heldout_parity_approved_sha != '' &&
+      inputs.heldout_parity_target == 'cuda'
+    runs-on: [self-hosted, linux, x64, cuda]
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Verify exact branch checkout
+        env:
+          APPROVED_SHA: ${{ inputs.heldout_parity_approved_sha }}
+        run: |
+          test "${GITHUB_REF}" = "refs/heads/wave8/784-cuda-metal-parity"
+          test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"
+          test "${GITHUB_SHA}" = "${APPROVED_SHA}"
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: "0.11.16"
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+      - name: Verify CUDA 12.4 runner contract
+        run: |
+          set -euo pipefail
+          nvidia-smi
+          nvcc --version
+          case "$(nvcc --version)" in *"release 12.4"*) ;; *) exit 1 ;; esac
+      - name: Install pinned CUDA harness environment
+        run: |
+          set -euo pipefail
+          uv sync --frozen --group backend --group reconstruction
+          uv pip install "torch==2.6.0" --index-url https://download.pytorch.org/whl/cu124
+          uv pip install "ninja==1.13.0"
+          uv pip install "gsplat==1.5.3" --no-build-isolation
+      - name: Prove real CUDA and compiled gsplat
+        run: |
+          uv run --no-sync python - <<'PY'
+          import gsplat
+          import torch
+          assert torch.__version__.startswith("2.6.0")
+          assert torch.version.cuda == "12.4"
+          assert torch.cuda.is_available()
+          assert getattr(gsplat, "_C", None) is not None
+          print(torch.cuda.get_device_name())
+          print(torch.cuda.get_device_capability())
+          device = torch.device("cuda")
+          kwargs = {
+              "means": torch.tensor([[0.0, 0.0, 2.0]], device=device),
+              "quats": torch.tensor([[1.0, 0.0, 0.0, 0.0]], device=device),
+              "scales": torch.tensor([[0.1, 0.1, 0.1]], device=device),
+              "opacities": torch.tensor([0.9], device=device),
+              "colors": torch.tensor([[[1.0, 0.0, 0.0]]], device=device),
+              "viewmats": torch.eye(4, device=device)[None],
+              "Ks": torch.tensor([[[16.0, 0.0, 8.0], [0.0, 16.0, 8.0], [0.0, 0.0, 1.0]]], device=device),
+              "width": 16,
+              "height": 16,
+              "sh_degree": 0,
+              "packed": True,
+          }
+          render, _, _ = gsplat.rasterization(**kwargs)
+          torch.cuda.synchronize()
+          assert render.is_cuda and torch.isfinite(render).all()
+          PY
+      - name: Fetch pinned CC0 source
+        run: |
+          set -euo pipefail
+          git init "$RUNNER_TEMP/aukerman-source"
+          git -C "$RUNNER_TEMP/aukerman-source" remote add origin https://github.com/OpenDroneMap/odm_data_aukerman.git
+          git -C "$RUNNER_TEMP/aukerman-source" fetch --depth 1 origin 4e8031630f4193494c79b1c1d3524108826d1ba9
+          git -C "$RUNNER_TEMP/aukerman-source" checkout --detach FETCH_HEAD
+          test "$(git -C "$RUNNER_TEMP/aukerman-source" rev-parse HEAD)" = "4e8031630f4193494c79b1c1d3524108826d1ba9"
+      - name: Run CUDA held-out bundle
+        run: uv run --frozen --no-sync python -m scripts.benchmark_heldout_parity run --kind cuda --source "$RUNNER_TEMP/aukerman-source" --output heldout-cuda.tar.gz
+      - name: Upload retained evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: heldout-cuda-${{ github.sha }}
+          if-no-files-found: warn
+          path: heldout-cuda.tar.gz
+          retention-days: 90

@@ -115,7 +115,8 @@ def test_msplat_group_is_platform_pinned_locked_and_gated() -> None:
     }
 
     ci = CI_WORKFLOW.read_text(encoding="utf-8")
-    assert ci.count("--group splat-metal") == 3
+    assert ci.count("--group splat-metal") == 4
+    assert "heldout-parity-metal" in ci
     assert "metal-preset-benchmark" in ci
     assert "4e8031630f4193494c79b1c1d3524108826d1ba9" in ci
     assert "--FeatureExtraction.max_image_size 1200" in ci

@@ -34,6 +34,10 @@ class TrainerConfig:
     ssim_lambda: float = 0.2
     init_opacity: float = 0.1
     sh_warmup_every: int = 1000
+    # Opt-in benchmark controls; product presets keep their historical behavior.
+    benchmark_heldout_split: bool = False
+    benchmark_test_every: int = 8
+    background_color: tuple[float, float, float] | None = None
 
     @classmethod
     def from_preset(cls, preset_cfg: dict) -> TrainerConfig:
@@ -65,7 +69,19 @@ class TrainerConfig:
         for field in fields(cls):
             if field.name != "iterations" and field.name in preset_cfg:
                 current = getattr(config, field.name)
-                setattr(config, field.name, type(current)(preset_cfg[field.name]))
+                value = preset_cfg[field.name]
+                if field.name == "background_color":
+                    if value is None:
+                        setattr(config, field.name, None)
+                    else:
+                        color = tuple(float(component) for component in value)
+                        if len(color) != 3:
+                            raise ValueError(
+                                "background_color must contain exactly three components"
+                            )
+                        setattr(config, field.name, color)
+                else:
+                    setattr(config, field.name, type(current)(value))
         return config
 
 
