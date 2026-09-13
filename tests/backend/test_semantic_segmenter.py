@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import numpy as np
 import pytest
 
 from backend.services.semantic_segmenter import build_id_to_category
@@ -191,3 +192,90 @@ def test_segmenter_lazy_import_error():
                 _import_segmentation_deps()
     finally:
         seg._segmentation_deps = save
+
+def _fake_segmenter(image: np.ndarray, *args, **kwargs):
+    """Return an image-shaped result whose entries carry no scores (#844)."""
+    h, w = image.shape[:2]
+    sky = np.zeros((h, w), dtype=bool)
+    sky[: h // 2, :] = True
+    road = np.zeros((h, w), dtype=bool)
+    road[h // 2 :, :] = True
+    return [
+        # score=None exactly as transformers 5.x shipped on arm64 CPU
+        {"label": "sky", "score": None, "mask": sky},
+        {"label": "road, route", "score": None, "mask": road},
+    ]
+
+
+def _fake_scoreless_segmenter():
+    """A callable fake pipeline whose entries carry no scores (#844)."""
+    import backend.services.semantic_segmenter as seg
+
+    def segmenter(image, *args, **kwargs):
+        h, w = np.asarray(image).shape[:2]
+        sky = np.zeros((h, w), dtype=bool)
+        sky[: h // 2, :] = True
+        road = np.zeros((h, w), dtype=bool)
+        road[h // 2 :, :] = True
+        return [
+            {"label": "sky", "score": None, "mask": sky},
+            {"label": "road, route", "score": None, "mask": road},
+        ]
+
+    segmenter.model = SimpleNamespace(
+        config=SimpleNamespace(id2label=_STUB_ID2LABEL)
+    )
+    seg._id_to_category_cache.clear()
+    return segmenter
+
+
+def test_segment_frame_handles_scoreless_entries_without_crashing():
+    """#844 regression: score=None must not raise TypeError in segment_frame."""
+    import numpy as np
+
+    from backend.services.semantic_segmenter import segment_frame
+
+    image = np.zeros((8, 10, 3), dtype=np.uint8)
+    labels, confidence = segment_frame(
+        image, segmenter=_fake_scoreless_segmenter(), model_id="fake-scoreless"
+    )
+
+    # Per-pixel supercategory argmax still ran: top half sky -> other (5),
+    # bottom half road -> ground (0).
+    assert labels[0, 0] == 5
+    assert labels[-1, 0] == 0
+    # Confidence came from real model data — each mask's coverage — not a
+    # constant: sky covers 4/8 rows, road the remaining 4/8.
+    assert 0.49 <= confidence[0, 0] <= 0.51
+    assert 0.49 <= confidence[-1, 0] <= 0.51
+
+
+def test_segment_frame_scoreless_entries_do_not_shadow_scored_entries():
+    """A real score competes with derived coverage confidences, not replace them."""
+    import numpy as np
+
+    import backend.services.semantic_segmenter as seg
+    from backend.services.semantic_segmenter import segment_frame
+
+    seg._id_to_category_cache.clear()
+    image = np.zeros((4, 4, 3), dtype=np.uint8)
+    mask_all = np.ones((4, 4), dtype=bool)
+
+    def segmenter(image, *args, **kwargs):
+        return [
+            {"label": "sky", "score": None, "mask": mask_all},  # coverage 1.0
+            {"label": "wall", "score": 0.5, "mask": mask_all},  # real score 0.5
+        ]
+
+    segmenter.model = SimpleNamespace(
+        config=SimpleNamespace(id2label={0: "wall", 2: "sky"})
+    )
+    labels, confidence = segment_frame(
+        image, segmenter=segmenter, model_id="fake-mixed"
+    )
+    # build_id_to_category: sky -> other(5), wall -> structure(2). The
+    # score-less entry keeps its mask-derived confidence (1.0) and must win;
+    # the scored entry must not auto-replace pixels via a lower confidence,
+    # and neither path may mangle the other's per-pixel map.
+    assert labels[0, 0] == 5
+    assert confidence[0, 0] == pytest.approx(1.0)

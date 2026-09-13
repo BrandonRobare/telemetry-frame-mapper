@@ -221,8 +221,13 @@ def segment_frame(
 
     for entry in results:
         label_str: str = entry["label"]
-        score: float = float(entry["score"])
+        # transformers 5.x can return score-less entries on CPU pipelines
+        # (#844). Never crash on a missing score: derive confidence from the
+        # model's own output — the predicted mask coverage — instead of
+        # dropping the prediction or inventing an arbitrary constant.
         mask = np.asarray(entry["mask"], dtype=bool)
+        raw_score = entry.get("score")
+        score: float = float(raw_score) if raw_score is not None else float(mask.mean())
 
         ade_id = label2id.get(label_str)
         if ade_id is None or ade_id >= len(id_to_category):
