@@ -138,7 +138,6 @@ def _native_config(
     )
 
 
-<<<<<<< HEAD
 def _selected_model_view(colmap_dir: Path) -> Path | None:
     """Build a temporary COLMAP view of the app-selected submodel for msplat.
 
@@ -167,7 +166,7 @@ def _selected_model_view(colmap_dir: Path) -> Path | None:
     elif (selected / "points3D.ply").exists():
         (view / "points3D.ply").symlink_to(selected / "points3D.ply")
     return view
-=======
+
 def _cloud_invalid_counts(cloud: GaussianCloud) -> dict[str, int]:
     """Count rows with non-finite or structurally invalid Gaussian values."""
     counts: dict[str, int] = {}
@@ -220,7 +219,6 @@ def validate_exported_ply(path: Path, expected_count: int | None) -> int:
         f"({details}); the artifact is retained at {path} and the "
         "reconstruction is not recorded as successful"
     )
->>>>>>> fc8d32f (fix(reconstruction): fail safely when Metal exports invalid Gaussian data (#851))
 
 
 def _next_step_can_densify(trainer: Any, dataset: Any, config: TrainerConfig) -> bool:
