@@ -6,9 +6,25 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+import numpy as np
 import pytest
 
+from backend.services.ply_io import GaussianCloud, write_3dgs_ply
 from backend.services.splat_backends.base import TrainerConfig
+
+
+def _valid_ply(path: Path, rows: int) -> None:
+    """Write a real, finite INRIA 3DGS PLY so validated harness exports parse."""
+    rng = np.random.default_rng(7)
+    cloud = GaussianCloud(
+        means=rng.random((rows, 3)).astype(np.float32),
+        sh0=rng.random((rows, 3)).astype(np.float32),
+        shN=np.zeros((rows, 0, 3), dtype=np.float32),
+        opacities=rng.random((rows,)).astype(np.float32),
+        scales=np.zeros((rows, 3), dtype=np.float32),
+        quats=np.tile(np.array([1.0, 0, 0, 0], dtype=np.float32), (rows, 1)),
+    )
+    write_3dgs_ply(path, cloud)
 
 
 def _config(*, iterations: int = 3, max_gaussians: int = 100) -> TrainerConfig:
@@ -52,7 +68,7 @@ def _runtime(tmp_path: Path, counts: list[int], *, start_iteration: int = 0):
         )
 
     trainer.step.side_effect = step
-    trainer.export_ply.side_effect = lambda path: Path(path).write_text("ply", encoding="utf-8")
+    trainer.export_ply.side_effect = lambda path: _valid_ply(Path(path), int(trainer.splat_count))
     trainer.save_checkpoint.side_effect = lambda path: Path(path).write_bytes(b"checkpoint")
     runtime.GaussianTrainer = MagicMock(return_value=trainer)
     return runtime, trainer
@@ -260,4 +276,131 @@ def test_metal_backend_missing_dependency_degrades_to_colmap_only(
             _config(),
             MagicMock(),
             threading.Event(),
+        )
+
+
+# ---------------------------------------------------------------------------
+# Exported-PLY validity gate (#851/#849)
+# ---------------------------------------------------------------------------
+
+
+def _cloud(**overrides) -> GaussianCloud:
+    rng = np.random.default_rng(11)
+    rows = overrides.pop("rows", 5)
+    cloud = GaussianCloud(
+        means=rng.random((rows, 3)).astype(np.float32),
+        sh0=rng.random((rows, 3)).astype(np.float32),
+        shN=np.zeros((rows, 0, 3), dtype=np.float32),
+        opacities=rng.random((rows,)).astype(np.float32),
+        scales=np.zeros((rows, 3), dtype=np.float32),
+        quats=np.tile(np.array([1.0, 0, 0, 0], dtype=np.float32), (rows, 1)),
+    )
+    for name, value in overrides.items():
+        setattr(cloud, name, value)
+    return cloud
+
+
+def _corrupt_ply(path: Path, **overrides) -> None:
+    write_3dgs_ply(path, _cloud(**overrides))
+
+
+def test_validate_exported_ply_accepts_finite_cloud(tmp_path: Path) -> None:
+    from backend.services.splat_backends import metal_msplat
+
+    path = tmp_path / "splat.ply"
+    _valid_ply(path, rows=5)
+    assert metal_msplat.validate_exported_ply(path, expected_count=5) == 5
+    assert metal_msplat.validate_exported_ply(path, expected_count=None) == 5
+
+
+def test_validate_exported_ply_rejects_non_finite_means(tmp_path: Path) -> None:
+    from backend.services.splat_backends import metal_msplat
+
+    path = tmp_path / "splat.ply"
+    rng = np.random.default_rng(2)
+    means = rng.random((5, 3)).astype(np.float32)
+    means[3][1] = np.nan
+    _corrupt_ply(path, means=means)
+
+    with pytest.raises(RuntimeError, match="means=1"):
+        metal_msplat.validate_exported_ply(path, expected_count=5)
+
+
+def test_validate_exported_ply_rejects_infinite_scales(tmp_path: Path) -> None:
+    from backend.services.splat_backends import metal_msplat
+
+    path = tmp_path / "splat.ply"
+    scales = np.zeros((5, 3), dtype=np.float32)
+    scales[0][0] = np.inf
+    _corrupt_ply(path, scales=scales)
+
+    with pytest.raises(RuntimeError, match="scales=1"):
+        metal_msplat.validate_exported_ply(path, expected_count=5)
+
+
+def test_validate_exported_ply_rejects_overflowing_exponentiated_scales(tmp_path: Path) -> None:
+    from backend.services.splat_backends import metal_msplat
+
+    path = tmp_path / "splat.ply"
+    scales = np.zeros((5, 3), dtype=np.float32)
+    scales[2][2] = 100.0  # finite value, but exp(100) overflows float32/float64 output
+    _corrupt_ply(path, scales=scales)
+
+    with pytest.raises(RuntimeError, match="exponentiated_scales=1"):
+        metal_msplat.validate_exported_ply(path, expected_count=5)
+
+
+def test_validate_exported_ply_rejects_zero_norm_quaternions(tmp_path: Path) -> None:
+    from backend.services.splat_backends import metal_msplat
+
+    path = tmp_path / "splat.ply"
+    quats = np.tile(np.array([1.0, 0, 0, 0], dtype=np.float32), (5, 1))
+    quats[4] = [0.0, 0.0, 0.0, 0.0]
+    _corrupt_ply(path, quats=quats)
+
+    with pytest.raises(RuntimeError, match="zero_norm_quaternions=1"):
+        metal_msplat.validate_exported_ply(path, expected_count=5)
+
+
+def test_validate_exported_ply_rejects_count_mismatch(tmp_path: Path) -> None:
+    from backend.services.splat_backends import metal_msplat
+
+    path = tmp_path / "splat.ply"
+    _valid_ply(path, rows=5)
+    with pytest.raises(RuntimeError, match="count=5 expected=6"):
+        metal_msplat.validate_exported_ply(path, expected_count=6)
+
+
+def test_train_fails_closed_when_export_contains_non_finite_rows(tmp_path: Path) -> None:
+    from backend.services.splat_backends import metal_msplat
+
+    runtime, trainer = _runtime(tmp_path, [4])
+    rng = np.random.default_rng(3)
+    means = rng.random((4, 3)).astype(np.float32)
+    means[1][0] = np.inf
+
+    def bad_export(path: str) -> None:
+        _corrupt_ply(Path(path), rows=4, means=means)
+
+    trainer.export_ply.side_effect = bad_export
+    output = tmp_path / "out" / "splat.ply"
+
+    with pytest.raises(RuntimeError, match="means=1"):
+        metal_msplat._train(
+            runtime, tmp_path / "colmap", output, _config(), MagicMock(), threading.Event()
+        )
+    # The invalid artifact is retained for diagnostics, never silently dropped.
+    assert output.exists()
+
+
+def test_train_fails_closed_on_serialized_count_mismatch(tmp_path: Path) -> None:
+    from backend.services.splat_backends import metal_msplat
+
+    runtime, trainer = _runtime(tmp_path, [4])
+    trainer.export_ply.side_effect = lambda path: _valid_ply(Path(path), rows=3)
+    output = tmp_path / "out" / "splat.ply"
+
+    with pytest.raises(RuntimeError, match="count=3 expected=4"):
+        metal_msplat._train(
+            runtime, tmp_path / "colmap", output, _config(), MagicMock(), threading.Event()
         )
