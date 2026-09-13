@@ -280,6 +280,10 @@ def test_run_disambiguates_duplicate_nested_basenames_and_thumbnails(tmp_path, s
     thumbnails = [Path(image.thumb_path) for image in images]
     assert all(thumbnail.is_file() for thumbnail in thumbnails)
     assert len({thumbnail.read_bytes() for thumbnail in thumbnails}) == 2
+    # #831: the image id prefixes the thumb basename so case-variant siblings
+    # cannot collapse to one file on case-insensitive macOS APFS.
+    for image, thumbnail in zip(images, thumbnails, strict=True):
+        assert thumbnail.name == f"{image.id}_{image.filename}"
 
 
 def test_run_marks_empty_folder_as_an_error(tmp_path, setup_test_db):
