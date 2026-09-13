@@ -178,7 +178,9 @@ def test_train_with_selected_zero_still_uses_view_and_keeps_workspace_clean(tmp_
     (colmap / "images").mkdir()
     runtime, record = _runtime(tmp_path)
 
-    metal_msplat._train(runtime, colmap, tmp_path / "out" / "splat.ply", _config(), MagicMock(), threading.Event())
+    metal_msplat._train(
+        runtime, colmap, tmp_path / "out" / "splat.ply", _config(), MagicMock(), threading.Event()
+    )
 
     loaded = record["loaded_root"]
     assert loaded is not None and loaded != colmap
