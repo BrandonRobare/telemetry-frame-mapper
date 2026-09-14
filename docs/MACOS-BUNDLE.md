@@ -4,7 +4,11 @@ This is an arm64-only, unsigned local-build workflow. It creates a `.app` bundle
 
 ## Build prerequisites
 
-Build on an arm64 Mac with Python 3.12–3.13, macOS 14 or newer, [uv](https://docs.astral.sh/uv/), Node.js 22 LTS (>=22.12), and the optional external tools described in [INSTALL.md](INSTALL.md). The application dependencies remain local: install ffmpeg and ExifTool for CLI geotagging, and COLMAP for reconstruction.
+Build on an arm64 Mac with Python 3.12–3.13, macOS 14 or newer, [uv](https://docs.astral.sh/uv/),
+Node.js 22 LTS (>=22.12), and the optional external tools described in [INSTALL.md](INSTALL.md).
+See the authoritative [supported macOS floor](INSTALL.md#supported-macos-floor) in INSTALL.md —
+everything outside that floor still runs, minus native splat training. The application dependencies
+remain local: install ffmpeg and ExifTool for CLI geotagging, and COLMAP for reconstruction.
 
 ## Build and validate
 
