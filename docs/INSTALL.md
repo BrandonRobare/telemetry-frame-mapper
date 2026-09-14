@@ -80,6 +80,25 @@ exiftool -ver
 colmap -h
 ```
 
+#### Supported macOS floor
+
+The full feature set of the v3.0 release is supported on **Apple Silicon (arm64) Macs running
+macOS 14 or later with Python 3.12 or 3.13** (#818). This is the single authoritative statement;
+`docs/MACOS-BUNDLE.md` references it instead of restating a version.
+
+- Everything except native splat training works outside that floor too: the CLI, import, review,
+  coverage, mission planning, COLMAP reconstruction (any supported OS), exports, and CPU semantic
+  segmentation run wherever the base app runs, and reconstruction `colmap_only` output is fully
+  supported on every platform.
+- Native Apple-Silicon splat training (`splat-metal`, `msplat==1.1.4`) requires **arm64 + macOS 14+
+  + Python 3.12/3.13**, because msplat publishes `macosx_14_0_arm64` wheels for cp312/cp313 only.
+  On Python 3.11 or 3.14, or on Intel, the group cannot install; the app still runs and completes
+  reconstructions as `colmap_only`.
+- Intel Macs and x86 Windows/Linux are out of scope for Metal training; CUDA training on NVIDIA
+  hosts remains a separate manual setup.
+
+See [PLATFORM-MATRIX.md](PLATFORM-MATRIX.md) for the one-table capability matrix (#791).
+
 ## 3. Frontend
 
 ```bash
