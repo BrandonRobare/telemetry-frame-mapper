@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime
 import json
+import os
 import re
 import shutil
 import threading
@@ -28,6 +29,7 @@ _UPLOAD_LOCKS: dict[str, threading.Lock] = {}
 _UPLOADS_GUARD = threading.Lock()
 _MANIFEST_NAME = ".upload.json"
 _UPLOAD_ID_RE = re.compile(r"^[0-9a-f]{32}$")
+_MAX_ACTIVE_RESERVATIONS = 8
 
 
 class UploadFilePlan(BaseModel):
@@ -272,6 +274,15 @@ def start_browser_import_upload(req: StartUploadRequest):
     # tree each time; shard per upload root if a second staging root ever exists.
     with _UPLOADS_GUARD:
         _cleanup_old_uploads(root, limits["cleanup_after_hours"])
+        # Bound concurrent reservations: each manifest dir is one in-flight
+        # browser import, and unbounded starts would let a LAN client exhaust
+        # disk with empty reservations (#864).
+        active_reservations = sum(1 for name in os.listdir(root) if (root / name).is_dir())
+        if active_reservations >= _MAX_ACTIVE_RESERVATIONS:
+            raise HTTPException(
+                status_code=409,
+                detail="Too many concurrent uploads; wait for an import to finish or cancel one",
+            )
         if _reserved_bytes(root) + req.total_bytes > limits["quota_bytes"]:
             raise HTTPException(status_code=507, detail="Browser upload storage quota exceeded")
 
