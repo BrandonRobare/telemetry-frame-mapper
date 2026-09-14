@@ -37,6 +37,7 @@ logging:
 deployment:
   host: "127.0.0.1"
   port: 8000
+  auto_open_browser: false
   cors_origins:
     - "http://localhost:5173"
   allow_unauthenticated_lan: false
