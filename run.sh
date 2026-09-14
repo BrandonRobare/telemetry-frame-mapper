@@ -20,11 +20,34 @@ fi
 echo "Starting backend with config.yaml deployment settings ..."
 python -m backend &
 BACKEND_PID=$!
+FRONTEND_PID=""
+
+cleanup() {
+  # #862: the frontend must not outlive a failed or exited backend. The
+  # waiter below also handles backend death; this covers normal shutdown.
+  if [ -n "$FRONTEND_PID" ] && kill -0 "$FRONTEND_PID" 2>/dev/null; then
+    kill "$FRONTEND_PID" 2>/dev/null || true
+  fi
+}
+trap cleanup EXIT
 
 URL="http://localhost:8000/docs"
 if [ -d frontend ] && command -v npm >/dev/null 2>&1; then
   echo "Starting frontend on http://localhost:5173 ..."
-  (cd frontend && npm run dev) &
+  # Watch the backend from inside the frontend subshell and take npm with it
+  # when the backend dies — a dead API must not leave :5173 serving (#862).
+  (
+    cd frontend
+    npm run dev &
+    NPM_PID=$!
+    while kill -0 "$BACKEND_PID" 2>/dev/null; do
+      sleep 1
+    done
+    pkill -TERM -P "$NPM_PID" 2>/dev/null || true
+    kill "$NPM_PID" 2>/dev/null || true
+    exit 0
+  ) &
+  FRONTEND_PID=$!
   URL="http://localhost:5173"
 elif [ -d frontend/dist ]; then
   echo "Node/npm not found, but frontend/dist is built — serving it from the backend on http://localhost:8000."
@@ -40,3 +63,8 @@ fi
 
 echo "Running. Press Ctrl+C to stop."
 wait $BACKEND_PID
+status=$?
+if [ -n "$FRONTEND_PID" ]; then
+  wait "$FRONTEND_PID" 2>/dev/null || true
+fi
+exit $status
