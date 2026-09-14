@@ -18,7 +18,9 @@ echo "Backend PID: $BACKEND_PID (http://localhost:8000)"
 
 if [ -d frontend ]; then
   echo "Starting frontend..."
-  (cd frontend && npm install && npm run dev) &
+  # The dev frontend talks to the backend directly: without VITE_API_URL
+  # every API call hits the Vite server and the app renders empty (#803).
+  (cd frontend && VITE_API_URL=http://localhost:8000 npm run dev) &
   FRONTEND_PID=$!
   echo "Frontend PID: $FRONTEND_PID"
   echo "Open http://localhost:5173"
