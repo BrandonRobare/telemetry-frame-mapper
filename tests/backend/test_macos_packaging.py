@@ -79,7 +79,8 @@ def test_macos_smoke_script_uses_fresh_home_health_migrations_and_cleanup_contra
     assert "Packaged app did not become healthy" in smoke
     assert "alembic_version" in smoke
     assert "get_current_head()" in smoke
-    assert smoke.count("uv run --frozen --no-sync python -c") == 2
+    # Two alembic probes + one /system/resources tool-discovery probe (#832).
+    assert smoke.count("uv run --frozen --no-sync python -c") == 3
     assert "$(python -c" not in smoke
     assert "Migration head mismatch" in smoke
     assert "kill -0 \"$app_pid\"" in smoke
