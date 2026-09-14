@@ -33,7 +33,7 @@ COPY config.yaml ./config.yaml
 COPY alembic.ini ./alembic.ini
 COPY --from=frontend-build /app/frontend/dist ./frontend/dist
 
-RUN uv sync --frozen --no-dev --group backend --group reconstruction
+RUN uv sync --frozen --no-dev --group backend --group reconstruction --group semantic
 
 RUN mkdir -p data imports processed exports
 
