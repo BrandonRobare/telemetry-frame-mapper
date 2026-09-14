@@ -77,6 +77,7 @@ export default function ImportModal({ open, onClose }: ImportModalProps) {
   const [folderPath, setFolderPath] = useState('')
   const [pathError, setPathError] = useState<string | null>(null)
   const [browserFiles, setBrowserFiles] = useState<BrowserUploadFilePlan[]>([])
+  const [skippedFiles, setSkippedFiles] = useState<string[]>([])
   const [browserProgress, setBrowserProgress] = useState<BrowserUploadProgress | null>(null)
   const [browserError, setBrowserError] = useState<string | null>(null)
   const [isBrowserUploading, setIsBrowserUploading] = useState(false)
@@ -177,6 +178,7 @@ export default function ImportModal({ open, onClose }: ImportModalProps) {
 
   function resetBrowserState() {
     setBrowserFiles([])
+    setSkippedFiles([])
     setBrowserProgress(null)
     setBrowserError(null)
     uploadAbortRef.current = null
@@ -196,6 +198,10 @@ export default function ImportModal({ open, onClose }: ImportModalProps) {
 
   function handleFilesSelected(fileList: FileList | File[]) {
     const plans = filesToPlans(fileList).filter((item) => /\.jpe?g$/i.test(item.path))
+    const skipped = Array.from(fileList)
+      .map((file) => browserUploadDisplayPath(file))
+      .filter((path) => !/\.jpe?g$/i.test(path))
+    setSkippedFiles(skipped)
     setBrowserFiles(plans)
     setBrowserError(plans.length === 0 ? 'Choose one or more JPEG images to upload.' : null)
     setBrowserProgress(null)
@@ -437,6 +443,17 @@ export default function ImportModal({ open, onClose }: ImportModalProps) {
                   ? `${summary.count} JPEG files selected (${formatBytes(summary.totalBytes)})`
                   : 'Choose a folder synced by OneDrive, Google Drive, Dropbox, or another desktop client. Files are uploaded in chunks; the app never receives cloud-provider credentials.'}
               </p>
+              {skippedFiles.length > 0 && (
+                <p
+                  className="text-xs"
+                  style={{ color: 'var(--warning)', marginTop: 4 }}
+                  role="status"
+                >
+                  {skippedFiles.length} non-JPEG file{skippedFiles.length === 1 ? '' : 's'} skipped:{' '}
+                  {skippedFiles.slice(0, 3).join(', ')}
+                  {skippedFiles.length > 3 ? ` (+${skippedFiles.length - 3} more)` : ''}
+                </p>
+              )}
             </div>
           ) : (
             <div style={{ marginBottom: 20 }}>
