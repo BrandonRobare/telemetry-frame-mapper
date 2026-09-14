@@ -8,6 +8,14 @@ from pathlib import Path
 
 APP_NAME = "Telemetry Frame Mapper"
 MACOS_EXECUTABLE_PATHS = ("/opt/homebrew/bin", "/usr/local/bin")
+# Optional extra tool roots (colon-separated), e.g. MacPorts or custom
+# Homebrew prefixes (#877). Set TFM_EXTRA_TOOL_ROOTS in the launcher env.
+_EXTRA_TOOL_ROOTS_ENV = "TFM_EXTRA_TOOL_ROOTS"
+
+
+def _extra_tool_roots() -> tuple[str, ...]:
+    value = os.environ.get(_EXTRA_TOOL_ROOTS_ENV, "")
+    return tuple(root for root in value.split(os.pathsep) if root)
 
 
 def prepend_macos_executable_paths(
@@ -26,7 +34,7 @@ def prepend_macos_executable_paths(
     directory_exists = is_dir or (lambda value: Path(value).is_dir())
     additions = [
         path
-        for path in MACOS_EXECUTABLE_PATHS
+        for path in (*MACOS_EXECUTABLE_PATHS, *_extra_tool_roots())
         if path not in current_entries and directory_exists(path)
     ]
     if additions:
