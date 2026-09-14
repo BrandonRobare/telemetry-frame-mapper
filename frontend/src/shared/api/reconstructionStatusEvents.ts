@@ -60,7 +60,13 @@ export function useReconstructionStatusEvents(
         publishConnected()
       }
       source.addEventListener('status', (event) => {
-        const status = JSON.parse((event as MessageEvent).data) as Reconstruction
+        let status: Reconstruction
+        try {
+          status = JSON.parse((event as MessageEvent).data) as Reconstruction
+        } catch {
+          // A malformed/truncated SSE frame must not kill the listener (#866).
+          return
+        }
         qc.setQueriesData<Job[]>({ queryKey: ['jobs'] }, (old) => {
           if (!old) return old
           return old.map((job) => (job.id === id ? applyReconstructionStatus(job, status) : job))
