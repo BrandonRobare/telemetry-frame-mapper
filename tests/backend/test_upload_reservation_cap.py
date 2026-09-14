@@ -2,13 +2,10 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 
 def test_start_rejects_when_reservation_cap_reached(
     client, tmp_path, monkeypatch
 ) -> None:
-    from backend.main import app
     from backend.routers import uploads
 
     root = tmp_path / "uploads"
@@ -38,7 +35,6 @@ def test_start_rejects_when_reservation_cap_reached(
 
 
 def test_start_accepts_under_the_cap(client, tmp_path, monkeypatch) -> None:
-    from backend.routers import uploads
 
     root = tmp_path / "uploads"
     root.mkdir(parents=True, exist_ok=True)
