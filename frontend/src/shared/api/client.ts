@@ -57,11 +57,28 @@ async function errorMessage(res: Response): Promise<string> {
   return `${fallback}: ${body}`
 }
 
+const DEFAULT_TIMEOUT_MS = 120_000
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(apiUrl(path), { credentials: 'include', ...init })
-  if (!res.ok) throw new Error(await errorMessage(res))
-  if (res.status === 204 || res.headers.get('content-length') === '0') return undefined as T
-  return res.json() as Promise<T>
+  // A wedged backend must not leave UI requests pending forever; time out
+  // while still honouring any caller-supplied signal (#868).
+  const controller = new AbortController()
+  const timeout = setTimeout(() => {
+    controller.abort(new DOMException('Request timed out', 'TimeoutError'))
+  }, DEFAULT_TIMEOUT_MS)
+  const outer = init?.signal
+  if (outer) {
+    if (outer.aborted) controller.abort()
+    else outer.addEventListener('abort', () => controller.abort(), { once: true })
+  }
+  try {
+    const res = await fetch(apiUrl(path), { credentials: 'include', ...init, signal: controller.signal })
+    if (!res.ok) throw new Error(await errorMessage(res))
+    if (res.status === 204 || res.headers.get('content-length') === '0') return undefined as T
+    return res.json() as Promise<T>
+  } finally {
+    clearTimeout(timeout)
+  }
 }
 
 export const get  = <T>(path: string) => request<T>(path)
