@@ -116,9 +116,9 @@ missing_tools="$(printf '%s' "$resources_json" | uv run --frozen --no-sync pytho
 import json
 import sys
 payload = json.load(sys.stdin)
-binaries = payload.get("binaries", {})
+tools = {tool["key"]: tool for tool in payload.get("tools", [])}
 print(" ".join(key for key in ("ffmpeg", "exiftool")
-               if not binaries.get(key, {}).get("available")))
+               if not tools.get(key, {}).get("available")))
 ')"
 if [[ -n "$missing_tools" ]]; then
     printf 'FAIL: packaged tool discovery regressed: %s not found under the bare PATH\n' \
