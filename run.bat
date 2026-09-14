@@ -38,7 +38,7 @@ start "Backend" cmd /k "python -m backend"
 where npm >nul 2>nul
 if not errorlevel 1 if exist "frontend\" (
     echo Starting frontend on http://localhost:5173 ...
-    start "Frontend" cmd /k "cd frontend && npm run dev"
+    start "TFM-Frontend" cmd /k "cd frontend && npm run dev"
     timeout /t 3 >nul
     start "" "http://localhost:5173"
 ) else if exist "frontend\dist\" (
@@ -50,3 +50,15 @@ if not errorlevel 1 if exist "frontend\" (
     timeout /t 2 >nul
     start "" "http://localhost:8000/docs"
 )
+
+rem #874: watch the backend window and reap the frontend when the backend
+rem exits, so a dead API never leaves an orphaned :5173 server behind.
+:watch_backend
+timeout /t 2 /nobreak >nul
+tasklist /FI "WINDOWTITLE eq Backend*" 2>nul | find /i "cmd.exe" >nul
+if %errorlevel% neq 0 (
+    echo Backend window closed - shutting down the frontend.
+    taskkill /FI "WINDOWTITLE eq TFM-Frontend*" /T /F >nul 2>&1
+    exit /b 1
+)
+goto watch_backend
