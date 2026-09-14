@@ -7,6 +7,12 @@ from pathlib import Path
 from drone_video_geotagger.frames import FrameTag
 
 
+def _csv_safe(value: object) -> str:
+    """Neutralize spreadsheet formula prefixes in CSV cells (#863)."""
+    text = "" if value is None else str(value)
+    return ("'" + text) if text and text[0] in ("=", "+", "-", "@", "\t", "\r") else text
+
+
 def write_audit_csv(tags: list[FrameTag], csv_path: Path) -> None:
     csv_path.parent.mkdir(parents=True, exist_ok=True)
     with csv_path.open("w", newline="", encoding="utf-8") as file:
@@ -26,7 +32,7 @@ def write_audit_csv(tags: list[FrameTag], csv_path: Path) -> None:
         for tag in tags:
             writer.writerow(
                 [
-                    str(tag.target),
+                    _csv_safe(str(tag.target)),
                     tag.frame_index,
                     f"{tag.seconds:.3f}",
                     f"{tag.lat:.8f}",
