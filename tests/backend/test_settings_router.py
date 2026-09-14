@@ -45,6 +45,18 @@ def tmp_config(tmp_path, monkeypatch):
         "processed_dir": "./processed",
         "exports_dir": "./exports",
         "data_dir": "./data",
+        "reconstruction": {
+            "default_preset": "quick",
+            "colmap_threads": 8,
+            "sift_max_features": 8192,
+            "matcher": "exhaustive",
+            "camera_model": "PINHOLE",
+            "presets": {
+                "quick": {"iterations": 1000, "max_gaussians": 350000},
+                "full": {"iterations": 30000, "max_gaussians": 1000000},
+                "default": {"iterations": 500, "max_gaussians": 100000},
+            },
+        },
     }
     cfg_file.write_text(yaml.safe_dump(defaults, sort_keys=False))
     # Point the router at the tmp file — all reads go through CONFIG_PATH.
@@ -132,6 +144,18 @@ def test_get_settings_reconstruction_defaults(client, tmp_config):
     assert "full" in recon["presets"]
     assert recon["presets"]["quick"]["iterations"] == 1000
     assert recon["presets"]["full"]["iterations"] == 30000
+
+
+def test_get_settings_filters_removed_preset_keys(client, tmp_config):
+    """#804: a stale on-disk preset name must not be echoed by GET /settings."""
+    resp = client.get("/settings")
+    assert resp.status_code == 200
+    presets = resp.json()["reconstruction"]["presets"]
+
+    # The fixture ships a removed "default" preset; only the v3 policy
+    # presets may survive.
+    assert "default" not in presets
+    assert set(presets) == {"quick", "full"}
 
 
 def test_get_settings_render_defaults(client, tmp_config):
