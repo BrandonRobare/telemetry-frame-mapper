@@ -107,6 +107,24 @@ if ! curl --fail --silent --show-error --max-time 2 "$health_url" >/dev/null; th
     exit 1
 fi
 
+# #832: the app was launched with a bare PATH (/usr/bin:/bin:/usr/sbin:/sbin).
+# The runtime hook must still surface Homebrew tools; without it this fails.
+resources_json="$(curl --fail --silent --show-error --max-time 5 \
+    "http://127.0.0.1:8000/system/resources")"
+missing_tools="$(printf '%s' "$resources_json" | uv run --frozen --no-sync python -c '
+import json
+import sys
+payload = json.load(sys.stdin)
+binaries = payload.get("binaries", {})
+print(" ".join(key for key in ("ffmpeg", "exiftool")
+               if not binaries.get(key, {}).get("available")))
+')"
+if [[ -n "$missing_tools" ]]; then
+    printf 'FAIL: packaged tool discovery regressed: %s not found under the bare PATH\n' \
+        "$missing_tools" >&2
+    exit 1
+fi
+
 for path in "$app_data/config.yaml" "$app_data/data" "$app_data/imports" "$app_data/processed" "$app_data/exports"; do
     if [[ ! -e "$path" ]]; then
         printf 'Packaged app did not create expected data path: %s\n' "$path" >&2
