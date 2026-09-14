@@ -18,6 +18,8 @@ from shapely.geometry import LineString, Point, shape
 from sqlalchemy.orm import Session as DBSession
 from starlette.background import BackgroundTask
 
+from backend.core.csv_safe import csv_safe
+
 from ..core.config import get_cesium_ion_config, get_config
 from ..core.paths import confine_path
 from ..db.database import get_db
@@ -887,8 +889,8 @@ def export_measurements_csv(reconstruction_id: int, db: DBSession = Depends(get_
     for m in measurements:
         writer.writerow(
             [
-                m.id, m.kind, m.label or "", m.value, m.unit or "",
-                m.created_at.isoformat(), m.points_json,
+                m.id, m.kind, csv_safe(m.label or ""), m.value, csv_safe(m.unit or ""),
+                m.created_at.isoformat(), csv_safe(m.points_json),
             ]
         )
     filename = f"measurements_{reconstruction_id}.csv"
