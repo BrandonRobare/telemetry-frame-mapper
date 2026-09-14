@@ -111,7 +111,7 @@ fi
 
 # #832: the app was launched with a bare PATH (/usr/bin:/bin:/usr/sbin:/sbin).
 # The runtime hook must still surface Homebrew tools; without it this fails.
-resources_json="$(curl --fail --silent --show-error --max-time 5 \
+resources_json="$(curl --fail --silent --show-error --max-time 15 \
     "http://127.0.0.1:8000/system/resources")"
 missing_tools="$(printf '%s' "$resources_json" | uv run --frozen --no-sync python -c '
 import json
