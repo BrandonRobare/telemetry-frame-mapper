@@ -111,8 +111,19 @@ fi
 
 # #832: the app was launched with a bare PATH (/usr/bin:/bin:/usr/sbin:/sbin).
 # The runtime hook must still surface Homebrew tools; without it this fails.
-resources_json="$(curl --fail --silent --show-error --max-time 15 \
-    "http://127.0.0.1:8000/system/resources")"
+# First-call Metal/torch init in the bundle can exceed short timeouts on a
+# hot runner, so probe with retries and a generous per-attempt budget.
+resources_json=""
+for _attempt in 1 2 3; do
+  resources_json="$(curl --fail --silent --show-error --max-time 30 \
+      "http://127.0.0.1:8000/system/resources" 2>/dev/null)" && break
+  printf '%s\n' "retrying /system/resources probe..." >&2
+  sleep 2
+done
+if [[ -z "$resources_json" ]]; then
+  printf '%s\n' "FAIL: /system/resources probe never returned under the bundled app (bare PATH); see stderr above." >&2
+  exit 1
+fi
 missing_tools="$(printf '%s' "$resources_json" | uv run --frozen --no-sync python -c '
 import json
 import sys
