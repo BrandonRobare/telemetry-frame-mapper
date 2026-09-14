@@ -10,7 +10,7 @@ start "Backend" cmd /k "set BACKEND_RELOAD=1&& uv sync --inexact --group backend
 
 where node >nul 2>nul
 if errorlevel 1 (
-    echo node/npm not found -- install Node 18+ from https://nodejs.org to run the frontend.
+    echo node/npm not found -- install Node 22 LTS (>=22.12) from https://nodejs.org to run the frontend.
     echo Backend starting at http://localhost:8000
     goto :eof
 )

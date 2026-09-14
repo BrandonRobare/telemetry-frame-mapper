@@ -7,7 +7,7 @@ The installer bundles one FastAPI API process, the built React frontend, default
 Build on 64-bit Windows with:
 
 - Python 3.11–3.12 and [uv](https://docs.astral.sh/uv/)
-- Node.js 20.19+ (to build `frontend/dist`)
+- Node.js 22 LTS (>=22.12; to build `frontend/dist`)
 - [Inno Setup 6](https://jrsoftware.org/isinfo.php) (`ISCC.exe`) on `PATH`
 
 The app's optional external tools are not redistributed: install `ffmpeg` and ExifTool for CLI geotagging, and COLMAP for reconstruction, as described in [INSTALL.md](INSTALL.md). CUDA/torch/gsplat remains a manual, optional setup.

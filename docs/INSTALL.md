@@ -5,7 +5,7 @@ What you need depends on how much of the pipeline you use:
 | You want to… | You need |
 |---|---|
 | Geotag video frames (CLI only) | Python 3.11+, `ffmpeg`, `exiftool` |
-| Use the web app (map, review, plan, export) | A source checkout with `uv`, Docker, or the Windows installer; + Node 20.19+ for the source frontend |
+| Use the web app (map, review, plan, export) | A source checkout with `uv`, Docker, or the Windows installer; + Node 22 LTS (>=22.12) for the source frontend |
 | Run 3D reconstruction | + COLMAP on PATH |
 | Train gaussian splats / render server-side | + NVIDIA GPU (4 GB+ VRAM), CUDA toolkit, torch + gsplat (see [SETUP.md](SETUP.md)) |
 
@@ -88,7 +88,7 @@ npm install
 npm run dev      # http://localhost:5173
 ```
 
-Requires Node 20.19+ (Vite 8 declares `^20.19.0 || >=22.12.0`). The UI expects the backend at `http://localhost:8000` (override with a `VITE_API_URL` env var).
+Requires Node 22 LTS (>=22.12; Vite 8 declares `^20.19.0 || >=22.12.0` — CI and the Docker image run 22). The UI expects the backend at `http://localhost:8000` (override with a `VITE_API_URL` env var).
 
 ## 4. Run it
 
