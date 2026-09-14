@@ -55,3 +55,12 @@ def test_run_scripts_do_not_reinstall_or_install_frontend():
         text = _script(name)
         assert "npm install" not in text
         assert "npm ci" not in text
+
+
+def test_run_sh_reaps_the_frontend_when_the_backend_dies():
+    """#862: run.sh must not leave :5173 serving after the backend exits."""
+    sh = _script("run.sh")
+    assert "wait $BACKEND_PID" in sh
+    assert "pkill -TERM -P" in sh
+    assert "kill -0 \"$BACKEND_PID\"" in sh
+    assert "trap cleanup EXIT" in sh
