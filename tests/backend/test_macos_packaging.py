@@ -123,6 +123,28 @@ def test_runtime_hook_does_not_change_path_outside_macos() -> None:
     assert environment["PATH"] == "/usr/bin:/bin"
 
 
+def test_runtime_hook_reconciles_old_config_with_defaults() -> None:
+    runtime_paths = _load_runtime_paths_module()
+    stored = {
+        "removed_preset_key": {"iterations": 999},
+        "deployment": {"host": "0.0.0.0", "port": 8000},
+    }
+    defaults = {
+        "deployment": {"host": "127.0.0.1", "port": 8000, "cors_origins": ["http://localhost:5173"]},
+        "render": {"lod_medium_ratio": 0.5},
+    }
+    merged, removed = runtime_paths._merge_current_defaults(stored, defaults)
+
+    # Stored value survives for a key that still exists.
+    assert merged["deployment"]["host"] == "0.0.0.0"
+    # New defaults are added.
+    assert merged["render"]["lod_medium_ratio"] == 0.5
+    assert merged["deployment"]["cors_origins"] == ["http://localhost:5173"]
+    # Removed keys are quarantined, not silently dropped.
+    assert removed["removed_preset_key"] == {"iterations": 999}
+    assert "removed_preset_key" not in merged
+
+
 def test_runtime_hook_prepends_extra_tool_roots_from_env(monkeypatch) -> None:
     runtime_paths = _load_runtime_paths_module()
     environment = {"PATH": "/usr/bin:/bin"}
