@@ -123,6 +123,23 @@ def test_runtime_hook_does_not_change_path_outside_macos() -> None:
     assert environment["PATH"] == "/usr/bin:/bin"
 
 
+def test_runtime_hook_prepends_extra_tool_roots_from_env(monkeypatch) -> None:
+    runtime_paths = _load_runtime_paths_module()
+    environment = {"PATH": "/usr/bin:/bin"}
+    monkeypatch.setenv(runtime_paths._EXTRA_TOOL_ROOTS_ENV, "/opt/local/bin")
+    existing = {"/usr/local/bin", "/opt/local/bin", "/opt/homebrew/bin"}
+
+    runtime_paths.prepend_macos_executable_paths(
+        platform="darwin",
+        environ=environment,
+        is_dir=existing.__contains__,
+    )
+
+    parts = environment["PATH"].split(":")
+    assert "/opt/local/bin" in parts
+    assert parts.index("/opt/local/bin") < parts.index("/usr/bin")
+
+
 def test_macos_packaging_scripts_have_no_nonportable_environment_assumptions() -> None:
     for script in (BUILD_SCRIPT, SMOKE_SCRIPT):
         source = _read_executable_shell_script(script)
