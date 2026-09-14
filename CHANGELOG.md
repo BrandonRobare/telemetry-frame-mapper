@@ -3,6 +3,38 @@
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres to [Semantic Versioning](https://semver.org/).
 
 
+## [3.0.0] — Unreleased
+
+Cross-platform acceleration release. Full details in `release-notes/v3.0.0.md`; highlights:
+
+### Added
+
+- arm64 macOS application bundle with Finder/Homebrew tool discovery, packaged smoke isolation,
+  and a Finder-launch UI entry point (#833, #859, #832).
+- Native Apple-Silicon Gaussian training through the optional `msplat` backend, with a
+  COLMAP-frame-preserving export, selected-submodel loading, and a validity gate that rejects
+  non-finite output before it can be recorded as success (#850, #851, #854, #855).
+- Structured accelerator contract with platform-correct setup hints, and versioned capability
+  probing (#856, #818).
+- Per-frame CPU semantic segmentation that tolerates score-less pipeline output (#844).
+
+### Changed
+
+- Version metadata, lockfiles, installer identity, and release notes synchronized to 3.0.0 (#861).
+- Source-launch launchers now run `npm ci`, sync with `--inexact` so optional dependency groups
+  survive, and point the dev frontend at the backend via `VITE_API_URL` (#803, #858, #873).
+- Thumbnails resolve through the backend image endpoint and are id-prefixed so case-variant
+  sibling names cannot overwrite each other on macOS (#831, #857, #876).
+- Spreadsheet-formula prefixes in CSV exports are neutralized (#863).
+
+### Fixed
+
+- COLMAP 4.x guided matching/global-mapper option namespaces (#856).
+- Post-import Quick QA state retention and terminal import progress (#860).
+- The bundled app no longer inherits stray environment selectors into its data
+  directories (#871).
+
+
 ## [2.0.5] — 2026-09-03
 
 UX, accessibility and durability release. Closes the v2.0.5 milestone; no new product surface.
