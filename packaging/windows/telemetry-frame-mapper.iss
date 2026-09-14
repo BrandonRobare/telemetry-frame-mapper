@@ -1,5 +1,5 @@
 #define AppName "Telemetry Frame Mapper"
-#define AppVersion "2.0.5"
+#define AppVersion "3.0.0"
 #define AppExeName "Telemetry Frame Mapper.exe"
 
 [Setup]
