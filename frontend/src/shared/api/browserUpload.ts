@@ -88,6 +88,7 @@ export async function uploadBrowserImport({ name, files, signal, onProgress }: B
   })
 
   let uploadedBytes = 0
+  let completed = false
   try {
     for (const { file, path } of files) {
       let offset = 0
@@ -109,17 +110,25 @@ export async function uploadBrowserImport({ name, files, signal, onProgress }: B
       }
     }
 
-    const completed = await checkedFetch<CompleteUploadResponse>(`/uploads/imports/${start.upload_id}/complete`, {
-      method: 'POST',
-      signal,
-    })
+    const completedResponse = await checkedFetch<CompleteUploadResponse>(
+      `/uploads/imports/${start.upload_id}/complete`,
+      {
+        method: 'POST',
+        signal,
+      },
+    )
+    completed = true
     onProgress?.({ uploadId: start.upload_id, uploadedBytes, totalBytes, status: 'importing' })
-    return { session: completed.session, uploadId: completed.upload_id }
+    return { session: completedResponse.session, uploadId: completedResponse.upload_id }
   } catch (error) {
-    await fetch(apiUrl(`/uploads/imports/${start.upload_id}/cancel`), {
-      method: 'POST',
-      credentials: 'include',
-    }).catch(() => undefined)
+    // #867: never cancel an import whose /complete already succeeded — a
+    // network blip after that point must not kill the running import.
+    if (!completed) {
+      await fetch(apiUrl(`/uploads/imports/${start.upload_id}/cancel`), {
+        method: 'POST',
+        credentials: 'include',
+      }).catch(() => undefined)
+    }
     throw error
   }
 }
