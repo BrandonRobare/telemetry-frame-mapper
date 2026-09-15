@@ -369,7 +369,7 @@ def test_hardware_workflow_is_manual_branch_gated_and_version_pinned() -> None:
     assert "heldout-parity-metal:" in workflow
     assert "heldout-parity-cuda:" in workflow
     assert workflow.count("github.event_name == 'workflow_dispatch'") >= 3
-    assert workflow.count("github.actor == github.repository_owner") == 2
+    assert workflow.count("github.actor == github.repository_owner") == 3
     assert "heldout_parity_approved_sha:" in workflow
     assert workflow.count('test "${GITHUB_SHA}" = "${APPROVED_SHA}"') == 2
     assert workflow.count("refs/heads/wave8/784-cuda-metal-parity") >= 4
