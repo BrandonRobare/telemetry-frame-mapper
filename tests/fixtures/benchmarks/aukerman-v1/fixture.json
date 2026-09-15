@@ -1,0 +1,31 @@
+{
+  "fixture_id": "aukerman-colmap-v1",
+  "image_manifest_sha256": "e03b500730f4a94c5dc6a67d7978d336c0c4b2bdde3e7ee28bd0151da96fefb3",
+  "license": "CC0-1.0",
+  "name": "OpenDroneMap Aukerman",
+  "registered_view_count": 75,
+  "schema_version": 1,
+  "source_commit": "4e8031630f4193494c79b1c1d3524108826d1ba9",
+  "sparse_archive_sha256": "23d420aac01e86cf263242003798db39af92611f7a9d94aad55afddf38d2dfe4",
+  "sparse_model_sha256": "06722b99e2482ce493bfa7ce203e9dcd9c0cb0ca1287fe52451db5da35c8428a",
+  "sparse_point_count": 10883,
+  "split": {
+    "heldout_view_count": 10,
+    "heldout_view_names": [
+      "DSC00229.JPG",
+      "DSC00238.JPG",
+      "DSC00247.JPG",
+      "DSC00257.JPG",
+      "DSC00267.JPG",
+      "DSC00277.JPG",
+      "DSC00285.JPG",
+      "DSC00293.JPG",
+      "DSC00301.JPG",
+      "DSC00309.JPG"
+    ],
+    "registered_view_names_sha256": "f41219ec66a2021ee7718be5fcb9e6548900c8c553d2617c96ee33eb8ef33a1c",
+    "rule": "filename-sorted registered view index i is held out iff i % test_every == 0",
+    "test_every": 8,
+    "train_view_count": 65
+  }
+}

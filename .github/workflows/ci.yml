@@ -9,6 +9,11 @@ on:
         required: false
         type: boolean
         default: false
+      run_metal_release_gate:
+        description: Run the #852 Metal release gate on the self-hosted physical M5
+        required: false
+        type: boolean
+        default: false
   push:
     branches: [main]
   pull_request:
@@ -429,3 +434,72 @@ jobs:
             colmap-model.txt
             metal-preset-benchmark.json
             metal-preset-environment.txt
+
+  metal-release-gate:
+    # #852: native msplat training on the physical Apple M5 (#849 scoped the
+    # supported target to that machine; hosted virtual-M1 runners are out).
+    # Tag pushes reach this through release.yml's workflow_call, so a failure
+    # blocks publish-frontend-dist. The owner can dispatch it for a manual
+    # proof. Never pull_request or branch pushes: the runner is trusted.
+    if: >
+      startsWith(github.ref, 'refs/tags/v') ||
+      (github.event_name == 'workflow_dispatch' &&
+       github.actor == github.repository_owner &&
+       inputs.run_metal_release_gate)
+    runs-on: [self-hosted, macOS, ARM64, metal-m5]
+    timeout-minutes: 30
+    steps:
+      - name: Check out code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Verify exact commit on physical Apple Silicon
+        run: |
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(uname -m)" = "arm64"
+          test "$(sysctl -n hw.model)" != "VirtualMac2,1"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: "0.11.16"
+
+      - name: Install locked Metal environment
+        run: uv sync --frozen --python 3.12 --group backend --group reconstruction --group splat-metal
+
+      - name: Fetch pinned CC0 Aukerman survey (cached per commit)
+        env:
+          FIXTURE_COMMIT: 4e8031630f4193494c79b1c1d3524108826d1ba9
+        run: |
+          set -euo pipefail
+          fixture="$HOME/Library/Caches/tfm-fixtures/aukerman-$FIXTURE_COMMIT"
+          if [ ! -d "$fixture/images" ]; then
+            rm -rf "$fixture"
+            git init "$fixture"
+            git -C "$fixture" remote add origin https://github.com/OpenDroneMap/odm_data_aukerman.git
+            git -C "$fixture" fetch --depth 1 origin "$FIXTURE_COMMIT"
+            git -C "$fixture" checkout --detach FETCH_HEAD
+          fi
+          test "$(git -C "$fixture" rev-parse HEAD)" = "$FIXTURE_COMMIT"
+          echo "FIXTURE=$fixture" >> "$GITHUB_ENV"
+
+      - name: Train through the release preset
+        run: |
+          set -euo pipefail
+          rm -rf metal-release-gate backend.log
+          uv run --frozen --no-sync python -m scripts.metal_release_gate train --source "$FIXTURE" --evidence metal-release-gate 2>&1 | tee backend.log
+
+      - name: Validate the export in a fresh process
+        run: |
+          set -euo pipefail
+          mv backend.log metal-release-gate/
+          uv pip freeze --exclude-editable > metal-release-gate/environment.txt
+          uv run --frozen --no-sync python -m scripts.metal_release_gate validate --evidence metal-release-gate
+
+      - name: Upload gate evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: metal-release-gate-${{ github.sha }}
+          if-no-files-found: error
+          retention-days: 90
+          path: metal-release-gate
