@@ -80,7 +80,7 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
@@ -188,7 +188,7 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
@@ -217,6 +217,17 @@ jobs:
       - name: Smoke Windows startup and migrations
         run: uv run --frozen --no-sync powershell -ExecutionPolicy Bypass -File packaging/windows/smoke.ps1
 
+      - name: Zip Windows bundle
+        shell: powershell
+        run: Compress-Archive -Path "dist/*" -DestinationPath "windows-arm64-bundle.zip" -Force
+
+      - name: Upload Windows bundle
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: windows-arm64-${{ github.sha }}
+          path: windows-arm64-bundle.zip
+          if-no-files-found: error
+
   macos-package:
     runs-on: macos-latest
     steps:
@@ -239,7 +250,7 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 

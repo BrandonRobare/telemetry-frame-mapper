@@ -350,11 +350,21 @@ def _build_full_response() -> dict:
     general = {k: getattr(cfg, k) for k in general_keys}
     mission = {k: getattr(cfg, k) for k in mission_keys}
 
+    # The response must never echo preset names that were removed from the
+    # v3 policy (#804): an old on-disk config.yaml keeps them forever, and
+    # the UI cannot select what does not exist. Only known presets survive;
+    # user-defined preset entries are not a feature of this release.
+    known_presets = {"quick", "full"}
+    presets = recon_cfg.get("presets")
+    if isinstance(presets, dict):
+        presets = {name: presets[name] for name in known_presets if name in presets}
+    recon = {**recon_cfg, "presets": presets} if isinstance(presets, dict) else recon_cfg
+
     return {
         "general": general,
         "mission": mission,
         "ingest": ingest_cfg,
-        "reconstruction": recon_cfg,
+        "reconstruction": recon,
         "render": render_cfg,
     }
 

@@ -5,6 +5,7 @@ import io
 from collections.abc import Iterable
 from dataclasses import dataclass
 
+from backend.core.csv_safe import csv_safe
 from backend.db.models import Image
 
 
@@ -120,7 +121,7 @@ def render_control_point_csv(points: Iterable[ControlPoint], format: str) -> str
         _validate_control_point(point, "point")
         rows.append(
             [
-                point.label,
+                csv_safe(point.label),
                 f"{point.latitude:.8f}",
                 f"{point.longitude:.8f}",
                 f"{point.altitude_m:.3f}",

@@ -19,11 +19,11 @@ WINDOWS_INSTALLER = ROOT / "packaging/windows/telemetry-frame-mapper.iss"
 UV_LOCK = ROOT / "uv.lock"
 CHANGELOG = ROOT / "CHANGELOG.md"
 CONTRIBUTING = ROOT / "CONTRIBUTING.md"
-RELEASE_NOTES = ROOT / "release-notes/v2.0.5.md"
+RELEASE_NOTES = ROOT / "release-notes/v3.0.0.md"
 V3_RELEASE_NOTES = ROOT / "release-notes/v3.0.0.md"
 MACOS_BUNDLE_DOC = ROOT / "docs/MACOS-BUNDLE.md"
 INSTALL_DOC = ROOT / "docs/INSTALL.md"
-RELEASE_VERSION = "2.0.5"
+RELEASE_VERSION = "3.0.0"
 
 
 def _match_version(pattern: str, text: str) -> str:

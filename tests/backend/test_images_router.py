@@ -238,3 +238,63 @@ def test_get_thumb_redirects_absolute_processed_path_under_processed(client, tmp
 
     assert resp.status_code == 307
     assert resp.headers["location"] == "/processed/42/thumbs/frame.jpg"
+
+
+def test_get_thumb_foreign_absolute_path_404s_when_basename_absent(
+    client, tmp_path, monkeypatch
+):
+    """An absolute thumb outside processed never 500s, and a missing
+    basename fallback is an explicit 404 rather than a silent static-mount
+    miss (#876)."""
+    _, img = _insert_session_and_image(client)
+    processed_dir = tmp_path / "processed-root"
+    processed_dir.mkdir(parents=True)
+
+    from backend.db.models import Image
+    from backend.main import app
+
+    monkeypatch.setattr(
+        "backend.routers.images.get_config",
+        lambda: type("Cfg", (), {"processed_dir": str(processed_dir)})(),
+    )
+
+    db = app.state.test_db_session
+    db.query(Image).filter(Image.id == img.id).update(
+        {"thumb_path": str(tmp_path / "elsewhere" / "frame.jpg")}
+    )
+    db.commit()
+
+    resp = client.get(f"/images/{img.id}/thumb", follow_redirects=False)
+
+    assert resp.status_code == 404
+    assert "Thumbnail file not found" in resp.json()["detail"]
+
+
+def test_get_thumb_foreign_absolute_path_serves_existing_basename(
+    client, tmp_path, monkeypatch
+):
+    """Foreign absolute thumbnails (macOS app-data layout) map by basename
+    when that exact file exists under processed (#876)."""
+    _, img = _insert_session_and_image(client)
+    processed_dir = tmp_path / "processed-root"
+    processed_dir.mkdir(parents=True)
+    (processed_dir / "frame.jpg").write_bytes(b"thumb")
+
+    from backend.db.models import Image
+    from backend.main import app
+
+    monkeypatch.setattr(
+        "backend.routers.images.get_config",
+        lambda: type("Cfg", (), {"processed_dir": str(processed_dir)})(),
+    )
+
+    db = app.state.test_db_session
+    db.query(Image).filter(Image.id == img.id).update(
+        {"thumb_path": str(tmp_path / "elsewhere" / "frame.jpg")}
+    )
+    db.commit()
+
+    resp = client.get(f"/images/{img.id}/thumb", follow_redirects=False)
+
+    assert resp.status_code == 307
+    assert resp.headers["location"] == "/processed/frame.jpg"

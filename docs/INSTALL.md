@@ -5,7 +5,7 @@ What you need depends on how much of the pipeline you use:
 | You want to… | You need |
 |---|---|
 | Geotag video frames (CLI only) | Python 3.11+, `ffmpeg`, `exiftool` |
-| Use the web app (map, review, plan, export) | A source checkout with `uv`, Docker, or the Windows installer; + Node 20.19+ for the source frontend |
+| Use the web app (map, review, plan, export) | A source checkout with `uv`, Docker, or the Windows installer; + Node 22 LTS (>=22.12) for the source frontend |
 | Run 3D reconstruction | + COLMAP on PATH |
 | Train gaussian splats / render server-side | + NVIDIA GPU (4 GB+ VRAM), CUDA toolkit, torch + gsplat (see [SETUP.md](SETUP.md)) |
 
@@ -82,6 +82,25 @@ exiftool -ver
 colmap -h
 ```
 
+#### Supported macOS floor
+
+The full feature set of the v3.0 release is supported on **Apple Silicon (arm64) Macs running
+macOS 14 or later with Python 3.12 or 3.13** (#818). This is the single authoritative statement;
+`docs/MACOS-BUNDLE.md` references it instead of restating a version.
+
+- Everything except native splat training works outside that floor too: the CLI, import, review,
+  coverage, mission planning, COLMAP reconstruction (any supported OS), exports, and CPU semantic
+  segmentation run wherever the base app runs, and reconstruction `colmap_only` output is fully
+  supported on every platform.
+- Native Apple-Silicon splat training (`splat-metal`, `msplat==1.1.4`) requires **arm64 + macOS 14+
+  + Python 3.12/3.13**, because msplat publishes `macosx_14_0_arm64` wheels for cp312/cp313 only.
+  On Python 3.11 or 3.14, or on Intel, the group cannot install; the app still runs and completes
+  reconstructions as `colmap_only`.
+- Intel Macs and x86 Windows/Linux are out of scope for Metal training; CUDA training on NVIDIA
+  hosts remains a separate manual setup.
+
+See [PLATFORM-MATRIX.md](PLATFORM-MATRIX.md) for the one-table capability matrix (#791).
+
 ## 3. Frontend
 
 ```bash
@@ -90,7 +109,7 @@ npm install
 npm run dev      # http://localhost:5173
 ```
 
-Requires Node 20.19+ (Vite 8 declares `^20.19.0 || >=22.12.0`). The UI expects the backend at `http://localhost:8000` (override with a `VITE_API_URL` env var).
+Requires Node 22 LTS (>=22.12; Vite 8 declares `^20.19.0 || >=22.12.0` — CI and the Docker image run 22). The UI expects the backend at `http://localhost:8000` (override with a `VITE_API_URL` env var).
 
 ## 4. Run it
 

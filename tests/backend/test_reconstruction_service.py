@@ -560,7 +560,12 @@ def test_run_colmap_supports_guided_matcher(tmp_path):
         "sift_max_features": 8192,
         "colmap_threads": 8,
     }
+    legacy_caps = {
+        "available": True, "is_v4": False,
+        "features": {"spatial_matcher": False, "global_mapper": False},
+    }
     with patch("backend.services.reconstruction.get_reconstruction_config", return_value=cfg), \
+         patch("backend.services.colmap_capabilities.get_capabilities", return_value=legacy_caps), \
          patch("backend.services.reconstruction.subprocess.Popen",
                return_value=_fake_colmap_popen()) as run:
         _run_colmap(colmap_dir, lambda *_args: None, threading.Event())
@@ -570,6 +575,108 @@ def test_run_colmap_supports_guided_matcher(tmp_path):
     assert "--SiftMatching.guided_matching=1" in matcher_cmd
     feature_cmd = run.call_args_list[0].args[0]
     assert feature_cmd[feature_cmd.index("--ImageReader.single_camera") + 1] == "1"
+
+
+def test_run_colmap_uses_v4_guided_namespace(tmp_path):
+    """COLMAP 4.x moves guided matching under FeatureMatching (#856)."""
+    import threading
+    from unittest.mock import patch
+
+    from backend.services.reconstruction import _run_colmap
+
+    colmap_dir = tmp_path / "colmap"
+    colmap_dir.mkdir()
+    _write_fake_images_txt(colmap_dir, 1)
+
+    cfg = {
+        "camera_model": "PINHOLE",
+        "matcher": "sequential_guided",
+        "sift_max_features": 8192,
+        "colmap_threads": 8,
+    }
+    v4_caps = {
+        "available": True, "is_v4": True,
+        "features": {"spatial_matcher": False, "global_mapper": False},
+    }
+    with patch("backend.services.reconstruction.get_reconstruction_config", return_value=cfg), \
+         patch("backend.services.colmap_capabilities.get_capabilities", return_value=v4_caps), \
+         patch("backend.services.reconstruction.subprocess.Popen",
+               return_value=_fake_colmap_popen()) as run:
+        _run_colmap(colmap_dir, lambda *_args: None, threading.Event())
+
+    matcher_cmd = run.call_args_list[1].args[0]
+    assert matcher_cmd[1] == "sequential_matcher"
+    assert "--FeatureMatching.guided_matching=1" in matcher_cmd
+    assert "--SiftMatching.guided_matching=1" not in matcher_cmd
+
+
+def test_run_colmap_global_mapper_uses_global_thread_namespace(tmp_path):
+    """global_mapper must use GlobalMapper.num_threads, not the incremental
+    Mapper.num_threads the COLMAP 4.x binary rejects (#856)."""
+    import threading
+    from unittest.mock import patch
+
+    from backend.services.reconstruction import _run_colmap
+
+    colmap_dir = tmp_path / "colmap"
+    colmap_dir.mkdir()
+    _write_fake_images_txt(colmap_dir, 1)
+
+    cfg = {
+        "camera_model": "PINHOLE",
+        "matcher": "exhaustive",
+        "mapper": "global",
+        "sift_max_features": 8192,
+        "colmap_threads": 8,
+    }
+    v4_caps = {
+        "available": True, "is_v4": True,
+        "features": {"spatial_matcher": False, "global_mapper": True},
+    }
+    with patch("backend.services.reconstruction.get_reconstruction_config", return_value=cfg), \
+         patch("backend.services.colmap_capabilities.get_capabilities", return_value=v4_caps), \
+         patch("backend.services.reconstruction.subprocess.Popen",
+               return_value=_fake_colmap_popen()) as run:
+        _run_colmap(colmap_dir, lambda *_args: None, threading.Event())
+
+    mapper_cmd = run.call_args_list[2].args[0]
+    assert mapper_cmd[1] == "global_mapper"
+    assert "--GlobalMapper.num_threads=8" in mapper_cmd
+    assert "--Mapper.num_threads=8" not in mapper_cmd
+
+
+def test_run_colmap_incremental_mapper_keeps_incremental_thread_namespace(tmp_path):
+    """Incremental mapping keeps Mapper.num_threads even when COLMAP is v4."""
+    import threading
+    from unittest.mock import patch
+
+    from backend.services.reconstruction import _run_colmap
+
+    colmap_dir = tmp_path / "colmap"
+    colmap_dir.mkdir()
+    _write_fake_images_txt(colmap_dir, 1)
+
+    cfg = {
+        "camera_model": "PINHOLE",
+        "matcher": "exhaustive",
+        "mapper": "incremental",
+        "sift_max_features": 8192,
+        "colmap_threads": 8,
+    }
+    v4_caps = {
+        "available": True, "is_v4": True,
+        "features": {"spatial_matcher": False, "global_mapper": True},
+    }
+    with patch("backend.services.reconstruction.get_reconstruction_config", return_value=cfg), \
+         patch("backend.services.colmap_capabilities.get_capabilities", return_value=v4_caps), \
+         patch("backend.services.reconstruction.subprocess.Popen",
+               return_value=_fake_colmap_popen()) as run:
+        _run_colmap(colmap_dir, lambda *_args: None, threading.Event())
+
+    mapper_cmd = run.call_args_list[2].args[0]
+    assert mapper_cmd[1] == "mapper"
+    assert "--Mapper.num_threads=8" in mapper_cmd
+    assert "--GlobalMapper.num_threads=8" not in mapper_cmd
 
 
 def test_run_colmap_can_opt_into_per_camera_estimates(tmp_path):
