@@ -114,16 +114,14 @@ def _native_config(
     *,
     freeze_densification: bool = False,
 ) -> Any:
-    return runtime.TrainingConfig(
+    kwargs: dict[str, Any] = dict(
         iterations=config.iterations,
         sh_degree=config.sh_degree,
         sh_degree_interval=config.sh_warmup_every,
         ssim_weight=config.ssim_lambda,
         num_downscales=0,
         refine_every=config.refine_every,
-        warmup_length=config.iterations + 1
-        if freeze_densification
-        else config.refine_start_iter,
+        warmup_length=config.iterations + 1 if freeze_densification else config.refine_start_iter,
         reset_alpha_every=max(1, config.reset_every // max(1, config.refine_every)),
         densify_grad_thresh=math.inf if freeze_densification else _DENSIFY_GRAD_THRESHOLD,
         stop_screen_size_at=config.refine_stop_iter,
@@ -136,6 +134,9 @@ def _native_config(
         output=str(output_path.parent),
         save_every=-1,
     )
+    if config.background_color is not None:
+        kwargs["bg_color"] = list(config.background_color)
+    return runtime.TrainingConfig(**kwargs)
 
 
 def _selected_model_view(colmap_dir: Path) -> Path | None:
@@ -246,6 +247,12 @@ def _train(
     progress = _ProgressThrottle(progress_cb)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     progress("loading COLMAP model", _PROGRESS_START, force=True)
+    dataset_kwargs: dict[str, Any] = {
+        "downscale_factor": float(config.downscale_factor),
+        "eval_mode": config.benchmark_heldout_split,
+    }
+    if config.benchmark_heldout_split:
+        dataset_kwargs["test_every"] = config.benchmark_test_every
     # msplat resolves sparse/0 unconditionally; mirror the app's selected
     # submodel through a temporary view directory for the load duration. After
     # load, cameras and points live in the in-memory dataset, so the view is
@@ -254,8 +261,7 @@ def _train(
     try:
         dataset = runtime.load_dataset(
             str(model_view if model_view is not None else colmap_dir),
-            downscale_factor=float(config.downscale_factor),
-            eval_mode=False,
+            **dataset_kwargs,
         )
     finally:
         if model_view is not None:

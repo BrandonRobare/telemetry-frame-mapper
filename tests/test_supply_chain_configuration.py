@@ -115,7 +115,8 @@ def test_msplat_group_is_platform_pinned_locked_and_gated() -> None:
     }
 
     ci = CI_WORKFLOW.read_text(encoding="utf-8")
-    assert ci.count("--group splat-metal") == 4
+    assert ci.count("--group splat-metal") == 5
+    assert "heldout-parity-metal" in ci
     assert "metal-preset-benchmark" in ci
     assert "metal-release-gate" in ci
     assert "runs-on: [self-hosted, macOS, ARM64, metal-m5]" in ci
