@@ -77,6 +77,28 @@ def test_usd_handoff_contains_real_mesh_and_georeferencing(client, tmp_path, mon
     assert "without an accuracy claim" in metadata["accuracy"]
 
 
+@pytest.mark.parametrize("root_spelling", ["symlink", "parent_component"])
+def test_usd_handoff_accepts_configured_root_spelling(client, tmp_path, monkeypatch, root_spelling):
+    real = tmp_path / "actual-exports"
+    real.mkdir()
+    if root_spelling == "symlink":
+        configured = tmp_path / "exports-link"
+        configured.symlink_to(real, target_is_directory=True)
+    else:
+        intermediate = tmp_path / "intermediate"
+        intermediate.mkdir()
+        configured = intermediate / ".." / "actual-exports"
+    monkeypatch.setattr(
+        export_router, "get_config", lambda: type("Cfg", (), {"exports_dir": str(configured)})()
+    )
+    rec = _complete_mesh_reconstruction(client, real)
+    response = client.get(f"/export/reconstructions/{rec.id}/usd")
+    assert response.status_code == 200
+    assert (real / str(rec.id) / f"mesh_{rec.id}_usd_handoff.zip").is_file()
+    with zipfile.ZipFile(real / str(rec.id) / f"mesh_{rec.id}_usd_handoff.zip") as bundle:
+        assert bundle.read("source/mesh.obj").startswith(b"v 0 0 0")
+
+
 def test_usd_handoff_crash_mid_write_keeps_previous_bundle(client, tmp_path, monkeypatch):
     """A crash while rebuilding the handoff ZIP must leave the previous one intact (#641)."""
     exports_dir = tmp_path / "exports"

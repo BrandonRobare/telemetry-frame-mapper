@@ -210,6 +210,9 @@ jobs:
           tests/cli
           tests/backend/test_settings_router.py
           tests/backend/test_ingest_orchestrator.py::test_run_disambiguates_duplicate_nested_basenames_and_thumbnails
+          tests/backend/test_path_confinement.py::test_windows_native_paths_work_for_confined_atomic_zip
+          tests/backend/test_session_bundle.py::test_archive_restore_accepts_configured_root_spelling[parent_component]
+          tests/backend/test_usd_export.py::test_usd_handoff_accepts_configured_root_spelling[parent_component]
 
       - name: Build frontend
         working-directory: frontend

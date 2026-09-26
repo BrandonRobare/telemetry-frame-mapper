@@ -12,14 +12,37 @@ def confine_path(
     *,
     allow_root: bool = False,
     boundary_name: str = "allowed directory",
+    reject_aliases: bool = False,
 ) -> Path:
     """Resolve *path* and reject it unless it remains inside *root*.
 
     ``realpath`` follows existing symlinks and normalizes both case and separators,
     so the containment decision has the same Windows behavior as the previous
-    export-specific guard.  The returned path is canonical and safe for the caller
-    to read or write at the time it is checked.
+    export-specific guard. ``reject_aliases`` additionally disallows lexical parent
+    traversal and symlink components below the configured root for untrusted paths.
+    The returned path is canonical and safe at the time it is checked.
     """
+    if reject_aliases:
+        # Compare original spellings before realpath erases traversal/symlinks.
+        # A configured root may contain '..' or be a symlink; a previously returned
+        # canonical child may therefore start at the root's real location instead.
+        for base in (root, Path(os.path.abspath(root)), Path(os.path.realpath(root))):
+            try:
+                child = path.relative_to(base)
+            except ValueError:
+                continue
+            # Backslash is a foreign separator only on POSIX; WindowsPath uses it
+            # for every ordinary child. Never allow aliases in the child suffix.
+            if ".." in child.parts or (os.sep != "\\" and "\\" in str(child)):
+                raise ValueError(f"Path {path} is outside {boundary_name}")
+            current = base
+            for part in child.parts:
+                current = current / part
+                if current.is_symlink():
+                    raise ValueError(f"Path {path} is outside {boundary_name}")
+            break
+        else:
+            raise ValueError(f"Path {path} is outside {boundary_name}")
     root_real = os.path.normcase(os.path.normpath(os.path.realpath(root)))
     path_real = os.path.normcase(os.path.normpath(os.path.realpath(path)))
     try:

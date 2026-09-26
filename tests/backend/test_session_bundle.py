@@ -171,6 +171,34 @@ def test_restore_finds_nested_archive_from_allowed_root(client, tmp_path):
     assert restored.id != session.id
 
 
+@pytest.mark.parametrize("root_spelling", ["symlink", "parent_component"])
+def test_archive_restore_accepts_configured_root_spelling(client, tmp_path, root_spelling):
+    cfg = _cfg(tmp_path)
+    real = tmp_path / "actual-exports"
+    real.mkdir()
+    if root_spelling == "symlink":
+        configured = tmp_path / "exports-link"
+        configured.symlink_to(real, target_is_directory=True)
+    else:
+        intermediate = tmp_path / "intermediate"
+        intermediate.mkdir()
+        configured = intermediate / ".." / "actual-exports"
+    cfg.exports_dir = str(configured)  # type: ignore[attr-defined]
+    db = _db(client)
+    session = SessionModel(name="Configured root", folder_path=str(tmp_path))
+    db.add(session)
+    db.commit()
+    db.refresh(session)
+
+    archived = _archive(client, cfg, session.id)
+    assert archived.status_code == 200
+    bundle_path = Path(archived.json()["bundle_path"])
+    assert bundle_path == real / f"session_{session.id}_archive.zip"
+    restored = _restore(client, cfg, str(bundle_path))
+    assert restored.status_code == 200
+    assert db.get(SessionModel, restored.json()["session_id"]).name == session.name
+
+
 def test_restore_does_not_enumerate_data_root(client, tmp_path, monkeypatch):
     # restore must resolve the archive directly from the (already-confined) path, never by
     # walking the data root — that walk would be a DoS on real roots (10^5+ files). #500
@@ -199,6 +227,48 @@ def test_session_archive_rejects_sibling_of_exports(tmp_path):
         pytest.raises(ValueError, match="outside exports directory"),
     ):
         build_session_archive(tmp_path / "exports2" / "bundle.zip", None, None)
+
+
+@pytest.mark.parametrize("kind", ["traversal", "symlink_parent", "symlink_target"])
+def test_session_archive_rejects_aliased_output_before_db_access(tmp_path, kind):
+    from backend.services.session_bundle import build_session_archive
+
+    exports = tmp_path / "exports"
+    exports.mkdir()
+    (exports / "real").mkdir()
+    if kind == "traversal":
+        archive = exports / "real" / ".." / "bundle.zip"
+    elif kind == "symlink_parent":
+        (exports / "alias").symlink_to(exports / "real", target_is_directory=True)
+        archive = exports / "alias" / "bundle.zip"
+    else:
+        archive = exports / "bundle.zip"
+        archive.symlink_to(exports / "real" / "bundle.zip")
+
+    with patch("backend.services.session_bundle.get_config", return_value=_cfg(tmp_path)):
+        with pytest.raises(ValueError, match="outside exports directory"):
+            build_session_archive(archive, None, None)
+    assert not (exports / "real" / "bundle.zip").exists()
+
+
+@pytest.mark.parametrize("kind", ["traversal", "symlink_parent", "symlink_file"])
+def test_restore_rejects_aliases_even_when_target_is_inside_allowed_root(client, tmp_path, kind):
+    cfg = _cfg(tmp_path)
+    imports = Path(cfg.imports_dir)
+    (imports / "real").mkdir(parents=True)
+    (imports / "real" / "bundle.zip").write_bytes(b"not an archive")
+    if kind == "traversal":
+        candidate = imports / "real" / ".." / "real" / "bundle.zip"
+    elif kind == "symlink_parent":
+        (imports / "alias").symlink_to(imports / "real", target_is_directory=True)
+        candidate = imports / "alias" / "bundle.zip"
+    else:
+        candidate = imports / "bundle.zip"
+        candidate.symlink_to(imports / "real" / "bundle.zip")
+    with patch("backend.services.session_bundle.restore_session_archive") as restore:
+        resp = _restore(client, cfg, str(candidate))
+    assert resp.status_code == 400
+    restore.assert_not_called()
 
 
 def test_restore_artifact_rejects_zip_slip(tmp_path):
