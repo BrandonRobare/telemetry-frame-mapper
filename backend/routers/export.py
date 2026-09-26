@@ -49,7 +49,9 @@ def _atomic_zip(zip_path: Path, root: Path, compression: int = zipfile.ZIP_STORE
     helper hands its callers a destructive primitive (``os.replace`` and ``unlink`` on
     a caller-supplied path), so it does not rely on every future caller confining first.
     """
-    zip_path = confine_path(zip_path, root, boundary_name="exports directory")
+    zip_path = confine_path(
+        zip_path, root, boundary_name="exports directory", reject_aliases=True
+    )
     fd, tmp_name = tempfile.mkstemp(dir=zip_path.parent, prefix=f".{zip_path.name}.", suffix=".tmp")
     os.close(fd)
     tmp_path = Path(tmp_name)
@@ -424,7 +426,7 @@ def export_webodm_georeferencing_csv(session_id: int, db: DBSession = Depends(ge
     )
     exports_dir = Path(get_config().exports_dir)
     exports_dir.mkdir(parents=True, exist_ok=True)
-    zip_path = exports_dir / f"webodm_georeferencing_csv_{session_id}.zip"
+    zip_path = exports_dir / f"webodm_georeferencing_csv_{int(session.id)}.zip"
     with _atomic_zip(zip_path, exports_dir) as zf:
         csv_rows = "filename,latitude,longitude,altitude\n"
         for img in images:

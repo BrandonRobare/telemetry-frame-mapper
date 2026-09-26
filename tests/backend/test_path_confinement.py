@@ -89,3 +89,39 @@ def test_atomic_zip_rejects_paths_outside_root(tmp_path, escaping):
 
     assert victim.read_bytes() == b"pre-existing"
     assert not list(root.iterdir())
+
+
+@pytest.mark.parametrize("kind", ["traversal", "symlink_parent", "symlink_target"])
+def test_atomic_zip_rejects_aliases_within_root_without_modifying_target(tmp_path, kind):
+    from backend.routers.export import _atomic_zip
+
+    root = tmp_path / "exports"
+    real = root / "real"
+    real.mkdir(parents=True)
+    target = real / "bundle.zip"
+    target.write_bytes(b"original")
+    if kind == "traversal":
+        candidate = real / ".." / "real" / "bundle.zip"
+    elif kind == "symlink_parent":
+        (root / "alias").symlink_to(real, target_is_directory=True)
+        candidate = root / "alias" / "bundle.zip"
+    else:
+        candidate = root / "bundle.zip"
+        candidate.symlink_to(target)
+    with pytest.raises(ValueError, match="outside exports directory"):
+        with _atomic_zip(candidate, root):
+            pass
+    assert target.read_bytes() == b"original"
+    assert not list(root.glob("*.tmp"))
+
+
+def test_atomic_zip_preserves_configured_symlink_root(tmp_path):
+    from backend.routers.export import _atomic_zip
+
+    real = tmp_path / "real"
+    real.mkdir()
+    root = tmp_path / "configured-exports"
+    root.symlink_to(real, target_is_directory=True)
+    with _atomic_zip(root / "bundle.zip", root) as zf:
+        zf.writestr("manifest.json", "{}")
+    assert (real / "bundle.zip").is_file()

@@ -201,6 +201,48 @@ def test_session_archive_rejects_sibling_of_exports(tmp_path):
         build_session_archive(tmp_path / "exports2" / "bundle.zip", None, None)
 
 
+@pytest.mark.parametrize("kind", ["traversal", "symlink_parent", "symlink_target"])
+def test_session_archive_rejects_aliased_output_before_db_access(tmp_path, kind):
+    from backend.services.session_bundle import build_session_archive
+
+    exports = tmp_path / "exports"
+    exports.mkdir()
+    (exports / "real").mkdir()
+    if kind == "traversal":
+        archive = exports / "real" / ".." / "bundle.zip"
+    elif kind == "symlink_parent":
+        (exports / "alias").symlink_to(exports / "real", target_is_directory=True)
+        archive = exports / "alias" / "bundle.zip"
+    else:
+        archive = exports / "bundle.zip"
+        archive.symlink_to(exports / "real" / "bundle.zip")
+
+    with patch("backend.services.session_bundle.get_config", return_value=_cfg(tmp_path)):
+        with pytest.raises(ValueError, match="outside exports directory"):
+            build_session_archive(archive, None, None)
+    assert not (exports / "real" / "bundle.zip").exists()
+
+
+@pytest.mark.parametrize("kind", ["traversal", "symlink_parent", "symlink_file"])
+def test_restore_rejects_aliases_even_when_target_is_inside_allowed_root(client, tmp_path, kind):
+    cfg = _cfg(tmp_path)
+    imports = Path(cfg.imports_dir)
+    (imports / "real").mkdir(parents=True)
+    (imports / "real" / "bundle.zip").write_bytes(b"not an archive")
+    if kind == "traversal":
+        candidate = imports / "real" / ".." / "real" / "bundle.zip"
+    elif kind == "symlink_parent":
+        (imports / "alias").symlink_to(imports / "real", target_is_directory=True)
+        candidate = imports / "alias" / "bundle.zip"
+    else:
+        candidate = imports / "bundle.zip"
+        candidate.symlink_to(imports / "real" / "bundle.zip")
+    with patch("backend.services.session_bundle.restore_session_archive") as restore:
+        resp = _restore(client, cfg, str(candidate))
+    assert resp.status_code == 400
+    restore.assert_not_called()
+
+
 def test_restore_artifact_rejects_zip_slip(tmp_path):
     # a crafted archive_path that escapes restore_root must be rejected (zip-slip)
     from backend.services.session_bundle import _restore_artifact
