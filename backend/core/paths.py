@@ -21,6 +21,13 @@ def confine_path(
     export-specific guard. ``reject_aliases`` additionally disallows lexical parent
     traversal and symlink components below the configured root for untrusted paths.
     The returned path is canonical and safe at the time it is checked.
+
+    Containment itself is decided with a ``startswith`` prefix check directly on
+    ``path_real`` — the same normalized string this function returns — rather than
+    on a value derived from it (``os.path.relpath``'s result, as a prior version of
+    this function used). A guard on a derived value doesn't tie back to the
+    returned value for static taint analysis; a guard on the returned value itself
+    does.
     """
     if reject_aliases:
         # Compare original spellings before realpath erases traversal/symlinks.
@@ -45,12 +52,18 @@ def confine_path(
             raise ValueError(f"Path {path} is outside {boundary_name}")
     root_real = os.path.normcase(os.path.normpath(os.path.realpath(root)))
     path_real = os.path.normcase(os.path.normpath(os.path.realpath(path)))
-    try:
-        relative = os.path.relpath(path_real, root_real)
-    except ValueError as exc:  # Different Windows drives.
-        raise ValueError(f"Path {path} is outside {boundary_name}") from exc
-    if relative == os.pardir or relative.startswith(f"{os.pardir}{os.sep}"):
-        raise ValueError(f"Path {path} is outside {boundary_name}")
-    if not allow_root and relative == os.curdir:
+    if path_real == root_real:
+        if not allow_root:
+            raise ValueError(f"Path {path} is outside {boundary_name}")
+        return Path(path_real)
+    # A bare prefix check would let a sibling whose name extends the root's — e.g.
+    # root "/data/exports" and path "/data/exports2/x" — pass, since the string
+    # "/data/exports2/x" starts with "/data/exports". Anchor the prefix on a
+    # trailing separator (unless root_real already ends in one, i.e. it's a
+    # filesystem root like "/" or "C:\\") so only real descendants match. This is
+    # also why cross-drive Windows paths need no special case: "d:\\x" never
+    # starts with "c:\\..." however it's spelled.
+    root_prefix = root_real if root_real.endswith(os.sep) else root_real + os.sep
+    if not path_real.startswith(root_prefix):
         raise ValueError(f"Path {path} is outside {boundary_name}")
     return Path(path_real)

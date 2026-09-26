@@ -206,6 +206,57 @@ def test_tag_release_invokes_reusable_full_verification_before_publication() -> 
     )
 
 
+def test_release_download_pattern_matches_ci_native_bundle_artifact_names() -> None:
+    ci = CI_WORKFLOW.read_text(encoding="utf-8")
+    release = RELEASE_WORKFLOW.read_text(encoding="utf-8")
+
+    # The upload-artifact `name:` for each native packaging job, minus the
+    # `${{ github.sha }}` suffix. If a job renames its artifact, this must be
+    # updated in lockstep with the release download pattern below it.
+    assert "name: macos-arm64-${{ github.sha }}" in ci
+    assert "name: windows-x64-${{ github.sha }}" in ci
+    # Old, mislabelled name (windows-package runs on windows-latest, which is
+    # x64) must not reappear.
+    assert "windows-arm64" not in ci
+    assert "windows-arm64" not in release
+
+    # actions/download-artifact matches `pattern:` with minimatch, which has
+    # no `a|b` alternation outside of an extglob group (`@(a|b)`); a bare
+    # `a-*|b-*` never matches either name. Pin the extglob form and pin it to
+    # exactly the two native bundle prefixes above.
+    pattern_match = re.search(r'pattern:\s*"([^"]+)"', release)
+    assert pattern_match is not None
+    assert pattern_match.group(1) == "@(macos-arm64|windows-x64)-*"
+
+    # The pinned actions/download-artifact@3e5f45b2c... (v8.0.1) has no
+    # `if-no-artifact-found` input at all (its inputs are exactly: name,
+    # artifact-ids, path, pattern, merge-multiple, github-token, repository,
+    # run-id, skip-decompress, digest-mismatch) -- Actions warns and ignores
+    # unknown inputs rather than failing, so that key would be a silent no-op
+    # guard. Don't let it (or continue-on-error) creep back in.
+    download_job = re.search(
+        r"Download native bundle artifacts\n(?P<body>(?:.*\n)*?)\n",
+        release,
+    )
+    assert download_job is not None
+    assert "continue-on-error" not in download_job.group("body")
+    assert "if-no-artifact-found" not in download_job.group("body")
+
+    # The real guard lives on the release upload step: each native deliverable
+    # is listed explicitly (not `native-artifacts/*`) so a missing bundle
+    # fails the release (fail_on_unmatched_files: true fails per unmatched
+    # entry, not only when every entry is unmatched) instead of publishing
+    # partially, and so the macOS evidence files that land in the same
+    # merge-multiple directory (macos-build.log, macos-smoke.log,
+    # macos-system-resources.json) are never uploaded as public release
+    # assets.
+    assert "fail_on_unmatched_files: true" in release
+    assert "native-artifacts/macos-arm64-bundle.zip" in release
+    assert "native-artifacts/macos-arm64-bundle.zip.sha256" in release
+    assert "native-artifacts/windows-x64-bundle.zip" in release
+    assert "native-artifacts/*" not in release
+
+
 def test_docker_uses_locked_uv_runtime_environment_and_ci_smokes_health() -> None:
     dockerfile = DOCKERFILE.read_text(encoding="utf-8")
     ci = CI_WORKFLOW.read_text(encoding="utf-8")
@@ -253,6 +304,7 @@ if __name__ == "__main__":
     test_windows_ci_runs_documented_path_and_subprocess_sensitive_pytest_suites()
     test_reusable_ci_builds_and_smokes_the_wheel_distribution()
     test_tag_release_invokes_reusable_full_verification_before_publication()
+    test_release_download_pattern_matches_ci_native_bundle_artifact_names()
     test_docker_uses_locked_uv_runtime_environment_and_ci_smokes_health()
     test_ci_and_release_actions_are_immutable_and_write_scope_is_publication_job_only()
     test_dependabot_keeps_github_actions_updates_enabled()
