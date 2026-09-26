@@ -230,13 +230,13 @@ jobs:
 
       - name: Zip Windows bundle
         shell: powershell
-        run: Compress-Archive -Path "dist/*" -DestinationPath "windows-arm64-bundle.zip" -Force
+        run: Compress-Archive -Path "dist/*" -DestinationPath "windows-x64-bundle.zip" -Force
 
       - name: Upload Windows bundle
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: windows-arm64-${{ github.sha }}
-          path: windows-arm64-bundle.zip
+          name: windows-x64-${{ github.sha }}
+          path: windows-x64-bundle.zip
           if-no-files-found: error
 
   macos-package:
@@ -345,6 +345,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: macos-arm64-${{ github.sha }}
+          if-no-files-found: error
           path: |
             macos-arm64-bundle.zip
             macos-arm64-bundle.zip.sha256
