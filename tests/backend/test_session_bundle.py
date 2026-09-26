@@ -81,26 +81,6 @@ def test_restore_rejects_sibling_of_allowed_directory(client, tmp_path):
     assert resp.status_code == 400
 
 
-def test_confine_restore_path_unit(tmp_path):
-    # Direct unit coverage for the helper CodeQL alert #77 asked to be pulled out of the
-    # multi-root loop: it must still confine to one of the three configured roots and
-    # still reject (400) anything outside all of them.
-    from fastapi import HTTPException
-
-    from backend.routers.sessions import _confine_restore_path
-
-    cfg = _cfg(tmp_path)
-    Path(cfg.exports_dir).mkdir(parents=True)
-    valid = Path(cfg.exports_dir) / "bundle.zip"
-    valid.write_bytes(b"zip")
-
-    assert _confine_restore_path(valid, cfg) == valid.resolve()
-
-    with pytest.raises(HTTPException) as exc_info:
-        _confine_restore_path(tmp_path / "evil.zip", cfg)
-    assert exc_info.value.status_code == 400
-
-
 @pytest.mark.parametrize("candidate_kind", ["outside", "traversal", "sibling"])
 def test_restore_rejects_untrusted_candidates_before_archive_open(client, tmp_path, candidate_kind):
     cfg = _cfg(tmp_path)
