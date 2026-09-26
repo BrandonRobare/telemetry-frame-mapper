@@ -128,9 +128,9 @@ def build_session_archive(zip_path: Path, session: Session, db: DBSession) -> di
     """Build a portable .zip of a session: its row, every cascaded child row
     (serialized to JSON), and any artifact files that exist on disk."""
 
-    exports_root = Path(get_config().exports_dir).resolve()
+    exports_root = Path(get_config().exports_dir)
     try:
-        zip_path = confine_path(zip_path, exports_root)
+        zip_path = confine_path(zip_path, exports_root, reject_aliases=True)
     except ValueError as exc:
         raise ValueError("Session archive path is outside exports directory") from exc
 

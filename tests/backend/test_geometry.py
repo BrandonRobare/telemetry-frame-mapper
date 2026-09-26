@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 
 import pytest
 from pyproj import Geod
@@ -70,6 +71,19 @@ def test_footprint_outside_configured_zone_matches_ground_width():
     # Denver (105°W) with the shipped default EPSG:32617 (central meridian 81°W).
     result = compute_footprint(39.74, -104.99, ALT_M, FOV_H, FOV_V, None, TARGET_CRS)
     assert _ground_width_m(result) == pytest.approx(result["ground_width_m"], rel=0.005)
+
+
+def test_out_of_zone_warning_does_not_log_private_flight_location_or_crs(caplog):
+    with caplog.at_level(logging.WARNING, logger="backend.services.geometry"):
+        result = compute_footprint(39.74, -104.99, ALT_M, FOV_H, FOV_V, None, TARGET_CRS)
+
+    assert _ground_width_m(result) == pytest.approx(result["ground_width_m"], rel=0.005)
+    assert len(caplog.records) == 1
+    warning = caplog.records[0].getMessage()
+    assert "local UTM zone" in warning
+    assert "39.74000" not in warning
+    assert "-104.99000" not in warning
+    assert TARGET_CRS not in warning
 
 
 def test_footprint_inside_configured_zone_still_uses_it():
