@@ -1,3 +1,6 @@
+import errno
+import os
+import subprocess
 from pathlib import Path
 from urllib.parse import quote
 
@@ -40,8 +43,7 @@ def test_manifest_endpoint(client, tmp_path, monkeypatch):
     artifact = safe_root / "a.txt"
     artifact.write_text("x")
     resp = client.post(
-        "/export/reproducibility-manifest"
-        f"?workflow=import&artifact_path={quote(str(artifact))}"
+        f"/export/reproducibility-manifest?workflow=import&artifact_path={quote(str(artifact))}"
     )
     assert resp.status_code == 200
     assert resp.json()["workflow"] == "import"
@@ -65,8 +67,7 @@ def test_manifest_endpoint_rejects_arbitrary_path(client, tmp_path, monkeypatch)
     outside = tmp_path / "outside.txt"
     outside.write_text("secret")
     resp = client.post(
-        "/export/reproducibility-manifest"
-        f"?workflow=import&artifact_path={quote(str(outside))}"
+        f"/export/reproducibility-manifest?workflow=import&artifact_path={quote(str(outside))}"
     )
     assert resp.status_code == 422
     assert "outside configured safe directories" in resp.json()["detail"]
@@ -174,7 +175,10 @@ def test_manifest_hashes_in_root_symlink_target_and_preserves_missing_path(tmp_p
     root.mkdir()
     real_file = root / "real.txt"
     real_file.write_text("safe")
-    (root / "alias.txt").symlink_to(real_file)
+    try:
+        (root / "alias.txt").symlink_to(real_file)
+    except OSError:
+        pytest.skip("file symlinks are unavailable")
 
     result = build_reproducibility_manifest(
         workflow="export",
@@ -187,6 +191,7 @@ def test_manifest_hashes_in_root_symlink_target_and_preserves_missing_path(tmp_p
     assert result["artifacts"][1] == {"path": str(root / "missing.txt"), "exists": False}
 
 
+@pytest.mark.skipif(os.name == "nt", reason="Windows uses validated Win32 handles")
 def test_manifest_fails_closed_without_descriptor_relative_opens(tmp_path, monkeypatch):
     artifact = tmp_path / "artifact.txt"
     artifact.write_text("safe")
@@ -194,4 +199,110 @@ def test_manifest_fails_closed_without_descriptor_relative_opens(tmp_path, monke
     with pytest.raises(ValueError, match="secure manifest artifact inspection is unavailable"):
         build_reproducibility_manifest(
             workflow="export", settings={}, artifacts=[artifact], artifact_roots=[tmp_path]
+        )
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX descriptor-relative open")
+def test_manifest_closes_duplicate_when_fdopen_fails(tmp_path, monkeypatch):
+    artifact = tmp_path / "artifact.txt"
+    artifact.write_text("safe")
+    duplicates = []
+    original_dup = os.dup
+
+    def track_dup(fd):
+        duplicate = original_dup(fd)
+        duplicates.append(duplicate)
+        return duplicate
+
+    def fail_fdopen(*args, **kwargs):
+        raise OSError("fdopen failed")
+
+    monkeypatch.setattr(manifest_service.os, "dup", track_dup)
+    monkeypatch.setattr(manifest_service.os, "fdopen", fail_fdopen)
+    try:
+        with pytest.raises(OSError, match="fdopen failed"):
+            manifest_service._artifact_entry(artifact, tmp_path)
+        assert len(duplicates) == 1
+        with pytest.raises(OSError) as exc:
+            os.fstat(duplicates[0])
+        assert exc.value.errno == errno.EBADF
+    finally:
+        for duplicate in duplicates:
+            try:
+                os.close(duplicate)
+            except OSError as exc:
+                if exc.errno != errno.EBADF:
+                    raise
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows handle validation")
+def test_windows_manifest_hashes_nested_file_and_inspects_directory(tmp_path):
+    folder = tmp_path / "nested"
+    folder.mkdir()
+    artifact = folder / "artifact.txt"
+    artifact.write_text("safe")
+    manifest = build_reproducibility_manifest(
+        workflow="export", settings={}, artifacts=[artifact, folder], artifact_roots=[tmp_path]
+    )
+    file_entry, directory_entry = manifest["artifacts"]
+    assert file_entry["sha256"] == sha256_file(artifact)
+    assert file_entry["size_bytes"] == artifact.stat().st_size
+    assert directory_entry["exists"] is True
+    assert "sha256" not in directory_entry
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows handle validation")
+def test_windows_manifest_rejects_swapped_file_before_read(tmp_path, monkeypatch):
+    safe_root = tmp_path / "safe"
+    safe_root.mkdir()
+    artifact = safe_root / "artifact.txt"
+    artifact.write_text("safe")
+    outside = tmp_path / "secret.txt"
+    outside.write_text("secret")
+    original = manifest_service.confine_path
+
+    def swap_after_validation(path, root, **kwargs):
+        validated = original(path, root, **kwargs)
+        if Path(path) == artifact:
+            artifact.unlink()
+            try:
+                artifact.symlink_to(outside)
+            except OSError:
+                pytest.skip("file symlinks are unavailable")
+        return validated
+
+    monkeypatch.setattr(manifest_service, "confine_path", swap_after_validation)
+    with pytest.raises(ValueError, match="outside configured safe directories"):
+        build_reproducibility_manifest(
+            workflow="export", settings={}, artifacts=[artifact], artifact_roots=[safe_root]
+        )
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows junction validation")
+def test_windows_manifest_rejects_swapped_directory_junction(tmp_path, monkeypatch):
+    safe_root = tmp_path / "safe"
+    folder = safe_root / "nested"
+    folder.mkdir(parents=True)
+    artifact = folder / "artifact.txt"
+    artifact.write_text("safe")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "artifact.txt").write_text("secret")
+    original = manifest_service.confine_path
+
+    def swap_after_validation(path, root, **kwargs):
+        validated = original(path, root, **kwargs)
+        if Path(path) == artifact:
+            folder.rename(safe_root / "moved")
+            subprocess.run(
+                ["cmd", "/c", "mklink", "/J", str(folder), str(outside)],
+                check=True,
+                capture_output=True,
+            )
+        return validated
+
+    monkeypatch.setattr(manifest_service, "confine_path", swap_after_validation)
+    with pytest.raises(ValueError, match="outside configured safe directories"):
+        build_reproducibility_manifest(
+            workflow="export", settings={}, artifacts=[artifact], artifact_roots=[safe_root]
         )
