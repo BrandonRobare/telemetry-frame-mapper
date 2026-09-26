@@ -80,6 +80,21 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# A bare import survives a bundle with no GDAL/PROJ data -- rasterio only
+# reads it lazily on first CRS or driver use -- so this probe actually
+# resolves a CRS through PROJ, round-trips a GeoTIFF through GDAL, and writes
+# a LAZ point cloud through the lazrs backend. Same environment isolation as
+# the real launch below, so it never touches the runner's actual user profile.
+if ! capability_check="$(env -i \
+    HOME="$smoke_root" \
+    PATH="/usr/bin:/bin:/usr/sbin:/sbin" \
+    TMPDIR="${TMPDIR:-/tmp}" \
+    "$app" --check-reconstruction-deps 2>&1)"; then
+    printf 'FAIL: packaged app cannot use laspy/rasterio:\n%s\n' "$capability_check" >&2
+    exit 1
+fi
+printf '%s\n' "$capability_check"
+
 # Launch with an explicit environment allowlist: the bare PATH is deliberate
 # so the runtime-hook Homebrew discovery under #832 is exercised.
 env -i \

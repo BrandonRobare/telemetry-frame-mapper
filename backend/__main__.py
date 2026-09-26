@@ -74,31 +74,75 @@ def _open_bundle_ui(deployment: dict) -> None:
     threading.Thread(target=_open_when_ready, daemon=True).start()
 
 
-def _check_reconstruction_imports(names: tuple[str, ...] = ("laspy", "rasterio")) -> int:
-    """`--check-reconstruction-deps`: import probe for the packaged bundle.
+def _check_reconstruction_capabilities() -> int:
+    """`--check-reconstruction-deps`: exercises the reconstruction export path's
+    actual capabilities in the packaged bundle, not just importability.
 
-    PyInstaller can bundle a package's `.py`/extension files fine while still
-    dropping data it never statically discovers (rasterio's GDAL/PROJ data,
-    native DLLs) unless the build script asks for them explicitly. A plain
-    `import` succeeding in the dev venv does not prove the frozen exe can do
-    the same, so the packaging smoke test invokes this instead.
+    A bare `import rasterio` succeeds even with no GDAL/PROJ data bundled --
+    rasterio only reads that data lazily on first CRS or driver use, which is
+    exactly the failure mode a v3.0.0 Windows release shipped with. This does
+    the cheap, in-memory version of what the exports actually do: resolve an
+    EPSG code through PROJ and round-trip a tiny GeoTIFF through a GDAL driver
+    (as backend/services/orthomosaic_export.py does), then write a LAZ point
+    cloud through the lazrs native backend (as
+    backend/services/reconstruction.py's LAZ export does).
     """
-    failures = []
-    for name in names:
-        try:
-            __import__(name)
-        except Exception as exc:
-            failures.append(f"{name}: {exc}")
+    import io
+
+    failures: list[str] = []
+    try:
+        import numpy as np
+        import rasterio  # noqa: F401  (import itself is not the point here)
+        from rasterio.crs import CRS
+        from rasterio.io import MemoryFile
+        from rasterio.transform import from_origin
+
+        wkt = CRS.from_epsg(4326).to_wkt()  # needs PROJ's proj.db
+        if not wkt:
+            raise RuntimeError("CRS.from_epsg(4326).to_wkt() returned empty")
+        profile = {
+            "driver": "GTiff",
+            "height": 1,
+            "width": 1,
+            "count": 1,
+            "dtype": "uint8",
+            "crs": CRS.from_epsg(4326),
+            "transform": from_origin(0, 1, 1, 1),
+        }
+        with MemoryFile() as memfile:  # needs GDAL's GTiff driver + data
+            with memfile.open(**profile) as dataset:
+                dataset.write(np.zeros((1, 1), dtype=np.uint8), 1)
+            with memfile.open() as dataset:
+                dataset.read(1)
+    except Exception as exc:
+        failures.append(f"rasterio (PROJ/GDAL): {exc}")
+
+    try:
+        import laspy
+        import numpy as np
+
+        header = laspy.LasHeader(point_format=3, version="1.4")
+        las = laspy.LasData(header)
+        las.x = np.array([0.0])
+        las.y = np.array([0.0])
+        las.z = np.array([0.0])
+        buffer = io.BytesIO()
+        las.write(buffer, laz_backend=laspy.LazBackend.Lazrs)  # needs the lazrs native backend
+        if not buffer.getvalue():
+            raise RuntimeError("LAZ write produced no bytes")
+    except Exception as exc:
+        failures.append(f"laspy (lazrs): {exc}")
+
     if failures:
-        print("reconstruction import check failed:\n" + "\n".join(failures), file=sys.stderr)
+        print("reconstruction capability check failed:\n" + "\n".join(failures), file=sys.stderr)
         return 1
-    print(f"reconstruction import check ok: {', '.join(names)}")
+    print("reconstruction capability check ok: rasterio (PROJ+GDAL), laspy (lazrs)")
     return 0
 
 
 def main() -> None:
     if "--check-reconstruction-deps" in sys.argv[1:]:
-        sys.exit(_check_reconstruction_imports())
+        sys.exit(_check_reconstruction_capabilities())
     deployment = get_deployment_config()
     _open_bundle_ui(deployment)
     # Reload mode uses one API worker; BACKEND_RELOAD=1 is how the dev launchers ask for it.

@@ -10,16 +10,27 @@ $smokeRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("tfm-windows-smoke-" +
 $env:LOCALAPPDATA = $smokeRoot
 New-Item -ItemType Directory -Force -Path $smokeRoot | Out-Null
 
-# The frozen exe can bundle rasterio's/laspy's Python files fine while still
-# missing GDAL/PROJ data or a native DLL that only a real import would surface.
-# Fail fast, before the slower health check below, if the packaged app cannot
-# import them. Runs after LOCALAPPDATA is redirected, same as the real launch
-# below, so it never touches the runner's actual user profile.
-$importCheck = & $exe --check-reconstruction-deps 2>&1
-if ($LASTEXITCODE -ne 0) {
-    throw "Packaged app cannot import laspy/rasterio: $importCheck"
+# A bare import survives a bundle with no GDAL/PROJ data -- rasterio only
+# reads it lazily on first CRS or driver use -- so this probe actually
+# resolves a CRS through PROJ, round-trips a GeoTIFF through GDAL, and writes
+# a LAZ point cloud through the lazrs backend. Fail fast, before the slower
+# health check below. Runs after LOCALAPPDATA is redirected, same as the real
+# launch below, so it never touches the runner's actual user profile.
+#
+# Redirect to files rather than `2>&1`: a harmless native warning on stderr
+# (e.g. GDAL griping before its data path is set) becomes a PowerShell
+# terminating error under $ErrorActionPreference = "Stop" when merged into
+# the success stream, which would fail this check for the wrong reason. The
+# exit code is the actual signal.
+$capabilityStdout = Join-Path $smokeRoot "capability-check-stdout.log"
+$capabilityStderr = Join-Path $smokeRoot "capability-check-stderr.log"
+$capabilityProcess = Start-Process -FilePath $exe -ArgumentList "--check-reconstruction-deps" `
+    -PassThru -Wait -RedirectStandardOutput $capabilityStdout -RedirectStandardError $capabilityStderr
+$capabilityOutput = "$(Get-Content $capabilityStdout -Raw)$(Get-Content $capabilityStderr -Raw)"
+if ($capabilityProcess.ExitCode -ne 0) {
+    throw "Packaged app cannot use laspy/rasterio: $capabilityOutput"
 }
-Write-Host $importCheck
+Write-Host $capabilityOutput
 $stdout = Join-Path $smokeRoot "stdout.log"
 $stderr = Join-Path $smokeRoot "stderr.log"
 $process = Start-Process -FilePath $exe -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr

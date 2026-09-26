@@ -7,8 +7,6 @@ the CI smoke uses so a headless runner never spawns a browser.
 
 from __future__ import annotations
 
-import sys
-
 import pytest
 
 
@@ -95,18 +93,49 @@ def test_stale_lock_is_replaced_not_kept(fake_frozen, monkeypatch, tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# --check-reconstruction-deps (the Windows packaging smoke's import probe)
+# --check-reconstruction-deps (the packaging smoke's capability probe)
+#
+# A bare `import rasterio` survives a bundle with no GDAL/PROJ data -- rasterio
+# only reads it lazily on first CRS or driver use -- so these exercise the
+# same PROJ/GDAL/lazrs calls the reconstruction exports actually make.
 # ---------------------------------------------------------------------------
 
 
-def test_reconstruction_import_check_passes_for_real_modules():
+def _require_reconstruction_dependencies() -> None:
+    pytest.importorskip("laspy")
+    pytest.importorskip("rasterio")
+
+
+def test_reconstruction_capability_check_passes_with_real_libraries():
+    _require_reconstruction_dependencies()
     import backend.__main__ as main
 
-    assert main._check_reconstruction_imports(("json", "os")) == 0
+    assert main._check_reconstruction_capabilities() == 0
 
 
-def test_reconstruction_import_check_fails_when_a_module_is_missing(monkeypatch):
+def test_reconstruction_capability_check_fails_when_proj_data_is_missing(monkeypatch):
+    _require_reconstruction_dependencies()
     import backend.__main__ as main
 
-    monkeypatch.setitem(sys.modules, "not_a_real_package", None)
-    assert main._check_reconstruction_imports(("json", "not_a_real_package")) == 1
+    # rasterio.crs.CRS is an immutable Cython type; swap the module's binding
+    # instead of patching the class, to simulate a missing proj.db.
+    class _NoProjData:
+        @classmethod
+        def from_epsg(cls, code):
+            raise RuntimeError("PROJ: internal_proj_create_from_database: Cannot find proj.db")
+
+    monkeypatch.setattr("rasterio.crs.CRS", _NoProjData)
+    assert main._check_reconstruction_capabilities() == 1
+
+
+def test_reconstruction_capability_check_fails_when_lazrs_backend_is_missing(monkeypatch):
+    _require_reconstruction_dependencies()
+    import laspy
+
+    import backend.__main__ as main
+
+    def _no_lazrs_backend(self, destination, do_compress=None, laz_backend=None):
+        raise laspy.errors.LaspyException("lazrs backend is not available")
+
+    monkeypatch.setattr(laspy.LasData, "write", _no_lazrs_backend)
+    assert main._check_reconstruction_capabilities() == 1

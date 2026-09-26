@@ -24,4 +24,5 @@ uv run --frozen --no-sync python -m PyInstaller --noconfirm --clean --onedir --w
     --collect-all backend \
     --collect-all msplat \
     --collect-all drone_video_geotagger \
+    --collect-all rasterio \
     backend/__main__.py
