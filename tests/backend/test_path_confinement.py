@@ -36,6 +36,36 @@ def test_confine_path_allows_child_and_root_when_requested(tmp_path):
     assert confine_path(root, root, allow_root=True) == root
 
 
+def test_confine_path_rejects_sibling_whose_name_extends_the_root(tmp_path):
+    # The classic prefix-check trap: "/tmp/x/exports2/evil" starts with the plain
+    # string "/tmp/x/exports" even though it is a sibling, not a descendant. The
+    # containment check must anchor on a path separator, not a bare string prefix.
+    root = tmp_path / "exports"
+    sibling = tmp_path / "exports2"
+    sibling.mkdir()
+
+    with pytest.raises(ValueError, match="outside allowed directory"):
+        confine_path(sibling / "evil.zip", root)
+
+
+def test_confine_path_treats_filesystem_root_as_a_trailing_separator_root(tmp_path):
+    # os.path.normpath keeps the trailing separator only for an actual filesystem
+    # root ("/" on POSIX, a drive root on Windows). The prefix built from it must
+    # not double that separator, which would then reject every real child.
+    fs_root = Path(os.path.abspath(os.sep))
+    candidate = tmp_path / "nested" / "artifact.bin"
+    assert confine_path(candidate, fs_root) == Path(os.path.realpath(candidate))
+
+
+@pytest.mark.skipif(os.name != "nt", reason="drive letters only exist on Windows")
+def test_confine_path_rejects_different_drive_without_raising(tmp_path):
+    root = Path("C:\\exports")
+    other_drive = Path("D:\\exports\\evil.zip")
+
+    with pytest.raises(ValueError, match="outside allowed directory"):
+        confine_path(other_drive, root)
+
+
 def test_user_influenced_filesystem_boundaries_use_public_guard():
     """Keep the audited containment boundaries on the one canonical guard."""
     root = Path(__file__).resolve().parents[2]

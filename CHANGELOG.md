@@ -11,11 +11,11 @@ Cross-platform acceleration release. Full details in `release-notes/v3.0.0.md`; 
 
 - arm64 macOS application bundle with Finder/Homebrew tool discovery, packaged smoke isolation,
   and a Finder-launch UI entry point (#833, #859, #832).
-- Native Apple-Silicon Gaussian training through the optional `msplat` backend, with a
+- Experimental native Apple-Silicon Gaussian training through the optional `msplat` backend, with a
   COLMAP-frame-preserving export, selected-submodel loading, and a validity gate that rejects
-  non-finite output before it can be recorded as success (#850, #851, #854, #855).
-- Structured accelerator contract with platform-correct setup hints, and versioned capability
-  probing (#856, #818).
+  non-finite output before it can be recorded as success (#783, #851, #854, #855). The CUDA
+  parity work tracked by #850 remains open (#784, #853).
+- Structured accelerator contract with platform-correct setup hints (#787, #788).
 - Per-frame CPU semantic segmentation that tolerates score-less pipeline output (#844).
 
 ### Changed
@@ -31,8 +31,12 @@ Cross-platform acceleration release. Full details in `release-notes/v3.0.0.md`; 
 
 - COLMAP 4.x guided matching/global-mapper option namespaces (#856).
 - Post-import Quick QA state retention and terminal import progress (#860).
-- The bundled app no longer inherits stray environment selectors into its data
-  directories (#871).
+- Bundled apps reconcile an existing app-data `config.yaml` with the release defaults on
+  launch, quarantining only retired keys (#871, #927).
+- LAZ point-cloud export works with laspy 2.x, and LAS/LAZ exports are written atomically so a
+  failed export is not cached (#930).
+- Metal training rejects truncated, trailing-byte or empty COLMAP binaries and overflowing
+  float32 quaternion norms; COLMAP readers report truncated records as `ValueError` (#925).
 
 
 ## [2.0.5] — 2026-09-03

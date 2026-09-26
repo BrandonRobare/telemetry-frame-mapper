@@ -1194,42 +1194,22 @@ def _world_points_to_utm(points_xyz, geo: dict | None):
 
 
 def _write_las_laz(las, output_path: Path) -> None:
-    """Write *las* as a LAZ-compressed file via lazrs or laszip backend.
+    """Write *las* as a LAZ-compressed file via an available laspy backend.
 
-    Raises RuntimeError if no LAZ backend is available.
+    Raises RuntimeError if no LAZ backend (lazrs or laszip) is available.
     """
-    import sys
-
     import laspy
 
-    lazrs_spec = None
-    laszip_spec = None
-    if "laspy" in sys.modules:
-        lazrs_spec = getattr(sys.modules["laspy"], "LazrsBackend", None)
-        laszip_spec = getattr(sys.modules["laspy"], "LaszipBackend", None)
-
-    # laspy >= 2.5 exposes compressed backends via laspy.LazrsBackend
-    for backend_cls in (lazrs_spec, laszip_spec):
-        if backend_cls is not None:
-            try:
-                las.write(str(output_path), do_compress=backend_cls)
-                return
-            except Exception:
-                continue
-
-    # Fallback: try the older laspy.CompressedWriter style
     try:
-        writer = laspy.CompressedWriter(str(output_path), "laz", las.header)
-        writer.write_points(las.points)
-        writer.close()
-        return
-    except (AttributeError, TypeError):
-        pass
-
-    raise RuntimeError(
-        "No LAZ backend available. Install laspy[lazrs] or laspy[laszip] "
-        "to enable compressed point-cloud export."
-    )
+        # output_path has a .laz suffix, so laspy.LasData.write() detects and
+        # enables compression itself, picking whichever of lazrs/laszip is
+        # installed (laspy.LazBackend.detect_available()).
+        las.write(str(output_path))
+    except laspy.errors.LaspyException as exc:
+        raise RuntimeError(
+            "No LAZ backend available. Install laspy[lazrs] or laspy[laszip] "
+            f"to enable compressed point-cloud export. laspy error: {exc}"
+        ) from exc
 
 
 def _export_point_cloud(
@@ -1246,6 +1226,9 @@ def _export_point_cloud(
     to standard LAS 1.4 when the backend is unavailable or *laz_backend* is
     False (the default).
     """
+    import os
+    import tempfile
+
     import laspy
     import numpy as np
     from pyproj import CRS
@@ -1295,10 +1278,26 @@ def _export_point_cloud(
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    if laz_backend:
-        _write_las_laz(las, output_path)
-    else:
-        las.write(output_path)
+    # laspy opens the destination file before it picks/initialises a backend,
+    # so a failed write (missing LAZ backend, disk full, ...) would otherwise
+    # leave a partial file sitting at output_path. The router only re-exports
+    # `if not canonical.exists()`, so that partial file would then be served
+    # forever. Write to a sibling temp file (same dir => same filesystem, so
+    # the rename is atomic) and only publish it on success.
+    tmp_fd, tmp_name = tempfile.mkstemp(
+        suffix=output_path.suffix, dir=output_path.parent
+    )
+    os.close(tmp_fd)
+    tmp_path = Path(tmp_name)
+    try:
+        if laz_backend:
+            _write_las_laz(las, tmp_path)
+        else:
+            las.write(tmp_path)
+        os.replace(tmp_path, output_path)
+    except BaseException:
+        tmp_path.unlink(missing_ok=True)
+        raise
     return output_path
 
 

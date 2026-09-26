@@ -101,6 +101,27 @@ def test_resolve_reconstruction_preset_keeps_operator_values_above_metal_policy(
     assert resolved["downscale_factor"] == 4
 
 
+def test_resolve_reconstruction_preset_ignores_retired_preset_keys(tmp_path):
+    from backend.core.config import resolve_reconstruction_preset
+
+    path = tmp_path / "config.yaml"
+    path.write_text(
+        "reconstruction:\n"
+        "  presets:\n"
+        "    quick:\n"
+        "      max_frames: 500\n"
+        "      exhaustive_matching: false\n"
+        "      sh_degree: 3\n",
+        encoding="utf-8",
+    )
+
+    resolved = resolve_reconstruction_preset("quick", "metal", str(path))
+
+    assert "max_frames" not in resolved
+    assert "exhaustive_matching" not in resolved
+    assert resolved["sh_degree"] == 3
+
+
 def test_resolve_reconstruction_preset_rejects_unknown_preset(tmp_path):
     from backend.core.config import resolve_reconstruction_preset
 

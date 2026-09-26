@@ -48,7 +48,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Set up uv
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           version: "0.11.16"
 
@@ -155,7 +155,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Set up uv
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           version: "0.11.16"
 
@@ -187,7 +187,7 @@ jobs:
           python-version: "3.12"
 
       - name: Set up uv
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           version: "0.11.16"
 
@@ -199,7 +199,7 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
 
       - name: Install locked packaging and test environment
-        run: uv sync --frozen --group backend --group desktop-package --group dev
+        run: uv sync --frozen --group backend --group reconstruction --group desktop-package --group dev
 
       # The Windows job intentionally runs the CLI suite plus settings atomic-write tests:
       # they exercise path, subprocess, and redirected-stream behavior where Windows differs.
@@ -212,6 +212,7 @@ jobs:
           tests/backend/test_reproducibility_manifest.py
           tests/backend/test_ingest_orchestrator.py::test_run_disambiguates_duplicate_nested_basenames_and_thumbnails
           tests/backend/test_path_confinement.py::test_windows_native_paths_work_for_confined_atomic_zip
+          tests/backend/test_path_confinement.py::test_confine_path_rejects_different_drive_without_raising
           tests/backend/test_session_bundle.py::test_archive_restore_accepts_configured_root_spelling[parent_component]
           tests/backend/test_usd_export.py::test_usd_handoff_accepts_configured_root_spelling[parent_component]
 
@@ -229,13 +230,13 @@ jobs:
 
       - name: Zip Windows bundle
         shell: powershell
-        run: Compress-Archive -Path "dist/*" -DestinationPath "windows-arm64-bundle.zip" -Force
+        run: Compress-Archive -Path "dist/*" -DestinationPath "windows-x64-bundle.zip" -Force
 
       - name: Upload Windows bundle
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: windows-arm64-${{ github.sha }}
-          path: windows-arm64-bundle.zip
+          name: windows-x64-${{ github.sha }}
+          path: windows-x64-bundle.zip
           if-no-files-found: error
 
   macos-package:
@@ -248,7 +249,7 @@ jobs:
         run: test "$(uname -m)" = "arm64"
 
       - name: Set up uv
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           version: "0.11.16"
 
@@ -344,6 +345,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: macos-arm64-${{ github.sha }}
+          if-no-files-found: error
           path: |
             macos-arm64-bundle.zip
             macos-arm64-bundle.zip.sha256
@@ -363,7 +365,7 @@ jobs:
         run: test "$(uname -m)" = "arm64"
 
       - name: Set up uv
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           version: "0.11.16"
 
@@ -469,7 +471,7 @@ jobs:
           test "${GITHUB_REF}" = "refs/heads/wave8/784-cuda-metal-parity"
           test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"
           test "${GITHUB_SHA}" = "${APPROVED_SHA}"
-      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           version: "0.11.16"
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
@@ -519,7 +521,7 @@ jobs:
           test "${GITHUB_REF}" = "refs/heads/wave8/784-cuda-metal-parity"
           test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"
           test "${GITHUB_SHA}" = "${APPROVED_SHA}"
-      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           version: "0.11.16"
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
@@ -610,7 +612,7 @@ jobs:
           test "$(sysctl -n hw.model)" != "VirtualMac2,1"
 
       - name: Set up uv
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           version: "0.11.16"
 
