@@ -1208,7 +1208,7 @@ def _write_las_laz(las, output_path: Path) -> None:
     except laspy.errors.LaspyException as exc:
         raise RuntimeError(
             "No LAZ backend available. Install laspy[lazrs] or laspy[laszip] "
-            "to enable compressed point-cloud export."
+            f"to enable compressed point-cloud export. laspy error: {exc}"
         ) from exc
 
 
@@ -1226,6 +1226,9 @@ def _export_point_cloud(
     to standard LAS 1.4 when the backend is unavailable or *laz_backend* is
     False (the default).
     """
+    import os
+    import tempfile
+
     import laspy
     import numpy as np
     from pyproj import CRS
@@ -1275,10 +1278,26 @@ def _export_point_cloud(
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    if laz_backend:
-        _write_las_laz(las, output_path)
-    else:
-        las.write(output_path)
+    # laspy opens the destination file before it picks/initialises a backend,
+    # so a failed write (missing LAZ backend, disk full, ...) would otherwise
+    # leave a partial file sitting at output_path. The router only re-exports
+    # `if not canonical.exists()`, so that partial file would then be served
+    # forever. Write to a sibling temp file (same dir => same filesystem, so
+    # the rename is atomic) and only publish it on success.
+    tmp_fd, tmp_name = tempfile.mkstemp(
+        suffix=output_path.suffix, dir=output_path.parent
+    )
+    os.close(tmp_fd)
+    tmp_path = Path(tmp_name)
+    try:
+        if laz_backend:
+            _write_las_laz(las, tmp_path)
+        else:
+            las.write(tmp_path)
+        os.replace(tmp_path, output_path)
+    except BaseException:
+        tmp_path.unlink(missing_ok=True)
+        raise
     return output_path
 
 
