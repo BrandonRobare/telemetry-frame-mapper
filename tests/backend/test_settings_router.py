@@ -158,6 +158,20 @@ def test_get_settings_filters_removed_preset_keys(client, tmp_config):
     assert set(presets) == {"quick", "full"}
 
 
+def test_get_settings_ignores_retired_preset_keys(client, tmp_config):
+    """#804: a retired key inside a known preset must not be echoed either."""
+    raw = yaml.safe_load(tmp_config.read_text())
+    raw["reconstruction"]["presets"]["quick"]["max_frames"] = 500
+    raw["reconstruction"]["presets"]["full"]["exhaustive_matching"] = True
+    tmp_config.write_text(yaml.safe_dump(raw, sort_keys=False))
+
+    presets = client.get("/settings").json()["reconstruction"]["presets"]
+
+    assert "max_frames" not in presets["quick"]
+    assert "exhaustive_matching" not in presets["full"]
+    assert presets["quick"]["max_gaussians"] == 350000
+
+
 def test_get_settings_render_defaults(client, tmp_config):
     data = client.get("/settings").json()
     render = data["render"]
