@@ -35,9 +35,8 @@ def _resolve_crs(lon: float, lat: float, target_crs: str | None) -> pyproj.CRS:
         lon_ok = (west <= lon <= east) if west <= east else (lon >= west or lon <= east)
         if not (lon_ok and south <= lat <= north):
             logger.warning(
-                "target_crs %s does not cover (%.5f, %.5f); using the local UTM zone "
-                "for this footprint instead",
-                target_crs, lat, lon,
+                "Configured CRS does not cover the footprint location; "
+                "using the local UTM zone instead"
             )
             return utm_crs_for(lon, lat)
     return crs
