@@ -11,7 +11,7 @@ One-table capabilities across distribution and hardware boundaries, per #791/#81
 | `colmap_only` output | ✅ | ✅ | ✅ | ✅ |
 | Semantic segmentation (per-frame, CPU) | ✅ (transformers group) | ⚠️ install `semantic` group manually | ✅ (since #872) | ✅ |
 | Native splat training — CUDA | ⚠️ manual torch/gsplat, NVIDIA GPU | ⚠️ manual | ⚭ not installed | — |
-| Native splat training — Metal (msplat) | — | — | — | ✅ on arm64 + macOS 14+ + Py 3.12/3.13 |
+| Native splat training — Metal (msplat) | ⚠️ experimental, Mac with `splat-metal` | — | — | ⚠️ experimental; arm64 + macOS 14+, validated on Apple M5 only |
 | Splat viewing / annotations / measurements / flythrough | ✅ | ✅ (CUDA-trained splats) | ✅ | ✅ |
 | Exports (survey report, geopackage, KML, USD, potree, orthomosaic) | ✅ | ✅ | ✅ | ✅ |
 | Per-Gaussian semantic labeling | CUDA-only (expected-depth rendering) | CUDA-only | — | ✕ (boundary per #791) |

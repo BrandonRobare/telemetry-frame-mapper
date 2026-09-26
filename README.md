@@ -45,7 +45,7 @@ uv sync --group backend --group dev
 extras.
 
 `ffmpeg` and `exiftool` must be on your `PATH` (or passed with `--ffmpeg` / `--exiftool`). COLMAP
-and a CUDA GPU are needed only for reconstruction. Full setup, including per-platform binaries and
+is needed only for reconstruction; splat training also needs a CUDA GPU or, experimentally, Apple Silicon. Full setup, including per-platform binaries and
 GPU training, is in [docs/INSTALL.md](docs/INSTALL.md).
 
 Extract frames, then geotag them:
