@@ -55,7 +55,12 @@ def confine_path(
     if path_real == root_real:
         if not allow_root:
             raise ValueError(f"Path {path} is outside {boundary_name}")
-        return Path(path_real)
+        # The strings are equal here, so this is the same value either way — but
+        # CodeQL doesn't treat equality with a non-constant as a barrier, so
+        # returning path_real (derived from the untrusted path) still reads as
+        # tainted. Return root_real instead: it derives only from the trusted
+        # root argument, so this branch is provably clean.
+        return Path(root_real)
     # A bare prefix check would let a sibling whose name extends the root's — e.g.
     # root "/data/exports" and path "/data/exports2/x" — pass, since the string
     # "/data/exports2/x" starts with "/data/exports". Anchor the prefix on a
