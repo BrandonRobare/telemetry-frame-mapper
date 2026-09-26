@@ -33,6 +33,10 @@ Cross-platform acceleration release. Full details in `release-notes/v3.0.0.md`; 
 - Post-import Quick QA state retention and terminal import progress (#860).
 - Bundled apps reconcile an existing app-data `config.yaml` with the release defaults on
   launch, quarantining only retired keys (#871, #927).
+- LAZ point-cloud export works with laspy 2.x, and LAS/LAZ exports are written atomically so a
+  failed export is not cached (#930).
+- Metal training rejects truncated, trailing-byte or empty COLMAP binaries and overflowing
+  float32 quaternion norms; COLMAP readers report truncated records as `ValueError` (#925).
 
 
 ## [2.0.5] — 2026-09-03
