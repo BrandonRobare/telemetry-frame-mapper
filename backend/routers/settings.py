@@ -21,7 +21,9 @@ from ..core.config import (
     get_reconstruction_config,
     get_render_config,
     load_config,
+    resolve_reconstruction_preset,
 )
+from ..services import accelerator
 
 router = APIRouter(prefix="/settings", tags=["settings"])
 
@@ -357,7 +359,17 @@ def _build_full_response() -> dict:
     known_presets = {"quick", "full"}
     presets = recon_cfg.get("presets")
     if isinstance(presets, dict):
-        presets = {name: presets[name] for name in known_presets if name in presets}
+        # Report the value this host will actually train with, not the bare
+        # cross-platform default: an omitted field (e.g. quick.iterations on
+        # Metal, #820) is filled by accelerator policy before it ever reaches
+        # the UI, so the settings page can't display a number that doesn't
+        # match what a job would run with.
+        accelerator_kind = accelerator.detect().kind
+        presets = {
+            name: resolve_reconstruction_preset(name, accelerator_kind, CONFIG_PATH)
+            for name in known_presets
+            if name in presets
+        }
     recon = {**recon_cfg, "presets": presets} if isinstance(presets, dict) else recon_cfg
 
     return {

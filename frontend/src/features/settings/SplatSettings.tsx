@@ -3,7 +3,7 @@ import { Button } from '../../shared/components/Button'
 import InfoHint from '../../shared/components/InfoHint'
 import { AdvancedDisclosure } from './AdvancedDisclosure'
 import { useSettings, useUpdateSettings } from './api'
-import type { ReconstructionSettings, PresetConfig } from './api'
+import type { PresetConfig } from './api'
 import { hasValidationErrors, validatePresetConfig } from './settingsValidation'
 
 interface FieldProps {
@@ -51,15 +51,6 @@ const DEFAULT_PRESETS: Record<string, PresetConfig> = {
   full:  { iterations: 30000, max_gaussians: 1000000, sh_degree: 2, downscale_factor: 2 },
 }
 
-const DEFAULT_RECONSTRUCTION: ReconstructionSettings = {
-  default_preset: 'quick',
-  colmap_threads: 8,
-  sift_max_features: 8192,
-  matcher: 'exhaustive',
-  camera_model: 'PINHOLE',
-  presets: DEFAULT_PRESETS,
-}
-
 // Splat Training edits the `presets` sub-object inside reconstruction settings.
 // We track a local overrides map keyed by preset name.
 export default function SplatSettings() {
@@ -96,16 +87,12 @@ export default function SplatSettings() {
 
   function handleSave() {
     if (hasErrors) return
-    const existing = settings?.reconstruction ?? DEFAULT_RECONSTRUCTION
-    const updatedPresets: Record<string, PresetConfig> = Object.fromEntries(
-      Object.entries(serverPresets).map(([name, cfg]) => [
-        name,
-        { ...cfg, ...(presetEdits[name] ?? {}) },
-      ])
-    )
-    const updated: ReconstructionSettings = { ...existing, presets: updatedPresets }
+    // Send only the fields the operator actually touched. A field left alone
+    // (e.g. quick.iterations, filled by accelerator policy per #820) must stay
+    // absent from the patch, or saving would pin it to whatever this host's
+    // policy resolved it to right now.
     updateMutation.mutate(
-      { reconstruction: updated },
+      { reconstruction: { presets: presetEdits } },
       { onSuccess: () => setPresetEdits({}) }
     )
   }

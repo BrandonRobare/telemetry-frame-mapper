@@ -74,6 +74,17 @@ export interface AppSettings {
   render: RenderSettings
 }
 
+// PATCH payload for reconstruction: every field optional, and preset fields left
+// untouched must be omittable so the backend doesn't pin them to whatever the
+// accelerator policy last resolved (#820) — only what the operator changed goes out.
+export type ReconstructionSettingsPatch = Partial<Omit<ReconstructionSettings, 'presets'>> & {
+  presets?: Record<string, Partial<PresetConfig>>
+}
+
+export type SettingsPatchBody = Omit<Partial<AppSettings>, 'reconstruction'> & {
+  reconstruction?: ReconstructionSettingsPatch
+}
+
 // ---------------------------------------------------------------------------
 // React Query hooks
 // ---------------------------------------------------------------------------
@@ -91,7 +102,7 @@ export function useUpdateSettings() {
   const qc = useQueryClient()
   const { addToast } = useToast()
   return useMutation({
-    mutationFn: (patch_body: Partial<AppSettings>) =>
+    mutationFn: (patch_body: SettingsPatchBody) =>
       patch<AppSettings>('/settings', patch_body),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: SETTINGS_KEY })
