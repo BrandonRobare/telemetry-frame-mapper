@@ -199,7 +199,7 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
 
       - name: Install locked packaging and test environment
-        run: uv sync --frozen --group backend --group desktop-package --group dev
+        run: uv sync --frozen --group backend --group reconstruction --group desktop-package --group dev
 
       # The Windows job intentionally runs the CLI suite plus settings atomic-write tests:
       # they exercise path, subprocess, and redirected-stream behavior where Windows differs.
