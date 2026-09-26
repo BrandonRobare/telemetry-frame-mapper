@@ -80,11 +80,11 @@ def _check_reconstruction_capabilities() -> int:
 
     A bare `import rasterio` succeeds even with no GDAL/PROJ data bundled --
     rasterio only reads that data lazily on first CRS or driver use, which is
-    exactly the failure mode a v3.0.0 Windows release shipped with. This does
-    the cheap, in-memory version of what the exports actually do: resolve an
-    EPSG code through PROJ and round-trip a tiny GeoTIFF through a GDAL driver
-    (as backend/services/orthomosaic_export.py does), then write a LAZ point
-    cloud through the lazrs native backend (as
+    exactly the failure mode a bundle built without `--collect-all rasterio`
+    would hit. This does the cheap, in-memory version of what the exports
+    actually do: resolve an EPSG code through PROJ and round-trip a tiny
+    GeoTIFF through a GDAL driver (as backend/services/orthomosaic_export.py
+    does), then write a LAZ point cloud through the lazrs native backend (as
     backend/services/reconstruction.py's LAZ export does).
     """
     import io
