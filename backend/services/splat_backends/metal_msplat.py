@@ -10,13 +10,19 @@ import shutil
 import tempfile
 import threading
 import time
+from collections.abc import Callable, Sized
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 
-from backend.services.colmap_io import _pick_best_submodel
+from backend.services.colmap_io import (
+    _pick_best_submodel,
+    read_cameras_bin,
+    read_images_bin,
+    read_points3d_bin,
+)
 from backend.services.ply_io import GaussianCloud, read_3dgs_ply
 from backend.services.splat_backends.base import (
     _GPU_LOCK,
@@ -151,12 +157,20 @@ def _selected_model_view(colmap_dir: Path) -> Path | None:
     ``sparse/0`` by handing it a temporary symlinked view of the selected
     model (#855).
 
+    The selected model's BIN files are parsed first and must hold at least one
+    record each, so a missing, truncated or empty model fails here instead of
+    reaching the native loader (#850).
+
     Returns the view directory (caller must remove it) or None when no real
     model exists and msplat's own fallback applies.
     """
     selected = _pick_best_submodel(colmap_dir / "sparse")
     if not selected.is_dir():
         return None
+    _require_binary(selected, "cameras.bin", read_cameras_bin)
+    _require_binary(selected, "images.bin", read_images_bin)
+    if (selected / "points3D.bin").exists() or not (selected / "points3D.ply").exists():
+        _require_binary(selected, "points3D.bin", lambda path: read_points3d_bin(path)[0])
     view = Path(tempfile.mkdtemp(prefix="metal-colmap-view-"))
     (view / "cameras.bin").symlink_to(selected / "cameras.bin")
     (view / "images.bin").symlink_to(selected / "images.bin")
@@ -167,6 +181,20 @@ def _selected_model_view(colmap_dir: Path) -> Path | None:
     elif (selected / "points3D.ply").exists():
         (view / "points3D.ply").symlink_to(selected / "points3D.ply")
     return view
+
+
+def _require_binary(selected: Path, name: str, read: Callable[[Path], Sized]) -> None:
+    """Raise unless ``selected/name`` parses completely and holds a record."""
+    try:
+        complete = len(read(selected / name)) > 0
+    except (OSError, ValueError):
+        complete = False
+    if not complete:
+        raise RuntimeError(
+            f"Metal selected COLMAP model {selected.name} requires binary {name}; "
+            "re-run COLMAP or convert the selected model to BIN format."
+        )
+
 
 def _cloud_invalid_counts(cloud: GaussianCloud) -> dict[str, int]:
     """Count rows with non-finite or structurally invalid Gaussian values."""
@@ -185,9 +213,18 @@ def _cloud_invalid_counts(cloud: GaussianCloud) -> dict[str, int]:
     )
     if overflowed:
         counts["exponentiated_scales"] = overflowed
-    zero_norms = int(np.count_nonzero(np.linalg.norm(cloud.quats, axis=1) == 0.0))
+    # write_splat normalises by this same float32 norm; one that underflows to
+    # zero or overflows to inf on finite components yields a garbage rotation.
+    with np.errstate(over="ignore", under="ignore"):
+        norms = np.linalg.norm(cloud.quats, axis=1)
+    zero_norms = int(np.count_nonzero(norms == 0.0))
     if zero_norms:
         counts["zero_norm_quaternions"] = zero_norms
+    overflowed_norms = int(
+        np.count_nonzero(np.isfinite(cloud.quats).all(axis=1) & ~np.isfinite(norms))
+    )
+    if overflowed_norms:
+        counts["non_finite_quaternion_norms"] = overflowed_norms
     return counts
 
 
@@ -196,8 +233,9 @@ def validate_exported_ply(path: Path, expected_count: int | None) -> int:
 
     Reads the artifact with the same parser the rest of the pipeline consumes
     and verifies every means/scale/quaternion/opacity/SH coefficient is finite,
-    exponentiated scales do not overflow, quaternion norms are non-zero, and
-    the serialized row count matches what the trainer reported.
+    exponentiated scales do not overflow, float32 quaternion norms are finite
+    and non-zero, and the serialized row count matches what the trainer
+    reported.
 
     Returns the serialized row count on success. On failure it raises with
     per-field counts and leaves the artifact in place for diagnostics — an

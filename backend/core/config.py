@@ -11,6 +11,7 @@ from urllib.parse import urlparse
 import yaml
 
 from backend.core.application_logging import logging_config
+from backend.core.retired_config import pop_retired_keys
 from backend.services.camera_calibration import default_camera_profiles, normalize_profiles
 
 
@@ -163,6 +164,7 @@ def _reconstruction_config_from_data(data: dict) -> dict:
             },
         },
     }
+    pop_retired_keys(data)  # an upgraded config.yaml may still carry them (#804)
     recon = data.get("reconstruction", {})
     merged = {**defaults, **recon}
     # Deep-merge presets: file overrides per-preset keys, defaults fill the rest.
@@ -211,6 +213,7 @@ def resolve_reconstruction_preset(
             data = yaml.safe_load(f) or {}
     except FileNotFoundError:
         data = {}
+    pop_retired_keys(data)
 
     base = dict(base_presets[preset])
     resolved = {

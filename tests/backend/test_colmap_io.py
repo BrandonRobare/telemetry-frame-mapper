@@ -274,6 +274,29 @@ def test_read_model_missing_raises_runtime_error(tmp_path):
         read_model(sparse)
 
 
+@pytest.mark.parametrize(
+    "reader, payload",
+    [
+        (read_cameras_bin, _cameras_bin([(1, 1, 1920, 1080, [1000.0, 1000.0, 960.0, 540.0])])),
+        (read_images_bin, _images_bin([(1, _QVEC, _TVEC, 1, "a.jpg", [(1.0, 2.0, 7)])])),
+        (read_points3d_bin, _points3d_bin([(7, [1.0, 2.0, 3.0], [1, 2, 3], 0.5, [(1, 0)])])),
+    ],
+    ids=["cameras", "images", "points3D"],
+)
+@pytest.mark.parametrize("damage", ["truncated_header", "truncated_tail", "trailing_byte"])
+def test_bin_readers_reject_incomplete_records(tmp_path, reader, payload, damage):
+    path = tmp_path / "model.bin"
+    path.write_bytes(
+        {
+            "truncated_header": payload[:12],
+            "truncated_tail": payload[:-1],
+            "trailing_byte": payload + b"\x00",
+        }[damage]
+    )
+    with pytest.raises(ValueError):
+        reader(path)
+
+
 def test_unsupported_camera_model_raises(tmp_path):
     bin_path = tmp_path / "cameras.bin"
     # Model id 4 = OPENCV (8 params): unsupported because it has distortion.

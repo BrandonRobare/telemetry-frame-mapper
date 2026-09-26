@@ -382,6 +382,27 @@ def test_validate_exported_ply_rejects_zero_norm_quaternions(tmp_path: Path) -> 
         metal_msplat.validate_exported_ply(path, expected_count=5)
 
 
+@pytest.mark.parametrize(
+    "magnitude, diagnostic",
+    [
+        (1e-30, "zero_norm_quaternions=1"),  # squared float32 underflows to 0
+        (1e30, "non_finite_quaternion_norms=1"),  # squared float32 overflows to inf
+    ],
+)
+def test_metal_rejects_quaternion_unusable_by_float32_splat_normalization(
+    tmp_path: Path, magnitude: float, diagnostic: str
+) -> None:
+    from backend.services.splat_backends import metal_msplat
+
+    path = tmp_path / "splat.ply"
+    quats = np.tile(np.array([1.0, 0, 0, 0], dtype=np.float32), (5, 1))
+    quats[2] = [magnitude, 0.0, 0.0, 0.0]  # finite, but write_splat cannot normalise it
+    _corrupt_ply(path, quats=quats)
+
+    with pytest.raises(RuntimeError, match=diagnostic):
+        metal_msplat.validate_exported_ply(path, expected_count=5)
+
+
 def test_validate_exported_ply_rejects_count_mismatch(tmp_path: Path) -> None:
     from backend.services.splat_backends import metal_msplat
 
