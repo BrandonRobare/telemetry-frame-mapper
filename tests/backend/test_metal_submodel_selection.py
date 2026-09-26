@@ -17,18 +17,31 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import numpy as np
+import pytest
 
 from backend.services.ply_io import GaussianCloud, write_3dgs_ply
 from backend.services.splat_backends.base import TrainerConfig
 
 
 def _write_model(sparse: Path, number: int, count: int) -> None:
-    """Create one numbered submodel dir with cameras.bin + images.bin headers."""
+    """Create one well-formed numbered BIN submodel with ``count`` images.
+
+    One PINHOLE camera, ``count`` images without 2D points, one point without a
+    track: the last record of each file ends in its 8-byte trailing count.
+    """
     model_dir = sparse / str(number)
     model_dir.mkdir(parents=True, exist_ok=False)
-    (model_dir / "cameras.bin").write_bytes(struct.pack("<Q", 0))
-    (model_dir / "images.bin").write_bytes(struct.pack("<Q", count))
-    (model_dir / "points3D.bin").write_bytes(struct.pack("<Q", 0))
+    (model_dir / "cameras.bin").write_bytes(
+        struct.pack("<QiiQQ4d", 1, 1, 1, 32, 32, 26.0, 26.0, 16.0, 16.0)
+    )
+    images = bytearray(struct.pack("<Q", count))
+    for image_id in range(1, count + 1):
+        images += struct.pack("<idddddddi", image_id, 1.0, 0, 0, 0, 0, 0, 0, 1)
+        images += f"frame-{image_id}.png".encode() + b"\0" + struct.pack("<Q", 0)
+    (model_dir / "images.bin").write_bytes(images)
+    (model_dir / "points3D.bin").write_bytes(
+        struct.pack("<QQdddBBBdQ", 1, 1, 0.0, 0.0, 1.5, 80, 100, 180, 0.1, 0)
+    )
 
 
 def _valid_ply(path: Path, rows: int) -> None:
@@ -186,3 +199,60 @@ def test_train_with_selected_zero_still_uses_view_and_keeps_workspace_clean(tmp_
     assert loaded is not None and loaded != colmap
     assert record["cameras_resolve"] == (colmap / "sparse" / "0" / "cameras.bin").resolve()
     assert not loaded.exists()
+
+@pytest.mark.parametrize("filename", ["cameras.bin", "images.bin", "points3D.bin"])
+def test_metal_rejects_truncated_final_binary_record(tmp_path: Path, filename: str) -> None:
+    from backend.services.splat_backends import metal_msplat
+
+    colmap = tmp_path / "colmap"
+    _write_model(colmap / "sparse", 0, 2)
+    binary = colmap / "sparse" / "0" / filename
+    payload = bytearray(binary.read_bytes())
+    if filename == "cameras.bin":
+        # Leave PINHOLE with only the three SIMPLE_PINHOLE parameters.
+        del payload[-8:]
+    elif filename == "images.bin":
+        # Claim one final 2D observation but leave its 24-byte record incomplete.
+        payload[-8:] = struct.pack("<Q", 1)
+        payload += struct.pack("<ddQ", 1.0, 2.0, 3)[:-1]
+    else:
+        # Claim one final track element but leave its 8-byte record incomplete.
+        payload[-8:] = struct.pack("<Q", 1)
+        payload += struct.pack("<ii", 1, 0)[:-1]
+    binary.write_bytes(payload)
+    runtime, _ = _runtime(tmp_path)
+    output = tmp_path / "out" / "splat.ply"
+
+    with pytest.raises(RuntimeError, match=f"selected COLMAP model 0 requires binary {filename}"):
+        metal_msplat._train(runtime, colmap, output, _config(), MagicMock(), threading.Event())
+    runtime.load_dataset.assert_not_called()
+
+
+@pytest.mark.parametrize("filename", ["cameras.bin", "images.bin", "points3D.bin"])
+def test_metal_rejects_binary_model_without_records(tmp_path: Path, filename: str) -> None:
+    from backend.services.splat_backends import metal_msplat
+
+    colmap = tmp_path / "colmap"
+    _write_model(colmap / "sparse", 0, 2)
+    (colmap / "sparse" / "0" / filename).write_bytes(struct.pack("<Q", 0))
+
+    with pytest.raises(RuntimeError, match=f"requires binary {filename}"):
+        metal_msplat._selected_model_view(colmap)
+
+
+def test_selected_model_view_keeps_points3d_ply_fallback(tmp_path: Path) -> None:
+    from backend.services.splat_backends import metal_msplat
+
+    colmap = tmp_path / "colmap"
+    _write_model(colmap / "sparse", 0, 2)
+    model = colmap / "sparse" / "0"
+    (model / "points3D.bin").unlink()
+    (model / "points3D.ply").write_bytes(b"ply\n")
+
+    view = metal_msplat._selected_model_view(colmap)
+    try:
+        assert view is not None
+        assert (view / "points3D.ply").resolve() == (model / "points3D.ply").resolve()
+    finally:
+        if view is not None:
+            shutil.rmtree(view)
