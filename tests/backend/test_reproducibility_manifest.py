@@ -186,9 +186,12 @@ def test_manifest_hashes_in_root_symlink_target_and_preserves_missing_path(tmp_p
         artifacts=[root / "alias.txt", root / "missing.txt"],
         artifact_roots=[root],
     )
-    assert result["artifacts"][0]["path"] == str(real_file)
+    assert result["artifacts"][0]["path"] == os.path.normcase(str(real_file))
     assert result["artifacts"][0]["sha256"] == sha256_file(real_file)
-    assert result["artifacts"][1] == {"path": str(root / "missing.txt"), "exists": False}
+    assert result["artifacts"][1] == {
+        "path": os.path.normcase(str(root / "missing.txt")),
+        "exists": False,
+    }
 
 
 @pytest.mark.skipif(os.name == "nt", reason="Windows uses validated Win32 handles")
