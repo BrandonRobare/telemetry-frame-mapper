@@ -450,6 +450,21 @@ class RestoreRequest(BaseModel):
     zip_path: str
 
 
+def _confine_restore_path(requested_path: Path, cfg) -> Path:
+    """Confine an archive-restore path to whichever configured root contains it.
+
+    A restorable archive may live under imports, exports, or the data root; try
+    each in turn and reject lexical/symlink aliases within it (same guarantee as
+    every other confine_path call site, just tried against multiple roots).
+    """
+    for root_value in (cfg.imports_dir, cfg.exports_dir, cfg.data_dir):
+        try:
+            return confine_path(requested_path, Path(root_value), reject_aliases=True)
+        except (OSError, RuntimeError, ValueError):
+            continue
+    raise HTTPException(status_code=400, detail="Archive path is outside allowed directories")
+
+
 @router.post("/restore")
 def restore_session(req: RestoreRequest, db: DBSession = Depends(get_db)):
     """Restore a session archive (from POST /sessions/{id}/archive) as a brand-new
@@ -458,16 +473,7 @@ def restore_session(req: RestoreRequest, db: DBSession = Depends(get_db)):
     from ..services.session_bundle import restore_session_archive
 
     # Resolve and confine the untrusted path before checking or opening the archive.
-    cfg = get_config()
-    requested_path = Path(req.zip_path)
-    for root_value in (cfg.imports_dir, cfg.exports_dir, cfg.data_dir):
-        try:
-            zip_path = confine_path(requested_path, Path(root_value), reject_aliases=True)
-            break
-        except (OSError, RuntimeError, ValueError):
-            continue
-    else:
-        raise HTTPException(status_code=400, detail="Archive path is outside allowed directories")
+    zip_path = _confine_restore_path(Path(req.zip_path), get_config())
     try:
         archive_exists = zip_path.is_file()
     except (OSError, RuntimeError, ValueError):
