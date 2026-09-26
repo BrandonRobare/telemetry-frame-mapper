@@ -228,15 +228,33 @@ def test_release_download_pattern_matches_ci_native_bundle_artifact_names() -> N
     assert pattern_match is not None
     assert pattern_match.group(1) == "@(macos-arm64|windows-x64)-*"
 
-    # A missing bundle must fail the release rather than publish silently.
+    # The pinned actions/download-artifact@3e5f45b2c... (v8.0.1) has no
+    # `if-no-artifact-found` input at all (its inputs are exactly: name,
+    # artifact-ids, path, pattern, merge-multiple, github-token, repository,
+    # run-id, skip-decompress, digest-mismatch) -- Actions warns and ignores
+    # unknown inputs rather than failing, so that key would be a silent no-op
+    # guard. Don't let it (or continue-on-error) creep back in.
     download_job = re.search(
         r"Download native bundle artifacts\n(?P<body>(?:.*\n)*?)\n",
         release,
     )
     assert download_job is not None
     assert "continue-on-error" not in download_job.group("body")
-    assert "if-no-artifact-found: error" in download_job.group("body")
+    assert "if-no-artifact-found" not in download_job.group("body")
+
+    # The real guard lives on the release upload step: each native deliverable
+    # is listed explicitly (not `native-artifacts/*`) so a missing bundle
+    # fails the release (fail_on_unmatched_files: true fails per unmatched
+    # entry, not only when every entry is unmatched) instead of publishing
+    # partially, and so the macOS evidence files that land in the same
+    # merge-multiple directory (macos-build.log, macos-smoke.log,
+    # macos-system-resources.json) are never uploaded as public release
+    # assets.
     assert "fail_on_unmatched_files: true" in release
+    assert "native-artifacts/macos-arm64-bundle.zip" in release
+    assert "native-artifacts/macos-arm64-bundle.zip.sha256" in release
+    assert "native-artifacts/windows-x64-bundle.zip" in release
+    assert "native-artifacts/*" not in release
 
 
 def test_docker_uses_locked_uv_runtime_environment_and_ci_smokes_health() -> None:

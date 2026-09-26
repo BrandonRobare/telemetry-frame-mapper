@@ -64,7 +64,6 @@ jobs:
           pattern: "@(macos-arm64|windows-x64)-*"
           merge-multiple: true
           path: native-artifacts
-          if-no-artifact-found: error
 
       - name: Verify release notes exist
         env:
@@ -83,4 +82,6 @@ jobs:
           fail_on_unmatched_files: true
           files: |
             frontend-dist.zip
-            native-artifacts/*
+            native-artifacts/macos-arm64-bundle.zip
+            native-artifacts/macos-arm64-bundle.zip.sha256
+            native-artifacts/windows-x64-bundle.zip
