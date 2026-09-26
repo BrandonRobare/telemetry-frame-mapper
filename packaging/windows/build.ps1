@@ -16,6 +16,7 @@ python -m PyInstaller --noconfirm --clean --onedir --name "Telemetry Frame Mappe
     --add-data "$repoRoot/frontend/dist;frontend/dist" `
     --collect-all backend `
     --collect-all drone_video_geotagger `
+    --collect-all rasterio `
     backend/__main__.py
 
 if ($LASTEXITCODE -ne 0) {

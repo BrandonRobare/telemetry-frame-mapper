@@ -9,6 +9,17 @@ if (-not (Test-Path $exe)) {
 $smokeRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("tfm-windows-smoke-" + [guid]::NewGuid())
 $env:LOCALAPPDATA = $smokeRoot
 New-Item -ItemType Directory -Force -Path $smokeRoot | Out-Null
+
+# The frozen exe can bundle rasterio's/laspy's Python files fine while still
+# missing GDAL/PROJ data or a native DLL that only a real import would surface.
+# Fail fast, before the slower health check below, if the packaged app cannot
+# import them. Runs after LOCALAPPDATA is redirected, same as the real launch
+# below, so it never touches the runner's actual user profile.
+$importCheck = & $exe --check-reconstruction-deps 2>&1
+if ($LASTEXITCODE -ne 0) {
+    throw "Packaged app cannot import laspy/rasterio: $importCheck"
+}
+Write-Host $importCheck
 $stdout = Join-Path $smokeRoot "stdout.log"
 $stderr = Join-Path $smokeRoot "stderr.log"
 $process = Start-Process -FilePath $exe -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr

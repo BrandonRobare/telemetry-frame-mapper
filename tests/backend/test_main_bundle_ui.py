@@ -7,6 +7,8 @@ the CI smoke uses so a headless runner never spawns a browser.
 
 from __future__ import annotations
 
+import sys
+
 import pytest
 
 
@@ -90,3 +92,21 @@ def test_stale_lock_is_replaced_not_kept(fake_frozen, monkeypatch, tmp_path):
     lock.unlink()
     main._open_bundle_ui({"host": "127.0.0.1", "port": 8000})
     assert lock.exists()
+
+
+# ---------------------------------------------------------------------------
+# --check-reconstruction-deps (the Windows packaging smoke's import probe)
+# ---------------------------------------------------------------------------
+
+
+def test_reconstruction_import_check_passes_for_real_modules():
+    import backend.__main__ as main
+
+    assert main._check_reconstruction_imports(("json", "os")) == 0
+
+
+def test_reconstruction_import_check_fails_when_a_module_is_missing(monkeypatch):
+    import backend.__main__ as main
+
+    monkeypatch.setitem(sys.modules, "not_a_real_package", None)
+    assert main._check_reconstruction_imports(("json", "not_a_real_package")) == 1

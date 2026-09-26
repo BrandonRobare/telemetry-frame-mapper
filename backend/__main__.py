@@ -74,7 +74,31 @@ def _open_bundle_ui(deployment: dict) -> None:
     threading.Thread(target=_open_when_ready, daemon=True).start()
 
 
+def _check_reconstruction_imports(names: tuple[str, ...] = ("laspy", "rasterio")) -> int:
+    """`--check-reconstruction-deps`: import probe for the packaged bundle.
+
+    PyInstaller can bundle a package's `.py`/extension files fine while still
+    dropping data it never statically discovers (rasterio's GDAL/PROJ data,
+    native DLLs) unless the build script asks for them explicitly. A plain
+    `import` succeeding in the dev venv does not prove the frozen exe can do
+    the same, so the packaging smoke test invokes this instead.
+    """
+    failures = []
+    for name in names:
+        try:
+            __import__(name)
+        except Exception as exc:
+            failures.append(f"{name}: {exc}")
+    if failures:
+        print("reconstruction import check failed:\n" + "\n".join(failures), file=sys.stderr)
+        return 1
+    print(f"reconstruction import check ok: {', '.join(names)}")
+    return 0
+
+
 def main() -> None:
+    if "--check-reconstruction-deps" in sys.argv[1:]:
+        sys.exit(_check_reconstruction_imports())
     deployment = get_deployment_config()
     _open_bundle_ui(deployment)
     # Reload mode uses one API worker; BACKEND_RELOAD=1 is how the dev launchers ask for it.
