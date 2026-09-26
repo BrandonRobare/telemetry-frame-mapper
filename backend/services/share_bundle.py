@@ -55,7 +55,7 @@ def _bundle_parent(zip_path: Path, exports_dir: Path):
         # Windows lacks Python's dir_fd/O_NOFOLLOW support. Recheck before creating
         # anything, and keep this platform's existing path-based atomic behavior.
         confine_path(zip_path, exports_dir, allow_root=False)
-        zip_path.parent.mkdir(parents=True, exist_ok=True)
+        Path(exports_dir).mkdir(parents=True, exist_ok=True)
         confine_path(zip_path, exports_dir, allow_root=False)
         yield None, str(zip_path)
         return

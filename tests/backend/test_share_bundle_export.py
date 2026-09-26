@@ -209,7 +209,6 @@ def test_share_bundle_rejects_parent_symlink_swapped_after_validation(tmp_path):
     assert not list(outside.iterdir())
 
 
-@pytest.mark.skipif(os.name == "nt", reason="Windows retains path-based nested directory creation")
 def test_share_bundle_does_not_create_untrusted_nested_parent(tmp_path):
     from backend.services import share_bundle
 
