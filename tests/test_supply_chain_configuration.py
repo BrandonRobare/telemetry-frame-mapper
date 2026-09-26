@@ -294,6 +294,10 @@ def test_dependabot_keeps_github_actions_updates_enabled() -> None:
     dependabot = DEPENDABOT.read_text(encoding="utf-8")
 
     assert 'package-ecosystem: "github-actions"' in dependabot
+    # The pip ecosystem bumps pyproject.toml without uv.lock, so CI's `uv lock --check` fails every
+    # Python update (#797, #932); the uv ecosystem updates both.
+    assert 'package-ecosystem: "uv"' in dependabot
+    assert 'package-ecosystem: "pip"' not in dependabot
 
 
 if __name__ == "__main__":
