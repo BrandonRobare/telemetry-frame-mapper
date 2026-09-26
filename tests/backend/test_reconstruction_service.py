@@ -1986,6 +1986,37 @@ def test_export_point_cloud_treats_stale_v1_sidecar_as_absent(tmp_path):
     assert written["has_classification"] is False
 
 
+def test_write_las_laz_round_trips_with_a_real_backend(tmp_path):
+    """Regression test: laspy 2.x removed LazrsBackend/LaszipBackend/CompressedWriter
+    (replaced by the LazBackend enum), so _write_las_laz must use the current
+    API and actually produce a readable, compressed LAZ file."""
+    laspy = pytest.importorskip("laspy")
+    import numpy as np
+
+    if not any(backend.is_available() for backend in laspy.LazBackend):
+        pytest.skip("no LAZ backend (lazrs/laszip) installed")
+
+    from backend.services.reconstruction import _write_las_laz
+
+    header = laspy.LasHeader(point_format=3, version="1.4")
+    header.scales = np.array([0.001, 0.001, 0.001])
+    header.offsets = np.array([0.0, 0.0, 0.0])
+    las = laspy.LasData(header)
+    point_count = 50
+    rng = np.random.default_rng(0)
+    las.x = rng.uniform(0, 100, point_count)
+    las.y = rng.uniform(0, 100, point_count)
+    las.z = rng.uniform(0, 10, point_count)
+
+    output_path = tmp_path / "cloud.laz"
+    _write_las_laz(las, output_path)
+
+    assert output_path.exists()
+    read_back = laspy.read(str(output_path))
+    assert len(read_back.points) == point_count
+    assert read_back.header.are_points_compressed
+
+
 def test_safe_export_path_rejects_sibling_prefix(tmp_path):
     from backend.core.paths import confine_path
 

@@ -1194,42 +1194,22 @@ def _world_points_to_utm(points_xyz, geo: dict | None):
 
 
 def _write_las_laz(las, output_path: Path) -> None:
-    """Write *las* as a LAZ-compressed file via lazrs or laszip backend.
+    """Write *las* as a LAZ-compressed file via an available laspy backend.
 
-    Raises RuntimeError if no LAZ backend is available.
+    Raises RuntimeError if no LAZ backend (lazrs or laszip) is available.
     """
-    import sys
-
     import laspy
 
-    lazrs_spec = None
-    laszip_spec = None
-    if "laspy" in sys.modules:
-        lazrs_spec = getattr(sys.modules["laspy"], "LazrsBackend", None)
-        laszip_spec = getattr(sys.modules["laspy"], "LaszipBackend", None)
-
-    # laspy >= 2.5 exposes compressed backends via laspy.LazrsBackend
-    for backend_cls in (lazrs_spec, laszip_spec):
-        if backend_cls is not None:
-            try:
-                las.write(str(output_path), do_compress=backend_cls)
-                return
-            except Exception:
-                continue
-
-    # Fallback: try the older laspy.CompressedWriter style
     try:
-        writer = laspy.CompressedWriter(str(output_path), "laz", las.header)
-        writer.write_points(las.points)
-        writer.close()
-        return
-    except (AttributeError, TypeError):
-        pass
-
-    raise RuntimeError(
-        "No LAZ backend available. Install laspy[lazrs] or laspy[laszip] "
-        "to enable compressed point-cloud export."
-    )
+        # output_path has a .laz suffix, so laspy.LasData.write() detects and
+        # enables compression itself, picking whichever of lazrs/laszip is
+        # installed (laspy.LazBackend.detect_available()).
+        las.write(str(output_path))
+    except laspy.errors.LaspyException as exc:
+        raise RuntimeError(
+            "No LAZ backend available. Install laspy[lazrs] or laspy[laszip] "
+            "to enable compressed point-cloud export."
+        ) from exc
 
 
 def _export_point_cloud(
