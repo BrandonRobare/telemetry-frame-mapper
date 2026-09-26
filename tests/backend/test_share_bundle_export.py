@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import zipfile
+from typing import Literal
 from unittest.mock import patch
 
 import pytest
@@ -26,12 +28,20 @@ def _make_session_with_gps_images(db, tmp_path):
     db.add_all(
         [
             Image(
-                session_id=session.id, filename="a.jpg", filepath=str(tmp_path / "a.jpg"),
-                latitude=10.0, longitude=20.0, altitude_m=100.0,
+                session_id=session.id,
+                filename="a.jpg",
+                filepath=str(tmp_path / "a.jpg"),
+                latitude=10.0,
+                longitude=20.0,
+                altitude_m=100.0,
             ),
             Image(
-                session_id=session.id, filename="b.jpg", filepath=str(tmp_path / "b.jpg"),
-                latitude=11.0, longitude=21.0, altitude_m=150.0,
+                session_id=session.id,
+                filename="b.jpg",
+                filepath=str(tmp_path / "b.jpg"),
+                latitude=11.0,
+                longitude=21.0,
+                altitude_m=150.0,
             ),
         ]
     )
@@ -45,7 +55,8 @@ def test_share_bundle_contains_viewer_manifest_and_tileset(client, tmp_path, mon
         "get_config",
         lambda: type("Cfg", (), {"exports_dir": str(tmp_path / "exports")})(),
     )
-    mesh = tmp_path / "mesh.glb"
+    (tmp_path / "exports").mkdir()
+    mesh = tmp_path / "exports" / "mesh.glb"
     mesh.write_bytes(b"glb")
     db = _db(client)
     session = _make_session_with_gps_images(db, tmp_path)
@@ -123,9 +134,14 @@ def test_share_bundle_crash_mid_write_keeps_previous_bundle(client, tmp_path):
     build_share_bundle(bundle, rec, exports)
     good = bundle.read_bytes()
 
-    with patch(
-        "backend.services.share_bundle.zipfile.ZipFile.write", side_effect=OSError("disk full")
-    ):
+    real_open = zipfile.ZipFile.open
+
+    def failing_open(self, name, mode: Literal["r", "w"] = "r", *args, **kwargs):
+        if name == "artifacts/mesh.glb":
+            raise OSError("disk full")
+        return real_open(self, name, mode, *args, **kwargs)
+
+    with patch("backend.services.share_bundle.zipfile.ZipFile.open", failing_open):
         with pytest.raises(OSError, match="disk full"):
             build_share_bundle(bundle, rec, exports)
 
@@ -145,13 +161,14 @@ def test_share_bundle_rebuild_never_exposes_a_partial_zip(client, tmp_path):
     good = bundle.read_bytes()
 
     observed = []
-    real_write = zipfile.ZipFile.write
+    real_open = zipfile.ZipFile.open
 
-    def observing_write(self, filename, arcname=None, *args, **kwargs):
-        observed.append(bundle.read_bytes())
-        return real_write(self, filename, arcname, *args, **kwargs)
+    def observing_open(self, name, mode: Literal["r", "w"] = "r", *args, **kwargs):
+        if name == "artifacts/mesh.glb":
+            observed.append(bundle.read_bytes())
+        return real_open(self, name, mode, *args, **kwargs)
 
-    with patch("backend.services.share_bundle.zipfile.ZipFile.write", observing_write):
+    with patch("backend.services.share_bundle.zipfile.ZipFile.open", observing_open):
         build_share_bundle(bundle, rec, exports)
 
     assert observed, "the rebuild never reached an artifact write"
@@ -167,3 +184,309 @@ def test_share_bundle_rejects_path_outside_exports(tmp_path):
             Reconstruction(),
             tmp_path / "exports",
         )
+
+
+def test_share_bundle_rejects_parent_symlink_swapped_after_validation(tmp_path):
+    """No mkdir/temp/replace may escape through a parent swapped after confinement."""
+    from backend.services import share_bundle
+
+    exports = tmp_path / "exports"
+    parent = exports / "nested"
+    parent.mkdir(parents=True)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+
+    def swap_parent(rec):
+        parent.rmdir()
+        parent.symlink_to(outside, target_is_directory=True)
+        return {"artifacts": {}}
+
+    with (
+        patch.object(share_bundle, "build_share_manifest", side_effect=swap_parent),
+        patch.object(share_bundle, "build_tileset", return_value={}),
+    ):
+        with pytest.raises((OSError, ValueError)):
+            share_bundle.build_share_bundle(parent / "share.zip", Reconstruction(), exports)
+    assert not list(outside.iterdir())
+
+
+def test_share_bundle_does_not_create_untrusted_nested_parent(tmp_path):
+    from backend.services import share_bundle
+
+    exports = tmp_path / "exports"
+    exports.mkdir()
+    with patch.object(share_bundle, "build_tileset", return_value={}):
+        with pytest.raises(FileNotFoundError):
+            share_bundle.build_share_bundle(
+                exports / "new" / "share.zip", Reconstruction(), exports
+            )
+    assert not (exports / "new").exists()
+
+
+def test_share_bundle_does_not_follow_final_destination_symlink(tmp_path):
+    from backend.services.share_bundle import build_share_bundle
+
+    exports = tmp_path / "exports"
+    exports.mkdir()
+    victim = tmp_path / "victim"
+    victim.write_bytes(b"unchanged")
+    destination = exports / "share.zip"
+    destination.symlink_to(victim)
+    with pytest.raises(ValueError, match="outside exports directory"):
+        build_share_bundle(destination, Reconstruction(), exports)
+    assert victim.read_bytes() == b"unchanged"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Windows does not support directory-descriptor writes")
+def test_share_bundle_publish_uses_open_parent_not_swapped_path(tmp_path):
+    from backend.services import share_bundle
+
+    exports = tmp_path / "exports"
+    parent = exports / "nested"
+    parent.mkdir(parents=True)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    artifact = exports / "mesh.glb"
+    artifact.write_bytes(b"glb")
+    rec = Reconstruction(mesh_glb_path=str(artifact))
+    real_open = zipfile.ZipFile.open
+    staged_names = []
+
+    def swap_during_write(self, name, mode: Literal["r", "w"] = "r", *args, **kwargs):
+        if name == "artifacts/mesh.glb":
+            temp_name = next(parent.glob("*.tmp")).name
+            staged_names.append(temp_name)
+            parent.rename(exports / "parked")
+            parent.symlink_to(outside, target_is_directory=True)
+            (outside / temp_name).write_bytes(b"attacker")
+        return real_open(self, name, mode, *args, **kwargs)
+
+    with (
+        patch.object(share_bundle, "build_tileset", return_value={}),
+        patch.object(share_bundle.zipfile.ZipFile, "open", swap_during_write),
+    ):
+        share_bundle.build_share_bundle(parent / "share.zip", rec, exports)
+    assert not (outside / "share.zip").exists()
+    assert (outside / staged_names[0]).read_bytes() == b"attacker"
+    with zipfile.ZipFile(exports / "parked" / "share.zip") as zf:
+        assert zf.read("artifacts/mesh.glb") == b"glb"
+
+
+def test_share_bundle_rejects_unsafe_archive_artifact_name(tmp_path):
+    """A POSIX filename with backslashes must not become a traversal on Windows extraction."""
+    from backend.services import share_bundle
+
+    exports = tmp_path / "exports"
+    exports.mkdir()
+    artifact = exports / r"..\escape.glb"
+    artifact.write_bytes(b"secret")
+    rec = Reconstruction(mesh_glb_path=str(artifact))
+    with patch.object(share_bundle, "build_tileset", return_value={}):
+        with pytest.raises(ValueError, match="artifact name"):
+            share_bundle.build_share_bundle(exports / "share.zip", rec, exports)
+    assert not (exports / "share.zip").exists()
+
+
+def test_share_bundle_rejects_symlink_artifact(tmp_path):
+    from backend.services import share_bundle
+
+    exports = tmp_path / "exports"
+    exports.mkdir()
+    target = tmp_path / "private.glb"
+    target.write_bytes(b"secret")
+    link = exports / "linked.glb"
+    link.symlink_to(target)
+    rec = Reconstruction(mesh_glb_path=str(link))
+    with patch.object(share_bundle, "build_tileset", return_value={}):
+        with pytest.raises(ValueError, match="symlink artifact"):
+            share_bundle.build_share_bundle(exports / "share.zip", rec, exports)
+    assert not (exports / "share.zip").exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX FIFO only")
+def test_share_bundle_fifo_fails_without_blocking(tmp_path):
+    """A FIFO in an artifact field must fail rather than block waiting for a writer."""
+    import subprocess
+    import sys
+
+    exports = tmp_path / "exports"
+    exports.mkdir()
+    fifo = exports / "mesh.glb"
+    os.mkfifo(fifo)
+    script = (
+        "from backend.services.share_bundle import build_share_bundle; "
+        "from backend.db.models import Reconstruction; "
+        "import pathlib; "
+        f"build_share_bundle(pathlib.Path({str(exports / 'share.zip')!r}), "
+        f"Reconstruction(mesh_glb_path={str(fifo)!r}), pathlib.Path({str(exports)!r}))"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", script], timeout=3, capture_output=True, text=True
+    )
+    assert result.returncode != 0
+    assert "non-file artifact" in result.stderr
+    assert not (exports / "share.zip").exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX descriptor confinement")
+def test_share_bundle_rejects_untrusted_artifact_parent_symlink(tmp_path):
+    from backend.services import share_bundle
+
+    exports = tmp_path / "exports"
+    exports.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "mesh.glb").write_bytes(b"private")
+    (exports / "linked").symlink_to(outside, target_is_directory=True)
+    rec = Reconstruction(mesh_glb_path=str(exports / "linked" / "mesh.glb"))
+    with patch.object(share_bundle, "build_tileset", return_value={}):
+        with pytest.raises(ValueError, match="artifact"):
+            share_bundle.build_share_bundle(exports / "share.zip", rec, exports)
+    assert not (exports / "share.zip").exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX descriptor confinement")
+def test_share_bundle_rejects_parent_swapped_during_artifact_open(tmp_path):
+    from backend.services import share_bundle
+
+    exports = tmp_path / "exports"
+    parent = exports / "nested"
+    parent.mkdir(parents=True)
+    (parent / "mesh.glb").write_bytes(b"public")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "mesh.glb").write_bytes(b"private")
+    rec = Reconstruction(mesh_glb_path=str(parent / "mesh.glb"))
+    original_open = share_bundle.os.open
+
+    def swap_before_open(path, *args, **kwargs):
+        if path == "nested":
+            parent.rename(exports / "parked")
+            parent.symlink_to(outside, target_is_directory=True)
+        return original_open(path, *args, **kwargs)
+
+    with (
+        patch.object(share_bundle, "build_tileset", return_value={}),
+        patch.object(share_bundle.os, "open", side_effect=swap_before_open),
+    ):
+        with pytest.raises((ValueError, OSError)):
+            share_bundle.build_share_bundle(exports / "share.zip", rec, exports)
+    assert not (exports / "share.zip").exists()
+
+
+def test_share_bundle_uses_configured_processed_and_colmap_roots(tmp_path):
+    from backend.services import share_bundle
+
+    exports = tmp_path / "exports"
+    exports.mkdir()
+    processed = tmp_path / "processed"
+    processed.mkdir()
+    data = tmp_path / "data"
+    colmap = data / "colmap" / "42"
+    colmap.mkdir(parents=True)
+    (processed / "mesh.glb").write_bytes(b"mesh")
+    (colmap / "cloud.las").write_bytes(b"cloud")
+    cfg = type("Cfg", (), {"processed_dir": str(processed), "data_dir": str(data)})()
+    rec = Reconstruction(
+        id=42,
+        colmap_dir=str(colmap),
+        mesh_glb_path=str(processed / "mesh.glb"),
+        pointcloud_path=str(colmap / "cloud.las"),
+    )
+    with (
+        patch.object(share_bundle, "get_config", return_value=cfg),
+        patch.object(share_bundle, "build_tileset", return_value={}),
+    ):
+        share_bundle.build_share_bundle(exports / "share.zip", rec, exports)
+    with zipfile.ZipFile(exports / "share.zip") as zf:
+        assert zf.read("artifacts/mesh.glb") == b"mesh"
+        assert zf.read("artifacts/cloud.las") == b"cloud"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX descriptor confinement")
+def test_share_bundle_rejects_exports_root_swapped_after_validation(tmp_path):
+    from backend.services import share_bundle
+
+    exports = tmp_path / "exports"
+    exports.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+
+    def swap_root(rec):
+        exports.rename(tmp_path / "parked")
+        exports.symlink_to(outside, target_is_directory=True)
+        return {"artifacts": {}}
+
+    with (
+        patch.object(share_bundle, "build_share_manifest", side_effect=swap_root),
+        patch.object(share_bundle, "build_tileset", return_value={}),
+    ):
+        with pytest.raises((OSError, ValueError)):
+            share_bundle.build_share_bundle(exports / "share.zip", Reconstruction(), exports)
+    assert not list(outside.iterdir())
+
+
+def test_share_bundle_rejects_other_reconstruction_colmap_root(tmp_path):
+    from backend.services import share_bundle
+
+    exports = tmp_path / "exports"
+    exports.mkdir()
+    processed = tmp_path / "processed"
+    processed.mkdir()
+    data = tmp_path / "data"
+    other = data / "colmap" / "43"
+    other.mkdir(parents=True)
+    (other / "cloud.las").write_bytes(b"private")
+    cfg = type("Cfg", (), {"processed_dir": str(processed), "data_dir": str(data)})()
+    rec = Reconstruction(id=42, colmap_dir=str(other), pointcloud_path=str(other / "cloud.las"))
+    with (
+        patch.object(share_bundle, "get_config", return_value=cfg),
+        patch.object(share_bundle, "build_tileset", return_value={}),
+    ):
+        with pytest.raises(ValueError, match="outside authorized artifact roots"):
+            share_bundle.build_share_bundle(exports / "share.zip", rec, exports)
+    assert not (exports / "share.zip").exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX descriptor confinement")
+def test_share_bundle_artifact_read_uses_open_parent_after_swap(tmp_path):
+    from backend.services import share_bundle
+
+    exports = tmp_path / "exports"
+    parent = exports / "nested"
+    parent.mkdir(parents=True)
+    (parent / "mesh.glb").write_bytes(b"public")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "mesh.glb").write_bytes(b"private")
+    rec = Reconstruction(mesh_glb_path=str(parent / "mesh.glb"))
+    original_open = share_bundle.os.open
+
+    def swap_after_parent_open(path, *args, **kwargs):
+        fd = original_open(path, *args, **kwargs)
+        if path == "nested":
+            parent.rename(exports / "parked")
+            parent.symlink_to(outside, target_is_directory=True)
+        return fd
+
+    with (
+        patch.object(share_bundle, "build_tileset", return_value={}),
+        patch.object(share_bundle.os, "open", side_effect=swap_after_parent_open),
+    ):
+        share_bundle.build_share_bundle(exports / "share.zip", rec, exports)
+    with zipfile.ZipFile(exports / "share.zip") as zf:
+        assert zf.read("artifacts/mesh.glb") == b"public"
+
+
+def test_share_bundle_rejects_artifact_outside_configured_roots(tmp_path):
+    from backend.services import share_bundle
+
+    exports = tmp_path / "exports"
+    exports.mkdir()
+    private = tmp_path / "secret.glb"
+    private.write_bytes(b"private")
+    rec = Reconstruction(mesh_glb_path=str(private), colmap_dir=str(tmp_path))
+    with patch.object(share_bundle, "build_tileset", return_value={}):
+        with pytest.raises(ValueError, match="outside authorized artifact roots"):
+            share_bundle.build_share_bundle(exports / "share.zip", rec, exports)
+    assert not (exports / "share.zip").exists()
