@@ -65,10 +65,9 @@ def _bundle_parent(zip_path: Path, exports_dir: Path):
     fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     try:
         for component in relative.parts[:-1]:
-            try:
-                os.mkdir(component, dir_fd=fd)
-            except FileExistsError:
-                pass
+            # Do not create caller-named directories during bundle generation.
+            # The HTTP route writes directly into exports_dir; nested callers
+            # must provide an existing, non-symlinked directory.
             child = os.open(component, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
             os.close(fd)
             fd = child
