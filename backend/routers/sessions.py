@@ -290,7 +290,7 @@ def bulk_sessions(body: BulkSessionRequest, db: DBSession = Depends(get_db)):
             if body.operation == "archive":
                 from ..services.session_bundle import build_session_archive
 
-                zip_path = Path(get_config().exports_dir) / f"session_{session_id}_archive.zip"
+                zip_path = Path(get_config().exports_dir) / f"session_{int(s.id)}_archive.zip"
                 archive = build_session_archive(zip_path, s, db)
                 outcomes.append(
                     BulkSessionOutcome(
@@ -442,7 +442,7 @@ def archive_session(session_id: int, db: DBSession = Depends(get_db)):
     s = db.query(SessionModel).filter(SessionModel.id == session_id).first()
     if not s:
         raise HTTPException(status_code=404, detail="Session not found")
-    zip_path = Path(get_config().exports_dir) / f"session_{session_id}_archive.zip"
+    zip_path = Path(get_config().exports_dir) / f"session_{int(s.id)}_archive.zip"
     return build_session_archive(zip_path, s, db)
 
 
@@ -462,7 +462,7 @@ def restore_session(req: RestoreRequest, db: DBSession = Depends(get_db)):
     requested_path = Path(req.zip_path)
     for root_value in (cfg.imports_dir, cfg.exports_dir, cfg.data_dir):
         try:
-            zip_path = confine_path(requested_path, Path(root_value))
+            zip_path = confine_path(requested_path, Path(root_value), reject_aliases=True)
             break
         except (OSError, RuntimeError, ValueError):
             continue
