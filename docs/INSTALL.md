@@ -43,7 +43,7 @@ uv sync --frozen --group backend --group reconstruction --group splat-metal
 
 The group pins `msplat==1.1.4`; its marker prevents installation on non-arm64 macOS, Linux, Windows, and unsupported Python versions. If the young, single-maintainer project becomes unavailable or incompatible, omit `splat-metal`: the application remains usable and reconstruction completes as `colmap_only`. CUDA users continue to follow the separate manual torch/gsplat procedure above.
 
-**v3.0 preview boundary:** native Metal splat training is experimental. The fixed Aukerman held-out gate produced non-finite Gaussians in two real arm64 runs, so CUDA-quality parity is not established. Use the supported `colmap_only` result for production work until [#784](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/784) records a valid comparison.
+**v3.0 boundary:** native Metal splat training is experimental. Finite output is gated on a physical Apple M5 only, and the CUDA–Metal held-out comparison has not run, so CUDA-quality parity is not established. Use the supported `colmap_only` result for production work until [#784](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/784) records a valid comparison.
 
 ## 2. External binaries
 

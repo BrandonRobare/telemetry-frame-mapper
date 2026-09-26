@@ -1774,7 +1774,11 @@ def test_export_point_cloud_uses_nearest_gaussian_color(tmp_path):
         output = _export_point_cloud(colmap_dir, ply_path, tmp_path / "pointcloud.las")
 
     assert output == tmp_path / "pointcloud.las"
-    assert written["path"] == output
+    # Written to a temp sibling first, then atomically replaced onto `output`
+    # (see test_export_point_cloud_leaves_no_file_when_laz_write_fails).
+    assert written["path"].parent == output.parent
+    assert written["path"].suffix == output.suffix
+    assert written["path"] != output
     assert output.read_bytes() == b"las"
     assert list(written["x"]) == [0.0, 10.0]
     assert list(written["red"]) == [10 * 257, 200 * 257]
@@ -1984,6 +1988,82 @@ def test_export_point_cloud_treats_stale_v1_sidecar_as_absent(tmp_path):
         _export_point_cloud(colmap_dir, ply_path, tmp_path / "pointcloud.las")
 
     assert written["has_classification"] is False
+
+
+def test_write_las_laz_round_trips_with_a_real_backend(tmp_path):
+    """Regression test: laspy 2.x removed LazrsBackend/LaszipBackend/CompressedWriter
+    (replaced by the LazBackend enum), so _write_las_laz must use the current
+    API and actually produce a readable, compressed LAZ file."""
+    laspy = pytest.importorskip("laspy")
+    import numpy as np
+
+    if not any(backend.is_available() for backend in laspy.LazBackend):
+        pytest.skip("no LAZ backend (lazrs/laszip) installed")
+
+    from backend.services.reconstruction import _write_las_laz
+
+    header = laspy.LasHeader(point_format=3, version="1.4")
+    header.scales = np.array([0.001, 0.001, 0.001])
+    header.offsets = np.array([0.0, 0.0, 0.0])
+    las = laspy.LasData(header)
+    point_count = 50
+    rng = np.random.default_rng(0)
+    las.x = rng.uniform(0, 100, point_count)
+    las.y = rng.uniform(0, 100, point_count)
+    las.z = rng.uniform(0, 10, point_count)
+
+    output_path = tmp_path / "cloud.laz"
+    _write_las_laz(las, output_path)
+
+    assert output_path.exists()
+    read_back = laspy.read(str(output_path))
+    assert len(read_back.points) == point_count
+    assert read_back.header.are_points_compressed
+
+
+def test_export_point_cloud_leaves_no_file_when_laz_write_fails(tmp_path, monkeypatch):
+    """laspy's LasData.write() opens the destination file before it picks a
+    backend, so a failed write must not leave a (partial/empty) file at the
+    output path — the router only re-exports `if not canonical.exists()`, so
+    a leftover file would otherwise be served with 200 forever."""
+    laspy = pytest.importorskip("laspy")
+    from unittest.mock import patch
+
+    from backend.services.reconstruction import _export_point_cloud
+
+    colmap_dir = tmp_path / "colmap"
+    sparse = colmap_dir / "sparse" / "0"
+    sparse.mkdir(parents=True)
+    (sparse / "points3D.txt").write_text("1 0 0 0 1 2 3 0.5\n")
+
+    ply_path = tmp_path / "splat.ply"
+    ply_path.write_text(
+        "ply\n"
+        "format ascii 1.0\n"
+        "element vertex 1\n"
+        "property float x\n"
+        "property float y\n"
+        "property float z\n"
+        "property uchar red\n"
+        "property uchar green\n"
+        "property uchar blue\n"
+        "end_header\n"
+        "0 0 0 10 20 30\n"
+    )
+
+    # Simulate "no LAZ backend installed" without needing to uninstall lazrs.
+    monkeypatch.setattr(
+        laspy.LazBackend, "detect_available", classmethod(lambda cls: ())
+    )
+
+    output_path = tmp_path / "pointcloud.laz"
+    with patch("backend.services.reconstruction.get_config") as mock_cfg:
+        mock_cfg.return_value.exports_dir = str(tmp_path)
+        with pytest.raises(RuntimeError, match="No LAZ backend available"):
+            _export_point_cloud(colmap_dir, ply_path, output_path, laz_backend=True)
+
+    assert not output_path.exists()
+    assert list(tmp_path.glob("*.laz")) == []
 
 
 def test_safe_export_path_rejects_sibling_prefix(tmp_path):

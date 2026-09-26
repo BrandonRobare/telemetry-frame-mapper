@@ -3,12 +3,34 @@ from __future__ import annotations
 import sys
 import threading
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import yaml
 
 import backend.routers.settings as settings_mod
 from backend.core.config import get_config
+
+
+def _pin_accelerator(monkeypatch, kind: str) -> None:
+    """Force the accelerator this settings-router call resolves policy for.
+
+    Real detection depends on the host running the test (Apple Silicon
+    resolves "metal" with no torch installed, CI resolves "cpu"), which would
+    make preset-value assertions flaky across machines.
+    """
+    device = "mps" if kind == "metal" else kind
+    fake_accelerator = SimpleNamespace(kind=kind, device=device)
+    monkeypatch.setattr(settings_mod.accelerator, "detect", lambda *a, **k: fake_accelerator)
+
+
+def _omit_quick_iterations(tmp_config) -> None:
+    """Strip the explicit `iterations` the fixture sets, like the real bundled
+    config.yaml (see the comment at config.yaml:99): omitted on purpose so
+    accelerator policy fills it in per host."""
+    raw = yaml.safe_load(tmp_config.read_text())
+    del raw["reconstruction"]["presets"]["quick"]["iterations"]
+    tmp_config.write_text(yaml.safe_dump(raw, sort_keys=False))
 
 
 @pytest.fixture()
@@ -135,7 +157,8 @@ def test_get_settings_ingest_defaults(client, tmp_config):
     assert ingest["filter_zero_gps"] is True
 
 
-def test_get_settings_reconstruction_defaults(client, tmp_config):
+def test_get_settings_reconstruction_defaults(client, tmp_config, monkeypatch):
+    _pin_accelerator(monkeypatch, "cpu")
     data = client.get("/settings").json()
     recon = data["reconstruction"]
     assert recon["colmap_threads"] == 8
@@ -144,6 +167,33 @@ def test_get_settings_reconstruction_defaults(client, tmp_config):
     assert "full" in recon["presets"]
     assert recon["presets"]["quick"]["iterations"] == 1000
     assert recon["presets"]["full"]["iterations"] == 30000
+
+
+def test_get_settings_reports_metal_policy_iterations(client, tmp_config, monkeypatch):
+    """#820: an omitted quick.iterations must show what a job will actually use.
+
+    The bundled config.yaml deliberately omits this field so Metal hosts get
+    1,250 iterations and CUDA hosts get 1,000. GET /settings used to always
+    report the bare cross-platform default (1,000) no matter the host.
+    """
+    _omit_quick_iterations(tmp_config)
+    _pin_accelerator(monkeypatch, "metal")
+    data = client.get("/settings").json()
+    assert data["reconstruction"]["presets"]["quick"]["iterations"] == 1250
+    # full is untouched by the Metal policy override.
+    assert data["reconstruction"]["presets"]["full"]["iterations"] == 30000
+
+
+def test_get_settings_explicit_iterations_beats_metal_policy(client, tmp_config, monkeypatch):
+    """A user-configured value is authoritative, even on a Metal host."""
+    _omit_quick_iterations(tmp_config)
+    _pin_accelerator(monkeypatch, "metal")
+    raw = yaml.safe_load(tmp_config.read_text())
+    raw["reconstruction"]["presets"]["quick"]["iterations"] = 777
+    tmp_config.write_text(yaml.safe_dump(raw, sort_keys=False))
+
+    data = client.get("/settings").json()
+    assert data["reconstruction"]["presets"]["quick"]["iterations"] == 777
 
 
 def test_get_settings_filters_removed_preset_keys(client, tmp_config):
@@ -232,6 +282,33 @@ def test_patch_reconstruction_preset_key(client, tmp_config):
     )
     assert resp.status_code == 200
     assert resp.json()["reconstruction"]["presets"]["quick"]["iterations"] == 500
+
+
+def test_patch_untouched_preset_field_leaves_metal_policy_iterations_absent(
+    client, tmp_config, monkeypatch
+):
+    """#820: patching one preset field must not pin the others' policy value.
+
+    A PATCH that only changes `max_gaussians` must not write `iterations` to
+    config.yaml at all — otherwise it freezes whatever the accelerator policy
+    resolved to at save time, so the next job never re-derives it.
+    """
+    _omit_quick_iterations(tmp_config)
+    _pin_accelerator(monkeypatch, "metal")
+    resp = client.patch(
+        "/settings",
+        json={"reconstruction": {"presets": {"quick": {"max_gaussians": 400000}}}},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["reconstruction"]["presets"]["quick"]["iterations"] == 1250
+    assert resp.json()["reconstruction"]["presets"]["quick"]["max_gaussians"] == 400000
+
+    raw = yaml.safe_load(tmp_config.read_text())
+    assert "iterations" not in raw["reconstruction"]["presets"]["quick"]
+
+    # A fresh GET still shows the policy value, unaffected by the earlier write.
+    refreshed = client.get("/settings").json()
+    assert refreshed["reconstruction"]["presets"]["quick"]["iterations"] == 1250
 
 
 def test_patch_general_field(client, tmp_config):
@@ -512,7 +589,10 @@ def test_reset_restores_defaults(client, tmp_config):
     assert data["mission"]["altitude_ft"] == 200.0
 
 
-def test_reset_uses_explicit_defaults_without_creating_sentinel_file(client, tmp_config):
+def test_reset_uses_explicit_defaults_without_creating_sentinel_file(
+    client, tmp_config, monkeypatch
+):
+    _pin_accelerator(monkeypatch, "cpu")
     sentinel = tmp_config.with_name(".settings-reset-empty.yaml")
 
     resp = client.post("/settings/reset")

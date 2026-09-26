@@ -85,8 +85,12 @@ export default function ReconstructionSettings() {
 
   function handleSave() {
     if (hasErrors) return
+    // This form never edits `presets` — send only the touched top-level
+    // fields, or a save here would re-write `server.presets` verbatim and
+    // pin any accelerator-policy-derived preset field (e.g. quick.iterations
+    // on Metal, #820) to whatever this host currently resolves it to.
     updateMutation.mutate(
-      { reconstruction: form },
+      { reconstruction: edits },
       { onSuccess: () => setEdits({}) }
     )
   }
