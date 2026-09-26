@@ -124,7 +124,10 @@ def _num_params_for_name(model_name: str) -> int:
 
 def _unpack(fmt: str, data: bytes, offset: int) -> tuple[tuple, int]:
     """Unpack ``fmt`` from ``data`` at ``offset``; return (values, new offset)."""
-    values = struct.unpack_from(fmt, data, offset)
+    try:
+        values = struct.unpack_from(fmt, data, offset)
+    except struct.error as exc:
+        raise ValueError("truncated COLMAP binary record") from exc
     return values, offset + struct.calcsize(fmt)
 
 
@@ -150,6 +153,8 @@ def read_cameras_bin(path: Path) -> dict[int, ColmapCamera]:
             height=int(height),
             params=params.astype(np.float64),
         )
+    if offset != len(data):
+        raise ValueError("cameras.bin does not end at a complete record boundary")
     return cameras
 
 
@@ -172,6 +177,8 @@ def read_images_bin(path: Path) -> list[ColmapImage]:
         images.append(
             ColmapImage(image_id=image_id, qvec=qvec, tvec=tvec, camera_id=camera_id, name=name)
         )
+    if offset != len(data):
+        raise ValueError("images.bin does not end at a complete record boundary")
     return images
 
 
@@ -182,6 +189,9 @@ def read_points3d_bin(path: Path) -> tuple[np.ndarray, np.ndarray]:
     """
     data = path.read_bytes()
     (num_points,), offset = _unpack("<Q", data, 0)
+    # A corrupt count must not size the arrays below before a record is read.
+    if len(data) < offset + num_points * struct.calcsize("<QdddBBBdQ"):
+        raise ValueError("truncated COLMAP binary record")
     xyz = np.empty((num_points, 3), dtype=np.float64)
     rgb = np.empty((num_points, 3), dtype=np.uint8)
     for i in range(num_points):
@@ -190,6 +200,8 @@ def read_points3d_bin(path: Path) -> tuple[np.ndarray, np.ndarray]:
         rgb[i] = fields[4:7]
         track_length = int(fields[8])
         offset += 8 * track_length  # skip (image_id: i, point2D_idx: i) per track element
+    if offset != len(data):
+        raise ValueError("points3D.bin does not end at a complete record boundary")
     return xyz, rgb
 
 
@@ -329,7 +341,8 @@ def read_model(sparse_dir: Path) -> ColmapModel:
 
     The mapper writes BIN and ``model_converter`` adds TXT in place, so a
     finished workspace usually has both; BIN is authoritative. Raises
-    ``RuntimeError`` if neither format is present.
+    ``RuntimeError`` if neither format is present and ``ValueError`` if a BIN
+    file is truncated or does not end at a record boundary.
     """
     if (sparse_dir / "cameras.bin").exists():
         cameras = read_cameras_bin(sparse_dir / "cameras.bin")
