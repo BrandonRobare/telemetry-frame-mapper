@@ -15,6 +15,11 @@ updates:
     groups:
       frontend-deps:
         patterns: ["*"]
+    ignore:
+      # typescript-eslint@8.70.1 (latest) still peers on "typescript >=4.8.4 <6.1.0";
+      # remove once a typescript-eslint release supports TypeScript 7.
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: "github-actions"
     directory: "/"
