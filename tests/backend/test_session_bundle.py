@@ -171,6 +171,34 @@ def test_restore_finds_nested_archive_from_allowed_root(client, tmp_path):
     assert restored.id != session.id
 
 
+@pytest.mark.parametrize("root_spelling", ["symlink", "parent_component"])
+def test_archive_restore_accepts_configured_root_spelling(client, tmp_path, root_spelling):
+    cfg = _cfg(tmp_path)
+    real = tmp_path / "actual-exports"
+    real.mkdir()
+    if root_spelling == "symlink":
+        configured = tmp_path / "exports-link"
+        configured.symlink_to(real, target_is_directory=True)
+    else:
+        intermediate = tmp_path / "intermediate"
+        intermediate.mkdir()
+        configured = intermediate / ".." / "actual-exports"
+    cfg.exports_dir = str(configured)  # type: ignore[attr-defined]
+    db = _db(client)
+    session = SessionModel(name="Configured root", folder_path=str(tmp_path))
+    db.add(session)
+    db.commit()
+    db.refresh(session)
+
+    archived = _archive(client, cfg, session.id)
+    assert archived.status_code == 200
+    bundle_path = Path(archived.json()["bundle_path"])
+    assert bundle_path == real / f"session_{session.id}_archive.zip"
+    restored = _restore(client, cfg, str(bundle_path))
+    assert restored.status_code == 200
+    assert db.get(SessionModel, restored.json()["session_id"]).name == session.name
+
+
 def test_restore_does_not_enumerate_data_root(client, tmp_path, monkeypatch):
     # restore must resolve the archive directly from the (already-confined) path, never by
     # walking the data root — that walk would be a DoS on real roots (10^5+ files). #500

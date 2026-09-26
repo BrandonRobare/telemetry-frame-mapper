@@ -23,20 +23,26 @@ def confine_path(
     The returned path is canonical and safe at the time it is checked.
     """
     if reject_aliases:
-        # Inspect the original spelling before realpath erases traversal/symlinks.
-        # The configured root may itself be a symlink; only its children are untrusted.
-        if ".." in path.parts or "\\" in str(path):
-            raise ValueError(f"Path {path} is outside {boundary_name}")
-        root_lexical = Path(os.path.abspath(root))
-        try:
-            child = Path(os.path.abspath(path)).relative_to(root_lexical)
-        except ValueError as exc:
-            raise ValueError(f"Path {path} is outside {boundary_name}") from exc
-        current = root_lexical
-        for part in child.parts:
-            current = current / part
-            if current.is_symlink():
+        # Compare original spellings before realpath erases traversal/symlinks.
+        # A configured root may contain '..' or be a symlink; a previously returned
+        # canonical child may therefore start at the root's real location instead.
+        for base in (root, Path(os.path.abspath(root)), Path(os.path.realpath(root))):
+            try:
+                child = path.relative_to(base)
+            except ValueError:
+                continue
+            # Backslash is a foreign separator only on POSIX; WindowsPath uses it
+            # for every ordinary child. Never allow aliases in the child suffix.
+            if ".." in child.parts or (os.sep != "\\" and "\\" in str(child)):
                 raise ValueError(f"Path {path} is outside {boundary_name}")
+            current = base
+            for part in child.parts:
+                current = current / part
+                if current.is_symlink():
+                    raise ValueError(f"Path {path} is outside {boundary_name}")
+            break
+        else:
+            raise ValueError(f"Path {path} is outside {boundary_name}")
     root_real = os.path.normcase(os.path.normpath(os.path.realpath(root)))
     path_real = os.path.normcase(os.path.normpath(os.path.realpath(path)))
     try:

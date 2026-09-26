@@ -1,6 +1,7 @@
 """Regression and structural coverage for the shared filesystem confinement boundary."""
 
-from pathlib import Path
+import os
+from pathlib import Path, PureWindowsPath
 
 import pytest
 
@@ -125,3 +126,50 @@ def test_atomic_zip_preserves_configured_symlink_root(tmp_path):
     with _atomic_zip(root / "bundle.zip", root) as zf:
         zf.writestr("manifest.json", "{}")
     assert (real / "bundle.zip").is_file()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="requires native Windows filesystem paths")
+def test_windows_native_paths_work_for_confined_atomic_zip(tmp_path):
+    from backend.routers.export import _atomic_zip
+
+    root = tmp_path / "exports"
+    root.mkdir()
+    target = Path(PureWindowsPath(root / "nested" / "bundle.zip"))
+    target.parent.mkdir()
+    assert "\\" in str(PureWindowsPath(target))
+    assert confine_path(target, root, reject_aliases=True) == target
+    with _atomic_zip(target, root) as zf:
+        zf.writestr("manifest.json", "{}")
+    assert target.is_file()
+
+
+def test_canonical_child_of_configured_symlink_root_remains_confined(tmp_path):
+    real = tmp_path / "real"
+    real.mkdir()
+    root = tmp_path / "exports"
+    root.symlink_to(real, target_is_directory=True)
+    canonical_child = confine_path(root / "bundle.zip", root, reject_aliases=True)
+    assert canonical_child == real / "bundle.zip"
+    assert confine_path(canonical_child, root, reject_aliases=True) == canonical_child
+
+    outside = tmp_path / "outside.zip"
+    outside.write_bytes(b"secret")
+    (real / "alias.zip").symlink_to(outside)
+    with pytest.raises(ValueError, match="outside allowed directory"):
+        confine_path(real / "alias.zip", root, reject_aliases=True)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="backslash is native on Windows")
+def test_posix_rejects_foreign_backslash_below_root(tmp_path):
+    with pytest.raises(ValueError, match="outside allowed directory"):
+        confine_path(tmp_path / r"sub\bundle.zip", tmp_path, reject_aliases=True)
+
+
+def test_configured_root_parent_spelling_does_not_reject_its_own_children(tmp_path):
+    (tmp_path / "intermediate").mkdir()
+    root = tmp_path / "intermediate" / ".." / "exports"
+    root.mkdir()
+    child = root / "bundle.zip"
+    assert confine_path(child, root, reject_aliases=True) == tmp_path / "exports" / "bundle.zip"
+    with pytest.raises(ValueError, match="outside allowed directory"):
+        confine_path(root / "sub" / ".." / "bundle.zip", root, reject_aliases=True)
