@@ -3,6 +3,7 @@ from urllib.parse import quote
 
 import pytest
 
+import backend.services.reproducibility_manifest as manifest_service
 from backend.services.reproducibility_manifest import build_reproducibility_manifest, sha256_file
 
 
@@ -138,4 +139,59 @@ def test_manifest_rejects_symlink_escape(tmp_path):
             settings={},
             artifacts=[link / "secret.txt"],
             artifact_roots=[safe_root],
+        )
+
+
+def test_manifest_rejects_symlink_swap_after_confinement(tmp_path, monkeypatch):
+    safe_root = tmp_path / "safe"
+    folder = safe_root / "sub"
+    folder.mkdir(parents=True)
+    (folder / "artifact.txt").write_text("safe")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "artifact.txt").write_text("secret")
+    original = manifest_service.confine_path
+
+    def swap_after_validation(path, root, **kwargs):
+        validated = original(path, root, **kwargs)
+        if Path(path) == folder / "artifact.txt":
+            folder.rename(safe_root / "moved")
+            folder.symlink_to(outside, target_is_directory=True)
+        return validated
+
+    monkeypatch.setattr(manifest_service, "confine_path", swap_after_validation)
+    with pytest.raises(ValueError, match="outside configured safe directories"):
+        build_reproducibility_manifest(
+            workflow="export",
+            settings={},
+            artifacts=[folder / "artifact.txt"],
+            artifact_roots=[safe_root],
+        )
+
+
+def test_manifest_hashes_in_root_symlink_target_and_preserves_missing_path(tmp_path):
+    root = tmp_path / "safe"
+    root.mkdir()
+    real_file = root / "real.txt"
+    real_file.write_text("safe")
+    (root / "alias.txt").symlink_to(real_file)
+
+    result = build_reproducibility_manifest(
+        workflow="export",
+        settings={},
+        artifacts=[root / "alias.txt", root / "missing.txt"],
+        artifact_roots=[root],
+    )
+    assert result["artifacts"][0]["path"] == str(real_file)
+    assert result["artifacts"][0]["sha256"] == sha256_file(real_file)
+    assert result["artifacts"][1] == {"path": str(root / "missing.txt"), "exists": False}
+
+
+def test_manifest_fails_closed_without_descriptor_relative_opens(tmp_path, monkeypatch):
+    artifact = tmp_path / "artifact.txt"
+    artifact.write_text("safe")
+    monkeypatch.setattr(manifest_service.os, "supports_dir_fd", set())
+    with pytest.raises(ValueError, match="secure manifest artifact inspection is unavailable"):
+        build_reproducibility_manifest(
+            workflow="export", settings={}, artifacts=[artifact], artifact_roots=[tmp_path]
         )
