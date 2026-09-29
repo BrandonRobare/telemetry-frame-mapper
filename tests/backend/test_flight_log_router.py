@@ -218,13 +218,21 @@ def test_upload_relative_clock_csv_without_start_time_is_rejected(client):
     assert db.query(FlightLog).filter(FlightLog.session_id == s.id).count() == 0
 
 
-def test_upload_relative_clock_csv_is_anchored_to_start_time(client):
+@pytest.mark.parametrize(
+    "start_time",
+    [
+        "2024-06-15T10:30:00Z",
+        # What the GPS Sync tab sends: Date.toISOString() of the UTC field value.
+        "2024-06-15T10:30:00.000Z",
+    ],
+)
+def test_upload_relative_clock_csv_is_anchored_to_start_time(client, start_time):
     s = _make_session(client)
 
     resp = client.post(
         "/flight-logs/upload",
         files={"file": ("log.csv", RELATIVE_CSV_BYTES, "text/csv")},
-        data={"session_id": str(s.id), "start_time": "2024-06-15T10:30:00Z"},
+        data={"session_id": str(s.id), "start_time": start_time},
     )
 
     assert resp.status_code == 200

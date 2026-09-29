@@ -60,8 +60,9 @@ ingest, analysis, planning, reconstruction, and export.
   missing or unrecognized coordinate headers are rejected; this app does not
   fabricate a position. A log whose clock counts from the start of the flight
   (timestamps before 2000-01-01) is anchored to the start time a DJI binary log
-  records, or to a `start_time` (ISO 8601, UTC unless an offset is given) sent with
-  the upload; without one it is rejected rather than placed in 1970. Points at
+  records, or to the GPS Sync tab's optional **Flight start (UTC)** field (sent as
+  `start_time`, ISO 8601, UTC unless an offset is given); without one the upload is
+  rejected, with the reason shown at that field, rather than placed in 1970. Points at
   (0, 0), the receiver's no-fix placeholder, never feed matching, and applying a
   sync recomputes the footprint of every frame it repositions.
 - **Battery/flight records:** per-session operator field records
