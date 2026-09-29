@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import csv
+import io
 import json
 import zipfile
 from collections.abc import Iterable
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
+from backend.core.csv_safe import csv_safe
 from backend.core.paths import confine_path
 from backend.db.models import Image
 from backend.services.georeferencing_workflows import render_gcp_list
@@ -18,14 +21,54 @@ class WebodmPackageOptions:
     include_gcp: bool = False
 
 
-def odm_georeferencing_csv(images: Iterable[Image]) -> str:
-    rows = ["filename,latitude,longitude,altitude"]
+def package_image_names(images: Iterable[Image]) -> list[tuple[Image, str]]:
+    """Pair each image with the one name it goes by in a WebODM package (#942).
+
+    That name is both the image's ``odm_georeferencing.csv`` row and, under
+    ``images/``, its zip member, so the two cannot drift apart. It is the stored
+    filename, which ingest keeps unique when two folders ship the same camera name
+    (the source path's basename does not), cut to a bare name so it can never become
+    a path inside the zip. Names still shared — merged sessions, or a case-only
+    difference that collides on extraction — get a ``__N`` suffix.
+    """
+    named: list[tuple[Image, str]] = []
+    taken: set[str] = set()
     for img in images:
-        lat = "" if img.latitude is None else img.latitude
-        lon = "" if img.longitude is None else img.longitude
-        alt = "" if img.altitude_m is None else img.altitude_m
-        rows.append(f"{img.filename},{lat},{lon},{alt}")
-    return "\n".join(rows) + "\n"
+        # PureWindowsPath strips "/", "\" and drive letters on any host OS.
+        name = PureWindowsPath(img.filename or "").name
+        if name in {"", ".."}:
+            continue
+        stem, suffix = PurePosixPath(name).stem, PurePosixPath(name).suffix
+        n = 1
+        while name.casefold() in taken:
+            n += 1
+            name = f"{stem}__{n}{suffix}"
+        taken.add(name.casefold())
+        named.append((img, name))
+    return named
+
+
+def _number_cell(value: object) -> object:
+    # Coordinates stay numeric, so a negative longitude gains no quote; anything else
+    # is text and gets the formula guard. csv_safe(None) is "", and 0.0 stays 0.0.
+    return value if isinstance(value, int | float) else csv_safe(value)
+
+
+def odm_georeferencing_csv(named_images: Iterable[tuple[Image, str]]) -> str:
+    """Render ``odm_georeferencing.csv`` from ``package_image_names`` pairs."""
+    output = io.StringIO(newline="")
+    writer = csv.writer(output, lineterminator="\n")
+    writer.writerow(["filename", "latitude", "longitude", "altitude"])
+    for img, name in named_images:
+        writer.writerow(
+            [
+                csv_safe(name),
+                _number_cell(img.latitude),
+                _number_cell(img.longitude),
+                _number_cell(img.altitude_m),
+            ]
+        )
+    return output.getvalue()
 
 
 def odm_options_for(mode: str, *, has_gcp: bool) -> list[str]:
@@ -49,18 +92,21 @@ def build_webodm_package(
     except ValueError as exc:
         raise ValueError("Package path must be inside exports directory") from exc
     zip_path.parent.mkdir(parents=True, exist_ok=True)
+    packaged = images
+    if options.include_images:
+        # List only images the zip will carry, so every CSV row has its member.
+        packaged = [img for img in images if Path(img.filepath).is_file()]
+    named = package_image_names(packaged)
     contents = []
     copied = 0
     with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-        zf.writestr("odm_georeferencing.csv", odm_georeferencing_csv(images))
+        zf.writestr("odm_georeferencing.csv", odm_georeferencing_csv(named))
         contents.append("odm_georeferencing.csv")
         if options.include_images:
-            for img in images:
-                src = Path(img.filepath)
-                if src.is_file():
-                    zf.write(src, f"images/{src.name}")
-                    contents.append(f"images/{src.name}")
-                    copied += 1
+            for img, name in named:
+                zf.write(img.filepath, f"images/{name}")
+                contents.append(f"images/{name}")
+                copied += 1
         # No surveyed GCPs are persisted anywhere yet, so include_gcp can only
         # ship a header-only template for the operator to fill in — and the
         # manifest must not tell them to pass --gcp for it (#629).
