@@ -1,6 +1,6 @@
 # M2 · v3.2 — Audit: Test Strategy & CI Split
 
-**Priority band:** P1 · **Epic:** _issue pending_ · **Work items:** 8 · **Findings:** 7
+**Priority band:** P1 · **Epic:** [#938](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/938) · **Work items:** 8 · **Findings:** 7
 
 ## Goal
 
@@ -17,19 +17,19 @@ Make every level of testing explicit (unit, integration, contract, component, en
 
 | Key | Title | Priority | Issue |
 |---|---|---|---|
-| [M2-01](#m2-01) | ci: path-filtered PR lanes by coverage area; full matrix on main, nightly and release | P1 | _issue pending_ |
-| [M2-02](#m2-02) | test: pytest markers and layout by level and coverage area | P1 | _issue pending_ |
-| [M2-03](#m2-03) | test: coverage reporting and per-area thresholds (pytest-cov, Vitest v8) | P1 | _issue pending_ |
-| [M2-04](#m2-04) | test: API contract suite (frontend URLs, OpenAPI types, CSV/export schemas) | P1 | _issue pending_ |
-| [M2-05](#m2-05) | test: Playwright end-to-end smoke suite against the Docker image | P1 | _issue pending_ |
-| [M2-06](#m2-06) | test: frontend component tests for untested units, Vitest projects by level | P1 | _issue pending_ |
-| [M2-07](#m2-07) | test: migration upgrade-path and schema-drift suite | P2 | _issue pending_ |
-| [M2-08](#m2-08) | test: fix flaky and assertion-free tests | P2 | _issue pending_ |
+| [M2-01](#m2-01) | ci: path-filtered PR lanes by coverage area; full matrix on main, nightly and release | P1 | [#957](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/957) |
+| [M2-02](#m2-02) | test: pytest markers and layout by level and coverage area | P1 | [#958](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/958) |
+| [M2-03](#m2-03) | test: coverage reporting and per-area thresholds (pytest-cov, Vitest v8) | P1 | [#959](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/959) |
+| [M2-04](#m2-04) | test: API contract suite (frontend URLs, OpenAPI types, CSV/export schemas) | P1 | [#960](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/960) |
+| [M2-05](#m2-05) | test: Playwright end-to-end smoke suite against the Docker image | P1 | [#961](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/961) |
+| [M2-06](#m2-06) | test: frontend component tests for untested units, Vitest projects by level | P1 | [#962](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/962) |
+| [M2-07](#m2-07) | test: migration upgrade-path and schema-drift suite | P2 | [#963](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/963) |
+| [M2-08](#m2-08) | test: fix flaky and assertion-free tests | P2 | [#964](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/964) |
 
 <a id="m2-01"></a>
 ### M2-01 · ci: path-filtered PR lanes by coverage area; full matrix on main, nightly and release
 
-**Priority:** P1 · **Coverage area:** `packaging-release` · **Labels:** `automated testing`, `github_actions`, `priority: high` · **Issue:** _issue pending_
+**Priority:** P1 · **Coverage area:** `packaging-release` · **Labels:** `automated testing`, `github_actions`, `priority: high` · **Issue:** [#957](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/957)
 
 Every PR runs Python 3.11+3.12, frontend, Docker, wheel, Windows packaging and macOS (brew + third full pytest). Split lanes by area so PRs run only what they touch.
 
@@ -64,7 +64,7 @@ Every PR runs Python 3.11+3.12, frontend, Docker, wheel, Windows packaging and m
 <a id="m2-02"></a>
 ### M2-02 · test: pytest markers and layout by level and coverage area
 
-**Priority:** P1 · **Coverage area:** `platform-ops` · **Labels:** `automated testing`, `python`, `priority: high` · **Issue:** _issue pending_
+**Priority:** P1 · **Coverage area:** `platform-ops` · **Labels:** `automated testing`, `python`, `priority: high` · **Issue:** [#958](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/958)
 
 Tests are not marked by level or area, so CI cannot select them. Add markers now (auto-applied in conftest) and migrate the directory layout incrementally.
 
@@ -89,7 +89,7 @@ Tests are not marked by level or area, so CI cannot select them. Add markers now
 <a id="m2-03"></a>
 ### M2-03 · test: coverage reporting and per-area thresholds (pytest-cov, Vitest v8)
 
-**Priority:** P1 · **Coverage area:** `platform-ops` · **Labels:** `automated testing`, `priority: high` · **Issue:** _issue pending_
+**Priority:** P1 · **Coverage area:** `platform-ops` · **Labels:** `automated testing`, `priority: high` · **Issue:** [#959](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/959)
 
 No coverage is measured. Baseline measured in this audit: Python 84.1% lines overall (area range 78.9–94.4%); frontend 49.6% lines / 41.3% branches of files loaded by tests, with 59 of 126 units never loaded.
 
@@ -119,7 +119,7 @@ No coverage is measured. Baseline measured in this audit: Python 84.1% lines ove
 <a id="m2-04"></a>
 ### M2-04 · test: API contract suite (frontend URLs, OpenAPI types, CSV/export schemas)
 
-**Priority:** P1 · **Coverage area:** `export-share` · **Labels:** `automated testing`, `priority: high` · **Issue:** _issue pending_
+**Priority:** P1 · **Coverage area:** `export-share` · **Labels:** `automated testing`, `priority: high` · **Issue:** [#960](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/960)
 
 This audit found the survey-report 405 by matching 122 frontend API calls against the FastAPI routes; make that a permanent contract test and stop hand-maintaining 658 lines of `types/api.ts`.
 
@@ -143,7 +143,7 @@ This audit found the survey-report 405 by matching 122 frontend API calls agains
 <a id="m2-05"></a>
 ### M2-05 · test: Playwright end-to-end smoke suite against the Docker image
 
-**Priority:** P1 · **Coverage area:** `packaging-release` · **Labels:** `automated testing`, `frontend`, `priority: high` · **Issue:** _issue pending_
+**Priority:** P1 · **Coverage area:** `packaging-release` · **Labels:** `automated testing`, `frontend`, `priority: high` · **Issue:** [#961](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/961)
 
 Nothing runs the built SPA against the real API. Add a small E2E suite with external tools mocked by shims (per ARCHITECTURE.md).
 
@@ -174,7 +174,7 @@ Nothing runs the built SPA against the real API. Add a small E2E suite with exte
 <a id="m2-06"></a>
 ### M2-06 · test: frontend component tests for untested units, Vitest projects by level
 
-**Priority:** P1 · **Coverage area:** `frontend` · **Labels:** `automated testing`, `frontend`, `priority: medium` · **Issue:** _issue pending_
+**Priority:** P1 · **Coverage area:** `frontend` · **Labels:** `automated testing`, `frontend`, `priority: medium` · **Issue:** [#962](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/962)
 
 59 of 126 frontend units have no test that imports them (largest: ExportTab 913 lines, ImportModal 662, CompareTab 413, ShareViewer 312). 14 of 18 RTL files use fireEvent; user-event is not installed.
 
@@ -205,7 +205,7 @@ Nothing runs the built SPA against the real API. Add a small E2E suite with exte
 <a id="m2-07"></a>
 ### M2-07 · test: migration upgrade-path and schema-drift suite
 
-**Priority:** P2 · **Coverage area:** `db-migrations` · **Labels:** `automated testing`, `backend`, `priority: medium` · **Issue:** _issue pending_
+**Priority:** P2 · **Coverage area:** `db-migrations` · **Labels:** `automated testing`, `backend`, `priority: medium` · **Issue:** [#963](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/963)
 
 tests/backend/test_database.py already upgrades an immutable v2.0.2 snapshot and checks columns and FK indexes. It does not cover pre-projects (v1.x) databases, which is where 0005 fails, or compare FK options, types and constraints, so fresh and upgraded schemas can still drift.
 
@@ -227,7 +227,7 @@ tests/backend/test_database.py already upgrades an immutable v2.0.2 snapshot and
 <a id="m2-08"></a>
 ### M2-08 · test: fix flaky and assertion-free tests
 
-**Priority:** P2 · **Coverage area:** `platform-ops` · **Labels:** `automated testing`, `python`, `priority: medium` · **Issue:** _issue pending_
+**Priority:** P2 · **Coverage area:** `platform-ops` · **Labels:** `automated testing`, `python`, `priority: medium` · **Issue:** [#964](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/964)
 
 test_job_queue sleeps 1 s for a worker thread and accepts 'failed' or 'completed'; five tests have no assertion.
 

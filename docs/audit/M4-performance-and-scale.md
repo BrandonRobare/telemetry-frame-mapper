@@ -1,6 +1,6 @@
 # M4 · v3.3 — Audit: Performance & Scale
 
-**Priority band:** P2/P3 · **Epic:** _issue pending_ · **Work items:** 3 · **Findings:** 13
+**Priority band:** P2/P3 · **Epic:** [#940](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/940) · **Work items:** 3 · **Findings:** 13
 
 ## Goal
 
@@ -15,14 +15,14 @@ Remove N+1 queries and quadratic hot paths that grow with session, project or sp
 
 | Key | Title | Priority | Issue |
 |---|---|---|---|
-| [M4-01](#m4-01) | perf(db): remove N+1 queries in projects, duplicate detection and GeoPackage export | P2 | _issue pending_ |
-| [M4-02](#m4-02) | perf(backend): quadratic and blocking hot paths | P2 | _issue pending_ |
-| [M4-03](#m4-03) | perf(geotag, viewer): bisect telemetry interpolation; instanced gap meshes | P3 | _issue pending_ |
+| [M4-01](#m4-01) | perf(db): remove N+1 queries in projects, duplicate detection and GeoPackage export | P2 | [#974](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/974) |
+| [M4-02](#m4-02) | perf(backend): quadratic and blocking hot paths | P2 | [#975](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/975) |
+| [M4-03](#m4-03) | perf(geotag, viewer): bisect telemetry interpolation; instanced gap meshes | P3 | [#976](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/976) |
 
 <a id="m4-01"></a>
 ### M4-01 · perf(db): remove N+1 queries in projects, duplicate detection and GeoPackage export
 
-**Priority:** P2 · **Coverage area:** `platform-ops` · **Labels:** `enhancement`, `backend`, `performance`, `priority: medium` · **Issue:** _issue pending_
+**Priority:** P2 · **Coverage area:** `platform-ops` · **Labels:** `enhancement`, `backend`, `performance`, `priority: medium` · **Issue:** [#974](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/974)
 
 list_projects runs one COUNT per project, duplicate detection one query per session, GeoPackage export one query per flight log.
 
@@ -52,7 +52,7 @@ list_projects runs one COUNT per project, duplicate detection one query per sess
 <a id="m4-02"></a>
 ### M4-02 · perf(backend): quadratic and blocking hot paths
 
-**Priority:** P2 · **Coverage area:** `reconstruction-splat` · **Labels:** `enhancement`, `backend`, `performance`, `priority: medium` · **Issue:** _issue pending_
+**Priority:** P2 · **Coverage area:** `reconstruction-splat` · **Labels:** `enhancement`, `backend`, `performance`, `priority: medium` · **Issue:** [#975](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/975)
 
 Coverage overlap O(n²), voxel diff via Python sets, splat outlier filter O(N²) loops, cdist chunk exceeding VRAM, double image decode, ORB matching per GET, three subprocesses per 3 s /system poll, blocking I/O in an async upload handler.
 
@@ -87,7 +87,7 @@ Coverage overlap O(n²), voxel diff via Python sets, splat outlier filter O(N²)
 <a id="m4-03"></a>
 ### M4-03 · perf(geotag, viewer): bisect telemetry interpolation; instanced gap meshes
 
-**Priority:** P3 · **Coverage area:** `geotag-cli` · **Labels:** `enhancement`, `performance`, `priority: low` · **Issue:** _issue pending_
+**Priority:** P3 · **Coverage area:** `geotag-cli` · **Labels:** `enhancement`, `performance`, `priority: low` · **Issue:** [#976](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/976)
 
 interpolate() scans every point twice per frame; coverage gaps render one mesh per voxel.
 

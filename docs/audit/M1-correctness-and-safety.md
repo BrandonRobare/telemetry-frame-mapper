@@ -1,6 +1,6 @@
 # M1 · v3.0.1 — Audit: Correctness & Safety Fixes
 
-**Priority band:** P0/P1 · **Epic:** _issue pending_ · **Work items:** 15 · **Findings:** 51
+**Priority band:** P0/P1 · **Epic:** [#937](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/937) · **Work items:** 15 · **Findings:** 51
 
 ## Goal
 
@@ -16,26 +16,26 @@ Stop the defects that corrupt or lose user data, produce wrong survey or flight 
 
 | Key | Title | Priority | Issue |
 |---|---|---|---|
-| [M1-01](#m1-01) | fix(export): neutralize formula injection in the ODM georeferencing CSV | P0 | _issue pending_ |
-| [M1-02](#m1-02) | fix(ingest): stop importing unreadable images as healthy frames | P0 | _issue pending_ |
-| [M1-03](#m1-03) | fix(uploads): staging sweep and cancel must not delete importing or imported images | P0 | _issue pending_ |
-| [M1-04](#m1-04) | fix(db): deletes must not wipe artifacts before a foreign-key failure | P0 | _issue pending_ |
-| [M1-05](#m1-05) | fix(migrations): 0005 crashes on pre-projects databases; freeze the baseline | P0 | _issue pending_ |
-| [M1-06](#m1-06) | fix(flight-log): BOM, relative clocks and null-island fixes corrupt GPS sync | P0 | _issue pending_ |
-| [M1-07](#m1-07) | fix(geotag): anchor frame time to ffmpeg's start number, not the first surviving frame | P1 | _issue pending_ |
-| [M1-08](#m1-08) | fix(plan): mission lanes must cover the drawn polygon; validate plan inputs | P0 | _issue pending_ |
-| [M1-09](#m1-09) | fix(georef): products mix COLMAP, UTM and lon/lat coordinate frames | P1 | _issue pending_ |
-| [M1-10](#m1-10) | fix(reports): survey report crashes on empty sessions; surface-extraction errors pass silently | P1 | _issue pending_ |
-| [M1-11](#m1-11) | fix(export-ui): survey report 405, share-link double submit, missing revoke UI, WebODM zip download | P1 | _issue pending_ |
-| [M1-12](#m1-12) | fix(splat): profile and cut/fill volume sample a constant flat plane | P1 | _issue pending_ |
-| [M1-13](#m1-13) | fix(reconstruction): filename collisions, remote completions and job-queue status drift | P1 | _issue pending_ |
-| [M1-14](#m1-14) | fix(run): run.sh / run.bat start a frontend that cannot reach the backend (#803 regression) | P1 | _issue pending_ |
-| [M1-15](#m1-15) | fix(security): hardening sweep (secrets on disk and argv, unpinned npx, root container, error leakage) | P1 | _issue pending_ |
+| [M1-01](#m1-01) | fix(export): neutralize formula injection in the ODM georeferencing CSV | P0 | [#942](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/942) |
+| [M1-02](#m1-02) | fix(ingest): stop importing unreadable images as healthy frames | P0 | [#943](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/943) |
+| [M1-03](#m1-03) | fix(uploads): staging sweep and cancel must not delete importing or imported images | P0 | [#944](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/944) |
+| [M1-04](#m1-04) | fix(db): deletes must not wipe artifacts before a foreign-key failure | P0 | [#945](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/945) |
+| [M1-05](#m1-05) | fix(migrations): 0005 crashes on pre-projects databases; freeze the baseline | P0 | [#946](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/946) |
+| [M1-06](#m1-06) | fix(flight-log): BOM, relative clocks and null-island fixes corrupt GPS sync | P0 | [#947](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/947) |
+| [M1-07](#m1-07) | fix(geotag): anchor frame time to ffmpeg's start number, not the first surviving frame | P1 | [#948](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/948) |
+| [M1-08](#m1-08) | fix(plan): mission lanes must cover the drawn polygon; validate plan inputs | P0 | [#949](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/949) |
+| [M1-09](#m1-09) | fix(georef): products mix COLMAP, UTM and lon/lat coordinate frames | P1 | [#950](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/950) |
+| [M1-10](#m1-10) | fix(reports): survey report crashes on empty sessions; surface-extraction errors pass silently | P1 | [#951](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/951) |
+| [M1-11](#m1-11) | fix(export-ui): survey report 405, share-link double submit, missing revoke UI, WebODM zip download | P1 | [#952](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/952) |
+| [M1-12](#m1-12) | fix(splat): profile and cut/fill volume sample a constant flat plane | P1 | [#953](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/953) |
+| [M1-13](#m1-13) | fix(reconstruction): filename collisions, remote completions and job-queue status drift | P1 | [#954](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/954) |
+| [M1-14](#m1-14) | fix(run): run.sh / run.bat start a frontend that cannot reach the backend (#803 regression) | P1 | [#955](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/955) |
+| [M1-15](#m1-15) | fix(security): hardening sweep (secrets on disk and argv, unpinned npx, root container, error leakage) | P1 | [#956](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/956) |
 
 <a id="m1-01"></a>
 ### M1-01 · fix(export): neutralize formula injection in the ODM georeferencing CSV
 
-**Priority:** P0 · **Coverage area:** `export-share` · **Labels:** `bug`, `security`, `backend`, `priority: high` · **Issue:** _issue pending_
+**Priority:** P0 · **Coverage area:** `export-share` · **Labels:** `bug`, `security`, `backend`, `priority: high` · **Issue:** [#942](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/942)
 
 The WebODM/ODM georeferencing CSV is assembled by string concatenation from image filenames without the #863 `csv_safe` guard, and the package's CSV names do not match the zipped image names.
 
@@ -67,7 +67,7 @@ The WebODM/ODM georeferencing CSV is assembled by string concatenation from imag
 <a id="m1-02"></a>
 ### M1-02 · fix(ingest): stop importing unreadable images as healthy frames
 
-**Priority:** P0 · **Coverage area:** `ingest-import` · **Labels:** `bug`, `backend`, `priority: high` · **Issue:** _issue pending_
+**Priority:** P0 · **Coverage area:** `ingest-import` · **Labels:** `bug`, `backend`, `priority: high` · **Issue:** [#943](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/943)
 
 `extract_exif` swallows Image.open/piexif failures, so the orchestrator's skip path never runs; quality scoring and thumbnail failures are also swallowed, leaving corrupt files flagged 'good' with no log entry.
 
@@ -101,7 +101,7 @@ The WebODM/ODM georeferencing CSV is assembled by string concatenation from imag
 <a id="m1-03"></a>
 ### M1-03 · fix(uploads): staging sweep and cancel must not delete importing or imported images
 
-**Priority:** P0 · **Coverage area:** `ingest-import` · **Labels:** `bug`, `backend`, `priority: high` · **Issue:** _issue pending_
+**Priority:** P0 · **Coverage area:** `ingest-import` · **Labels:** `bug`, `backend`, `priority: high` · **Issue:** [#944](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/944)
 
 The 24 h staging sweep removes source images of sessions that were already imported from the staging directory, `/cancel` deletes an upload whose import is running, and the reservation cap counts finished imports.
 
@@ -135,7 +135,7 @@ The 24 h staging sweep removes source images of sessions that were already impor
 <a id="m1-04"></a>
 ### M1-04 · fix(db): deletes must not wipe artifacts before a foreign-key failure
 
-**Priority:** P0 · **Coverage area:** `db-migrations` · **Labels:** `bug`, `backend`, `priority: high` · **Issue:** _issue pending_
+**Priority:** P0 · **Coverage area:** `db-migrations` · **Labels:** `bug`, `backend`, `priority: high` · **Issue:** [#945](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/945)
 
 Deleting a session with auto-import records, or a reconstruction that is referenced by a comparison or a child re-run, deletes files first and then fails the DB commit on a foreign key (reproduced), leaving rows that point at missing artifacts.
 
@@ -169,7 +169,7 @@ Deleting a session with auto-import records, or a reconstruction that is referen
 <a id="m1-05"></a>
 ### M1-05 · fix(migrations): 0005 crashes on pre-projects databases; freeze the baseline
 
-**Priority:** P0 · **Coverage area:** `db-migrations` · **Labels:** `bug`, `backend`, `priority: high` · **Issue:** _issue pending_
+**Priority:** P0 · **Coverage area:** `db-migrations` · **Labels:** `bug`, `backend`, `priority: high` · **Issue:** [#946](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/946)
 
 Upgrading a pre-projects SQLite database raises NotImplementedError in 0005 (reproduced). The baseline builds tables from live models, so fresh and upgraded schemas can drift, and one revision has an autogenerated hash ID.
 
@@ -202,7 +202,7 @@ Upgrading a pre-projects SQLite database raises NotImplementedError in 0005 (rep
 <a id="m1-06"></a>
 ### M1-06 · fix(flight-log): BOM, relative clocks and null-island fixes corrupt GPS sync
 
-**Priority:** P0 · **Coverage area:** `flight-log-gps` · **Labels:** `bug`, `backend`, `priority: high` · **Issue:** _issue pending_
+**Priority:** P0 · **Coverage area:** `flight-log-gps` · **Labels:** `bug`, `backend`, `priority: high` · **Issue:** [#947](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/947)
 
 A UTF-8 BOM makes every DJI CSV timestamp parse as 0 (reproduced), relative millisecond clocks are stored as Unix epochs, (0, 0) points are used for interpolation, and GPS sync leaves footprints computed from the old positions.
 
@@ -238,7 +238,7 @@ A UTF-8 BOM makes every DJI CSV timestamp parse as 0 (reproduced), relative mill
 <a id="m1-07"></a>
 ### M1-07 · fix(geotag): anchor frame time to ffmpeg's start number, not the first surviving frame
 
-**Priority:** P1 · **Coverage area:** `geotag-cli` · **Labels:** `bug`, `python`, `priority: high` · **Issue:** _issue pending_
+**Priority:** P1 · **Coverage area:** `geotag-cli` · **Labels:** `bug`, `python`, `priority: high` · **Issue:** [#948](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/948)
 
 Deleting leading frames (e.g. the take-off) shifts every remaining frame's time and writes wrong GPS into EXIF; an 8 fps default is silently used when telemetry has no duration.
 
@@ -269,7 +269,7 @@ Deleting leading frames (e.g. the take-off) shifts every remaining frame's time 
 <a id="m1-08"></a>
 ### M1-08 · fix(plan): mission lanes must cover the drawn polygon; validate plan inputs
 
-**Priority:** P0 · **Coverage area:** `coverage-planning` · **Labels:** `bug`, `backend`, `priority: high` · **Issue:** _issue pending_
+**Priority:** P0 · **Coverage area:** `coverage-planning` · **Labels:** `bug`, `backend`, `priority: high` · **Issue:** [#949](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/949)
 
 Lawnmower lanes are generated over the polygon's bounding box, so the drone flies outside the drawn area; overlap has no lower bound; KML/GPX drop terrain-following altitudes; the gap re-fly plan covers only the first gap; mission settings accept unbounded geometry values.
 
@@ -306,7 +306,7 @@ Lawnmower lanes are generated over the polygon's bounding box, so the drone flie
 <a id="m1-09"></a>
 ### M1-09 · fix(georef): products mix COLMAP, UTM and lon/lat coordinate frames
 
-**Priority:** P1 · **Coverage area:** `reconstruction-splat` · **Labels:** `bug`, `backend`, `priority: high` · **Issue:** _issue pending_
+**Priority:** P1 · **Coverage area:** `reconstruction-splat` · **Labels:** `bug`, `backend`, `priority: high` · **Issue:** [#950](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/950)
 
 3D Tiles placement ignores the solved geo-transform, the splat target-area crop compares COLMAP coordinates to lon/lat, checkpoint validation compares points against surfaces in different frames, and change detection diffs non-georeferenced reconstructions (ARCHITECTURE.md:86 says NULL geo_transform means 'not georeferenced').
 
@@ -341,7 +341,7 @@ Lawnmower lanes are generated over the polygon's bounding box, so the drone flie
 <a id="m1-10"></a>
 ### M1-10 · fix(reports): survey report crashes on empty sessions; surface-extraction errors pass silently
 
-**Priority:** P1 · **Coverage area:** `export-share` · **Labels:** `bug`, `backend`, `priority: high` · **Issue:** _issue pending_
+**Priority:** P1 · **Coverage area:** `export-share` · **Labels:** `bug`, `backend`, `priority: high` · **Issue:** [#951](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/951)
 
 `/export/survey-report` returns 500 (KeyError 'gps_present') for any session with no images (reproduced), and GLB/LAS surface extraction failures return 'no points' so the quality report passes silently.
 
@@ -371,7 +371,7 @@ Lawnmower lanes are generated over the polygon's bounding box, so the drone flie
 <a id="m1-11"></a>
 ### M1-11 · fix(export-ui): survey report 405, share-link double submit, missing revoke UI, WebODM zip download
 
-**Priority:** P1 · **Coverage area:** `export-share` · **Labels:** `bug`, `frontend`, `priority: high` · **Issue:** _issue pending_
+**Priority:** P1 · **Coverage area:** `export-share` · **Labels:** `bug`, `frontend`, `priority: high` · **Issue:** [#952](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/952)
 
 Both survey-report controls GET a POST-only route (405, reproduced); 'Generate Share Link' can be double-submitted and there is no UI to list or revoke links; the WebODM CSV button never downloads; the share viewer keys off an error string.
 
@@ -408,7 +408,7 @@ Both survey-report controls GET a POST-only route (405, reproduced); 'Generate S
 <a id="m1-12"></a>
 ### M1-12 · fix(splat): profile and cut/fill volume sample a constant flat plane
 
-**Priority:** P1 · **Coverage area:** `reconstruction-splat` · **Labels:** `bug`, `frontend`, `priority: high` · **Issue:** _issue pending_
+**Priority:** P1 · **Coverage area:** `reconstruction-splat` · **Labels:** `bug`, `frontend`, `priority: high` · **Issue:** [#953](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/953)
 
 The profile and volume tools use `sampler = () => groundY` and clicks intersect a flat plane, yet VolumePanel reports m³/yd³ and exports CSV.
 
@@ -437,7 +437,7 @@ The profile and volume tools use `sampler = () => groundY` and clicks intersect 
 <a id="m1-13"></a>
 ### M1-13 · fix(reconstruction): filename collisions, remote completions and job-queue status drift
 
-**Priority:** P1 · **Coverage area:** `reconstruction-splat` · **Labels:** `bug`, `backend`, `priority: high` · **Issue:** _issue pending_
+**Priority:** P1 · **Coverage area:** `reconstruction-splat` · **Labels:** `bug`, `backend`, `priority: high` · **Issue:** [#954](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/954)
 
 Multi-session runs drop frames whose filenames collide, remote-worker completions record no artifact paths, failed runs are marked 'completed' in the job queue, the duplicate-run guard misses remote/cancelling states, and handlers that return early leave queue entries 'running'.
 
@@ -474,7 +474,7 @@ Multi-session runs drop frames whose filenames collide, remote-worker completion
 <a id="m1-14"></a>
 ### M1-14 · fix(run): run.sh / run.bat start a frontend that cannot reach the backend (#803 regression)
 
-**Priority:** P1 · **Coverage area:** `packaging-release` · **Labels:** `bug`, `priority: high`, `area:platform` · **Issue:** _issue pending_
+**Priority:** P1 · **Coverage area:** `packaging-release` · **Labels:** `bug`, `priority: high`, `area:platform` · **Issue:** [#955](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/955)
 
 The README launchers start `npm run dev` without VITE_API_URL and Vite has no proxy, so the app renders empty; #803 fixed only dev.sh/dev.bat.
 
@@ -501,7 +501,7 @@ The README launchers start `npm run dev` without VITE_API_URL and Vite has no pr
 <a id="m1-15"></a>
 ### M1-15 · fix(security): hardening sweep (secrets on disk and argv, unpinned npx, root container, error leakage)
 
-**Priority:** P1 · **Coverage area:** `platform-ops` · **Labels:** `bug`, `security`, `priority: medium` · **Issue:** _issue pending_
+**Priority:** P1 · **Coverage area:** `platform-ops` · **Labels:** `bug`, `security`, `priority: medium` · **Issue:** [#956](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/956)
 
 Share signing key is created world-readable then chmod-ed; splat-transform runs an unpinned npm package via npx; the DJI API key is passed in argv and its error check never matches; share bundles embed absolute server paths; the Cesium token is sent to an unvalidated URL; raw exception text is returned to clients; the container runs as root; base images are tag-pinned.
 

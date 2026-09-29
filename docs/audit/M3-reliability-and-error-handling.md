@@ -1,6 +1,6 @@
 # M3 · v3.2 — Audit: Reliability & Error Handling
 
-**Priority band:** P2 · **Epic:** _issue pending_ · **Work items:** 9 · **Findings:** 42
+**Priority band:** P2 · **Epic:** [#939](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/939) · **Work items:** 9 · **Findings:** 42
 
 ## Goal
 
@@ -16,20 +16,20 @@ Remove silent failure paths, make writes atomic and bounded, keep derived state 
 
 | Key | Title | Priority | Issue |
 |---|---|---|---|
-| [M3-01](#m3-01) | fix(errors): remove the remaining silent exception handlers | P2 | _issue pending_ |
-| [M3-02](#m3-02) | refactor(config): one validated, UTF-8 config loader | P2 | _issue pending_ |
-| [M3-03](#m3-03) | fix(jobs): route long-running work through the job queue with one status vocabulary | P2 | _issue pending_ |
-| [M3-04](#m3-04) | fix(io): atomic artifact writes, subprocess timeouts, no GET side effects | P2 | _issue pending_ |
-| [M3-05](#m3-05) | fix(data): keep derived session state consistent | P2 | _issue pending_ |
-| [M3-06](#m3-06) | fix(api): validate annotation and defect inputs; single transaction for defects | P2 | _issue pending_ |
-| [M3-07](#m3-07) | fix(frontend): UX safety and state-handling fixes | P2 | _issue pending_ |
-| [M3-08](#m3-08) | fix(cli): share one geotag flow between CLI and headless pipeline | P2 | _issue pending_ |
-| [M3-09](#m3-09) | chore(scripts): benchmark harness hygiene | P3 | _issue pending_ |
+| [M3-01](#m3-01) | fix(errors): remove the remaining silent exception handlers | P2 | [#965](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/965) |
+| [M3-02](#m3-02) | refactor(config): one validated, UTF-8 config loader | P2 | [#966](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/966) |
+| [M3-03](#m3-03) | fix(jobs): route long-running work through the job queue with one status vocabulary | P2 | [#967](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/967) |
+| [M3-04](#m3-04) | fix(io): atomic artifact writes, subprocess timeouts, no GET side effects | P2 | [#968](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/968) |
+| [M3-05](#m3-05) | fix(data): keep derived session state consistent | P2 | [#969](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/969) |
+| [M3-06](#m3-06) | fix(api): validate annotation and defect inputs; single transaction for defects | P2 | [#970](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/970) |
+| [M3-07](#m3-07) | fix(frontend): UX safety and state-handling fixes | P2 | [#971](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/971) |
+| [M3-08](#m3-08) | fix(cli): share one geotag flow between CLI and headless pipeline | P2 | [#972](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/972) |
+| [M3-09](#m3-09) | chore(scripts): benchmark harness hygiene | P3 | [#973](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/973) |
 
 <a id="m3-01"></a>
 ### M3-01 · fix(errors): remove the remaining silent exception handlers
 
-**Priority:** P2 · **Coverage area:** `platform-ops` · **Labels:** `bug`, `backend`, `priority: medium` · **Issue:** _issue pending_
+**Priority:** P2 · **Coverage area:** `platform-ops` · **Labels:** `bug`, `backend`, `priority: medium` · **Issue:** [#965](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/965)
 
 Storage breakdown blanks on any error, splat preview returns None for every failure, GLB georef embed failure is ignored, NVML errors are swallowed, scheduled backup failures are logged without cause.
 
@@ -62,7 +62,7 @@ Storage breakdown blanks on any error, splat preview returns None for every fail
 <a id="m3-02"></a>
 ### M3-02 · refactor(config): one validated, UTF-8 config loader
 
-**Priority:** P2 · **Coverage area:** `platform-ops` · **Labels:** `bug`, `backend`, `priority: medium` · **Issue:** _issue pending_
+**Priority:** P2 · **Coverage area:** `platform-ops` · **Labels:** `bug`, `backend`, `priority: medium` · **Issue:** [#966](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/966)
 
 config.yaml is re-read by 18 copy-pasted getters with locale encoding and no top-level or section type validation; settings writes UTF-8 but reads locale; relative paths resolve against CWD; processed_dir changes break the static mount; the DB ignores data_dir.
 
@@ -98,7 +98,7 @@ config.yaml is re-read by 18 copy-pasted getters with locale encoding and no top
 <a id="m3-03"></a>
 ### M3-03 · fix(jobs): route long-running work through the job queue with one status vocabulary
 
-**Priority:** P2 · **Coverage area:** `reconstruction-splat` · **Labels:** `bug`, `backend`, `priority: medium` · **Issue:** _issue pending_
+**Priority:** P2 · **Coverage area:** `reconstruction-splat` · **Labels:** `bug`, `backend`, `priority: medium` · **Issue:** [#967](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/967)
 
 Orthomosaic export bypasses the persistent job queue; 'live' statuses are defined four times; HTTP status is chosen by substring-matching exception text.
 
@@ -129,7 +129,7 @@ Orthomosaic export bypasses the persistent job queue; 'live' statuses are define
 <a id="m3-04"></a>
 ### M3-04 · fix(io): atomic artifact writes, subprocess timeouts, no GET side effects
 
-**Priority:** P2 · **Coverage area:** `export-share` · **Labels:** `bug`, `backend`, `priority: medium` · **Issue:** _issue pending_
+**Priority:** P2 · **Coverage area:** `export-share` · **Labels:** `bug`, `backend`, `priority: medium` · **Issue:** [#968](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/968)
 
 Session archive zips are written in place; GeoPackage uses a fixed temp name; rclone has no timeout; WebODM upload opens every image at once; GET /plans/{id}/segments writes files.
 
@@ -164,7 +164,7 @@ Session archive zips are written in place; GeoPackage uses a fixed temp name; rc
 <a id="m3-05"></a>
 ### M3-05 · fix(data): keep derived session state consistent
 
-**Priority:** P2 · **Coverage area:** `ingest-import` · **Labels:** `bug`, `backend`, `priority: medium` · **Issue:** _issue pending_
+**Priority:** P2 · **Coverage area:** `ingest-import` · **Labels:** `bug`, `backend`, `priority: medium` · **Issue:** [#969](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/969)
 
 Review edits leave usable_count stale and flags are free text; archiving raw frames leaves stale paths; the 'COLMAP intermediates' storage rule scans a directory nothing writes; auto-import sessions reference removable media; EXIF local time is stored as UTC; interrupted imports leave photo_count 0.
 
@@ -199,7 +199,7 @@ Review edits leave usable_count stale and flags are free text; archiving raw fra
 <a id="m3-06"></a>
 ### M3-06 · fix(api): validate annotation and defect inputs; single transaction for defects
 
-**Priority:** P2 · **Coverage area:** `reconstruction-splat` · **Labels:** `bug`, `backend`, `priority: medium` · **Issue:** _issue pending_
+**Priority:** P2 · **Coverage area:** `reconstruction-splat` · **Labels:** `bug`, `backend`, `priority: medium` · **Issue:** [#970](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/970)
 
 Annotation lat/lon/alt/color are unvalidated; a defect and its image links are committed in two transactions.
 
@@ -228,7 +228,7 @@ Annotation lat/lon/alt/color are unvalidated; a defect and its image links are c
 <a id="m3-07"></a>
 ### M3-07 · fix(frontend): UX safety and state-handling fixes
 
-**Priority:** P2 · **Coverage area:** `frontend` · **Labels:** `bug`, `frontend`, `priority: medium` · **Issue:** _issue pending_
+**Priority:** P2 · **Coverage area:** `frontend` · **Labels:** `bug`, `frontend`, `priority: medium` · **Issue:** [#971](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/971)
 
 Reconstruction cancel has no confirmation; state setters run inside an updater; exhaustive-deps suppressed without reasons; object URLs revoked synchronously; cancelled measurement overlays are never disposed.
 
@@ -260,7 +260,7 @@ Reconstruction cancel has no confirmation; state setters run inside an updater; 
 <a id="m3-08"></a>
 ### M3-08 · fix(cli): share one geotag flow between CLI and headless pipeline
 
-**Priority:** P2 · **Coverage area:** `geotag-cli` · **Labels:** `bug`, `python`, `priority: medium` · **Issue:** _issue pending_
+**Priority:** P2 · **Coverage area:** `geotag-cli` · **Labels:** `bug`, `python`, `priority: medium` · **Issue:** [#972](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/972)
 
 The pipeline geotag step copies cli.run and skips the video-duration cross-check and GPS-lock warnings; --log-dir only creates an empty directory; ingest validation counts an empty GPS IFD as valid.
 
@@ -289,7 +289,7 @@ The pipeline geotag step copies cli.run and skips the video-duration cross-check
 <a id="m3-09"></a>
 ### M3-09 · chore(scripts): benchmark harness hygiene
 
-**Priority:** P3 · **Coverage area:** `reconstruction-splat` · **Labels:** `chore`, `python`, `priority: low` · **Issue:** _issue pending_
+**Priority:** P3 · **Coverage area:** `reconstruction-splat` · **Labels:** `chore`, `python`, `priority: low` · **Issue:** [#973](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/973)
 
 Hashing/RSS helpers are copied across three scripts and have drifted; the parity harness imports resource at top level, leaks temp dirs, and depends on private backend helpers; per-candidate RSS is the process peak.
 

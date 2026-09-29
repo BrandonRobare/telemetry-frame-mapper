@@ -1,6 +1,6 @@
 # M5 · v3.3 — Audit: Maintainability & Type Safety
 
-**Priority band:** P3 · **Epic:** _issue pending_ · **Work items:** 7 · **Findings:** 48
+**Priority band:** P3 · **Epic:** [#941](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/941) · **Work items:** 7 · **Findings:** 48
 
 ## Goal
 
@@ -16,18 +16,18 @@ Break up the oversized modules, remove copy-paste, and turn on the stricter comp
 
 | Key | Title | Priority | Issue |
 |---|---|---|---|
-| [M5-01](#m5-01) | refactor(reconstruction): split reconstruction.py and its router | P3 | _issue pending_ |
-| [M5-02](#m5-02) | refactor(backend): deduplicate geo helpers and remove dead code | P3 | _issue pending_ |
-| [M5-03](#m5-03) | refactor: reduce cyclomatic complexity >= 15 and enable ruff C901 | P3 | _issue pending_ |
-| [M5-04](#m5-04) | refactor(geotag): shared ffmpeg probe and csv_safe | P3 | _issue pending_ |
-| [M5-05](#m5-05) | refactor(splat-viewer): split SplatViewerTab, type the viewer, use colour tokens | P3 | _issue pending_ |
-| [M5-06](#m5-06) | refactor(frontend): shared helpers for job status, downloads, uploads and export cards | P3 | _issue pending_ |
-| [M5-07](#m5-07) | chore(ts): enable strict and noUncheckedIndexedAccess | P3 | _issue pending_ |
+| [M5-01](#m5-01) | refactor(reconstruction): split reconstruction.py and its router | P3 | [#977](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/977) |
+| [M5-02](#m5-02) | refactor(backend): deduplicate geo helpers and remove dead code | P3 | [#978](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/978) |
+| [M5-03](#m5-03) | refactor: reduce cyclomatic complexity >= 15 and enable ruff C901 | P3 | [#979](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/979) |
+| [M5-04](#m5-04) | refactor(geotag): shared ffmpeg probe and csv_safe | P3 | [#980](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/980) |
+| [M5-05](#m5-05) | refactor(splat-viewer): split SplatViewerTab, type the viewer, use colour tokens | P3 | [#981](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/981) |
+| [M5-06](#m5-06) | refactor(frontend): shared helpers for job status, downloads, uploads and export cards | P3 | [#982](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/982) |
+| [M5-07](#m5-07) | chore(ts): enable strict and noUncheckedIndexedAccess | P3 | [#983](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/983) |
 
 <a id="m5-01"></a>
 ### M5-01 · refactor(reconstruction): split reconstruction.py and its router
 
-**Priority:** P3 · **Coverage area:** `reconstruction-splat` · **Labels:** `chore`, `backend`, `priority: low` · **Issue:** _issue pending_
+**Priority:** P3 · **Coverage area:** `reconstruction-splat` · **Labels:** `chore`, `backend`, `priority: low` · **Issue:** [#977](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/977)
 
 2,683-line service and ~40-endpoint router; 'get or 404' copy-pasted ~30 times; three PLY parsers besides ply_io; test-only wrappers in production; diagnostics suggest rejected matcher values; locale-encoded TXT reads; stale ply_io comment.
 
@@ -63,7 +63,7 @@ Break up the oversized modules, remove copy-paste, and turn on the stricter comp
 <a id="m5-02"></a>
 ### M5-02 · refactor(backend): deduplicate geo helpers and remove dead code
 
-**Priority:** P3 · **Coverage area:** `reconstruction-splat` · **Labels:** `chore`, `backend`, `priority: low` · **Issue:** _issue pending_
+**Priority:** P3 · **Coverage area:** `reconstruction-splat` · **Labels:** `chore`, `backend`, `priority: low` · **Issue:** [#978](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/978)
 
 UTM zone derivation and geo-transform loading duplicated; dead parse_gcp_csv; `src.` import path; identical branches; stale comments/hints/docs; hand-rolled HTML escape.
 
@@ -100,7 +100,7 @@ UTM zone derivation and geo-transform loading duplicated; dead parse_gcp_csv; `s
 <a id="m5-03"></a>
 ### M5-03 · refactor: reduce cyclomatic complexity >= 15 and enable ruff C901
 
-**Priority:** P3 · **Coverage area:** `platform-ops` · **Labels:** `chore`, `python`, `priority: low` · **Issue:** _issue pending_
+**Priority:** P3 · **Coverage area:** `platform-ops` · **Labels:** `chore`, `python`, `priority: low` · **Issue:** [#979](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/979)
 
 15 functions exceed complexity 15 (max 32 in _restore_session_archive).
 
@@ -141,7 +141,7 @@ UTM zone derivation and geo-transform loading duplicated; dead parse_gcp_csv; `s
 <a id="m5-04"></a>
 ### M5-04 · refactor(geotag): shared ffmpeg probe and csv_safe
 
-**Priority:** P3 · **Coverage area:** `geotag-cli` · **Labels:** `chore`, `python`, `priority: low` · **Issue:** _issue pending_
+**Priority:** P3 · **Coverage area:** `geotag-cli` · **Labels:** `chore`, `python`, `priority: low` · **Issue:** [#980](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/980)
 
 ffmpeg invocation copied three times (video probed twice); csv_safe duplicated from backend.
 
@@ -169,7 +169,7 @@ ffmpeg invocation copied three times (video probed twice); csv_safe duplicated f
 <a id="m5-05"></a>
 ### M5-05 · refactor(splat-viewer): split SplatViewerTab, type the viewer, use colour tokens
 
-**Priority:** P3 · **Coverage area:** `frontend` · **Labels:** `chore`, `frontend`, `priority: low` · **Issue:** _issue pending_
+**Priority:** P3 · **Coverage area:** `frontend` · **Labels:** `chore`, `frontend`, `priority: low` · **Issue:** [#981](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/981)
 
 2,204-line module; 20+ `any` for the viewer and Three.js groups; 35 hard-coded colours.
 
@@ -198,7 +198,7 @@ ffmpeg invocation copied three times (video probed twice); csv_safe duplicated f
 <a id="m5-06"></a>
 ### M5-06 · refactor(frontend): shared helpers for job status, downloads, uploads and export cards
 
-**Priority:** P3 · **Coverage area:** `frontend` · **Labels:** `chore`, `frontend`, `priority: low` · **Issue:** _issue pending_
+**Priority:** P3 · **Coverage area:** `frontend` · **Labels:** `chore`, `frontend`, `priority: low` · **Issue:** [#982](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/982)
 
 Export cards, reconstruct form controls, job-status maps, blob download, multipart upload and error parsing are copied across components; nested ternaries in JSX.
 
@@ -232,7 +232,7 @@ Export cards, reconstruct form controls, job-status maps, blob download, multipa
 <a id="m5-07"></a>
 ### M5-07 · chore(ts): enable strict and noUncheckedIndexedAccess
 
-**Priority:** P3 · **Coverage area:** `frontend` · **Labels:** `chore`, `frontend`, `priority: low` · **Issue:** _issue pending_
+**Priority:** P3 · **Coverage area:** `frontend` · **Labels:** `chore`, `frontend`, `priority: low` · **Issue:** [#983](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/983)
 
 `strict` is off (code already passes it with 0 errors); noUncheckedIndexedAccess reports 128 errors (85 non-test).
 

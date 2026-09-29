@@ -208,168 +208,168 @@ Start each area at its measured baseline (rounded down) so today's code passes, 
 
 | Level | Work item | File | Test |
 |---|---|---|---|
-| unit | [M1-08](M1-correctness-and-safety.md#m1-08) _pending_ | `tests/backend/test_mission_planner.py` | For an L-shaped polygon every waypoint lies inside the polygon buffered by one lane spacing. |
-| integration | [M1-08](M1-correctness-and-safety.md#m1-08) _pending_ | `tests/backend/test_plans_router.py` | Negative or >=1 overlap returns 422. |
-| unit | [M1-08](M1-correctness-and-safety.md#m1-08) _pending_ | `tests/backend/test_mission_planner_ext.py` | Exported KML/GPX altitudes equal the terrain-following altitudes; a two-gap coverage result yields lanes over both gaps. |
-| integration | [M3-04](M3-reliability-and-error-handling.md#m3-04) _pending_ | `tests/backend/test_plans_router.py` | GET /segments creates no files in exports_dir. |
-| perf | [M4-02](M4-performance-and-scale.md#m4-02) _pending_ | `tests/perf/test_coverage_scaling.py (new)` | Overlap for 2k footprints completes under a budget and scales < n^1.3 (nightly). |
+| unit | [M1-08](M1-correctness-and-safety.md#m1-08) [#949](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/949) | `tests/backend/test_mission_planner.py` | For an L-shaped polygon every waypoint lies inside the polygon buffered by one lane spacing. |
+| integration | [M1-08](M1-correctness-and-safety.md#m1-08) [#949](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/949) | `tests/backend/test_plans_router.py` | Negative or >=1 overlap returns 422. |
+| unit | [M1-08](M1-correctness-and-safety.md#m1-08) [#949](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/949) | `tests/backend/test_mission_planner_ext.py` | Exported KML/GPX altitudes equal the terrain-following altitudes; a two-gap coverage result yields lanes over both gaps. |
+| integration | [M3-04](M3-reliability-and-error-handling.md#m3-04) [#968](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/968) | `tests/backend/test_plans_router.py` | GET /segments creates no files in exports_dir. |
+| perf | [M4-02](M4-performance-and-scale.md#m4-02) [#975](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/975) | `tests/perf/test_coverage_scaling.py (new)` | Overlap for 2k footprints completes under a budget and scales < n^1.3 (nightly). |
 
 ### `db-migrations`
 
 | Level | Work item | File | Test |
 |---|---|---|---|
-| integration | [M1-04](M1-correctness-and-safety.md#m1-04) _pending_ | `tests/backend/test_sessions_router.py` | Deleting an auto-imported session succeeds and removes its AutoImportRecord. |
-| integration | [M1-04](M1-correctness-and-safety.md#m1-04) _pending_ | `tests/backend/test_database.py` | The new ondelete migration upgrades a v3.0.0 DB containing auto-import rows and a comparison without data loss. |
-| contract | [M1-05](M1-correctness-and-safety.md#m1-05) _pending_ | `tests/backend/test_database.py` | Extend `test_legacy_upgrade_covers_every_model_column` with a pre-projects v1.x snapshot (reproduces the 0005 NotImplementedError today) and assert `compare_metadata(Base.metadata)` is empty after upgrade. |
-| contract | [M1-05](M1-correctness-and-safety.md#m1-05) _pending_ | `tests/backend/test_database.py` | `downgrade` to 0004 then `upgrade head` round-trips on a populated DB (0005 downgrade path). |
-| contract | [M2-07](M2-test-strategy-and-ci.md#m2-07) _pending_ | `tests/backend/test_database.py` | Each release snapshot (v1.x, v2.0.2, v3.0.0) upgrades to head with zero compare_metadata diffs and preserved row counts. |
+| integration | [M1-04](M1-correctness-and-safety.md#m1-04) [#945](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/945) | `tests/backend/test_sessions_router.py` | Deleting an auto-imported session succeeds and removes its AutoImportRecord. |
+| integration | [M1-04](M1-correctness-and-safety.md#m1-04) [#945](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/945) | `tests/backend/test_database.py` | The new ondelete migration upgrades a v3.0.0 DB containing auto-import rows and a comparison without data loss. |
+| contract | [M1-05](M1-correctness-and-safety.md#m1-05) [#946](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/946) | `tests/backend/test_database.py` | Extend `test_legacy_upgrade_covers_every_model_column` with a pre-projects v1.x snapshot (reproduces the 0005 NotImplementedError today) and assert `compare_metadata(Base.metadata)` is empty after upgrade. |
+| contract | [M1-05](M1-correctness-and-safety.md#m1-05) [#946](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/946) | `tests/backend/test_database.py` | `downgrade` to 0004 then `upgrade head` round-trips on a populated DB (0005 downgrade path). |
+| contract | [M2-07](M2-test-strategy-and-ci.md#m2-07) [#963](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/963) | `tests/backend/test_database.py` | Each release snapshot (v1.x, v2.0.2, v3.0.0) upgrades to head with zero compare_metadata diffs and preserved row counts. |
 
 ### `export-share`
 
 | Level | Work item | File | Test |
 |---|---|---|---|
-| integration | [M1-01](M1-correctness-and-safety.md#m1-01) _pending_ | `tests/backend/test_webodm_package_export.py` | An image named `=HYPERLINK(...).jpg` produces a quoted, `'`-prefixed cell in odm_georeferencing.csv. |
-| unit | [M1-01](M1-correctness-and-safety.md#m1-01) _pending_ | `tests/backend/test_webodm_package_export.py` | Every filename listed in the CSV exists as a member of the produced zip. |
-| contract | [M1-01](M1-correctness-and-safety.md#m1-01) _pending_ | `tests/backend/test_csv_safe.py` | Extend the writer inventory test so any new CSV writer in backend/ must import csv_safe (grep-based contract). |
-| integration | [M1-10](M1-correctness-and-safety.md#m1-10) _pending_ | `tests/backend/test_survey_report.py` | POST /export/survey-report for an empty session returns 200 in json and html formats. |
-| unit | [M1-10](M1-correctness-and-safety.md#m1-10) _pending_ | `tests/backend/test_quality_report.py` | A corrupt GLB produces a failed surface check with the parser error, not an empty pass. |
-| contract | [M1-11](M1-correctness-and-safety.md#m1-11) _pending_ | `tests/contract/test_frontend_api_contract.py (new)` | Every URL + method built in frontend/src resolves to a FastAPI route (would have caught the 405). |
-| e2e | [M1-11](M1-correctness-and-safety.md#m1-11) _pending_ | `e2e/export.spec.ts (new)` | Survey report opens (200) and the WebODM zip downloads. |
-| unit | [M1-15](M1-correctness-and-safety.md#m1-15) _pending_ | `tests/backend/test_share_links.py` | The signing key file is created 0o600 and a concurrent create does not overwrite it. |
-| contract | [M2-04](M2-test-strategy-and-ci.md#m2-04) _pending_ | `tests/contract/test_frontend_api_contract.py (new)` | All frontend calls resolve to a route with the same method. |
-| e2e | [M2-05](M2-test-strategy-and-ci.md#m2-05) _pending_ | `e2e/export.spec.ts (new)` | Every Export tab download returns 200 with the expected content type. |
-| integration | [M3-03](M3-reliability-and-error-handling.md#m3-03) _pending_ | `tests/backend/test_orthomosaic_export.py` | Starting an ortho export creates a queue entry; a restart resumes or fails it. |
-| unit | [M3-04](M3-reliability-and-error-handling.md#m3-04) _pending_ | `tests/backend/test_session_bundle.py` | A crash mid-write (monkeypatched) leaves no partial archive at the final path. |
+| integration | [M1-01](M1-correctness-and-safety.md#m1-01) [#942](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/942) | `tests/backend/test_webodm_package_export.py` | An image named `=HYPERLINK(...).jpg` produces a quoted, `'`-prefixed cell in odm_georeferencing.csv. |
+| unit | [M1-01](M1-correctness-and-safety.md#m1-01) [#942](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/942) | `tests/backend/test_webodm_package_export.py` | Every filename listed in the CSV exists as a member of the produced zip. |
+| contract | [M1-01](M1-correctness-and-safety.md#m1-01) [#942](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/942) | `tests/backend/test_csv_safe.py` | Extend the writer inventory test so any new CSV writer in backend/ must import csv_safe (grep-based contract). |
+| integration | [M1-10](M1-correctness-and-safety.md#m1-10) [#951](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/951) | `tests/backend/test_survey_report.py` | POST /export/survey-report for an empty session returns 200 in json and html formats. |
+| unit | [M1-10](M1-correctness-and-safety.md#m1-10) [#951](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/951) | `tests/backend/test_quality_report.py` | A corrupt GLB produces a failed surface check with the parser error, not an empty pass. |
+| contract | [M1-11](M1-correctness-and-safety.md#m1-11) [#952](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/952) | `tests/contract/test_frontend_api_contract.py (new)` | Every URL + method built in frontend/src resolves to a FastAPI route (would have caught the 405). |
+| e2e | [M1-11](M1-correctness-and-safety.md#m1-11) [#952](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/952) | `e2e/export.spec.ts (new)` | Survey report opens (200) and the WebODM zip downloads. |
+| unit | [M1-15](M1-correctness-and-safety.md#m1-15) [#956](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/956) | `tests/backend/test_share_links.py` | The signing key file is created 0o600 and a concurrent create does not overwrite it. |
+| contract | [M2-04](M2-test-strategy-and-ci.md#m2-04) [#960](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/960) | `tests/contract/test_frontend_api_contract.py (new)` | All frontend calls resolve to a route with the same method. |
+| e2e | [M2-05](M2-test-strategy-and-ci.md#m2-05) [#961](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/961) | `e2e/export.spec.ts (new)` | Every Export tab download returns 200 with the expected content type. |
+| integration | [M3-03](M3-reliability-and-error-handling.md#m3-03) [#967](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/967) | `tests/backend/test_orthomosaic_export.py` | Starting an ortho export creates a queue entry; a restart resumes or fails it. |
+| unit | [M3-04](M3-reliability-and-error-handling.md#m3-04) [#968](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/968) | `tests/backend/test_session_bundle.py` | A crash mid-write (monkeypatched) leaves no partial archive at the final path. |
 
 ### `flight-log-gps`
 
 | Level | Work item | File | Test |
 |---|---|---|---|
-| unit | [M1-06](M1-correctness-and-safety.md#m1-06) _pending_ | `tests/backend/test_flight_log_sync.py` | A BOM-prefixed DJI CSV yields the same timestamps as the BOM-less file. |
-| unit | [M1-06](M1-correctness-and-safety.md#m1-06) _pending_ | `tests/backend/test_flight_log_sync.py` | A log with 0..600000 ms offsets is anchored to its start time, not 1970. |
-| integration | [M1-06](M1-correctness-and-safety.md#m1-06) _pending_ | `tests/backend/test_flight_log_router.py` | (0, 0) rows never influence synced positions; footprints change after sync. |
-| unit | [M1-15](M1-correctness-and-safety.md#m1-15) _pending_ | `tests/backend/test_dji_log_parser.py` | The API key never appears in the subprocess argv. |
+| unit | [M1-06](M1-correctness-and-safety.md#m1-06) [#947](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/947) | `tests/backend/test_flight_log_sync.py` | A BOM-prefixed DJI CSV yields the same timestamps as the BOM-less file. |
+| unit | [M1-06](M1-correctness-and-safety.md#m1-06) [#947](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/947) | `tests/backend/test_flight_log_sync.py` | A log with 0..600000 ms offsets is anchored to its start time, not 1970. |
+| integration | [M1-06](M1-correctness-and-safety.md#m1-06) [#947](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/947) | `tests/backend/test_flight_log_router.py` | (0, 0) rows never influence synced positions; footprints change after sync. |
+| unit | [M1-15](M1-correctness-and-safety.md#m1-15) [#956](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/956) | `tests/backend/test_dji_log_parser.py` | The API key never appears in the subprocess argv. |
 
 ### `frontend`
 
 | Level | Work item | File | Test |
 |---|---|---|---|
-| contract | [M5-07](M5-maintainability-and-type-safety.md#m5-07) _pending_ | `frontend/tsconfig.app.json` | `tsc -b` in CI enforces both flags. |
+| contract | [M5-07](M5-maintainability-and-type-safety.md#m5-07) [#983](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/983) | `frontend/tsconfig.app.json` | `tsc -b` in CI enforces both flags. |
 
 ### `frontend/export`
 
 | Level | Work item | File | Test |
 |---|---|---|---|
-| component | [M1-11](M1-correctness-and-safety.md#m1-11) _pending_ | `frontend/src/features/export/ExportTab.test.tsx (new)` | Clicking 'Generate Share Link' twice sends one POST; revoke calls the revoke endpoint and removes the row. |
+| component | [M1-11](M1-correctness-and-safety.md#m1-11) [#952](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/952) | `frontend/src/features/export/ExportTab.test.tsx (new)` | Clicking 'Generate Share Link' twice sends one POST; revoke calls the revoke endpoint and removes the row. |
 
 ### `frontend/import`
 
 | Level | Work item | File | Test |
 |---|---|---|---|
-| component | [M2-06](M2-test-strategy-and-ci.md#m2-06) _pending_ | `frontend/src/features/import/ImportModal.test.tsx (new)` | ESC closes when idle, not while uploading; Tab cycles inside the dialog; cancel aborts the upload. |
+| component | [M2-06](M2-test-strategy-and-ci.md#m2-06) [#962](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/962) | `frontend/src/features/import/ImportModal.test.tsx (new)` | ESC closes when idle, not while uploading; Tab cycles inside the dialog; cancel aborts the upload. |
 
 ### `frontend/reconstruct`
 
 | Level | Work item | File | Test |
 |---|---|---|---|
-| component | [M3-07](M3-reliability-and-error-handling.md#m3-07) _pending_ | `frontend/src/features/reconstruct/ReconstructTab.test.tsx` | Cancel opens a confirmation; only confirm sends POST /cancel. |
+| component | [M3-07](M3-reliability-and-error-handling.md#m3-07) [#971](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/971) | `frontend/src/features/reconstruct/ReconstructTab.test.tsx` | Cancel opens a confirmation; only confirm sends POST /cancel. |
 
 ### `frontend/settings`
 
 | Level | Work item | File | Test |
 |---|---|---|---|
-| component | [M2-06](M2-test-strategy-and-ci.md#m2-06) _pending_ | `frontend/src/features/settings/*.test.tsx (new)` | Invalid values show validation errors and are not PATCHed. |
+| component | [M2-06](M2-test-strategy-and-ci.md#m2-06) [#962](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/962) | `frontend/src/features/settings/*.test.tsx (new)` | Invalid values show validation errors and are not PATCHed. |
 
 ### `frontend/share`
 
 | Level | Work item | File | Test |
 |---|---|---|---|
-| component | [M1-11](M1-correctness-and-safety.md#m1-11) _pending_ | `frontend/src/features/share/ShareViewer.test.tsx (new)` | A 401 with code share_password_required shows the password form. |
+| component | [M1-11](M1-correctness-and-safety.md#m1-11) [#952](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/952) | `frontend/src/features/share/ShareViewer.test.tsx (new)` | A 401 with code share_password_required shows the password form. |
 
 ### `frontend/shared`
 
 | Level | Work item | File | Test |
 |---|---|---|---|
-| unit | [M3-07](M3-reliability-and-error-handling.md#m3-07) _pending_ | `frontend/src/shared/utils/downloadBlob.test.ts (new)` | revokeObjectURL is called after the click tick. |
-| unit | [M5-06](M5-maintainability-and-type-safety.md#m5-06) _pending_ | `frontend/src/shared/api/client.test.ts` | `postForm` applies the timeout and parses array-shaped 422 details. |
-| unit | [M5-06](M5-maintainability-and-type-safety.md#m5-06) _pending_ | `frontend/src/shared/jobs/status.test.ts (new)` | Every Job['status'] has a label and colour (exhaustive). |
+| unit | [M3-07](M3-reliability-and-error-handling.md#m3-07) [#971](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/971) | `frontend/src/shared/utils/downloadBlob.test.ts (new)` | revokeObjectURL is called after the click tick. |
+| unit | [M5-06](M5-maintainability-and-type-safety.md#m5-06) [#982](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/982) | `frontend/src/shared/api/client.test.ts` | `postForm` applies the timeout and parses array-shaped 422 details. |
+| unit | [M5-06](M5-maintainability-and-type-safety.md#m5-06) [#982](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/982) | `frontend/src/shared/jobs/status.test.ts (new)` | Every Job['status'] has a label and colour (exhaustive). |
 
 ### `frontend/splat`
 
 | Level | Work item | File | Test |
 |---|---|---|---|
-| unit | [M1-12](M1-correctness-and-safety.md#m1-12) _pending_ | `frontend/src/features/splat/measurementMath.test.ts` | `computeVolume` with a sloped sampler returns the analytic wedge volume; the UI refuses to compute without a sampler. |
-| component | [M5-05](M5-maintainability-and-type-safety.md#m5-05) _pending_ | `frontend/src/features/splat/*.test.tsx` | Each extracted layer hook disposes its group on unmount (mock scene). |
+| unit | [M1-12](M1-correctness-and-safety.md#m1-12) [#953](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/953) | `frontend/src/features/splat/measurementMath.test.ts` | `computeVolume` with a sloped sampler returns the analytic wedge volume; the UI refuses to compute without a sampler. |
+| component | [M5-05](M5-maintainability-and-type-safety.md#m5-05) [#981](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/981) | `frontend/src/features/splat/*.test.tsx` | Each extracted layer hook disposes its group on unmount (mock scene). |
 
 ### `geotag-cli`
 
 | Level | Work item | File | Test |
 |---|---|---|---|
-| unit | [M1-07](M1-correctness-and-safety.md#m1-07) _pending_ | `tests/cli/test_frames.py` | Frames 21..30 at 1 fps are tagged at t=20..29 s, identical to the same frames when 1..20 are present. |
-| unit | [M1-07](M1-correctness-and-safety.md#m1-07) _pending_ | `tests/cli/test_frames.py` | `infer_frame_rate` raises when telemetry_end_s <= 0. |
-| integration | [M1-07](M1-correctness-and-safety.md#m1-07) _pending_ | `tests/cli/test_pipeline.py` | The headless pipeline honours `start_number` from the job spec. |
-| integration | [M3-08](M3-reliability-and-error-handling.md#m3-08) _pending_ | `tests/cli/test_pipeline.py` | Pipeline and CLI produce identical tags and warnings for the same inputs; a log file appears in log_dir. |
-| unit | [M4-03](M4-performance-and-scale.md#m4-03) _pending_ | `tests/cli/test_telemetry.py` | Bisect interpolation equals the linear-scan result on randomized telemetry (property test). |
-| unit | [M5-04](M5-maintainability-and-type-safety.md#m5-04) _pending_ | `tests/cli/test_audit.py` | backend and CLI import the same csv_safe object. |
+| unit | [M1-07](M1-correctness-and-safety.md#m1-07) [#948](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/948) | `tests/cli/test_frames.py` | Frames 21..30 at 1 fps are tagged at t=20..29 s, identical to the same frames when 1..20 are present. |
+| unit | [M1-07](M1-correctness-and-safety.md#m1-07) [#948](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/948) | `tests/cli/test_frames.py` | `infer_frame_rate` raises when telemetry_end_s <= 0. |
+| integration | [M1-07](M1-correctness-and-safety.md#m1-07) [#948](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/948) | `tests/cli/test_pipeline.py` | The headless pipeline honours `start_number` from the job spec. |
+| integration | [M3-08](M3-reliability-and-error-handling.md#m3-08) [#972](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/972) | `tests/cli/test_pipeline.py` | Pipeline and CLI produce identical tags and warnings for the same inputs; a log file appears in log_dir. |
+| unit | [M4-03](M4-performance-and-scale.md#m4-03) [#976](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/976) | `tests/cli/test_telemetry.py` | Bisect interpolation equals the linear-scan result on randomized telemetry (property test). |
+| unit | [M5-04](M5-maintainability-and-type-safety.md#m5-04) [#980](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/980) | `tests/cli/test_audit.py` | backend and CLI import the same csv_safe object. |
 
 ### `ingest-import`
 
 | Level | Work item | File | Test |
 |---|---|---|---|
-| unit | [M1-02](M1-correctness-and-safety.md#m1-02) _pending_ | `tests/backend/test_ingest.py` | `extract_exif` on 2 KB of random bytes raises UnreadableImageError (today it returns an empty dict). |
-| integration | [M1-02](M1-correctness-and-safety.md#m1-02) _pending_ | `tests/backend/test_ingest_orchestrator.py` | A folder with one corrupt .jpg and two valid frames imports 2 frames, skips 1, and writes an `image_skipped` log entry. |
-| integration | [M1-02](M1-correctness-and-safety.md#m1-02) _pending_ | `tests/backend/test_ingest_orchestrator.py` | When `score_image` raises, the frame is stored unusable with a `quality_failed` entry, never `flag='good'`. |
-| integration | [M1-03](M1-correctness-and-safety.md#m1-03) _pending_ | `tests/backend/test_uploads_router.py` | A completed upload older than 24 h keeps its images after the sweep runs; an abandoned one is removed. |
-| integration | [M1-03](M1-correctness-and-safety.md#m1-03) _pending_ | `tests/backend/test_uploads_router.py` | POST /cancel on an importing upload returns 409 and leaves files in place. |
-| integration | [M1-03](M1-correctness-and-safety.md#m1-03) _pending_ | `tests/backend/test_upload_reservation_cap.py` | Finished imports do not consume reservation slots. |
-| integration | [M3-05](M3-reliability-and-error-handling.md#m3-05) _pending_ | `tests/backend/test_images_router.py` | Flagging an image updates Session.usable_count; an unknown flag is 422. |
-| unit | [M3-05](M3-reliability-and-error-handling.md#m3-05) _pending_ | `tests/backend/test_ingest.py` | EXIF DateTimeOriginal with OffsetTimeOriginal converts to UTC; without offset stays local. |
-| integration | [M4-01](M4-performance-and-scale.md#m4-01) _pending_ | `tests/backend/test_duplicate_detection.py` | Constant query count across 1 vs 30 sessions. |
+| unit | [M1-02](M1-correctness-and-safety.md#m1-02) [#943](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/943) | `tests/backend/test_ingest.py` | `extract_exif` on 2 KB of random bytes raises UnreadableImageError (today it returns an empty dict). |
+| integration | [M1-02](M1-correctness-and-safety.md#m1-02) [#943](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/943) | `tests/backend/test_ingest_orchestrator.py` | A folder with one corrupt .jpg and two valid frames imports 2 frames, skips 1, and writes an `image_skipped` log entry. |
+| integration | [M1-02](M1-correctness-and-safety.md#m1-02) [#943](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/943) | `tests/backend/test_ingest_orchestrator.py` | When `score_image` raises, the frame is stored unusable with a `quality_failed` entry, never `flag='good'`. |
+| integration | [M1-03](M1-correctness-and-safety.md#m1-03) [#944](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/944) | `tests/backend/test_uploads_router.py` | A completed upload older than 24 h keeps its images after the sweep runs; an abandoned one is removed. |
+| integration | [M1-03](M1-correctness-and-safety.md#m1-03) [#944](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/944) | `tests/backend/test_uploads_router.py` | POST /cancel on an importing upload returns 409 and leaves files in place. |
+| integration | [M1-03](M1-correctness-and-safety.md#m1-03) [#944](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/944) | `tests/backend/test_upload_reservation_cap.py` | Finished imports do not consume reservation slots. |
+| integration | [M3-05](M3-reliability-and-error-handling.md#m3-05) [#969](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/969) | `tests/backend/test_images_router.py` | Flagging an image updates Session.usable_count; an unknown flag is 422. |
+| unit | [M3-05](M3-reliability-and-error-handling.md#m3-05) [#969](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/969) | `tests/backend/test_ingest.py` | EXIF DateTimeOriginal with OffsetTimeOriginal converts to UTC; without offset stays local. |
+| integration | [M4-01](M4-performance-and-scale.md#m4-01) [#974](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/974) | `tests/backend/test_duplicate_detection.py` | Constant query count across 1 vs 30 sessions. |
 
 ### `packaging-release`
 
 | Level | Work item | File | Test |
 |---|---|---|---|
-| contract | [M1-14](M1-correctness-and-safety.md#m1-14) _pending_ | `tests/backend/test_dev_launcher_contract.py` | Extend the #803 launcher contract to run.sh and run.bat (VITE_API_URL or proxy present). |
-| contract | [M1-15](M1-correctness-and-safety.md#m1-15) _pending_ | `tests/test_supply_chain_configuration.py` | Dockerfile FROM lines are digest-pinned and a USER directive precedes CMD. |
-| contract | [M2-01](M2-test-strategy-and-ci.md#m2-01) _pending_ | `tests/test_supply_chain_configuration.py` | Every job has timeout-minutes; the path map covers every top-level source directory (no orphan paths). |
-| contract | [M2-01](M2-test-strategy-and-ci.md#m2-01) _pending_ | `tests/test_ci_lane_map.py (new)` | Each coverage area's path globs match at least one file and every tracked source file maps to >=1 area. |
-| e2e | [M2-05](M2-test-strategy-and-ci.md#m2-05) _pending_ | `e2e/smoke.spec.ts (new)` | Golden-path journey above passes on the Docker image. |
+| contract | [M1-14](M1-correctness-and-safety.md#m1-14) [#955](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/955) | `tests/backend/test_dev_launcher_contract.py` | Extend the #803 launcher contract to run.sh and run.bat (VITE_API_URL or proxy present). |
+| contract | [M1-15](M1-correctness-and-safety.md#m1-15) [#956](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/956) | `tests/test_supply_chain_configuration.py` | Dockerfile FROM lines are digest-pinned and a USER directive precedes CMD. |
+| contract | [M2-01](M2-test-strategy-and-ci.md#m2-01) [#957](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/957) | `tests/test_supply_chain_configuration.py` | Every job has timeout-minutes; the path map covers every top-level source directory (no orphan paths). |
+| contract | [M2-01](M2-test-strategy-and-ci.md#m2-01) [#957](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/957) | `tests/test_ci_lane_map.py (new)` | Each coverage area's path globs match at least one file and every tracked source file maps to >=1 area. |
+| e2e | [M2-05](M2-test-strategy-and-ci.md#m2-05) [#961](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/961) | `e2e/smoke.spec.ts (new)` | Golden-path journey above passes on the Docker image. |
 
 ### `platform-ops`
 
 | Level | Work item | File | Test |
 |---|---|---|---|
-| contract | [M2-02](M2-test-strategy-and-ci.md#m2-02) _pending_ | `tests/test_markers_contract.py (new)` | Every collected test has exactly one level marker and one area marker. |
-| contract | [M2-03](M2-test-strategy-and-ci.md#m2-03) _pending_ | `.github/workflows/ci.yml` | Nightly full run fails if any area drops below its threshold. |
-| contract | [M2-04](M2-test-strategy-and-ci.md#m2-04) _pending_ | `tests/contract/test_openapi_types.py (new)` | Generated TS types are up to date with app.openapi(). |
-| integration | [M3-01](M3-reliability-and-error-handling.md#m3-01) _pending_ | `tests/backend/test_storage_router.py` | An unreadable file in one session dir still returns the other sessions plus an error entry. |
-| unit | [M3-02](M3-reliability-and-error-handling.md#m3-02) _pending_ | `tests/backend/test_config.py` | A list-valued top level raises a clear ConfigError; a UTF-8 non-ASCII path round-trips under a cp1252 locale (monkeypatched). |
-| unit | [M3-02](M3-reliability-and-error-handling.md#m3-02) _pending_ | `tests/backend/test_database.py` | DATABASE_URL defaults to <data_dir>/drone_mapping.db. |
-| unit | [M3-04](M3-reliability-and-error-handling.md#m3-04) _pending_ | `tests/backend/test_artifact_backup.py` | A hung rclone (sleep shim) is killed at the timeout and reported failed. |
-| integration | [M3-05](M3-reliability-and-error-handling.md#m3-05) _pending_ | `tests/backend/test_storage_lifecycle.py` | The intermediates rule finds files written by a (fake) COLMAP run; archived frames stay resolvable. |
-| integration | [M3-06](M3-reliability-and-error-handling.md#m3-06) _pending_ | `tests/backend/test_defects_router.py` | A failing link insert leaves no orphan defect. |
-| integration | [M4-01](M4-performance-and-scale.md#m4-01) _pending_ | `tests/backend/test_projects.py` | Query count for GET /projects is constant for 1 vs 50 projects (SQLAlchemy event counter fixture). |
-| unit | [M5-03](M5-maintainability-and-type-safety.md#m5-03) _pending_ | `(per function)` | Unit tests for each extracted helper, especially error branches previously untested. |
+| contract | [M2-02](M2-test-strategy-and-ci.md#m2-02) [#958](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/958) | `tests/test_markers_contract.py (new)` | Every collected test has exactly one level marker and one area marker. |
+| contract | [M2-03](M2-test-strategy-and-ci.md#m2-03) [#959](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/959) | `.github/workflows/ci.yml` | Nightly full run fails if any area drops below its threshold. |
+| contract | [M2-04](M2-test-strategy-and-ci.md#m2-04) [#960](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/960) | `tests/contract/test_openapi_types.py (new)` | Generated TS types are up to date with app.openapi(). |
+| integration | [M3-01](M3-reliability-and-error-handling.md#m3-01) [#965](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/965) | `tests/backend/test_storage_router.py` | An unreadable file in one session dir still returns the other sessions plus an error entry. |
+| unit | [M3-02](M3-reliability-and-error-handling.md#m3-02) [#966](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/966) | `tests/backend/test_config.py` | A list-valued top level raises a clear ConfigError; a UTF-8 non-ASCII path round-trips under a cp1252 locale (monkeypatched). |
+| unit | [M3-02](M3-reliability-and-error-handling.md#m3-02) [#966](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/966) | `tests/backend/test_database.py` | DATABASE_URL defaults to <data_dir>/drone_mapping.db. |
+| unit | [M3-04](M3-reliability-and-error-handling.md#m3-04) [#968](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/968) | `tests/backend/test_artifact_backup.py` | A hung rclone (sleep shim) is killed at the timeout and reported failed. |
+| integration | [M3-05](M3-reliability-and-error-handling.md#m3-05) [#969](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/969) | `tests/backend/test_storage_lifecycle.py` | The intermediates rule finds files written by a (fake) COLMAP run; archived frames stay resolvable. |
+| integration | [M3-06](M3-reliability-and-error-handling.md#m3-06) [#970](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/970) | `tests/backend/test_defects_router.py` | A failing link insert leaves no orphan defect. |
+| integration | [M4-01](M4-performance-and-scale.md#m4-01) [#974](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/974) | `tests/backend/test_projects.py` | Query count for GET /projects is constant for 1 vs 50 projects (SQLAlchemy event counter fixture). |
+| unit | [M5-03](M5-maintainability-and-type-safety.md#m5-03) [#979](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/979) | `(per function)` | Unit tests for each extracted helper, especially error branches previously untested. |
 
 ### `reconstruction-splat`
 
 | Level | Work item | File | Test |
 |---|---|---|---|
-| integration | [M1-04](M1-correctness-and-safety.md#m1-04) _pending_ | `tests/backend/test_reconstruction_router.py` | Deleting a reconstruction used by a comparison returns 409 and its splat/PLY files still exist. |
-| unit | [M1-09](M1-correctness-and-safety.md#m1-09) _pending_ | `tests/backend/test_cesium_tiles.py` | The tileset root transform equals the ECEF placement derived from a known geo_transform. |
-| unit | [M1-09](M1-correctness-and-safety.md#m1-09) _pending_ | `tests/backend/test_splat_cleanup.py` | A synthetic splat with a known geo_transform keeps exactly the Gaussians inside a lon/lat polygon. |
-| integration | [M1-09](M1-correctness-and-safety.md#m1-09) _pending_ | `tests/backend/test_comparisons_router.py` | Comparing a reconstruction with NULL geo_transform returns 422. |
-| integration | [M1-12](M1-correctness-and-safety.md#m1-12) _pending_ | `tests/backend/test_elevation_export.py` | The new height-query endpoint returns DSM heights for known points. |
-| integration | [M1-13](M1-correctness-and-safety.md#m1-13) _pending_ | `tests/backend/test_reconstruction_service.py` | Two sessions each containing DJI_0001.JPG stage 2 distinct images. |
-| integration | [M1-13](M1-correctness-and-safety.md#m1-13) _pending_ | `tests/backend/test_remote_worker.py` | A remote completion stores splat/PLY paths reported by the worker. |
-| unit | [M1-13](M1-correctness-and-safety.md#m1-13) _pending_ | `tests/backend/test_job_queue.py` | Handler that raises -> failed; handler that returns early -> failed with reason (replaces the sleep-based test, see M2-08). |
-| unit | [M1-15](M1-correctness-and-safety.md#m1-15) _pending_ | `tests/backend/test_splat_transform.py` | The argv contains a pinned version and no bare `npx <pkg>`. |
-| unit | [M2-08](M2-test-strategy-and-ci.md#m2-08) _pending_ | `tests/backend/test_job_queue.py` | Deterministic no-handler test asserts status == 'failed'. |
-| unit | [M3-01](M3-reliability-and-error-handling.md#m3-01) _pending_ | `tests/backend/test_splat_backends.py` | A render exception is logged (caplog) and returns None. |
-| integration | [M3-06](M3-reliability-and-error-handling.md#m3-06) _pending_ | `tests/backend/test_annotations_router.py` | lat=91, lon=181, color='red;' each return 422. |
-| unit | [M3-09](M3-reliability-and-error-handling.md#m3-09) _pending_ | `tests/test_heldout_parity_benchmark.py` | Shared helpers used by all three scripts; import succeeds with `resource` unavailable (monkeypatched). |
-| unit | [M4-02](M4-performance-and-scale.md#m4-02) _pending_ | `tests/backend/test_splat_cleanup.py` | KD-tree outlier filter matches the reference result on a seeded cloud. |
-| contract | [M5-01](M5-maintainability-and-type-safety.md#m5-01) _pending_ | `tests/contract/test_frontend_api_contract.py` | Router split keeps every route and method (contract suite from M2-04). |
-| unit | [M5-01](M5-maintainability-and-type-safety.md#m5-01) _pending_ | `tests/backend/test_ply_io.py` | ply_io reads every PLY variant the removed parsers handled (fixtures). |
-| unit | [M5-02](M5-maintainability-and-type-safety.md#m5-02) _pending_ | `tests/backend/test_georeferencing_solve.py` | UTM zone helper covers zone boundaries, Norway/Svalbard exceptions and southern hemisphere. |
+| integration | [M1-04](M1-correctness-and-safety.md#m1-04) [#945](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/945) | `tests/backend/test_reconstruction_router.py` | Deleting a reconstruction used by a comparison returns 409 and its splat/PLY files still exist. |
+| unit | [M1-09](M1-correctness-and-safety.md#m1-09) [#950](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/950) | `tests/backend/test_cesium_tiles.py` | The tileset root transform equals the ECEF placement derived from a known geo_transform. |
+| unit | [M1-09](M1-correctness-and-safety.md#m1-09) [#950](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/950) | `tests/backend/test_splat_cleanup.py` | A synthetic splat with a known geo_transform keeps exactly the Gaussians inside a lon/lat polygon. |
+| integration | [M1-09](M1-correctness-and-safety.md#m1-09) [#950](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/950) | `tests/backend/test_comparisons_router.py` | Comparing a reconstruction with NULL geo_transform returns 422. |
+| integration | [M1-12](M1-correctness-and-safety.md#m1-12) [#953](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/953) | `tests/backend/test_elevation_export.py` | The new height-query endpoint returns DSM heights for known points. |
+| integration | [M1-13](M1-correctness-and-safety.md#m1-13) [#954](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/954) | `tests/backend/test_reconstruction_service.py` | Two sessions each containing DJI_0001.JPG stage 2 distinct images. |
+| integration | [M1-13](M1-correctness-and-safety.md#m1-13) [#954](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/954) | `tests/backend/test_remote_worker.py` | A remote completion stores splat/PLY paths reported by the worker. |
+| unit | [M1-13](M1-correctness-and-safety.md#m1-13) [#954](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/954) | `tests/backend/test_job_queue.py` | Handler that raises -> failed; handler that returns early -> failed with reason (replaces the sleep-based test, see M2-08). |
+| unit | [M1-15](M1-correctness-and-safety.md#m1-15) [#956](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/956) | `tests/backend/test_splat_transform.py` | The argv contains a pinned version and no bare `npx <pkg>`. |
+| unit | [M2-08](M2-test-strategy-and-ci.md#m2-08) [#964](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/964) | `tests/backend/test_job_queue.py` | Deterministic no-handler test asserts status == 'failed'. |
+| unit | [M3-01](M3-reliability-and-error-handling.md#m3-01) [#965](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/965) | `tests/backend/test_splat_backends.py` | A render exception is logged (caplog) and returns None. |
+| integration | [M3-06](M3-reliability-and-error-handling.md#m3-06) [#970](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/970) | `tests/backend/test_annotations_router.py` | lat=91, lon=181, color='red;' each return 422. |
+| unit | [M3-09](M3-reliability-and-error-handling.md#m3-09) [#973](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/973) | `tests/test_heldout_parity_benchmark.py` | Shared helpers used by all three scripts; import succeeds with `resource` unavailable (monkeypatched). |
+| unit | [M4-02](M4-performance-and-scale.md#m4-02) [#975](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/975) | `tests/backend/test_splat_cleanup.py` | KD-tree outlier filter matches the reference result on a seeded cloud. |
+| contract | [M5-01](M5-maintainability-and-type-safety.md#m5-01) [#977](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/977) | `tests/contract/test_frontend_api_contract.py` | Router split keeps every route and method (contract suite from M2-04). |
+| unit | [M5-01](M5-maintainability-and-type-safety.md#m5-01) [#977](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/977) | `tests/backend/test_ply_io.py` | ply_io reads every PLY variant the removed parsers handled (fixtures). |
+| unit | [M5-02](M5-maintainability-and-type-safety.md#m5-02) [#978](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/978) | `tests/backend/test_georeferencing_solve.py` | UTM zone helper covers zone boundaries, Norway/Svalbard exceptions and southern hemisphere. |
