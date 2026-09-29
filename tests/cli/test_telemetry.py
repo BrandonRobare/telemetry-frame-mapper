@@ -204,7 +204,7 @@ GPS (-81.0000, 41.2000, 102)
     frame = tmp_path / "frame_00001.jpg"
     frame.touch()
     monkeypatch.setattr(cli, "collect_frames", lambda _: [(frame, 1)])
-    monkeypatch.setattr(cli, "infer_frame_rate", lambda *_: 1.0)
+    monkeypatch.setattr(cli, "infer_frame_rate", lambda *_, **__: 1.0)
     monkeypatch.setattr(cli, "read_video_duration", lambda *_: None)
     monkeypatch.setattr(cli, "read_video_start", lambda *_: None)
 
@@ -215,6 +215,7 @@ GPS (-81.0000, 41.2000, 102)
         output=tmp_path / "out",
         srt=srt,
         frame_rate=None,
+        start_number=1,
         ffmpeg="ffmpeg",
         exiftool="exiftool",
         in_place=False,
