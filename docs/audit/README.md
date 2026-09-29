@@ -41,6 +41,8 @@ The audit is split into five GitHub milestones that continue the release line af
 | **v3.5 — Performance & Scale** | M4 | P2/P3 | [#940](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/940) | 3 | 13 |
 | **v3.6 — Maintainability & Type Safety** | M5 | P3 | [#941](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/941) | 7 | 48 |
 
+[`create-milestones.sh`](create-milestones.sh) creates these milestones and assigns the epic and work-item issues to them. It needs the GitHub CLI (`gh auth login`) and is safe to re-run: `bash docs/audit/create-milestones.sh`.
+
 ### Work items
 
 | Key | Title | Milestone | Priority | Findings | Issue |
