@@ -638,7 +638,9 @@ host-specific secret, so an existing link keeps working until its recorded expir
 The Import dialog defaults to **Browser upload**: pick or drag a folder of frames and the app
 streams it to the backend in chunks, then runs the same import pipeline as any other source. This
 is the easiest route when the images are on your workstation but not already under `imports/`. The
-**Server path** mode remains for folders that already live there.
+**Server path** mode remains for folders that already live there. A finished upload is kept under
+`imports/browser_imports/<upload id>/`, the folder its session imports from; an upload left
+unfinished for `browser_uploads.cleanup_after_hours` (24 h by default) is removed from staging.
 
 **Upload / cloud drive** covers files a desktop client has already synced from OneDrive, Google
 Drive, Dropbox, or similar. The provider's own client and the operating system authorize access;
