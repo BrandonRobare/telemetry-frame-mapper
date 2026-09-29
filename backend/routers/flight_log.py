@@ -1,23 +1,30 @@
 from __future__ import annotations
 
 import calendar
+import logging
 import os
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from sqlalchemy.orm import Session as DBSession
 
-from ..core.config import get_dji_api_key, get_upload_limits_config
+from ..core.config import get_dji_api_key, get_upload_limits_config, load_config
 from ..db.database import get_db
-from ..db.models import FlightLog, FlightLogPoint, Image
+from ..db.models import FlightLog, FlightLogPoint, Footprint, Image
 from ..db.models import Session as SessionModel
 from ..services.flight_log_sync import (
+    FlightLogClockError,
     FlightLogCSVError,
+    anchor_log_timestamps,
     build_offset_preview,
     match_images_to_log,
     parse_flight_log_csv,
+    parse_log_start_time,
 )
+from ..services.ingest_orchestrator import build_footprint
 from ..services.upload_reader import read_upload_with_limit
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/flight-logs", tags=["flight-logs"])
 
@@ -43,6 +50,42 @@ def _naive_utc_to_timestamp(dt: datetime) -> float:
     on naive datetimes (which assumes local time).
     """
     return float(calendar.timegm(dt.timetuple())) + dt.microsecond / 1_000_000
+
+
+def _absolute_timestamps(timestamps_s: list[float], start_time: datetime | None) -> list[float]:
+    """Unix times for a log's timestamps, or a 422 when they cannot be placed in time."""
+    try:
+        return anchor_log_timestamps(timestamps_s, start_time)
+    except FlightLogClockError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+def _header_start_time(value: str | None) -> datetime | None:
+    """The start time a DJI log header records, or None when absent or unusable."""
+    if not value:
+        return None
+    try:
+        return parse_log_start_time(value)
+    except FlightLogClockError:
+        return None
+
+
+def _refresh_footprint(img: Image, cfg, db: DBSession) -> None:
+    """Replace ``img``'s footprint with one built from its current position.
+
+    The old footprint describes a position the image no longer has, so it goes
+    even when no new one can be built (no altitude, or projection failed).
+    """
+    db.query(Footprint).filter(Footprint.image_id == img.id).delete(
+        synchronize_session="fetch"
+    )
+    try:
+        footprint = build_footprint(img, cfg)
+    except Exception:
+        logger.warning("Footprint computation failed for %s", img.filename, exc_info=True)
+        return
+    if footprint is not None:
+        db.add(footprint)
 
 
 def _get_log_points_and_images(
@@ -87,11 +130,25 @@ def _get_log_points_and_images(
 async def upload_flight_log(
     file: UploadFile = File(...),
     session_id: int = Form(...),
+    start_time: str | None = Form(None),
     db: DBSession = Depends(get_db),
 ):
+    """Store a flight log's GPS track for timestamp sync.
+
+    ``start_time`` (ISO 8601, UTC when no offset is given) anchors a log whose
+    clock counts from the start of the flight and that does not record when the
+    flight started. It is not used for logs that already carry absolute times.
+    """
     session = db.query(SessionModel).filter(SessionModel.id == session_id).first()
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
+
+    start: datetime | None = None
+    if start_time:
+        try:
+            start = parse_log_start_time(start_time)
+        except FlightLogClockError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     limits = get_upload_limits_config()
     max_bytes = limits["flight_log_max_bytes"]
@@ -106,7 +163,7 @@ async def upload_flight_log(
     first_bytes = content[:64].strip()
 
     if ext in _DJI_EXTENSIONS or (first_bytes and is_dji_binary_header(first_bytes)):
-        return await _upload_dji_binary(session_id, file.filename or "", content, db)
+        return await _upload_dji_binary(session_id, file.filename or "", content, db, start)
 
     # CSV adapters use explicit vendor header contracts; do not infer coordinates.
     try:
@@ -120,6 +177,9 @@ async def upload_flight_log(
             detail="No data rows found in flight log CSV",
         )
 
+    # CSV logs carry no start time of their own; only the caller can supply one.
+    timestamps_s = _absolute_timestamps([p["timestamp_s"] for p in points], start)
+
     log = FlightLog(
         session_id=session_id,
         filename=file.filename,
@@ -129,10 +189,10 @@ async def upload_flight_log(
     db.add(log)
     db.flush()
 
-    for p in points:
+    for p, timestamp_s in zip(points, timestamps_s, strict=True):
         point = FlightLogPoint(
             flight_log_id=log.id,
-            timestamp=_utc_timestamp_to_naive(p["timestamp_s"]),
+            timestamp=_utc_timestamp_to_naive(timestamp_s),
             latitude=p["latitude"],
             longitude=p["longitude"],
             altitude_m=p["altitude_m"],
@@ -159,6 +219,7 @@ async def _upload_dji_binary(
     filename: str,
     content: bytes,
     db: DBSession,
+    start_time: datetime | None = None,
 ) -> dict:
     """Parse a DJI .txt binary log and persist FlightLog + FlightLogPoint rows."""
     from ..services.dji_log_parser import (
@@ -182,7 +243,7 @@ async def _upload_dji_binary(
             raise HTTPException(status_code=422, detail=msg) from exc
         raise HTTPException(status_code=422, detail=msg) from exc
 
-    return _persist_dji_result(session_id, filename, content, result, db)
+    return _persist_dji_result(session_id, filename, content, result, db, start_time)
 
 
 def _persist_dji_result(
@@ -191,7 +252,15 @@ def _persist_dji_result(
     _content: bytes,
     result,
     db: DBSession,
+    start_time: datetime | None = None,
 ) -> dict:
+    # A relative OSD timeMs counts from the flight start the header records; a
+    # caller's start_time only stands in when the header has none.
+    timestamps_s = _absolute_timestamps(
+        [frame.timestamp_ms / 1000.0 for frame in result.frames],
+        _header_start_time(result.header.start_time) or start_time,
+    )
+
     log = FlightLog(
         session_id=session_id,
         filename=filename,
@@ -205,10 +274,10 @@ def _persist_dji_result(
     db.add(log)
     db.flush()
 
-    for frame in result.frames:
+    for frame, timestamp_s in zip(result.frames, timestamps_s, strict=True):
         point = FlightLogPoint(
             flight_log_id=log.id,
-            timestamp=_utc_timestamp_to_naive(frame.timestamp_ms / 1000.0),
+            timestamp=_utc_timestamp_to_naive(timestamp_s),
             latitude=frame.latitude,
             longitude=frame.longitude,
             altitude_m=frame.altitude_m,
@@ -315,6 +384,7 @@ def apply_sync(
     )
 
     match_map = {m["image_id"]: m for m in matches}
+    cfg = load_config() if match_map else None
     applied = 0
     for img in images:
         if img.id in match_map:
@@ -332,6 +402,10 @@ def apply_sync(
             img.longitude = m["longitude"]
             img.altitude_m = m["altitude_m"]
             img.gps_source = "flight_log"
+            # Every repositioned image, not just ones whose values moved on this
+            # call: re-applying a sync also repairs footprints left stale by
+            # earlier syncs, which never refreshed them.
+            _refresh_footprint(img, cfg, db)
             applied += 1
 
     db.commit()
