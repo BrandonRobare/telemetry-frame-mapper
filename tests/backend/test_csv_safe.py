@@ -5,14 +5,15 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-import pytest
-
 from backend.core.csv_safe import csv_safe
 
 _BACKEND = Path(__file__).resolve().parents[2] / "backend"
-# A module writes CSV if it uses a stdlib writer, serves text/csv, or names a .csv
-# output in a string literal (how a hand-concatenated CSV gets into a zip, #942).
-_WRITES_CSV = re.compile(r"""csv\.(?:writer|DictWriter)\(|text/csv|\.csv["']""")
+# A module writes CSV if it uses a stdlib writer, serves text/csv, or writes a .csv
+# member into a zip (how the hand-concatenated ODM CSV got out, #942). Readers that
+# merely mention ".csv" are not writers.
+_WRITES_CSV = re.compile(
+    r"""csv\.(?:writer|DictWriter)\(|text/csv|\.writestr\(\s*f?["'][^"'\n]*\.csv["']"""
+)
 _IMPORTS_CSV_SAFE = re.compile(r"^\s*from\s+[\w.]*csv_safe\s+import\s+csv_safe\b", re.MULTILINE)
 # Writers the detector must keep finding; a miss means the grep has gone blind.
 _KNOWN_CSV_WRITERS = {
@@ -73,8 +74,6 @@ def test_audit_csv_escapes_filenames(tmp_path) -> None:
     assert "'=CMD.jpg" in text
 
 
-@pytest.mark.contract
-@pytest.mark.area_export_share
 def test_every_backend_csv_writer_imports_csv_safe() -> None:
     """Any module in backend/ that writes CSV must guard its cells with csv_safe (#863, #942)."""
     writers = {

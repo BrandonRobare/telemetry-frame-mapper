@@ -104,10 +104,3 @@ ignore = ["B008"]
 addopts = "-s"
 testpaths = ["tests"]
 pythonpath = [".", "src"]
-# Level and coverage-area markers (docs/audit/TEST-STRATEGY.md section 4.1).
-markers = [
-  "unit: isolated, no DB/network/subprocess",
-  "integration: TestClient + temp DB + filesystem",
-  "contract: cross-boundary agreements (API, types, migrations, exports, packaging)",
-  "area_export_share: exports, share links/bundles, reports, WebODM, GIS formats",
-]

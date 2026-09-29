@@ -28,7 +28,9 @@ def package_image_names(images: Iterable[Image]) -> list[tuple[Image, str]]:
     ``images/``, its zip member, so the two cannot drift apart. It is the stored
     filename, which ingest keeps unique when two folders ship the same camera name
     (the source path's basename does not), cut to a bare name so it can never become
-    a path inside the zip. Names still shared — merged sessions, or a case-only
+    a path inside the zip. A name a spreadsheet would read as a formula gets a
+    leading ``_``, so the CSV cell is inert without csv_safe's quote and still
+    matches the member. Names still shared — merged sessions, or a case-only
     difference that collides on extraction — get a ``__N`` suffix.
     """
     named: list[tuple[Image, str]] = []
@@ -38,6 +40,8 @@ def package_image_names(images: Iterable[Image]) -> list[tuple[Image, str]]:
         name = PureWindowsPath(img.filename or "").name
         if name in {"", ".."}:
             continue
+        if csv_safe(name) != name:
+            name = "_" + name
         stem, suffix = PurePosixPath(name).stem, PurePosixPath(name).suffix
         n = 1
         while name.casefold() in taken:

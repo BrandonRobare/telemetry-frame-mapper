@@ -120,13 +120,14 @@ def test_webodm_package_rejects_path_outside_exports(tmp_path, filename):
         )
 
 
-@pytest.mark.integration
-@pytest.mark.area_export_share
 @pytest.mark.parametrize("endpoint", ["webodm-georeferencing-csv", "webodm-package"])
 def test_odm_georeferencing_csv_neutralizes_formula_filenames(
     client, tmp_path, monkeypatch, endpoint
 ):
-    """A filename a spreadsheet would run as a formula reaches the CSV as inert text (#942)."""
+    """A filename a spreadsheet would run as a formula reaches the CSV inert (#942).
+
+    It is packaged under a "_"-prefixed name, so the CSV row and the zip member agree.
+    """
     monkeypatch.setattr(
         export_router,
         "get_config",
@@ -151,18 +152,20 @@ def test_odm_georeferencing_csv_neutralizes_formula_filenames(
     body = client.post(f"/export/{endpoint}?session_id={session.id}").json()
     with zipfile.ZipFile(body["zip_path"]) as zf:
         text = zf.read("odm_georeferencing.csv").decode()
+        members = zf.namelist()
+        if endpoint == "webodm-package":
+            assert zf.read(f"images/_{evil}") == b"jpg"
 
-    # The name holds commas and quotes, so the cell is quoted and carries the ' guard...
-    assert '"\'=HYPERLINK(""evil.example"",""x"").jpg"' in text
+    # The name holds commas and quotes, so the cell is quoted and starts inert...
+    assert '"_=HYPERLINK(""evil.example"",""x"").jpg"' in text
     # ...and reads back as one text cell, while the (negative) coordinates stay numbers.
     assert list(csv.reader(io.StringIO(text))) == [
         ["filename", "latitude", "longitude", "altitude"],
-        ["'" + evil, "-33.5", "151.25", "12.0"],
+        ["_" + evil, "-33.5", "151.25", "12.0"],
     ]
+    assert f"images/{evil}" not in members
 
 
-@pytest.mark.unit
-@pytest.mark.area_export_share
 def test_webodm_package_csv_names_match_zip_members_one_to_one(tmp_path):
     """Every CSV row names an image the zip carries, and every zipped image has a row (#942)."""
     exports = tmp_path / "exports"
@@ -172,6 +175,8 @@ def test_webodm_package_csv_names_match_zip_members_one_to_one(tmp_path):
         ("b", "DJI_0001.JPG"),
         ("c", "DJI_0003.JPG"),
         ("d", "DJI_0003.JPG"),
+        ("e", "=x.jpg"),
+        ("f", "-flight.jpg"),
     ):
         (flight / folder).mkdir(parents=True)
         (flight / folder / name).write_bytes(folder.encode())
@@ -189,6 +194,10 @@ def test_webodm_package_csv_names_match_zip_members_one_to_one(tmp_path):
         # One stored filename twice, e.g. two imports merged into one session.
         image("DJI_0003.JPG", flight / "c" / "DJI_0003.JPG"),
         image("DJI_0003.JPG", flight / "d" / "DJI_0003.JPG"),
+        # Names a spreadsheet would read as formulas: csv_safe's quote would make the
+        # CSV row differ from the member, so they are packaged under an inert name.
+        image("=x.jpg", flight / "e" / "=x.jpg"),
+        image("-flight.jpg", flight / "f" / "-flight.jpg"),
         # The source file is gone, so the zip cannot carry it and the CSV must not list it.
         image("DJI_0004.JPG", flight / "missing" / "DJI_0004.JPG"),
     ]
@@ -210,5 +219,7 @@ def test_webodm_package_csv_names_match_zip_members_one_to_one(tmp_path):
             b"c",
             b"d",
         }
-    assert len(rows) == manifest["copied_image_count"] == 4
-    assert manifest["image_count"] == 5
+        assert zf.read("images/_=x.jpg") == b"e"
+        assert zf.read("images/_-flight.jpg") == b"f"
+    assert len(rows) == manifest["copied_image_count"] == 6
+    assert manifest["image_count"] == 7
