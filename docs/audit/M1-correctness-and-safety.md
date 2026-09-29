@@ -1,6 +1,6 @@
-# M1 · v3.0.1 — Audit: Correctness & Safety Fixes
+# v3.2 — Correctness & Safety Fixes
 
-**Priority band:** P0/P1 · **Epic:** [#937](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/937) · **Work items:** 15 · **Findings:** 51
+**GitHub milestone:** `v3.2 — Correctness & Safety Fixes` · **Audit group:** M1 · **Priority band:** P0/P1 · **Epic:** [#937](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/937) · **Work items:** 15 · **Findings:** 51
 
 ## Goal
 

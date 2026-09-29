@@ -1,6 +1,6 @@
-# M5 · v3.3 — Audit: Maintainability & Type Safety
+# v3.6 — Maintainability & Type Safety
 
-**Priority band:** P3 · **Epic:** [#941](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/941) · **Work items:** 7 · **Findings:** 48
+**GitHub milestone:** `v3.6 — Maintainability & Type Safety` · **Audit group:** M5 · **Priority band:** P3 · **Epic:** [#941](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/941) · **Work items:** 7 · **Findings:** 48
 
 ## Goal
 

@@ -1,6 +1,6 @@
-# M2 · v3.2 — Audit: Test Strategy & CI Split
+# v3.3 — Test Strategy & CI Split
 
-**Priority band:** P1 · **Epic:** [#938](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/938) · **Work items:** 8 · **Findings:** 7
+**GitHub milestone:** `v3.3 — Test Strategy & CI Split` · **Audit group:** M2 · **Priority band:** P1 · **Epic:** [#938](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/938) · **Work items:** 8 · **Findings:** 7
 
 ## Goal
 

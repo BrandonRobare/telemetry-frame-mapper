@@ -1,6 +1,6 @@
-# M4 · v3.3 — Audit: Performance & Scale
+# v3.5 — Performance & Scale
 
-**Priority band:** P2/P3 · **Epic:** [#940](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/940) · **Work items:** 3 · **Findings:** 13
+**GitHub milestone:** `v3.5 — Performance & Scale` · **Audit group:** M4 · **Priority band:** P2/P3 · **Epic:** [#940](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/940) · **Work items:** 3 · **Findings:** 13
 
 ## Goal
 

@@ -1,6 +1,6 @@
-# M3 · v3.2 — Audit: Reliability & Error Handling
+# v3.4 — Reliability & Error Handling
 
-**Priority band:** P2 · **Epic:** [#939](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/939) · **Work items:** 9 · **Findings:** 42
+**GitHub milestone:** `v3.4 — Reliability & Error Handling` · **Audit group:** M3 · **Priority band:** P2 · **Epic:** [#939](https://github.com/BrandonRobare/telemetry-frame-mapper/issues/939) · **Work items:** 9 · **Findings:** 42
 
 ## Goal
 
