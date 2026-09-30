@@ -1464,6 +1464,27 @@ def test_cleanup_succeeds(client, tmp_path):
     assert cleaned.means.shape[0] == data["n_after"]
 
 
+# COLMAP->UTM 17N transform for the crop tests: yawed 90 degrees, scaled 4x, shifted.
+_CROP_GEO = {
+    "scale": 4.0,
+    "rotation": [[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]],
+    "translation": [10.0, 20.0, 5.0],
+    "utm_zone": "17N",
+    "utm_origin": [591253.0, 3873500.0],
+}
+
+
+def _crop_polygon_lonlat() -> str:
+    """Lon/lat polygon for easting +5..+12 m, northing +18..+25 m from _CROP_GEO's origin."""
+    from pyproj import Transformer
+
+    to_lonlat = Transformer.from_crs(32617, 4326, always_xy=True)
+    oe, on = _CROP_GEO["utm_origin"]
+    corners = [(5, 18), (12, 18), (12, 25), (5, 25), (5, 18)]
+    ring = [list(to_lonlat.transform(oe + de, on + dn)) for de, dn in corners]
+    return _json.dumps({"type": "Polygon", "coordinates": [ring]})
+
+
 def test_cleanup_with_target_area_crops_splat(client, tmp_path):
     import numpy as np
 
@@ -1472,10 +1493,8 @@ def test_cleanup_with_target_area_crops_splat(client, tmp_path):
 
     db = _get_db(client)
     s = _make_session_with_images(db)
-    target = TargetArea(
-        name="crop",
-        geom_geojson='{"type":"Polygon","coordinates":[[[0,0],[1,0],[1,1],[0,1],[0,0]]]}',
-    )
+    # Lon/lat, as the Plan tab stores target areas.
+    target = TargetArea(name="crop", geom_geojson=_crop_polygon_lonlat())
     db.add(target)
     db.commit()
     db.refresh(target)
@@ -1484,6 +1503,8 @@ def test_cleanup_with_target_area_crops_splat(client, tmp_path):
     rec_dir = exports_dir / "101"
     rec_dir.mkdir(parents=True)
     splat_file = rec_dir / "splat.ply"
+    # Through _CROP_GEO these COLMAP centres land at (+8, +22), (+2, +28) and (+8, +16)
+    # metres from the UTM origin: only the first is inside the target area.
     cloud = GaussianCloud(
         means=np.array([[0.5, 0.5, 0.0], [2.0, 2.0, 0.0], [-1.0, 0.5, 0.0]], dtype=np.float32),
         sh0=np.zeros((3, 3), dtype=np.float32),
@@ -1497,6 +1518,7 @@ def test_cleanup_with_target_area_crops_splat(client, tmp_path):
     rec = Reconstruction(
         id=101, session_id=s.id, preset="quick", status="complete",
         progress_pct=100.0, frames_used=3, splat_path=str(splat_file),
+        geo_transform=_json.dumps(_CROP_GEO),
     )
     db.add(rec)
     db.commit()
@@ -1516,6 +1538,54 @@ def test_cleanup_with_target_area_crops_splat(client, tmp_path):
     cleaned = read_3dgs_ply(exports_dir / "101" / "splat_cleaned.ply")
     assert cleaned.means.shape[0] == 1
     assert cleaned.means[0].tolist() == [0.5, 0.5, 0.0]
+
+
+def test_cleanup_target_area_refuses_reconstruction_without_geo_transform(client, tmp_path):
+    """A lon/lat target area cannot be matched to a splat that is not georeferenced (#950)."""
+    import numpy as np
+
+    from backend.db.models import TargetArea
+    from backend.services.ply_io import GaussianCloud, write_3dgs_ply
+
+    db = _get_db(client)
+    s = _make_session_with_images(db)
+    target = TargetArea(name="crop", geom_geojson=_crop_polygon_lonlat())
+    db.add(target)
+    db.commit()
+    db.refresh(target)
+
+    exports_dir = tmp_path / "exports"
+    rec_dir = exports_dir / "102"
+    rec_dir.mkdir(parents=True)
+    splat_file = rec_dir / "splat.ply"
+    write_3dgs_ply(
+        splat_file,
+        GaussianCloud(
+            means=np.zeros((2, 3), dtype=np.float32),
+            sh0=np.zeros((2, 3), dtype=np.float32),
+            shN=np.zeros((2, 0, 3), dtype=np.float32),
+            opacities=np.ones(2, dtype=np.float32),
+            scales=np.zeros((2, 3), dtype=np.float32),
+            quats=np.zeros((2, 4), dtype=np.float32),
+        ),
+    )
+    rec = Reconstruction(
+        id=102, session_id=s.id, preset="quick", status="complete",
+        progress_pct=100.0, frames_used=3, splat_path=str(splat_file),
+    )
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+
+    with patch("backend.routers.reconstruction.get_config") as mock_cfg:
+        mock_cfg.return_value.exports_dir = str(exports_dir)
+        resp = client.post(
+            f"/reconstruction/{rec.id}/cleanup", json={"target_area_id": target.id}
+        )
+
+    assert resp.status_code == 422
+    assert "not georeferenced" in resp.json()["detail"]
+    assert not (rec_dir / "splat_cleaned.ply").exists()
 
 
 def test_cleanup_target_area_not_found(client, tmp_path):

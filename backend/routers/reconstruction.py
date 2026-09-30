@@ -37,8 +37,10 @@ from ..services.quality_report import (
     validate_held_out_checkpoints,
 )
 from ..services.reconstruction import (
+    NotGeoreferencedError,
     _export_point_cloud,
     _load_geo_transform_for_reconstruction,
+    _require_geo_transform,
     _write_mesh_georef,
     build_reconstruction_diagnostics,
     cancel_reconstruction,
@@ -1305,7 +1307,16 @@ def cleanup_splat(
             raise HTTPException(status_code=404, detail="Target area not found")
         if not ta.geom_geojson:
             raise HTTPException(status_code=422, detail="Target area has no geometry defined")
+        # The target area is lon/lat; the splat is in this reconstruction's COLMAP
+        # frame, so the crop needs this reconstruction's solved transform (#950).
+        try:
+            geo = _require_geo_transform(
+                rec.geo_transform, "Cropping a splat to a target area", rec.id
+            )
+        except NotGeoreferencedError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
         options["target_area_geojson"] = ta.geom_geojson
+        options["geo_transform"] = geo
     try:
         stats, n_before, n_after = cleanup_ply_file(src, dst, **options)
     except Exception as exc:
