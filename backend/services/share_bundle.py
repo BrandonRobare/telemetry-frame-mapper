@@ -205,7 +205,8 @@ def build_share_bundle(zip_path: Path, rec: Reconstruction, exports_dir: Path) -
                     glb = next(
                         (entry["path"] for entry in copied if entry["label"] == "mesh_glb"), None
                     )
-                    zf.writestr("tileset.json", json.dumps(build_tileset(images, glb), indent=2))
+                    tileset = build_tileset(images, glb, geo_transform=rec.geo_transform)
+                    zf.writestr("tileset.json", json.dumps(tileset, indent=2))
             os.replace(tmp_name, name, src_dir_fd=parent_fd, dst_dir_fd=parent_fd)
         finally:
             try:
