@@ -5,8 +5,14 @@ from pathlib import Path
 
 import pytest
 import sqlalchemy as sa
+from alembic import command
+from alembic.autogenerate import compare_metadata
+from alembic.runtime.migration import MigrationContext
 
 from backend.db import database as database_module
+from backend.db.session_search import install_session_search_schema
+
+DB_FIXTURES = Path(__file__).parent / "db"
 
 
 def test_default_database_url_is_repo_rooted(monkeypatch):
@@ -50,6 +56,14 @@ def isolated_engine(monkeypatch, tmp_path):
     db_path = tmp_path / "isolated.db"
     db_url = f"sqlite:///{db_path.as_posix()}"
     isolated_engine = sa.create_engine(db_url, connect_args={"check_same_thread": False})
+
+    @sa.event.listens_for(isolated_engine, "connect")
+    def _enforce_foreign_keys(dbapi_connection, connection_record):
+        # Same as the app's engine: migrations have to work with SQLite
+        # enforcing foreign keys, because that is how they run in production.
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
 
     monkeypatch.setattr(database_module, "DATABASE_URL", db_url)
     monkeypatch.setattr(database_module, "engine", isolated_engine)
@@ -111,18 +125,91 @@ def test_init_db_upgrades_legacy_shimmed_db(isolated_engine):
     assert "alembic_version" in inspector.get_table_names()
 
 
-def test_legacy_upgrade_covers_every_model_column(isolated_engine):
-    """An immutable v2.0.2 schema must upgrade to the complete current model schema."""
-    schema = (
-        Path(__file__).parent / "db" / "v2_0_2_schema.sql"
-    ).read_text(encoding="utf-8")
-    db_path = str(isolated_engine.url).split("///")[1]
-    raw_conn = sqlite3.connect(db_path)
+def _load_schema(engine, snapshot: str) -> None:
+    """Create a database from a checked-in schema dump, bypassing the engine."""
+    raw_conn = sqlite3.connect(engine.url.database)
     try:
-        raw_conn.executescript(schema)
+        raw_conn.executescript((DB_FIXTURES / snapshot).read_text(encoding="utf-8"))
         raw_conn.commit()
     finally:
         raw_conn.close()
+
+
+def _model_diff(engine) -> list:
+    """What autogenerate would still have to change to reach the models."""
+
+    def include(obj, name, type_, reflected, compare_to):
+        # The FTS5 search index (0012) is raw SQLite DDL, not a mapped table.
+        return not (type_ == "table" and name.startswith("session_search"))
+
+    with engine.connect() as conn:
+        context = MigrationContext.configure(conn, opts={"include_object": include})
+        return compare_metadata(context, database_module.Base.metadata)
+
+
+def _physical_schema(engine) -> dict:
+    """Tables, columns, foreign keys and indexes exactly as SQLite reports them.
+
+    Column order is left out on purpose: a later revision can only append a
+    column, while create_all() puts it where the model declares it.
+    """
+    schema = {}
+    with engine.connect() as conn:
+        tables = conn.exec_driver_sql(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name != 'alembic_version'"
+        ).scalars()
+        for table in tables.all():
+            columns = {
+                row[1]: tuple(row[2:])  # type, notnull, default, pk position
+                for row in conn.exec_driver_sql(f"PRAGMA table_info('{table}')")
+            }
+            foreign_keys = sorted(
+                tuple(row[2:])  # table, from, to, on_update, on_delete, match
+                for row in conn.exec_driver_sql(f"PRAGMA foreign_key_list('{table}')")
+            )
+            indexes = set()
+            for row in conn.exec_driver_sql(f"PRAGMA index_list('{table}')").all():
+                name, unique, origin = row[1], row[2], row[3]
+                indexed = tuple(
+                    info[2] for info in conn.exec_driver_sql(f"PRAGMA index_info('{name}')")
+                )
+                # SQLite numbers the indexes behind UNIQUE constraints itself.
+                if name.startswith("sqlite_autoindex_"):
+                    name = None
+                indexes.add((name, unique, origin, indexed))
+            schema[table] = {
+                "columns": columns,
+                "foreign_keys": foreign_keys,
+                "indexes": indexes,
+            }
+    return schema
+
+
+def _fresh_schema(tmp_path) -> dict:
+    """The schema init_db() gives a brand-new install (create_all + stamp)."""
+    engine = sa.create_engine(f"sqlite:///{(tmp_path / 'fresh-reference.db').as_posix()}")
+    try:
+        database_module.Base.metadata.create_all(bind=engine)
+        with engine.begin() as connection:
+            install_session_search_schema(connection)
+        return _physical_schema(engine)
+    finally:
+        engine.dispose()
+
+
+# Released schemas that must upgrade to head. The flag says whether the dump
+# carries its CREATE INDEX statements: v2.0.2 was captured tables-only, so the
+# indexes create_all() gave that install at creation time are missing from it.
+LEGACY_SNAPSHOTS = [
+    pytest.param("v1_0_0_schema.sql", True, id="v1.0.0-pre-projects"),
+    pytest.param("v2_0_2_schema.sql", False, id="v2.0.2"),
+]
+
+
+@pytest.mark.parametrize(("snapshot", "has_indexes"), LEGACY_SNAPSHOTS)
+def test_legacy_upgrade_covers_every_model_column(isolated_engine, snapshot, has_indexes):
+    """An immutable released schema must upgrade to the complete current model schema."""
+    _load_schema(isolated_engine, snapshot)
 
     database_module.init_db()
 
@@ -130,6 +217,122 @@ def test_legacy_upgrade_covers_every_model_column(isolated_engine):
     for table in database_module.Base.metadata.sorted_tables:
         actual_columns = {column["name"] for column in inspector.get_columns(table.name)}
         assert {column.name for column in table.columns} <= actual_columns
+
+    diff = _model_diff(isolated_engine)
+    if not has_indexes:
+        diff = [change for change in diff if change[0] != "add_index"]
+    assert diff == []
+
+
+def test_pre_projects_upgrade_keeps_data_and_matches_a_fresh_install(isolated_engine, tmp_path):
+    """v1.0.0 predates projects; 0005 must add sessions.project_id as a real FK."""
+    _load_schema(isolated_engine, "v1_0_0_schema.sql")
+    with isolated_engine.begin() as conn:
+        conn.exec_driver_sql("INSERT INTO sessions (id, name) VALUES (1, 'roof survey')")
+        conn.exec_driver_sql(
+            "INSERT INTO images (id, session_id, filename, filepath) "
+            "VALUES (1, 1, 'DJI_0001.JPG', 'imports/roof/DJI_0001.JPG')"
+        )
+        conn.exec_driver_sql(
+            "INSERT INTO session_frame_selections (session_id, image_id) VALUES (1, 1)"
+        )
+        conn.exec_driver_sql("INSERT INTO reconstructions (id, session_id) VALUES (1, 1)")
+
+    database_module.init_db()
+
+    assert _physical_schema(isolated_engine) == _fresh_schema(tmp_path)
+    with isolated_engine.connect() as conn:
+        assert conn.exec_driver_sql("SELECT id, project_id FROM sessions").all() == [(1, None)]
+        assert conn.exec_driver_sql("SELECT count(*) FROM images").scalar() == 1
+        assert conn.exec_driver_sql("SELECT count(*) FROM session_frame_selections").scalar() == 1
+        assert conn.exec_driver_sql("SELECT count(*) FROM reconstructions").scalar() == 1
+        assert conn.exec_driver_sql("PRAGMA foreign_key_check").all() == []
+
+
+def test_fresh_upgrade_builds_the_same_schema_as_a_fresh_install(isolated_engine, tmp_path):
+    """The frozen baseline plus every revision must equal create_all() of the models."""
+    command.upgrade(database_module._alembic_config(), "head")
+
+    assert _model_diff(isolated_engine) == []
+    assert _physical_schema(isolated_engine) == _fresh_schema(tmp_path)
+
+
+def test_downgrade_to_0004_and_back_keeps_a_populated_database(isolated_engine, tmp_path):
+    """0010 and 0005 have to rebuild tables that other tables reference."""
+    database_module.init_db()
+    with isolated_engine.begin() as conn:
+        conn.exec_driver_sql("INSERT INTO projects (id, name) VALUES (1, 'north field')")
+        conn.exec_driver_sql("INSERT INTO sessions (id, name, project_id) VALUES (1, 'a', 1)")
+        conn.exec_driver_sql("INSERT INTO sessions (id, name) VALUES (2, 'b')")
+        conn.exec_driver_sql(
+            "INSERT INTO images (id, session_id, filename, filepath) "
+            "VALUES (1, 1, 'DJI_0001.JPG', 'imports/a/DJI_0001.JPG')"
+        )
+        conn.exec_driver_sql(
+            "INSERT INTO session_frame_selections (session_id, image_id) VALUES (1, 1)"
+        )
+        conn.exec_driver_sql("INSERT INTO reconstructions (id, session_id) VALUES (1, 1)")
+        conn.exec_driver_sql(
+            "INSERT INTO reconstructions (id, session_id, parent_reconstruction_id) "
+            "VALUES (2, 1, 1)"
+        )
+        conn.exec_driver_sql(
+            "INSERT INTO reconstruction_frames (reconstruction_id, image_id) VALUES (2, 1)"
+        )
+    cfg = database_module._alembic_config()
+
+    command.downgrade(cfg, "0004")
+
+    inspector = sa.inspect(isolated_engine)
+    assert "projects" not in inspector.get_table_names()
+    assert "project_id" not in {c["name"] for c in inspector.get_columns("sessions")}
+    assert inspector.get_foreign_keys("sessions") == []
+    assert "parent_reconstruction_id" not in {
+        c["name"] for c in inspector.get_columns("reconstructions")
+    }
+    with isolated_engine.connect() as conn:
+        assert _revision(Path(isolated_engine.url.database)) == "0004"
+        assert conn.exec_driver_sql("SELECT id FROM sessions ORDER BY id").scalars().all() == [
+            1,
+            2,
+        ]
+        # Rows that reference the rebuilt tables survive, cascading ones included.
+        assert conn.exec_driver_sql("SELECT count(*) FROM images").scalar() == 1
+        assert conn.exec_driver_sql("SELECT count(*) FROM session_frame_selections").scalar() == 1
+        assert conn.exec_driver_sql("SELECT count(*) FROM reconstructions").scalar() == 2
+        assert conn.exec_driver_sql("SELECT count(*) FROM reconstruction_frames").scalar() == 1
+
+    command.upgrade(cfg, "head")
+
+    assert _model_diff(isolated_engine) == []
+    fresh, actual = _fresh_schema(tmp_path), _physical_schema(isolated_engine)
+    # The tables 0005 and 0010 rebuild come back exactly as a fresh install has them.
+    for table in ("projects", "sessions", "reconstructions"):
+        assert actual[table] == fresh[table], table
+    with isolated_engine.connect() as conn:
+        assert conn.exec_driver_sql("SELECT id, project_id FROM sessions ORDER BY id").all() == [
+            (1, None),
+            (2, None),
+        ]
+        assert conn.exec_driver_sql("SELECT count(*) FROM session_frame_selections").scalar() == 1
+        assert conn.exec_driver_sql("SELECT count(*) FROM reconstruction_frames").scalar() == 1
+        assert conn.exec_driver_sql("PRAGMA foreign_key_check").all() == []
+
+
+def test_migrations_leave_foreign_key_enforcement_on(isolated_engine):
+    """Migrations turn enforcement off to rebuild tables; pooled connections get it back."""
+    _load_schema(isolated_engine, "v1_0_0_schema.sql")
+
+    database_module.init_db()
+
+    # Check out every pooled connection, the one the migrations used included.
+    pooled = [isolated_engine.connect() for _ in range(max(1, isolated_engine.pool.checkedin()))]
+    try:
+        enforced = [c.exec_driver_sql("PRAGMA foreign_keys").scalar() for c in pooled]
+    finally:
+        for connection in pooled:
+            connection.close()
+    assert enforced == [1] * len(pooled)
 
 
 # The FK columns revision 0016 indexes, and the columns it deliberately leaves

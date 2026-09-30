@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from logging.config import fileConfig
 
 from alembic import context
+from sqlalchemy.engine import Connection
 
 from backend.db import models  # noqa: F401  (registers all models on Base.metadata)
 from backend.db.database import Base, engine
@@ -52,13 +55,47 @@ def run_migrations_offline() -> None:
         context.run_migrations()
 
 
+@contextmanager
+def _sqlite_foreign_keys_off(connection: Connection) -> Iterator[None]:
+    """Run the migrations with SQLite foreign-key enforcement off, then restore it.
+
+    The app's engine enables ``PRAGMA foreign_keys`` on every connection. A
+    revision that has to rebuild a table (``op.batch_alter_table``, SQLite's only
+    way to add or drop a constrained column) drops the old table, and with
+    enforcement on that DROP runs an implicit DELETE: it fails while other
+    tables still reference the rows, and fires their ON DELETE CASCADE actions.
+    SQLite ignores the pragma inside a transaction, so it is switched here,
+    before the first revision opens one, as SQLite's own table-rebuild recipe
+    prescribes. The prior setting is put back before the connection returns to
+    the pool the app keeps using.
+    """
+    if connection.dialect.name != "sqlite":
+        yield
+        return
+    enforced = connection.exec_driver_sql("PRAGMA foreign_keys").scalar()
+    connection.exec_driver_sql("PRAGMA foreign_keys=OFF")
+    connection.commit()
+    if connection.exec_driver_sql("PRAGMA foreign_keys").scalar():
+        raise RuntimeError("Could not turn off SQLite foreign-key enforcement to migrate.")
+    try:
+        yield
+        connection.commit()
+    except BaseException:
+        connection.rollback()
+        raise
+    finally:
+        # Outside any transaction again, so the pragma takes effect.
+        connection.exec_driver_sql(f"PRAGMA foreign_keys={'ON' if enforced else 'OFF'}")
+        connection.commit()
+
+
 def run_migrations_online() -> None:
     """Run migrations in 'online' mode.
 
     In this scenario we need to create an Engine
     and associate a connection with the context.
     """
-    with engine.connect() as connection:
+    with engine.connect() as connection, _sqlite_foreign_keys_off(connection):
         context.configure(connection=connection, target_metadata=target_metadata)
 
         with context.begin_transaction():
