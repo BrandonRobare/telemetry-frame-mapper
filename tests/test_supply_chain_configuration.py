@@ -269,6 +269,53 @@ def test_docker_uses_locked_uv_runtime_environment_and_ci_smokes_health() -> Non
     assert "docker logs telemetry-frame-mapper-ci" in ci
 
 
+def test_dockerfile_images_are_pinned_by_digest() -> None:
+    dockerfile = DOCKERFILE.read_text(encoding="utf-8")
+    digest = r"@sha256:[0-9a-f]{64}"
+    stages = set(re.findall(r"^FROM\s+\S+\s+AS\s+(\S+)", dockerfile, flags=re.MULTILINE | re.I))
+    from_images = re.findall(r"^FROM\s+(\S+)", dockerfile, flags=re.MULTILINE | re.I)
+    copy_images = [
+        image
+        for image in re.findall(r"^COPY\s+--from=(\S+)", dockerfile, flags=re.MULTILINE | re.I)
+        if image not in stages
+    ]
+    syntax = re.findall(r"^#\s*syntax=(\S+)", dockerfile, flags=re.MULTILINE)
+
+    assert from_images
+    assert copy_images  # the uv binary comes from an external image
+    for image in [*from_images, *copy_images, *syntax]:
+        # Keep the tag for readers and Dependabot; the digest is what Docker resolves.
+        assert re.fullmatch(r"[^\s@:]+:[^\s@:]+" + digest, image), image
+
+
+def test_docker_runtime_runs_as_non_root_user_that_owns_runtime_writes() -> None:
+    dockerfile = DOCKERFILE.read_text(encoding="utf-8")
+    runtime = dockerfile[dockerfile.rindex("\nFROM ") :]
+    users = re.findall(r"^USER\s+(\S+)", runtime, flags=re.MULTILINE)
+    cmd = re.search(r"^CMD\s", runtime, flags=re.MULTILINE)
+
+    assert users, "the runtime stage must drop root with a USER directive"
+    assert users[-1] not in {"root", "0", "0:0"}
+    assert cmd is not None
+    assert runtime.rindex("\nUSER ") < cmd.start()
+    user = users[-1]
+    # Everything the app writes at runtime (DB, drop folder, derived files, exports, logs,
+    # Settings' atomic config.yaml replace, and the share signing key beside exports/).
+    chown = re.search(rf"chown\s+{re.escape(user)}:{re.escape(user)}\s+([^\n]+)", runtime)
+    assert chown is not None
+    owned = set(chown.group(1).split())
+    for path in ("/app", "/app/data", "/app/imports", "/app/processed", "/app/exports"):
+        assert path in owned, path
+    assert "/app/logs" in owned
+    assert re.search(r"mkdir -p data imports processed exports logs", runtime)
+
+
+def test_dependabot_keeps_docker_base_image_digests_current() -> None:
+    dependabot = DEPENDABOT.read_text(encoding="utf-8")
+
+    assert 'package-ecosystem: "docker"' in dependabot
+
+
 def test_ci_and_release_actions_are_immutable_and_write_scope_is_publication_job_only() -> None:
     ci = CI_WORKFLOW.read_text(encoding="utf-8")
     release = RELEASE_WORKFLOW.read_text(encoding="utf-8")
@@ -310,5 +357,8 @@ if __name__ == "__main__":
     test_tag_release_invokes_reusable_full_verification_before_publication()
     test_release_download_pattern_matches_ci_native_bundle_artifact_names()
     test_docker_uses_locked_uv_runtime_environment_and_ci_smokes_health()
+    test_dockerfile_images_are_pinned_by_digest()
+    test_docker_runtime_runs_as_non_root_user_that_owns_runtime_writes()
+    test_dependabot_keeps_docker_base_image_digests_current()
     test_ci_and_release_actions_are_immutable_and_write_scope_is_publication_job_only()
     test_dependabot_keeps_github_actions_updates_enabled()
