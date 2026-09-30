@@ -120,8 +120,10 @@ def test_share_bundle_contains_viewer_manifest_and_tileset(client, tmp_path, mon
     assert root["content"]["uri"] == "artifacts/mesh.glb"
 
 
-def test_share_bundle_refuses_reconstruction_without_geo_transform(client, tmp_path, monkeypatch):
-    """NULL geo_transform means not georeferenced: no tileset may be placed (#950)."""
+def test_share_bundle_without_geo_transform_omits_only_the_tileset(client, tmp_path, monkeypatch):
+    """NULL geo_transform: still share the artifacts, but place nothing on the globe (#950)."""
+    from backend.services import share_bundle
+
     exports = tmp_path / "exports"
     monkeypatch.setattr(
         export_router,
@@ -131,21 +133,47 @@ def test_share_bundle_refuses_reconstruction_without_geo_transform(client, tmp_p
     exports.mkdir()
     mesh = exports / "mesh.glb"
     mesh.write_bytes(b"glb")
+    splat = exports / "splat.ply"
+    splat.write_bytes(b"ply")
     db = _db(client)
     session = _make_session_with_gps_images(db, tmp_path)
     rec = Reconstruction(
-        session_id=session.id, status="complete", mesh_glb_path=str(mesh), frames_used=1
+        session_id=session.id,
+        status="complete",
+        mesh_glb_path=str(mesh),
+        splat_path=str(splat),
+        frames_used=1,
     )
     db.add(rec)
     db.commit()
     db.refresh(rec)
 
-    resp = client.post(f"/export/reconstructions/{rec.id}/share-bundle")
+    with patch.object(share_bundle, "build_tileset") as tileset:
+        resp = client.post(f"/export/reconstructions/{rec.id}/share-bundle")
 
-    assert resp.status_code == 422
-    assert "not georeferenced" in resp.json()["detail"]
-    assert not (exports / f"reconstruction_{rec.id}_share.zip").exists()
-    assert not list(exports.glob("*.tmp"))
+    assert resp.status_code == 200
+    body = resp.json()
+    tileset.assert_not_called()
+    with zipfile.ZipFile(body["bundle_path"]) as zf:
+        names = set(zf.namelist())
+        manifest = json.loads(zf.read("manifest.json"))
+    assert {"manifest.json", "index.html", "artifacts/mesh.glb", "artifacts/splat.ply"} <= names
+    assert "tileset.json" not in names
+    for cesium in (body["cesium"], manifest["cesium"]):
+        assert cesium["tileset_json"] is None
+        assert f"reconstruction {rec.id} is not georeferenced" in cesium["tileset_omitted_reason"]
+
+
+def test_share_bundle_manifest_names_the_tileset_only_when_georeferenced():
+    from backend.services.share_bundle import build_share_manifest
+
+    placed = build_share_manifest(Reconstruction(id=5, geo_transform=json.dumps(_GEO)))
+    unplaced = build_share_manifest(Reconstruction(id=6))
+
+    assert placed["cesium"]["tileset_json"] == "tileset.json"
+    assert "tileset_omitted_reason" not in placed["cesium"]
+    assert unplaced["cesium"]["tileset_json"] is None
+    assert "not georeferenced" in unplaced["cesium"]["tileset_omitted_reason"]
 
 
 def test_share_bundle_tileset_valid_without_glb(client, tmp_path, monkeypatch):

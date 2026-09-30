@@ -82,13 +82,16 @@ ingest, analysis, planning, reconstruction, and export.
   and viewer page. The root tile's ECEF `transform` places the mesh (which stays in COLMAP's frame)
   through the reconstruction's solved COLMAP→UTM geo-transform; `boundingVolume.region` comes from
   the image GPS bounds. When a mesh GLB is available it's bundled and referenced as tile content,
-  otherwise the tileset still carries the region/transform with no content. A reconstruction that
-  is **not georeferenced** is refused with `422` rather than placed at a guessed position; the same
-  applies to Cesium ion publishing below. Placement is as good as the GPS fit (`rmse_m` in the
-  geo-transform), not a substitute for ground control.
+  otherwise the tileset still carries the region/transform with no content. `tileset.json` is
+  included only for a georeferenced reconstruction: for one that is **not georeferenced** the
+  bundle still ships the manifest, viewer page and artifacts, with the manifest's
+  `cesium.tileset_json` set to `null` and a `tileset_omitted_reason`, rather than a model placed at
+  a guessed position. Placement is as good as the GPS fit (`rmse_m` in the geo-transform), not a
+  substitute for ground control.
 - **Cesium ion publishing:** with an explicitly enabled `cesium_ion` configuration and a token held
   only in its named environment variable, `POST /export/reconstructions/{id}/cesium-ion` uploads
-  that existing share bundle and returns the ion asset ID. See [CESIUM-ION.md](CESIUM-ION.md).
+  that existing share bundle and returns the ion asset ID; a reconstruction that is not
+  georeferenced has nothing to place and is refused with `422`. See [CESIUM-ION.md](CESIUM-ION.md).
 - **Session archive/restore:** `POST /sessions/{id}/archive` bundles a session's
   full DB state (images, flight logs, reconstructions with lineage,
   measurements, annotations, defects, etc.) plus its artifact files into one
