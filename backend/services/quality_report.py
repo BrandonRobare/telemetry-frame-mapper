@@ -273,6 +273,17 @@ def validate_held_out_checkpoints(
 
     results: list[CheckpointValidation] = []
     np_points = np.array(points, dtype=np.float64)
+    from backend.services.reconstruction import NotGeoreferencedError
+
+    try:
+        np_points, frame = _surface_points_in_checkpoint_frame(rec, source, np_points)
+    except NotGeoreferencedError as exc:
+        return {
+            "available": False,
+            "status": "not_georeferenced",
+            "source": source,
+            "reason": str(exc),
+        }
 
     for sp in survey_points:
         query = np.array([sp.x, sp.y, sp.z], dtype=np.float64)
@@ -294,6 +305,7 @@ def validate_held_out_checkpoints(
     return {
         "available": True,
         "source": source,
+        "frame": frame,
         "point_count": len(survey_points),
         "surface_point_count": len(points),
         "summary": {
@@ -462,6 +474,33 @@ def _rmse(values: list[float]) -> float:
     if not values:
         return 0.0
     return math.sqrt(sum(v * v for v in values) / len(values))
+
+
+def _surface_points_in_checkpoint_frame(
+    rec: Any, source: str, points: np.ndarray
+) -> tuple[np.ndarray, dict]:
+    """Put surface points in the frame checkpoints are surveyed in (#950).
+
+    Checkpoints are absolute UTM easting/northing in the reconstruction's zone, with
+    heights in its geo-transform's vertical frame (as in the LAS export), so every
+    distance is in metres. Mesh and splat vertices are in COLMAP's frame and go
+    through the solved transform; the LAS export is already written in that UTM
+    frame. Returns ``(points, frame)``; raises ``NotGeoreferencedError`` when the
+    reconstruction has no solved transform.
+    """
+    from backend.services.reconstruction import (
+        _require_geo_transform,
+        _utm_epsg,
+        _world_points_to_utm,
+    )
+
+    geo = _require_geo_transform(
+        getattr(rec, "geo_transform", None), "Checkpoint validation", getattr(rec, "id", None)
+    )
+    if source != "pointcloud":
+        points = _world_points_to_utm(points, geo)
+    zone = str(geo["utm_zone"])
+    return points, {"crs": f"EPSG:{_utm_epsg(zone)}", "utm_zone": zone}
 
 
 def parse_surveyed_points_3d(

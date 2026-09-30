@@ -412,7 +412,11 @@ class RenderVideoIn(BaseModel):
 
 
 class SurveyedPointIn(BaseModel):
-    """A surveyed checkpoint in local reconstruction coordinates."""
+    """A surveyed checkpoint: UTM easting/northing (m) in the reconstruction's zone.
+
+    ``z`` is height in the reconstruction's geo-transform vertical frame. The zone is
+    the ``utm_zone`` of ``GET /reconstruction/{id}/geo-transform``.
+    """
     label: str | None = None
     x: float
     y: float

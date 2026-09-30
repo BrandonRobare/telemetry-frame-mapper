@@ -704,12 +704,16 @@ curl -O -J "http://127.0.0.1:8000/reconstruction/1/download-bundle"
 
 **Checkpoint validation** — scores a finished reconstruction against independently surveyed points,
 which is the honest way to measure accuracy (points used for registration cannot also validate it).
-Coordinates are in the reconstruction's **local frame**, not lat/lon, and at least one is required.
+Coordinates are **UTM easting/northing in metres** in the reconstruction's zone (the `utm_zone` of
+`GET /reconstruction/{id}/geo-transform`), with `z` in the same height frame as the LAS export; at
+least one is required. The mesh or splat is mapped into that frame through the solved
+geo-transform, so the reconstruction must be georeferenced (otherwise `422`). The response's
+`frame` names the CRS the distances were measured in.
 
 ```bash
 curl -X POST http://127.0.0.1:8000/reconstruction/1/validate-checkpoints \
   -H "Content-Type: application/json" \
-  -d '{"points": [{"label": "CP1", "x": 12.40, "y": -3.15, "z": 0.87}]}'
+  -d '{"points": [{"label": "CP1", "x": 591265.40, "y": 3873518.85, "z": 12.87}]}'
 ```
 
 **GCP list** — converts marked ground control points into a list for downstream tools. Each point
