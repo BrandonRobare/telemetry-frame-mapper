@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import sqlite3
 from pathlib import Path
 
@@ -224,7 +225,60 @@ def test_legacy_upgrade_covers_every_model_column(isolated_engine, snapshot, has
     assert diff == []
 
 
-def test_pre_projects_upgrade_keeps_data_and_matches_a_fresh_install(isolated_engine, tmp_path):
+class _Captured(logging.Handler):
+    def __init__(self) -> None:
+        super().__init__(logging.WARNING)
+        self.messages: list[str] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self.messages.append(record.getMessage())
+
+
+@pytest.fixture
+def migration_warnings():
+    """Warnings from env.py's migration logger.
+
+    Captured on the logger itself: env.py's fileConfig() replaces the root
+    handlers, caplog's included, as soon as a migration starts.
+    """
+    migration_logger = logging.getLogger("backend.db.migrations")
+    handler = _Captured()
+    migration_logger.addHandler(handler)
+    try:
+        yield handler.messages
+    finally:
+        migration_logger.removeHandler(handler)
+
+
+def test_upgrade_reports_pre_existing_orphans_and_still_starts(
+    isolated_engine, migration_warnings
+):
+    """v1.0.0 never enforced foreign keys, so its databases may hold orphaned rows."""
+    _load_schema(isolated_engine, "v1_0_0_schema.sql")
+    raw_conn = sqlite3.connect(isolated_engine.url.database)  # no FK enforcement, like v1.0.0
+    try:
+        raw_conn.execute("INSERT INTO sessions (id, name) VALUES (1, 'kept')")
+        raw_conn.execute(
+            "INSERT INTO images (id, session_id, filename, filepath) "
+            "VALUES (1, 99, 'DJI_0099.JPG', 'imports/deleted/DJI_0099.JPG')"
+        )
+        raw_conn.commit()
+    finally:
+        raw_conn.close()
+
+    database_module.init_db()
+
+    assert database_module._at_migration_head(database_module._alembic_config())
+    with isolated_engine.connect() as conn:
+        assert conn.exec_driver_sql("SELECT id, session_id FROM images").all() == [(1, 99)]
+    assert len(migration_warnings) == 1
+    assert "found 1 row(s) that reference a missing row" in migration_warnings[0]
+    assert "images -> sessions: 1" in migration_warnings[0]
+
+
+def test_pre_projects_upgrade_keeps_data_and_matches_a_fresh_install(
+    isolated_engine, tmp_path, migration_warnings
+):
     """v1.0.0 predates projects; 0005 must add sessions.project_id as a real FK."""
     _load_schema(isolated_engine, "v1_0_0_schema.sql")
     with isolated_engine.begin() as conn:
@@ -240,6 +294,7 @@ def test_pre_projects_upgrade_keeps_data_and_matches_a_fresh_install(isolated_en
 
     database_module.init_db()
 
+    assert migration_warnings == []  # clean data: the foreign-key check stays quiet
     assert _physical_schema(isolated_engine) == _fresh_schema(tmp_path)
     with isolated_engine.connect() as conn:
         assert conn.exec_driver_sql("SELECT id, project_id FROM sessions").all() == [(1, None)]
