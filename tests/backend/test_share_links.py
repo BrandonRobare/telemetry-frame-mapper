@@ -365,6 +365,29 @@ class TestPersistedShareLinks:
         assert "secure" not in cookie  # TestClient uses local HTTP.
         assert client.get(f"/share/token/{token}").status_code == 200
 
+    def test_password_required_is_a_machine_readable_401(self, client):
+        """The share viewer branches on this code, never on the message text (#952)."""
+        from backend.routers.share_links import SHARE_PASSWORD_REQUIRED_CODE
+
+        assert SHARE_PASSWORD_REQUIRED_CODE == "share_password_required"
+        rec = self._completed_reconstruction(client)
+        protected = self._create(client, rec, password="secret")
+        response = client.get(f"/share/token/{protected['share_token']}")
+        assert response.status_code == 401
+        assert response.json() == {
+            "detail": "Share link password required",
+            "code": "share_password_required",
+        }
+
+        # Other refusals carry no password code, so the viewer shows them as errors.
+        revoked = self._create(client, rec)
+        client.post(
+            f"/export/reconstructions/{rec.id}/share-links/{revoked['share_link_id']}/revoke"
+        )
+        gone = client.get(f"/share/token/{revoked['share_token']}")
+        assert gone.status_code == 410
+        assert "code" not in gone.json()
+
     def test_https_proxy_marks_unlock_cookie_secure(self, client):
         rec = self._completed_reconstruction(client)
         created = self._create(client, rec, password="secret")

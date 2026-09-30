@@ -116,7 +116,13 @@ When a job finishes (complete, failed, or cancelled) the app shows a toast from 
 ## 8. Export
 
 **Export tab:**
-- **WebODM georeferencing CSV** — zip containing only `odm_georeferencing.csv` for ODM processing,
+- **WebODM georeferencing CSV** — zip containing only `odm_georeferencing.csv` for ODM processing;
+  the button builds it (`POST /export/webodm-georeferencing-csv?session_id=…`), then the browser
+  downloads it from `GET /export/webodm-georeferencing-csv/download?session_id=…`,
+- **Survey report** — **View / Print Report** opens `GET /export/survey-report?session_id=…&format=html`
+  and **Download JSON** saves `format=json` (POST is still accepted for API clients),
+- **Public share links** — per completed reconstruction: generate a link (optionally
+  password-protected), and see and **Revoke** the links that still work,
 - **GeoJSON** — frame positions/footprints,
 - **Point cloud (LAS 1.4)** — from the COLMAP sparse model, colorized from the splat when present, UTM CRS embedded,
 - **DSM GeoTIFF** — `POST /export/reconstructions/{id}/elevation?product=dsm&resolution_m=0.25`

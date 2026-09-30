@@ -156,6 +156,28 @@ def test_survey_report_endpoint_html(client):
     assert "Survey Report" in resp.text
 
 
+def test_survey_report_get_serves_the_export_tab_links(client):
+    """The Export tab opens the report with window.open and a download link: both GET (#952)."""
+    from backend.main import app
+
+    db = app.state.test_db_session
+    session = _make_session(db)
+    for i in range(3):
+        _add_image(db, session.id, i)
+
+    html = client.get(f"/export/survey-report?session_id={session.id}&format=html")
+    assert html.status_code == 200
+    assert html.headers["content-type"] == "text/html; charset=utf-8"
+    assert "Survey Report" in html.text
+
+    data = client.get(f"/export/survey-report?session_id={session.id}&format=json")
+    assert data.status_code == 200
+    assert data.json()["report_type"] == "survey-report"
+    assert data.json()["frame_summary"]["total"] == 3
+
+    assert client.get("/export/survey-report?session_id=999999").status_code == 404
+
+
 def test_survey_report_404(client):
     resp = client.post("/export/survey-report?session_id=999999")
     assert resp.status_code == 404

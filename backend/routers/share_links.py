@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session as DBSession
 
@@ -27,9 +27,17 @@ from ..services.share_links import (
 
 router = APIRouter(prefix="/share", tags=["share"])
 
+# Sent as ``code`` beside ``detail`` in the 401 for a locked link. The share viewer
+# shows its password form on this code, so the message text can change freely.
+SHARE_PASSWORD_REQUIRED_CODE = "share_password_required"
+
 
 class ShareLinkUnlockRequest(BaseModel):
     password: str
+
+
+class _SharePasswordRequired(Exception):
+    """A password-protected link was opened without its unlock session."""
 
 
 def _bare_token(token: str) -> str:
@@ -128,7 +136,7 @@ def _resolve_metadata_link(
     if link.password_hash:
         unlocked = _unlock_link(request, db)
         if not unlocked or unlocked.id != link.id:
-            raise HTTPException(status_code=401, detail="Share link password required")
+            raise _SharePasswordRequired
     _set_unlock_cookie(response, request, link, db)
     return rec, False
 
@@ -199,8 +207,21 @@ def public_viewer_metadata(
     response: Response,
     db: DBSession = Depends(get_db),
 ):
-    """Return read-only reconstruction metadata after required link access checks."""
-    rec, legacy = _resolve_metadata_link(token, request, response, db)
+    """Return read-only reconstruction metadata after required link access checks.
+
+    A password-protected link without an unlock session is a 401 whose body carries
+    ``code: "share_password_required"`` for the viewer to branch on.
+    """
+    try:
+        rec, legacy = _resolve_metadata_link(token, request, response, db)
+    except _SharePasswordRequired:
+        return JSONResponse(
+            status_code=401,
+            content={
+                "detail": "Share link password required",
+                "code": SHARE_PASSWORD_REQUIRED_CODE,
+            },
+        )
     return build_public_viewer_payload(rec, legacy=legacy)
 
 

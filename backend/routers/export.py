@@ -784,6 +784,7 @@ def revoke_share_link(reconstruction_id: int, share_link_id: int, db: DBSession 
     return _share_link_owner_payload(link)
 
 
+@router.get("/survey-report")
 @router.post("/survey-report")
 def export_survey_report(
     session_id: int,
@@ -794,6 +795,10 @@ def export_survey_report(
 
     Returns structured JSON by default. Pass ``format=html`` for self-contained
     HTML, or ``format=pdf`` for a PDF when WeasyPrint is installed.
+
+    Building the report only reads the database, so GET serves it as well: the
+    Export tab opens it with a plain link and ``window.open`` (#952). POST is
+    kept for existing API clients.
     """
     from fastapi.responses import HTMLResponse, Response
 
@@ -828,6 +833,40 @@ def export_survey_report(
     if format != "json":
         raise HTTPException(status_code=422, detail="format must be json, html, or pdf")
     return report
+
+
+@router.get("/webodm-georeferencing-csv/download")
+def download_webodm_georeferencing_csv(session_id: int, db: DBSession = Depends(get_db)):
+    """Download the zip that ``POST /export/webodm-georeferencing-csv`` last built.
+
+    Read-only: it never builds the archive, so the POST stays its only writer. The
+    client gets its own snapshot, so a rebuild can replace the durable file mid-download.
+    """
+    session = db.query(SessionModel).filter(SessionModel.id == session_id).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    exports_dir = Path(get_config().exports_dir)
+    zip_path = confine_path(
+        exports_dir / f"webodm_georeferencing_csv_{int(session.id)}.zip",
+        exports_dir,
+        boundary_name="exports directory",
+        reject_aliases=True,
+    )
+    if not zip_path.is_file():
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                "No georeferencing CSV zip for this session yet; build it with "
+                "POST /export/webodm-georeferencing-csv"
+            ),
+        )
+    download_path = _download_snapshot(zip_path)
+    return FileResponse(
+        download_path,
+        media_type="application/zip",
+        filename=zip_path.name,
+        background=BackgroundTask(download_path.unlink, missing_ok=True),
+    )
 
 
 @router.post("/webodm-package")

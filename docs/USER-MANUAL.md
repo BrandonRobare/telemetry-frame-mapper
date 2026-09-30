@@ -494,11 +494,15 @@ Public responses distinguish the failure modes:
 
 | Status | Meaning |
 |---|---|
-| `401` | The link is password-protected and not yet unlocked |
+| `401` | The link is password-protected and not yet unlocked; the body carries `"code": "share_password_required"` next to `detail` |
 | `403` | Wrong password, or the token does not match this reconstruction |
 | `410` | Expired or revoked |
 
-Owners can inspect and revoke links:
+The viewer shows its password form on that `code`, not on the message text.
+
+The Export tab lists each reconstruction's links that still work (created and expiry dates, and
+whether a password is set) with a **Revoke** button. Over the API, owners can inspect and revoke
+links:
 
 ```bash
 GET  /export/reconstructions/{id}/share-links
