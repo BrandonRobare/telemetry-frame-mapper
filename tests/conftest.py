@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import NullPool
 
@@ -37,6 +37,13 @@ test_engine = create_engine(
     connect_args={"check_same_thread": False},
     poolclass=NullPool,
 )
+if test_engine.dialect.name == "sqlite":
+    # The app's engine enforces foreign keys (backend/db/database.py); tests must too,
+    # or a delete that fails in production on a foreign key passes here (#945).
+    @event.listens_for(test_engine, "connect")
+    def _enforce_sqlite_foreign_keys(dbapi_connection, connection_record):
+        dbapi_connection.execute("PRAGMA foreign_keys=ON")
+
 TestSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=test_engine)
 
 

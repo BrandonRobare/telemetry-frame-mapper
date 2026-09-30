@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from unittest.mock import patch
+
 from backend.db.models import AutoImportRecord, Session
 from backend.services.auto_import import AutoImportWatcher
 from tests.conftest import TestSessionLocal
@@ -76,6 +78,36 @@ def test_persisted_fingerprint_prevents_reimport_after_watcher_restart(tmp_path)
     with TestSessionLocal() as db:
         assert db.query(AutoImportRecord).count() == 1
         assert db.query(Session).count() == 1
+
+
+def test_deleted_session_is_not_reimported_while_its_folder_stays_in_the_root(client, tmp_path):
+    """Deleting a watch-folder session keeps its claim, so it stays deleted (#945)."""
+    root = tmp_path / "card"
+    flight = root / "100MEDIA"
+    flight.mkdir(parents=True)
+    (flight / "DJI_0001.JPG").write_bytes(b"same media")
+    clock = [0.0]
+    calls: list[tuple[int, object]] = []
+    watcher = _watcher(_config(root, stable_seconds=0), clock, calls)
+    watcher.poll_once()
+    watcher.poll_once()
+    assert len(calls) == 1
+    session_id = calls[0][0]
+
+    storage = type("Cfg", (), {
+        "processed_dir": str(tmp_path / "processed"),
+        "exports_dir": str(tmp_path / "exports"),
+        "data_dir": str(tmp_path / "data"),
+    })()
+    with patch("backend.routers.sessions.get_config", return_value=storage):
+        assert client.delete(f"/sessions/{session_id}").status_code == 200
+
+    watcher.poll_once()
+    watcher.poll_once()
+    assert len(calls) == 1
+    with TestSessionLocal() as db:
+        assert db.query(Session).count() == 0
+        assert [record.session_id for record in db.query(AutoImportRecord)] == [None]
 
 
 def test_missing_and_file_roots_are_reported_without_importing(tmp_path):
