@@ -236,3 +236,89 @@ def test_cesium_route_returns_actionable_safe_error(client, tmp_path, monkeypatc
         response.json()["detail"]
         == "Cesium ion token is missing from environment variable CESIUM_ION_TOKEN"
     )
+
+
+@pytest.mark.parametrize(
+    "completion_url",
+    [
+        "https://attacker.example/v1/assets/81/uploadComplete",
+        "https://api.cesium.test.attacker.example/v1/assets/81/uploadComplete",
+        "https://api.cesium.test@attacker.example/v1/assets/81/uploadComplete",
+        "https://user@api.cesium.test/v1/assets/81/uploadComplete",
+        "https://api.cesium.test:8443/v1/assets/81/uploadComplete",
+        "http://api.cesium.test/v1/assets/81/uploadComplete",
+        "/v1/assets/81/uploadComplete",
+    ],
+)
+def test_completion_url_off_the_ion_api_origin_never_receives_the_token(
+    tmp_path, monkeypatch, completion_url
+):
+    monkeypatch.setenv("CESIUM_ION_TEST_TOKEN", "ion-secret")
+    created = httpx.Response(
+        201,
+        json={
+            "assetMetadata": {"id": 81, "status": "AWAITING_FILES"},
+            "uploadLocation": {
+                "bucket": "assets.cesium.test",
+                "prefix": "sources/81/",
+                "endpoint": "https://assets.cesium.test",
+                "accessKey": "temporary-access",
+                "secretAccessKey": "temporary-secret",
+                "sessionToken": "temporary-session",
+            },
+            "onComplete": {"method": "POST", "url": completion_url, "fields": {}},
+        },
+        request=httpx.Request("POST", "https://api.cesium.test/v1/assets"),
+    )
+    sent = []
+
+    def _record(method, url, **kwargs):
+        sent.append((method, url, kwargs.get("headers", {})))
+        if method == "PUT":
+            return httpx.Response(200, request=httpx.Request("PUT", url))
+        if url == completion_url:
+            return httpx.Response(204, request=httpx.Request("POST", "https://x.test"))
+        return created
+
+    with patch("backend.services.cesium_ion.httpx.request", side_effect=_record):
+        with pytest.raises(CesiumIonError, match="completion URL"):
+            upload_tileset(_config(), "tiles.zip", _bundle(tmp_path), "Mission")
+
+    assert all(url != completion_url for _, url, _ in sent)
+    token_urls = [url for _, url, headers in sent if "ion-secret" in str(headers)]
+    assert token_urls == ["https://api.cesium.test/v1/assets"]
+    # Nothing is uploaded for an asset that could not be completed.
+    assert all(method != "PUT" for method, _, _ in sent)
+
+
+def test_completion_url_on_the_configured_api_origin_is_accepted(tmp_path, monkeypatch):
+    """Host comparison ignores case and an explicit default port."""
+    monkeypatch.setenv("CESIUM_ION_TEST_TOKEN", "ion-secret")
+    completion_url = "https://API.cesium.test:443/v1/assets/81/uploadComplete"
+    created = httpx.Response(
+        201,
+        json={
+            "assetMetadata": {"id": 81, "status": "AWAITING_FILES"},
+            "uploadLocation": {
+                "bucket": "assets.cesium.test",
+                "prefix": "sources/81/",
+                "endpoint": "https://assets.cesium.test",
+                "accessKey": "temporary-access",
+                "secretAccessKey": "temporary-secret",
+                "sessionToken": "temporary-session",
+            },
+            "onComplete": {"method": "POST", "url": completion_url, "fields": {}},
+        },
+        request=httpx.Request("POST", "https://api.cesium.test/v1/assets"),
+    )
+
+    def _respond(method, url, **kwargs):
+        if method == "PUT":
+            return httpx.Response(200, request=httpx.Request("PUT", url))
+        if url == completion_url:
+            return httpx.Response(204, request=httpx.Request("POST", url))
+        return created
+
+    with patch("backend.services.cesium_ion.httpx.request", side_effect=_respond):
+        result = upload_tileset(_config(), "tiles.zip", _bundle(tmp_path), "Mission")
+    assert result == {"asset_id": 81, "status": "AWAITING_FILES"}

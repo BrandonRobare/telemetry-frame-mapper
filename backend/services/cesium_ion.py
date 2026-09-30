@@ -38,6 +38,34 @@ def _base_url(config: dict) -> str:
     return url.rstrip("/")
 
 
+def _origin(parsed) -> tuple[str, str | None, int | None]:
+    default_port = {"https": 443, "http": 80}.get(parsed.scheme)
+    return parsed.scheme, parsed.hostname, parsed.port or default_port
+
+
+def _require_api_origin(config: dict, url: str, asset_id: int) -> None:
+    """Only the configured ion API origin may receive the bearer token.
+
+    ``onComplete.url`` comes from the asset-creation response; a token sent to any
+    other host, scheme or port would leak the account credential.
+    """
+    try:
+        parsed = urlparse(url)
+        origin = _origin(parsed)
+    except ValueError:
+        origin = None
+    if (
+        origin is None
+        or parsed.username is not None
+        or parsed.password is not None
+        or origin != _origin(urlparse(_base_url(config)))
+    ):
+        raise CesiumIonError(
+            f"Cesium ion asset {asset_id} returned a completion URL outside the configured "
+            "Cesium ion API; refusing to send the token"
+        )
+
+
 def _headers(config: dict) -> dict[str, str]:
     name = str(config.get("token_env", "CESIUM_ION_TOKEN"))
     token = os.environ.get(name, "").strip()
@@ -176,13 +204,15 @@ def upload_tileset(config: dict, bundle_name: str, bundle: Path, name: str) -> d
     complete = created.get("onComplete")
     if not isinstance(upload, dict) or not isinstance(complete, dict):
         raise CesiumIonError(f"Cesium ion asset {asset_id} did not provide upload instructions")
-    _upload_bundle(config, upload, bundle_name, bundle)
     method, url = complete.get("method"), complete.get("url")
     if not isinstance(method, str) or not isinstance(url, str) or not url:
         raise CesiumIonError(f"Cesium ion asset {asset_id} did not provide completion instructions")
     fields = complete.get("fields", {})
     if not isinstance(fields, dict):
         raise CesiumIonError(f"Cesium ion asset {asset_id} returned invalid completion fields")
+    # Validate before uploading, so a bad completion target leaves nothing half-done.
+    _require_api_origin(config, url, asset_id)
+    _upload_bundle(config, upload, bundle_name, bundle)
     try:
         response = httpx.request(
             method, url, headers=_headers(config), json=fields, timeout=config["timeout_seconds"]

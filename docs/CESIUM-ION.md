@@ -17,7 +17,9 @@ cesium_ion:
 
 The request builds `reconstruction_{id}_share.zip`, creates a `3DTILES` asset, uploads that ZIP
 using Cesium's short-lived storage credentials, and notifies ion to begin processing. The API never
-returns the configured token or the temporary storage credentials. A disabled integration, absent
+returns the configured token or the temporary storage credentials, and the token is only ever sent
+to the configured `api_url` origin: a completion URL on any other scheme, host, or port is refused
+before the upload starts. A disabled integration, absent
 token, unsafe URL, invalid Cesium response, or upload failure returns `422` with an actionable
 message. Processing continues in Cesium ion; inspect the returned `asset_id` in its dashboard.
 
