@@ -247,6 +247,7 @@ def test_update_rec_clamps_negative_duration_to_zero(setup_test_db):
 
 def _make_mock_image(filename="frame_00001.jpg", filepath=None, lat=35.0, lon=-80.0, alt=100.0):
     img = MagicMock()
+    img.session_id = 1
     img.filename = filename
     img.filepath = filepath or f"/tmp/{filename}"
     img.latitude = lat
@@ -341,8 +342,68 @@ def test_workspace_image_copied_or_linked():
         src.write_bytes(b"fake jpg")
         img = _make_mock_image(filename="source.jpg", filepath=str(src))
         _write_colmap_workspace(colmap_dir, [img])
-        dest = colmap_dir / "images" / "source.jpg"
+        dest = colmap_dir / "images" / "1_source.jpg"
         assert dest.exists()
+
+
+def _two_sessions_with_the_same_filename(db, tmp_path=None):
+    """Two flights whose cards both restarted numbering at DJI_0001.JPG."""
+    from backend.db.models import Image
+
+    images = []
+    for label in ("north", "south"):
+        session = _make_session(db)
+        src = Path(f"/tmp/{label}/DJI_0001.JPG")
+        if tmp_path is not None:
+            src = tmp_path / label / "DJI_0001.JPG"
+            src.parent.mkdir(parents=True)
+            src.write_bytes(f"{label} flight".encode())
+        img = Image(
+            session_id=session.id,
+            filename="DJI_0001.JPG",
+            filepath=str(src),
+            usable=True,
+            latitude=35.0,
+            longitude=-80.0,
+            altitude_m=100.0,
+        )
+        db.add(img)
+        db.commit()
+        db.refresh(img)
+        images.append(img)
+    return images
+
+
+def test_two_sessions_with_the_same_filename_stage_two_distinct_images(setup_test_db, tmp_path):
+    """A multi-session run must not drop the second session's DJI_0001.JPG."""
+    from unittest.mock import patch
+
+    from backend.db.models import Image
+    from backend.main import app
+    from backend.services.reconstruction import _write_colmap_workspace, start_reconstruction
+
+    db = app.state.test_db_session
+    north, south = _two_sessions_with_the_same_filename(db, tmp_path)
+
+    with patch("backend.services.reconstruction.enqueue") as enqueue:
+        rec = start_reconstruction(
+            north.session_id,
+            "quick",
+            db,
+            source_session_ids=[north.session_id, south.session_id],
+        )
+    image_ids = enqueue.call_args.kwargs["payload"]["image_ids"]
+    assert rec.frames_used == 2
+    images = db.query(Image).filter(Image.id.in_(image_ids)).all()
+
+    colmap_dir = tmp_path / "colmap"
+    _write_colmap_workspace(colmap_dir, images)
+
+    staged = {path.name: path.read_bytes() for path in (colmap_dir / "images").iterdir()}
+    assert staged == {
+        f"{north.session_id}_DJI_0001.JPG": b"north flight",
+        f"{south.session_id}_DJI_0001.JPG": b"south flight",
+    }
 
 
 def _fake_colmap_popen(returncode=0, stderr=""):
@@ -1475,6 +1536,98 @@ def test_run_pipeline_trainer_result_persisted_and_lod_generated(setup_test_db):
         assert medium.means.shape[0] == 2  # int(4 * 0.50)
 
 
+@pytest.mark.parametrize(
+    ("colmap_error", "trainer_error", "expected_error"),
+    [
+        (None, "CUDA out of memory: tried to allocate 2 GiB", "switch to 'quick' preset"),
+        (None, "Training frame not found: /data/frames/f.jpg", "Training frame not found"),
+        ("COLMAP mapper failed (exit code 1)", None, "COLMAP mapper failed"),
+    ],
+)
+def test_failed_reconstruction_marks_its_queue_entry_failed(
+    setup_test_db, colmap_error, trainer_error, expected_error
+):
+    """The queue entry must mirror the reconstruction row: failed, not completed or re-queued."""
+    import threading
+    from datetime import datetime
+    from unittest.mock import MagicMock, patch
+
+    from backend.db.models import JobQueueEntry
+    from backend.main import app
+    from backend.services import job_queue as jq
+    from backend.services import reconstruction as recon
+
+    db = app.state.test_db_session
+    with tempfile.TemporaryDirectory() as tmp:
+        rec, img, colmap_dir = _pipeline_fixture(db, tmp)
+        # Same payload and retry budget start_reconstruction enqueues with.
+        entry = jq.enqueue(
+            jq.RECONSTRUCTION,
+            rec.id,
+            payload={"preset": "quick", "colmap_dir": str(colmap_dir), "image_ids": [img.id]},
+            priority=10,
+            max_attempts=2,
+        )
+        assert jq._claim_pending(db, entry.id, datetime.now(UTC)) is True
+
+        colmap = MagicMock(return_value=1)
+        if colmap_error:
+            colmap.side_effect = RuntimeError(colmap_error)
+        trainer = MagicMock(side_effect=RuntimeError(trainer_error or "not reached"))
+        orig = jq._handlers.get(jq.RECONSTRUCTION)
+        jq.register_handler(jq.RECONSTRUCTION, recon._run_pipeline)
+        try:
+            with patch("backend.services.reconstruction._write_colmap_workspace", MagicMock()), \
+                 patch("backend.services.reconstruction._run_colmap", colmap), \
+                 patch("backend.services.reconstruction._run_gsplat", trainer), \
+                 patch(
+                     "backend.services.reconstruction.get_remote_worker_config",
+                     return_value={"enabled": False},
+                 ), \
+                 patch("backend.services.reconstruction.get_config") as mock_cfg:
+                mock_cfg.return_value.data_dir = tmp
+                mock_cfg.return_value.exports_dir = tmp
+                mock_cfg.return_value.processed_dir = tmp
+                jq._execute_job(
+                    entry.id, jq.RECONSTRUCTION, rec.id, entry.payload_json, threading.Event()
+                )
+        finally:
+            if orig is not None:
+                jq.register_handler(jq.RECONSTRUCTION, orig)
+
+    stored = db.query(JobQueueEntry).filter(JobQueueEntry.id == entry.id).one()
+    db.refresh(rec)
+    assert rec.status == "failed"
+    assert expected_error in rec.error_msg
+    assert stored.status == "failed", "queue entry must match the failed reconstruction"
+    assert expected_error in stored.error_msg
+
+
+@pytest.mark.parametrize(
+    "live_status",
+    ["pending", "running_colmap", "running_gsplat", "running_remote", "cancelling"],
+)
+def test_start_reconstruction_refuses_while_a_run_is_live(setup_test_db, live_status):
+    from unittest.mock import patch
+
+    from backend.db.models import Image
+    from backend.main import app
+    from backend.services.reconstruction import start_reconstruction
+
+    db = app.state.test_db_session
+    s = _make_session(db)
+    db.add(Image(session_id=s.id, filename="f.jpg", filepath="/tmp/f.jpg", usable=True))
+    db.add(Reconstruction(session_id=s.id, preset="quick", status=live_status, frames_used=1))
+    db.commit()
+
+    with patch("backend.services.reconstruction.enqueue") as enqueue:
+        with pytest.raises(ValueError, match="already in progress"):
+            start_reconstruction(s.id, "quick", db)
+
+    enqueue.assert_not_called()
+    assert db.query(Reconstruction).filter(Reconstruction.session_id == s.id).count() == 1
+
+
 # ---------------------------------------------------------------------------
 # _store_reprojection_errors tests
 # ---------------------------------------------------------------------------
@@ -1710,6 +1863,62 @@ def test_store_reprojection_errors_rejected_frame_stays_null(setup_test_db, tmp_
         ReconstructionFrame.image_id == img.id,
     ).first()
     assert frame.colmap_error_px is None
+
+
+def test_colliding_filenames_map_colmap_results_back_to_their_own_frames(setup_test_db, tmp_path):
+    """Per-frame errors and registration follow the staged name, not the bare filename."""
+    from backend.main import app
+    from backend.services.reconstruction import (
+        _store_reprojection_errors,
+        build_reconstruction_diagnostics,
+    )
+
+    db = app.state.test_db_session
+    north, south = _two_sessions_with_the_same_filename(db)
+    colmap_dir = tmp_path / "colmap"
+    rec = Reconstruction(
+        session_id=north.session_id,
+        preset="quick",
+        status="complete",
+        frames_used=2,
+        frames_registered=1,
+        colmap_dir=str(colmap_dir),
+        source_session_ids=json.dumps([north.session_id, south.session_id]),
+    )
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+    db.add_all([
+        ReconstructionFrame(reconstruction_id=rec.id, image_id=north.id),
+        ReconstructionFrame(reconstruction_id=rec.id, image_id=south.id),
+    ])
+    db.commit()
+
+    # Only the south flight's frame registered; its two observations average 1.0 px.
+    sparse = colmap_dir / "sparse" / "0"
+    sparse.mkdir(parents=True)
+    (sparse / "points3D.txt").write_text(
+        "1 0.1 0.2 0.3 255 0 0 0.5 1 0\n"
+        "2 0.4 0.5 0.6 0 255 0 1.5 1 1\n"
+    )
+    (sparse / "images.txt").write_text(
+        f"1 1 0 0 0 0 0 0 1 {south.session_id}_DJI_0001.JPG\n"
+        "100.0 200.0 1 150.0 250.0 2\n"
+    )
+
+    _store_reprojection_errors(db, rec.id, colmap_dir)
+    db.expire_all()
+    errors = {
+        frame.image_id: frame.colmap_error_px
+        for frame in db.query(ReconstructionFrame).filter(
+            ReconstructionFrame.reconstruction_id == rec.id
+        )
+    }
+    assert errors == {north.id: None, south.id: pytest.approx(1.0)}
+
+    diagnostics = build_reconstruction_diagnostics(db, rec)
+    assert [item["id"] for item in diagnostics["registered_images"]] == [south.id]
+    assert [item["id"] for item in diagnostics["unregistered_images"]] == [north.id]
 
 
 def test_export_point_cloud_uses_nearest_gaussian_color(tmp_path):
@@ -2876,6 +3085,7 @@ def test_write_colmap_workspace_confines_image_filename_to_workspace(tmp_path, m
     colmap_dir = tmp_path / "workspace" / "deep" / "nested"
 
     class _Img:
+        session_id = 5
         filepath = str(source)
         filename = "../../../config.yaml"
         camera_make = None
@@ -2890,4 +3100,4 @@ def test_write_colmap_workspace_confines_image_filename_to_workspace(tmp_path, m
     recon._write_colmap_workspace(colmap_dir, [_Img()])
 
     assert outside.read_text().startswith("pin_lock:"), "workspace write escaped and clobbered it"
-    assert (colmap_dir / "images" / "config.yaml").read_bytes() == b"image bytes"
+    assert (colmap_dir / "images" / "5_config.yaml").read_bytes() == b"image bytes"

@@ -2,14 +2,18 @@ from __future__ import annotations
 
 import json
 import threading
+from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import httpx
+import numpy as np
 import pytest
 
 from backend.core.config import get_remote_worker_config
 from backend.db.models import JobQueueEntry, Reconstruction
 from backend.db.models import Session as SessionModel
+from backend.services import ply_io
 from backend.services.job_queue import JobNonRetryableError
 from backend.services.reconstruction import _run_remote_pipeline
 from backend.services.remote_worker import (
@@ -17,6 +21,34 @@ from backend.services.remote_worker import (
     dispatch_reconstruction,
     get_reconstruction_status,
 )
+
+
+@pytest.fixture
+def shared_storage(tmp_path, monkeypatch):
+    """Stand-in for the exports/processed roots the API and the worker share."""
+    cfg = SimpleNamespace(
+        data_dir=str(tmp_path / "data"),
+        exports_dir=str(tmp_path / "exports"),
+        processed_dir=str(tmp_path / "processed"),
+    )
+    monkeypatch.setattr("backend.services.reconstruction.get_config", lambda: cfg)
+    return cfg
+
+
+def _write_worker_splat(storage, reconstruction_id: int) -> Path:
+    """Write the splat.ply a worker leaves at exports/<id>/ on shared storage."""
+    path = Path(storage.exports_dir) / str(reconstruction_id) / "splat.ply"
+    path.parent.mkdir(parents=True)
+    cloud = ply_io.GaussianCloud(
+        means=np.arange(12, dtype=np.float32).reshape(4, 3),
+        sh0=np.zeros((4, 3), dtype=np.float32),
+        shN=np.zeros((4, 0, 3), dtype=np.float32),
+        opacities=np.array([0.4, -0.2, 1.3, 0.0], dtype=np.float32),
+        scales=np.zeros((4, 3), dtype=np.float32),
+        quats=np.tile(np.array([1, 0, 0, 0], dtype=np.float32), (4, 1)),
+    )
+    ply_io.write_3dgs_ply(path, cloud)
+    return path
 
 
 def _config(**overrides):
@@ -72,7 +104,7 @@ def test_remote_worker_rejects_http_without_explicit_opt_in(monkeypatch):
         get_reconstruction_status(_config(url="http://worker.test"), "worker-1")
 
 
-def test_remote_pipeline_persists_worker_id_and_tracks_completion(setup_test_db):
+def test_remote_pipeline_persists_worker_id_and_tracks_completion(setup_test_db, shared_storage):
     from tests.conftest import TestSessionLocal
 
     with TestSessionLocal() as db:
@@ -82,6 +114,7 @@ def test_remote_pipeline_persists_worker_id_and_tracks_completion(setup_test_db)
         rec = Reconstruction(session_id=session.id, preset="quick", status="pending", frames_used=2)
         db.add(rec)
         db.commit()
+        _write_worker_splat(shared_storage, rec.id)
         entry = JobQueueEntry(
             job_type="reconstruction",
             target_id=rec.id,
@@ -225,11 +258,12 @@ def _remote_entry(db, remote_job_id: str | None = None) -> tuple:
     return rec, entry
 
 
-def test_remote_pipeline_survives_transient_poll_failures(setup_test_db):
+def test_remote_pipeline_survives_transient_poll_failures(setup_test_db, shared_storage):
     from tests.conftest import TestSessionLocal
 
     with TestSessionLocal() as db:
         rec, entry = _remote_entry(db, remote_job_id="w-transient")
+        _write_worker_splat(shared_storage, rec.id)
         # Two dropped polls (below the 5-failure threshold), then success.
         poll = patch(
             "backend.services.reconstruction.get_reconstruction_status",
@@ -254,6 +288,102 @@ def test_remote_pipeline_survives_transient_poll_failures(setup_test_db):
         assert rec.status == "complete"
         assert rec.frames_registered == 2
         cancel_remote.assert_not_called()
+
+
+_WORKER_COMPLETE = {
+    "status": "complete",
+    "result": {"frames_registered": 2, "gaussian_count": 4, "psnr": 25.4, "ssim": 0.91},
+}
+
+
+def test_remote_completion_stores_the_splat_artifacts_on_shared_storage(
+    setup_test_db, shared_storage
+):
+    """The worker reports only metrics; the artifacts it wrote must still be recorded."""
+    from tests.conftest import TestSessionLocal
+
+    with TestSessionLocal() as db:
+        rec, entry = _remote_entry(db, remote_job_id="w-artifacts")
+        splat = _write_worker_splat(shared_storage, rec.id)
+        thumb = Path(shared_storage.processed_dir) / "thumbs" / f"splat_{rec.id}.jpg"
+        thumb.parent.mkdir(parents=True)
+        thumb.write_bytes(b"\xff\xd8worker thumbnail")
+
+        with patch(
+            "backend.services.reconstruction.get_reconstruction_status",
+            return_value=_WORKER_COMPLETE,
+        ):
+            _run_remote_pipeline(
+                entry, db, threading.Event(), json.loads(entry.payload_json), _config()
+            )
+
+        db.refresh(rec)
+        assert rec.status == "complete"
+        assert rec.step == "done"
+        assert Path(rec.splat_path) == splat
+        # Same LOD layout a local run leaves, derived from the worker's splat.
+        assert Path(rec.splat_preview_path) == splat.with_name("splat_preview.ply")
+        assert Path(rec.splat_medium_path) == splat.with_name("splat_medium.ply")
+        assert ply_io.read_3dgs_ply(Path(rec.splat_preview_path)).means.shape[0] == 1
+        assert ply_io.read_3dgs_ply(Path(rec.splat_medium_path)).means.shape[0] == 2
+        assert Path(rec.thumb_path) == thumb
+        assert rec.gaussian_count == 4
+        assert rec.psnr == 25.4
+        assert rec.ssim == 0.91
+        assert rec.training_metrics is None  # the worker protocol does not report it
+
+
+def test_remote_completion_keeps_worker_written_lods(setup_test_db, shared_storage):
+    from tests.conftest import TestSessionLocal
+
+    with TestSessionLocal() as db:
+        rec, entry = _remote_entry(db, remote_job_id="w-lods")
+        splat = _write_worker_splat(shared_storage, rec.id)
+        preview = splat.with_name("splat_preview.ply")
+        medium = splat.with_name("splat_medium.ply")
+        preview.write_bytes(b"worker preview")
+        medium.write_bytes(b"worker medium")
+
+        with patch(
+            "backend.services.reconstruction.get_reconstruction_status",
+            return_value=_WORKER_COMPLETE,
+        ):
+            _run_remote_pipeline(
+                entry, db, threading.Event(), json.loads(entry.payload_json), _config()
+            )
+
+        db.refresh(rec)
+        assert rec.status == "complete"
+        assert Path(rec.splat_preview_path) == preview
+        assert Path(rec.splat_medium_path) == medium
+        assert preview.read_bytes() == b"worker preview"
+        assert medium.read_bytes() == b"worker medium"
+        assert rec.thumb_path is None
+
+
+def test_remote_completion_without_a_splat_fails_the_job(setup_test_db, shared_storage):
+    from tests.conftest import TestSessionLocal
+
+    with TestSessionLocal() as db:
+        rec, entry = _remote_entry(db, remote_job_id="w-nosplat")
+        expected = Path(shared_storage.exports_dir) / str(rec.id) / "splat.ply"
+
+        with patch(
+            "backend.services.reconstruction.get_reconstruction_status",
+            return_value=_WORKER_COMPLETE,
+        ), patch(
+            "backend.services.reconstruction.cancel_remote_reconstruction"
+        ) as cancel_remote:
+            with pytest.raises(JobNonRetryableError, match="splat"):
+                _run_remote_pipeline(
+                    entry, db, threading.Event(), json.loads(entry.payload_json), _config()
+                )
+
+        db.refresh(rec)
+        assert rec.status == "failed"
+        assert str(expected) in rec.error_msg
+        assert rec.splat_path is None
+        cancel_remote.assert_not_called()  # the worker already finished
 
 
 def test_remote_pipeline_fails_and_cancels_remote_after_sustained_failures(

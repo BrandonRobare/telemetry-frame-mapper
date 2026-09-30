@@ -11,7 +11,7 @@ import threading
 import time
 from dataclasses import asdict
 from datetime import UTC, datetime
-from pathlib import Path, PureWindowsPath
+from pathlib import Path
 
 from shapely.geometry import Point, shape
 from sqlalchemy.orm import Session as DBSession
@@ -35,9 +35,14 @@ from backend.db.models import (
 )
 from backend.services import accelerator, ply_io, splat_trainer
 from backend.services.camera_calibration import calibration_profile_for_images
-from backend.services.colmap_io import _pick_best_submodel
+from backend.services.colmap_io import (
+    _pick_best_submodel,
+    images_by_workspace_name,
+    workspace_image_name,
+)
 from backend.services.job_queue import (
     FLYTHROUGH_RENDER,
+    LIVE_RECONSTRUCTION_STATUSES,
     MESH_EXPORT,
     RECONSTRUCTION,
     SEMANTIC_LABELING,
@@ -197,18 +202,24 @@ def _write_colmap_workspace(colmap_dir: Path, images: list) -> None:
         f"1 {camera_model} {width} {height} {params_str}\n"
     )
 
+    staged: set[str] = set()
     for img in images:
         src = Path(img.filepath)
-        # Never trust the stored filename as a path fragment: a restored session bundle
-        # carries it verbatim from the archive manifest, so a value like
-        # "../../../config.yaml" would escape the workspace on the copy2 fallback below.
-        # PureWindowsPath (not PurePath) so "/", "\" and drive letters are all stripped
-        # regardless of the host OS — a POSIX server may restore a Windows-authored bundle.
-        safe_name = PureWindowsPath(img.filename or "").name
-        if not safe_name:
+        # Session-prefixed so two sessions' DJI_0001.JPG both reach COLMAP. The name is
+        # also confined to a basename: a restored session bundle carries the stored
+        # filename verbatim, so "../../../config.yaml" would otherwise escape the
+        # workspace on the copy2 fallback below.
+        name = workspace_image_name(img.session_id, img.filename)
+        if name is None:
             continue
-        dest = images_dir / safe_name
-        if dest.exists():
+        if name in staged:
+            # Only reachable if one session holds the same filename twice, which
+            # ingest prevents; say so rather than dropping a frame silently.
+            logger.warning("COLMAP workspace name %s is already staged; skipping", name)
+            continue
+        staged.add(name)
+        dest = images_dir / name
+        if dest.exists():  # staged by an earlier attempt at this reconstruction
             continue
         try:
             os.symlink(src.resolve(), dest)
@@ -419,7 +430,7 @@ def _count_registered_images(images_txt: Path) -> int:
 
 
 def _registered_image_names(colmap_dir: Path) -> set[str]:
-    """Return image filenames present in the best COLMAP sub-model."""
+    """Return the workspace image names present in the best COLMAP sub-model."""
     images_txt = _pick_best_submodel(colmap_dir / "sparse") / "images.txt"
     if not images_txt.exists():
         return set()
@@ -449,6 +460,10 @@ def build_reconstruction_diagnostics(db: DBSession, rec: Reconstruction) -> dict
         )
     frame_by_image_id = {frame.image_id: frame for frame in frames}
     registered_names = _registered_image_names(Path(rec.colmap_dir)) if rec.colmap_dir else set()
+    image_by_name = images_by_workspace_name(images)
+    registered_ids = {
+        image_by_name[name].id for name in registered_names if name in image_by_name
+    }
 
     def image_payload(img: Image, registered: bool) -> dict:
         frame = frame_by_image_id.get(img.id)
@@ -463,9 +478,9 @@ def build_reconstruction_diagnostics(db: DBSession, rec: Reconstruction) -> dict
             "registered": registered,
         }
 
-    registered = [image_payload(img, True) for img in images if img.filename in registered_names]
+    registered = [image_payload(img, True) for img in images if img.id in registered_ids]
     unregistered = [
-        image_payload(img, False) for img in images if img.filename not in registered_names
+        image_payload(img, False) for img in images if img.id not in registered_ids
     ]
     total = len(images)
     registered_count = len(registered)
@@ -479,7 +494,7 @@ def build_reconstruction_diagnostics(db: DBSession, rec: Reconstruction) -> dict
             start = math.floor(bucket_idx * total / bucket_count)
             end = math.floor((bucket_idx + 1) * total / bucket_count)
             chunk = images[start:end]
-            unreg = [img for img in chunk if img.filename not in registered_names]
+            unreg = [img for img in chunk if img.id not in registered_ids]
             timeline.append({
                 "bucket": bucket_idx,
                 "start_index": start,
@@ -714,12 +729,13 @@ def _store_reprojection_errors(db: DBSession, reconstruction_id: int, colmap_dir
     ).all()
     image_ids = [f.image_id for f in frames]
     images = db.query(Image).filter(Image.id.in_(image_ids)).all()
-    img_map = {img.filename: img.id for img in images}
+    image_by_name = images_by_workspace_name(images)
     frame_map = {f.image_id: f for f in frames}
 
     for name, error in name_to_error.items():
-        if name in img_map and img_map[name] in frame_map:
-            frame_map[img_map[name]].colmap_error_px = error
+        image = image_by_name.get(name)
+        if image is not None and image.id in frame_map:
+            frame_map[image.id].colmap_error_px = error
 
     db.commit()
 
@@ -922,13 +938,29 @@ def _run_gsplat(
     return backend.train(colmap_dir, output_path, config, progress_cb, cancel)
 
 
+def _splat_output_path(reconstruction_id: int) -> Path:
+    """Where a reconstruction's splat.ply lands, whether trained here or by a remote worker."""
+    return _reconstruction_export_dir(reconstruction_id) / "splat.ply"
+
+
+def _splat_thumbnail_path(reconstruction_id: int) -> Path:
+    return Path(get_config().processed_dir) / "thumbs" / f"splat_{reconstruction_id}.jpg"
+
+
+def _lod_paths(splat_path: Path) -> tuple[Path, Path]:
+    """Return the (preview, medium) LOD paths that sit beside ``splat_path``."""
+    return (
+        splat_path.with_name(splat_path.stem + "_preview.ply"),
+        splat_path.with_name(splat_path.stem + "_medium.ply"),
+    )
+
+
 def _generate_lod(splat_path: Path) -> tuple[Path, Path]:
     """Return (preview_path, medium_path) — opacity-pruned variants using configured ratios."""
     render_cfg = get_render_config()
     preview_ratio = float(render_cfg.get("lod_preview_ratio", 0.10))
     medium_ratio = float(render_cfg.get("lod_medium_ratio", 0.50))
-    preview = splat_path.with_name(splat_path.stem + "_preview.ply")
-    medium = splat_path.with_name(splat_path.stem + "_medium.ply")
+    preview, medium = _lod_paths(splat_path)
     ply_io.prune_by_opacity(splat_path, preview, keep_ratio=preview_ratio)
     ply_io.prune_by_opacity(splat_path, medium, keep_ratio=medium_ratio)
     return preview, medium
@@ -2096,7 +2128,7 @@ def start_reconstruction(
     """Create Reconstruction record and enqueue a background job. Returns the record."""
     running = db.query(Reconstruction).filter(
         Reconstruction.session_id == session_id,
-        Reconstruction.status.in_(["pending", "running_colmap", "running_gsplat"]),
+        Reconstruction.status.in_(LIVE_RECONSTRUCTION_STATUSES),
     ).first()
     if running:
         raise ValueError(
@@ -2353,8 +2385,7 @@ def _run_pipeline(entry, db, cancel: threading.Event) -> None:
         )
         _log_rec(reconstruction_id, "Gaussian Splatting: starting")
 
-        cfg = get_config()
-        splat_path = Path(cfg.exports_dir) / str(reconstruction_id) / "splat.ply"
+        splat_path = _splat_output_path(reconstruction_id)
         splat_path.parent.mkdir(parents=True, exist_ok=True)
 
         try:
@@ -2366,7 +2397,7 @@ def _run_pipeline(entry, db, cancel: threading.Event) -> None:
             _log_rec(reconstruction_id, "LOD generation: complete")
 
             _log_rec(reconstruction_id, "Thumbnail generation: starting")
-            thumb_candidate = Path(cfg.processed_dir) / "thumbs" / f"splat_{reconstruction_id}.jpg"
+            thumb_candidate = _splat_thumbnail_path(reconstruction_id)
             generated_thumb = _generate_thumbnail(splat_path, thumb_candidate)
             _log_rec(reconstruction_id, "Thumbnail generation: complete")
 
@@ -2409,14 +2440,15 @@ def _run_pipeline(entry, db, cancel: threading.Event) -> None:
             )
         except RuntimeError as exc:
             if "CUDA out of memory" in str(exc):
+                message = "GPU ran out of memory — switch to 'quick' preset or reduce frame count"
                 _update_rec(
                     db, reconstruction_id,
                     status="failed",
-                    error_msg=(
-                        "GPU ran out of memory — switch to 'quick' preset or reduce frame count"
-                    ),
+                    error_msg=message,
                     completed_at=datetime.now(UTC),
                 )
+                # The same preset would run out of memory again: fail, don't retry.
+                raise JobNonRetryableError(message) from exc
             elif "COLMAP sparse cloud only" in str(exc):
                 # The trainer's documented graceful-degradation contract: missing
                 # torch/gsplat is the only RuntimeError that means "COLMAP-only
@@ -2438,23 +2470,55 @@ def _run_pipeline(entry, db, cancel: threading.Event) -> None:
             else:
                 # Unsupported camera model, empty sparse model, missing frame, ...
                 _log_rec(reconstruction_id, f"Gaussian Splatting failed: {exc}")
+                message = str(exc)[:_ERROR_MSG_MAX_CHARS]
                 _update_rec(
                     db, reconstruction_id,
                     status="failed",
-                    error_msg=str(exc)[:_ERROR_MSG_MAX_CHARS],
+                    error_msg=message,
                     completed_at=datetime.now(UTC),
                 )
+                raise JobNonRetryableError(message) from exc
 
+    except JobNonRetryableError:
+        raise  # the failure is already recorded on the reconstruction row
     except Exception as exc:
+        # Final, like every failure above: a retry would flip this 'failed' row back
+        # to running_colmap while the queue entry read 'pending' in between.
+        message = str(exc)[:_ERROR_MSG_MAX_CHARS]
+        db.rollback()  # a failed flush leaves the session unusable until rolled back
         _update_rec(
             db, reconstruction_id,
             status="failed",
-            error_msg=str(exc)[:_ERROR_MSG_MAX_CHARS],
+            error_msg=message,
             completed_at=datetime.now(UTC),
         )
-        raise
+        raise JobNonRetryableError(message) from exc
     else:
         mark_complete(entry.id)
+
+
+def _shared_splat_artifacts(reconstruction_id: int) -> dict[str, str | None] | None:
+    """Return the artifact paths a remote worker left on shared storage, or None.
+
+    The worker protocol reports metrics only (docs/SETUP.md); the worker writes the
+    splat to the same exports/<id>/splat.ply a local run uses, so the paths are
+    resolved here rather than taken from the worker. None means the splat is
+    missing. LODs the worker did not write are derived from its splat exactly as a
+    local run derives them; a thumbnail is recorded only if the worker rendered one.
+    """
+    splat_path = _splat_output_path(reconstruction_id)
+    if not splat_path.is_file():
+        return None
+    preview, medium = _lod_paths(splat_path)
+    if not (preview.is_file() and medium.is_file()):
+        preview, medium = _generate_lod(splat_path)
+    thumb = _splat_thumbnail_path(reconstruction_id)
+    return {
+        "splat_path": str(splat_path),
+        "splat_preview_path": str(preview),
+        "splat_medium_path": str(medium),
+        "thumb_path": str(thumb) if thumb.is_file() else None,
+    }
 
 
 def _cancel_remote_best_effort(config: dict, remote_job_id, reconstruction_id: int) -> None:
@@ -2525,6 +2589,22 @@ def _run_remote_pipeline(
             if state == "complete":
                 result = status.get("result", {})
                 result = result if isinstance(result, dict) else {}
+                artifacts = _shared_splat_artifacts(reconstruction_id)
+                if artifacts is None:
+                    message = (
+                        "Remote worker reported complete but no splat was found at "
+                        f"{_splat_output_path(reconstruction_id)}; the worker must write "
+                        "its artifacts to the shared exports directory"
+                    )
+                    _update_rec(
+                        db,
+                        reconstruction_id,
+                        status="failed",
+                        step="failed",
+                        error_msg=message,
+                        completed_at=datetime.now(UTC),
+                    )
+                    raise JobNonRetryableError(message)
                 # Worker and API share storage, so the sparse model lands locally
                 # at colmap_dir. Run the same in-process solve; leave the transform
                 # NULL (never a placeholder) if no local sparse model is present.
@@ -2541,6 +2621,7 @@ def _run_remote_pipeline(
                     status="complete",
                     step="done",
                     progress_pct=100.0,
+                    **artifacts,
                     frames_registered=result.get("frames_registered"),
                     gaussian_count=result.get("gaussian_count"),
                     psnr=result.get("psnr"),

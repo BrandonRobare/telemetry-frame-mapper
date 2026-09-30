@@ -37,15 +37,24 @@ Only distortion-free camera models are supported (the reconstruction
 workspace uses a single PINHOLE camera and never runs ``image_undistorter``):
 PINHOLE (model id 1, params fx fy cx cy) and SIMPLE_PINHOLE (model id 0,
 params f cx cy). Any other model raises ``RuntimeError`` naming the model.
+
+Workspace images are staged as ``<session_id>_<filename>``
+(:func:`workspace_image_name`), and every reader that maps a model's image
+names back to ``Image`` rows goes through :func:`images_by_workspace_name`.
 """
 
 from __future__ import annotations
 
 import struct
+from collections import Counter
+from collections.abc import Iterable
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
+from typing import TypeVar
 
 import numpy as np
+
+_ImageT = TypeVar("_ImageT")
 
 # Supported (distortion-free) COLMAP camera models: model id -> (name, num_params).
 _SUPPORTED_CAMERA_MODELS: dict[int, tuple[str, int]] = {
@@ -273,6 +282,58 @@ def read_points3d_txt(path: Path) -> tuple[np.ndarray, np.ndarray]:
         np.array(xyz, dtype=np.float64).reshape(-1, 3),
         np.array(rgb, dtype=np.uint8).reshape(-1, 3),
     )
+
+
+# ---------------------------------------------------------------------------
+# Workspace image names
+# ---------------------------------------------------------------------------
+
+
+def _safe_basename(filename: str | None) -> str:
+    # A restored session bundle carries the stored filename verbatim, so never use it
+    # as a path fragment. PureWindowsPath (not PurePath) strips "/", "\" and drive
+    # letters on any host OS — a POSIX server may restore a Windows-authored bundle.
+    return PureWindowsPath(filename or "").name
+
+
+def workspace_image_name(session_id: int, filename: str | None) -> str | None:
+    """Return the name an image is staged under in a COLMAP workspace, or None.
+
+    ``<session_id>_<basename>``: ingest keeps filenames unique only within a session
+    and DJI cameras restart DJI_0001.JPG numbering per card, so a multi-session run
+    needs the session to tell two such frames apart. Every run is prefixed (not just
+    ones with a collision) so a frame's name depends only on its own row: it cannot
+    change with the rest of the frame set, and it parses back unambiguously because
+    the session id is an integer. None means the filename has no usable basename.
+    """
+    basename = _safe_basename(filename)
+    if not basename:
+        return None
+    return f"{session_id}_{basename}"
+
+
+def images_by_workspace_name(images: Iterable[_ImageT]) -> dict[str, _ImageT]:
+    """Map every name a COLMAP model may use for ``images`` back to its row.
+
+    ``images`` are ``Image`` rows (anything with ``session_id`` and ``filename``).
+    Staged names from :func:`workspace_image_name` are authoritative. A bare
+    filename — a workspace staged before the session prefix existed, or a remote
+    worker that stages bare names — resolves only when exactly one image has that
+    basename and no staged name claims the same string, so an ambiguous name maps to
+    nothing rather than to another session's frame.
+    """
+    images = list(images)
+    by_name: dict[str, _ImageT] = {}
+    for image in images:
+        name = workspace_image_name(image.session_id, image.filename)
+        if name is not None:
+            by_name[name] = image
+    basename_counts = Counter(_safe_basename(image.filename) for image in images)
+    for image in images:
+        basename = _safe_basename(image.filename)
+        if basename and basename_counts[basename] == 1:
+            by_name.setdefault(basename, image)
+    return by_name
 
 
 # ---------------------------------------------------------------------------

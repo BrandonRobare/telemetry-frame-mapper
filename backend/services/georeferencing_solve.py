@@ -109,8 +109,8 @@ def _utm_zone_str(lon: float, lat: float) -> tuple[str, pyproj.Transformer]:
 def _correspondences(sparse_dir: Path, images: list) -> tuple[np.ndarray, np.ndarray] | None:
     """Build (camera_centres, gps_lonlatalt) for registered, GPS-tagged frames."""
     gps = {
-        img.filename: (img.longitude, img.latitude, img.altitude_m)
-        for img in images
+        name: (img.longitude, img.latitude, img.altitude_m)
+        for name, img in colmap_io.images_by_workspace_name(images).items()
         if img.latitude is not None and img.longitude is not None and img.altitude_m is not None
     }
     if not gps:
@@ -138,7 +138,8 @@ def compute_geo_transform(colmap_dir: Path, sparse_dir: Path, images: list) -> d
     """Solve COLMAP-world -> UTM and write ``geo_transform.json``.
 
     ``images`` are the DB ``Image`` rows for the reconstruction (need
-    ``filename``, ``latitude``, ``longitude``, ``altitude_m``). Returns the
+    ``session_id``, ``filename``, ``latitude``, ``longitude``, ``altitude_m``);
+    model images are matched to them by workspace name. Returns the
     transform dict on success (and writes the file); returns ``None`` on any
     failure without writing, logging the reason at WARNING.
     """

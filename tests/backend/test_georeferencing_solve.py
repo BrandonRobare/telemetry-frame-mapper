@@ -118,8 +118,47 @@ def _write_sparse_model(sparse_dir: Path, centres_by_name: dict[str, np.ndarray]
     (sparse_dir / "images.txt").write_text("\n".join(lines) + "\n")
 
 
-def _image(name: str, lon: float, lat: float, alt: float) -> SimpleNamespace:
-    return SimpleNamespace(filename=name, longitude=lon, latitude=lat, altitude_m=alt)
+def _image(
+    name: str, lon: float, lat: float, alt: float, session_id: int = 1
+) -> SimpleNamespace:
+    return SimpleNamespace(
+        session_id=session_id, filename=name, longitude=lon, latitude=lat, altitude_m=alt
+    )
+
+
+def test_compute_geo_transform_pairs_session_prefixed_names_with_their_own_gps(tmp_path):
+    """Two flights both have DJI_0001.JPG; each staged frame must use its own GPS fix."""
+    frames = {
+        (1, "DJI_0001.JPG"): (-80.8430, 35.2270, 210.0),
+        (1, "DJI_0002.JPG"): (-80.8420, 35.2270, 212.0),
+        (1, "DJI_0003.JPG"): (-80.8430, 35.2280, 214.0),
+        (2, "DJI_0001.JPG"): (-80.8420, 35.2280, 216.0),
+        (2, "DJI_0002.JPG"): (-80.8425, 35.2275, 213.0),
+    }
+    _zone, transformer = _utm_zone_str(-80.8425, 35.2275)
+    utm = {key: transformer.transform(lon, lat) for key, (lon, lat, _alt) in frames.items()}
+    origin_e = float(np.mean([e for e, _n in utm.values()]))
+    origin_n = float(np.mean([n for _e, n in utm.values()]))
+    centres = {
+        colmap_io.workspace_image_name(session_id, name): np.array(
+            [utm[(session_id, name)][0] - origin_e, utm[(session_id, name)][1] - origin_n, alt]
+        )
+        for (session_id, name), (_lon, _lat, alt) in frames.items()
+    }
+    colmap_dir = tmp_path / "colmap"
+    sparse_dir = colmap_dir / "sparse" / "0"
+    _write_sparse_model(sparse_dir, centres)
+    images = [
+        _image(name, lon, lat, alt, session_id=session_id)
+        for (session_id, name), (lon, lat, alt) in frames.items()
+    ]
+
+    geo = compute_geo_transform(colmap_dir, sparse_dir, images)
+
+    assert geo is not None
+    # A frame paired with the other flight's GPS would leave metres of residual.
+    assert geo["rmse_m"] == pytest.approx(0.0, abs=1e-6)
+    assert geo["trimmed_point_count"] == 0
 
 
 def test_compute_geo_transform_writes_file_and_round_trips(tmp_path):
