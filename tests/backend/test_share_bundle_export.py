@@ -220,6 +220,33 @@ def _bundle_inputs(client, tmp_path):
     return exports, exports / f"reconstruction_{rec.id}_share.zip", rec
 
 
+def test_share_bundle_manifest_uses_bundle_relative_paths(client, tmp_path):
+    """A shared bundle must not reveal server paths, and its manifest must resolve in-bundle."""
+    from backend.services.share_bundle import build_share_bundle
+
+    exports, bundle, rec = _bundle_inputs(client, tmp_path)
+    splat = exports / "nested" / "splat.ply"
+    splat.parent.mkdir()
+    splat.write_bytes(b"ply")
+    rec.splat_path = str(splat)
+    rec.pointcloud_path = str(exports / "missing.las")  # recorded, but gone from disk
+
+    returned = build_share_bundle(bundle, rec, exports)
+
+    with zipfile.ZipFile(bundle) as zf:
+        names = set(zf.namelist())
+        manifest_text = zf.read("manifest.json").decode()
+        index_html = zf.read("index.html").decode()
+    manifest = json.loads(manifest_text)
+    expected = {"mesh_glb": "artifacts/mesh.glb", "splat_ply": "artifacts/splat.ply"}
+    assert manifest["artifacts"] == expected
+    assert returned["artifacts"] == expected
+    assert set(manifest["artifacts"].values()) <= names
+    for text in (manifest_text, index_html):
+        assert str(tmp_path) not in text
+        assert os.path.abspath(str(exports)) not in text
+
+
 def test_share_bundle_crash_mid_write_keeps_previous_bundle(client, tmp_path):
     """A crash while rebuilding must leave the previous bundle intact (#641)."""
     from backend.services.share_bundle import build_share_bundle

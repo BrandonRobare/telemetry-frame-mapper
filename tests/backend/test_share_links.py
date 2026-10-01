@@ -601,6 +601,77 @@ class TestPersistedShareLinks:
             main.app.state.owns_job_queue = True
 
 
+class TestSigningKeyFile:
+    """The HMAC signing key is a secret: never world-readable, never clobbered."""
+
+    @pytest.fixture
+    def key_path(self, tmp_path, monkeypatch):
+        from backend.core.config import get_config
+
+        monkeypatch.setattr(get_config(), "exports_dir", str(tmp_path / "exports"))
+        return tmp_path / ".share_signing_key"
+
+    def test_key_is_created_exclusively_with_owner_only_mode(self, key_path, monkeypatch):
+        import os
+
+        from backend.services import share_links
+
+        real_open = os.open
+        opened = []
+
+        def recording_open(path, flags, mode=0o777, *args, **kwargs):
+            if os.fspath(path) == os.fspath(key_path):
+                opened.append((flags, mode))
+            return real_open(path, flags, mode, *args, **kwargs)
+
+        monkeypatch.setattr(os, "open", recording_open)
+        key = share_links._signing_key()
+
+        # The file is born 0o600 in a single exclusive create: there is no window in
+        # which it exists with the umask's (usually world-readable) default mode.
+        assert len(opened) == 1
+        flags, mode = opened[0]
+        assert flags & os.O_CREAT and flags & os.O_EXCL
+        assert mode == 0o600
+        assert len(key) == 64
+        assert key_path.read_bytes() == key
+        if os.name == "posix":
+            assert key_path.stat().st_mode & 0o777 == 0o600
+
+    def test_concurrent_create_keeps_the_first_writers_key(self, key_path, monkeypatch):
+        from backend.services import share_links
+
+        theirs = b"t" * 64
+        real_token_bytes = share_links.secrets.token_bytes
+
+        def race_then_generate(n):
+            # Another process wins the create between our existence check and our write.
+            key_path.write_bytes(theirs)
+            return real_token_bytes(n)
+
+        monkeypatch.setattr(share_links.secrets, "token_bytes", race_then_generate)
+        assert share_links._signing_key() == theirs
+        assert key_path.read_bytes() == theirs
+
+    def test_existing_key_is_reused(self, key_path):
+        from backend.services import share_links
+
+        existing = b"e" * 64
+        key_path.write_bytes(existing)
+        assert share_links._signing_key() == existing
+        token = create_share_token(3)
+        assert parse_share_token(token).reconstruction_id == 3
+        assert key_path.read_bytes() == existing
+
+    def test_empty_key_file_is_refused(self, key_path, monkeypatch):
+        from backend.services import share_links
+
+        monkeypatch.setattr(share_links, "_SIGNING_KEY_READ_DELAY_S", 0)
+        key_path.write_bytes(b"")
+        with pytest.raises(RuntimeError, match="empty"):
+            share_links._signing_key()
+
+
 def _db(client):
     from backend.main import app
 

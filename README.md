@@ -170,6 +170,12 @@ docker run --rm -p 127.0.0.1:8000:8000 \
   telemetry-frame-mapper
 ```
 
+The API runs as the unprivileged `app` user (UID/GID 1000), so the mounted `data`, `imports`,
+`processed`, and `exports` directories must be writable by UID 1000. Create them before
+`docker run` (Docker creates missing ones owned by root). Directories written by an older image,
+which ran as root, need `sudo chown -R 1000:1000 data imports processed exports` once. If one of
+them is not writable, the backend refuses to start and names the directory and this fix.
+
 Open `http://localhost:8000`. `-p 127.0.0.1:8000:8000` is deliberate: when auth is disabled
 (and you have explicitly set `deployment.allow_unauthenticated_lan: true`), never publish the
 container with `-p 8000:8000`; keep it loopback-only. The image bundles `ffmpeg`, `exiftool`, and

@@ -24,9 +24,8 @@ VIEWER_HTML = """
 """
 
 
-def build_share_manifest(rec: Reconstruction) -> dict:
-    from backend.services.reconstruction import NotGeoreferencedError, _require_geo_transform
-
+def _artifact_sources(rec: Reconstruction) -> dict[str, str]:
+    """Server-side path of each recorded artifact, keyed by its manifest label."""
     artifacts = {
         "pointcloud_las": rec.pointcloud_path,
         "mesh_glb": rec.mesh_glb_path,
@@ -35,6 +34,14 @@ def build_share_manifest(rec: Reconstruction) -> dict:
         "preview_splat_ply": rec.splat_preview_path,
         "medium_splat_ply": rec.splat_medium_path,
     }
+    return {k: v for k, v in artifacts.items() if v}
+
+
+def build_share_manifest(rec: Reconstruction) -> dict:
+    """Bundle metadata. ``artifacts`` is filled with bundle-relative paths as files are
+    bundled; server filesystem paths never enter a bundle that leaves this machine."""
+    from backend.services.reconstruction import NotGeoreferencedError, _require_geo_transform
+
     cesium: dict = {
         "tileset_json": "tileset.json",
         "note": (
@@ -54,7 +61,7 @@ def build_share_manifest(rec: Reconstruction) -> dict:
         "session_id": rec.session_id,
         "status": rec.status,
         "cesium": cesium,
-        "artifacts": {k: v for k, v in artifacts.items() if v},
+        "artifacts": {},
     }
 
 
@@ -195,14 +202,8 @@ def build_share_bundle(zip_path: Path, rec: Reconstruction, exports_dir: Path) -
         try:
             with os.fdopen(tmp_fd, "w+b") as output:
                 with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-                    text = json.dumps(manifest, indent=2)
-                    zf.writestr("manifest.json", text)
-                    zf.writestr(
-                        "index.html",
-                        VIEWER_HTML.replace("MANIFEST_JSON", text.replace("</", "<\\/")),
-                    )
                     rec_id = rec.id if isinstance(rec.id, int) else None
-                    for label, raw in manifest["artifacts"].items():
+                    for label, raw in _artifact_sources(rec).items():
                         p = Path(raw)
                         with _artifact_source(raw, exports_dir, rec_id) as source:
                             if source is None:
@@ -211,6 +212,14 @@ def build_share_bundle(zip_path: Path, rec: Reconstruction, exports_dir: Path) -
                             with zf.open(arcname, "w") as target:
                                 shutil.copyfileobj(source, target)
                             copied.append({"label": label, "path": arcname})
+                    # Only what was bundled, by its path inside the bundle.
+                    manifest["artifacts"] = {entry["label"]: entry["path"] for entry in copied}
+                    text = json.dumps(manifest, indent=2)
+                    zf.writestr("manifest.json", text)
+                    zf.writestr(
+                        "index.html",
+                        VIEWER_HTML.replace("MANIFEST_JSON", text.replace("</", "<\\/")),
+                    )
                     glb = next(
                         (entry["path"] for entry in copied if entry["label"] == "mesh_glb"), None
                     )

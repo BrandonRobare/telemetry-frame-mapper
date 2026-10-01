@@ -286,6 +286,51 @@ class TestParseDjiBinaryBytes:
         with pytest.raises(RuntimeError, match="djirecord not found"):
             parse_dji_binary_bytes(b"content")
 
+    @pytest.mark.parametrize("source", ["argument", "environment"])
+    def test_api_key_never_appears_in_subprocess_argv(self, monkeypatch, source):
+        """argv is visible to every local user (ps, /proc); the key travels in env only."""
+        secret = "dji-secret-key-0123456789"
+        calls = []
+
+        def fake_run(argv, capture_output, text, timeout, env):  # noqa: ARG001
+            calls.append((list(argv), dict(env)))
+            return _FakeCompletedProcess(0, json.dumps(_V13_DECRYPTED), "")
+
+        monkeypatch.setattr(subprocess, "run", fake_run)
+        monkeypatch.setattr(
+            "backend.services.dji_log_parser._BINARY", "/fake/djirecord"
+        )
+        if source == "environment":
+            monkeypatch.setenv("DJI_API_KEY", secret)
+            result = parse_dji_binary_bytes(b"fake v13 log")
+        else:
+            monkeypatch.delenv("DJI_API_KEY", raising=False)
+            result = parse_dji_binary_bytes(b"fake v13 log", api_key=secret)
+
+        assert result.decrypted is True
+        [(argv, env)] = calls
+        assert "--api-key" not in argv
+        assert not any(secret in arg for arg in argv)
+        # pydjirecord's CLI reads DJI_API_KEY when --api-key is absent.
+        assert env["DJI_API_KEY"] == secret
+
+    def test_invalid_api_key_error_gets_the_actionable_message(self, monkeypatch):
+        """pydjirecord reports a rejected key as 'Invalid DJI API key (403)'."""
+        def fake_run(argv, capture_output, text, timeout, env):  # noqa: ARG001
+            return _FakeCompletedProcess(
+                1, "",
+                "Traceback (most recent call last):\n"
+                "pydjirecord.error.ApiKeyError: Invalid DJI API key (403)",
+            )
+
+        monkeypatch.setattr(subprocess, "run", fake_run)
+        monkeypatch.setattr(
+            "backend.services.dji_log_parser._BINARY", "/fake/djirecord"
+        )
+
+        with pytest.raises(RuntimeError, match="DJI log decryption failed"):
+            parse_dji_binary_bytes(b"fake v13 log", api_key="wrong-key")
+
 
 class TestDetectLogVersion:
     def test_valid_log(self, monkeypatch, tmp_path):

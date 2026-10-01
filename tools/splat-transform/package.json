@@ -1,0 +1,11 @@
+{
+  "name": "telemetry-frame-mapper-splat-transform",
+  "private": true,
+  "description": "Locked install of the splat-transform CLI; backend/services/splat_transform.py runs it with npx --no-install from this directory.",
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@playcanvas/splat-transform": "3.8.0"
+  }
+}

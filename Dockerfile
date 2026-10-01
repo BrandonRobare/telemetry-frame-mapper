@@ -1,13 +1,14 @@
-# syntax=docker/dockerfile:1
+# syntax=docker/dockerfile:1@sha256:ecfaec9ed6d810b56388c508f4121597bfbba70d41a6dfeee4d8cad5f295fc32
 
-FROM node:22-bookworm-slim AS frontend-build
+# Images are pinned by digest; the tag stays for readers and Dependabot's docker updates.
+FROM node:22-bookworm-slim@sha256:43ac6c60b8f89723f746e8a92ce91abd5017e627ce1ddfe4238355d3a30b772c AS frontend-build
 WORKDIR /app/frontend
 COPY frontend/package*.json ./
 RUN npm ci
 COPY frontend/ ./
 RUN npm run build
 
-FROM python:3.12-slim-bookworm AS runtime
+FROM python:3.12-slim-bookworm@sha256:392307d22300de8b5986851a12d9176dfc0fc073e65bf6523ebd7dcbeb23564e AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -23,7 +24,7 @@ RUN apt-get update \
 
 WORKDIR /app
 
-COPY --from=ghcr.io/astral-sh/uv:0.11.16 /uv /uvx /bin/
+COPY --from=ghcr.io/astral-sh/uv:0.11.16@sha256:440fd6477af86a2f1b38080c539f1672cd22acb1b1a47e321dba5158ab08864d /uv /uvx /bin/
 COPY pyproject.toml uv.lock README.md LICENSE ./
 COPY src/ ./src/
 COPY backend/ ./backend/
@@ -35,7 +36,16 @@ COPY --from=frontend-build /app/frontend/dist ./frontend/dist
 
 RUN uv sync --frozen --no-dev --group backend --group reconstruction --group semantic
 
-RUN mkdir -p data imports processed exports
+# Run the API as an unprivileged user (UID/GID 1000). Code and the virtualenv stay root-owned.
+# The user owns only what the app writes at runtime: the data/drop/derived/export and log
+# directories, and /app itself, where Settings atomically replaces config.yaml and the share
+# signing key is created beside exports/.
+RUN groupadd --gid 1000 app \
+    && useradd --uid 1000 --gid app --create-home --shell /usr/sbin/nologin app \
+    && mkdir -p data imports processed exports logs \
+    && chown app:app /app /app/config.yaml /app/data /app/imports /app/processed /app/exports /app/logs
+
+USER app
 
 EXPOSE 8000
 
