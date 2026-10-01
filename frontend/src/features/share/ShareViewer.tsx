@@ -1,6 +1,9 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { apiUrl, get, post } from '../../shared/api/client'
+import { ApiError, apiUrl, get, post } from '../../shared/api/client'
+
+/** The `code` GET /share/token/{token} sends with its 401 for a locked link. */
+const SHARE_PASSWORD_REQUIRED = 'share_password_required'
 
 interface ShareViewerPayload {
   reconstruction_id: number
@@ -66,7 +69,7 @@ export default function ShareViewer() {
 
   if (error) {
     const msg = error instanceof Error ? error.message : 'Failed to load share'
-    if (msg === 'Share link password required') {
+    if (error instanceof ApiError && error.code === SHARE_PASSWORD_REQUIRED) {
       return (
         <SharePasswordPrompt
           password={password}
@@ -86,7 +89,8 @@ export default function ShareViewer() {
         />
       )
     }
-    return <ShareError status={403} message={msg} />
+    // Show what the backend answered, e.g. 410 for a revoked or expired link.
+    return <ShareError status={error instanceof ApiError ? error.status : 403} message={msg} />
   }
 
   if (!data || data.status !== 'complete') {

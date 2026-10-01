@@ -139,6 +139,37 @@ def test_webodm_georeferencing_csv_export_uses_configured_exports_dir(client, tm
         assert zf.namelist() == ["odm_georeferencing.csv"]
 
 
+def test_webodm_georeferencing_csv_zip_downloads_after_build(client, tmp_path):
+    """The Export tab downloads the zip the POST built, not only its server path (#952)."""
+    import io
+    from pathlib import Path
+    from unittest.mock import patch
+
+    s, _ = _insert_session_and_image(client)
+    exports_dir = tmp_path / "exports"
+    download_url = f"/export/webodm-georeferencing-csv/download?session_id={s.id}"
+
+    with patch("backend.routers.export.get_config") as mock_cfg:
+        mock_cfg.return_value.exports_dir = str(exports_dir)
+        not_built = client.get(download_url)
+        built = client.post(f"/export/webodm-georeferencing-csv?session_id={s.id}")
+        resp = client.get(download_url)
+        unknown = client.get("/export/webodm-georeferencing-csv/download?session_id=999999")
+
+    assert not_built.status_code == 404
+    assert "POST /export/webodm-georeferencing-csv" in not_built.json()["detail"]
+    assert unknown.status_code == 404
+    assert resp.status_code == 200
+    assert resp.headers["content-type"] == "application/zip"
+    zip_name = f"webodm_georeferencing_csv_{s.id}.zip"
+    assert f'filename="{zip_name}"' in resp.headers["content-disposition"]
+    assert resp.content == Path(built.json()["zip_path"]).read_bytes()
+    with zipfile.ZipFile(io.BytesIO(resp.content)) as zf:
+        assert zf.namelist() == ["odm_georeferencing.csv"]
+    # The response streamed a snapshot copy, which is gone once it was sent.
+    assert [p.name for p in exports_dir.iterdir()] == [zip_name]
+
+
 def test_image_list_includes_colmap_error_when_reconstruction_complete(client):
     from backend.db.models import Image, Reconstruction, ReconstructionFrame
     from backend.db.models import Session as SessionModel
