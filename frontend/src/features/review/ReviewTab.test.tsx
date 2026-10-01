@@ -57,6 +57,8 @@ afterEach(() => {
   cleanup()
   vi.unstubAllGlobals()
   useMapStore.setState({ selectedSessionId: null })
+  // The Review filters deep-link into the URL; do not carry them into the next test.
+  window.history.replaceState(null, '', window.location.pathname)
 })
 
 describe('ReviewTab frame selection clearing', () => {
@@ -106,5 +108,41 @@ describe('ReviewTab frame selection clearing', () => {
       '/reconstruction/frame-selection',
       expect.objectContaining({ method: 'POST', body: JSON.stringify({ session_id: 42, image_ids: [] }) }),
     ))
+  })
+})
+
+describe('ReviewTab unscored frames', () => {
+  function stubImages(images: unknown[]) {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/images?session_id=42') return jsonResponse(images)
+      if (url === '/reconstruction/frame-selection/42') return jsonResponse({ image_ids: [] })
+      throw new Error(`Unexpected request: ${url}`)
+    }))
+    useMapStore.setState({ selectedSessionId: 42 })
+  }
+
+  it('badges a frame whose quality scoring failed and offers it as a filter', async () => {
+    stubImages([
+      image,
+      { ...image, id: 2, filename: 'frame-002.jpg', flag: 'unscored', usable: false },
+    ])
+
+    renderReviewTab()
+
+    expect(await screen.findByRole('button', { name: 'Flag: Unscored, click to cycle' })).toBeTruthy()
+    const filter = screen.getByRole('button', { name: /^1\s*Unscored$/ })
+    fireEvent.click(filter)
+    expect(screen.getByText('1 / 2 frames')).toBeTruthy()
+    expect(screen.queryByText('frame-001.jpg')).toBeNull()
+    expect(screen.getByText('frame-002.jpg')).toBeTruthy()
+  })
+
+  it('does not show the unscored filter when every frame was scored', async () => {
+    stubImages([image])
+
+    renderReviewTab()
+
+    await screen.findByRole('button', { name: 'Flag: Good, click to cycle' })
+    expect(screen.queryByRole('button', { name: /Unscored/ })).toBeNull()
   })
 })

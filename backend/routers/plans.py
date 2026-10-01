@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
@@ -46,11 +47,16 @@ def _plan_generation_or_422(generator, **kwargs):
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
+# Overlaps are fractions: 0 means adjacent images just touch, and 1 would mean zero
+# lane/waypoint spacing. Negative values space lanes wider than the camera footprint.
+Overlap = Annotated[float, Field(ge=0, lt=1)]
+
+
 class PlanIn(BaseModel):
     target_area_id: int
     altitude_ft: float = Field(gt=0)
-    side_overlap_pct: float
-    forward_overlap_pct: float
+    side_overlap_pct: Overlap
+    forward_overlap_pct: Overlap
 
 
 class PlanOut(BaseModel):
@@ -72,8 +78,8 @@ class PlanOut(BaseModel):
 class PlanGenerateFromGapsIn(BaseModel):
     coverage_run_id: int
     altitude_ft: float = Field(gt=0)
-    side_overlap_pct: float
-    forward_overlap_pct: float
+    side_overlap_pct: Overlap
+    forward_overlap_pct: Overlap
 
 
 class ValidationOut(BaseModel):
@@ -103,11 +109,6 @@ class SegmentOut(BaseModel):
 
 @router.post("/generate", response_model=PlanOut)
 def generate_plan(body: PlanIn, db: DBSession = Depends(get_db)):
-    if body.side_overlap_pct >= 1.0:
-        raise HTTPException(status_code=422, detail="side_overlap_pct must be < 1.0")
-    if body.forward_overlap_pct >= 1.0:
-        raise HTTPException(status_code=422, detail="forward_overlap_pct must be < 1.0")
-
     area = db.query(TargetArea).filter(TargetArea.id == body.target_area_id).first()
     if not area:
         raise HTTPException(status_code=404, detail="Target area not found")

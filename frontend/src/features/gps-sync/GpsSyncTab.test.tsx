@@ -53,6 +53,54 @@ describe('GpsSyncTab flight-log upload', () => {
     const body = init.body as FormData
     expect(body.get('file')).toBe(file)
     expect(body.get('session_id')).toBe('42')
+    // An empty flight-start field sends nothing, so absolute-time logs upload as before.
+    expect(body.has('start_time')).toBe(false)
+  })
+
+  it('sends the flight start field as a UTC ISO 8601 start_time when filled', async () => {
+    const fetchMock = vi.fn<(url: string, init?: RequestInit) => Promise<Response>>(
+      async () => new Response('{}', { status: 200 }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+    useMapStore.setState({ selectedSessionId: 42 })
+
+    renderGpsSyncTab()
+    fireEvent.change(screen.getByLabelText('Flight start (UTC)'), {
+      target: { value: '2024-06-15T10:30:05' },
+    })
+    selectFlightLog(new File(['time(millisecond)\n'], 'flight.csv', { type: 'text/csv' }))
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+    const body = fetchMock.mock.calls[0][1]?.body as FormData
+    // Read as UTC whatever the browser's zone: 10:30:05 in the field is 10:30:05Z.
+    expect(body.get('start_time')).toBe('2024-06-15T10:30:05.000Z')
+  })
+
+  it('shows the relative-clock 422 detail at the flight start field', async () => {
+    const detail =
+      'Flight log timestamps are relative to the start of the flight (0 s to 600 s) and the ' +
+      "log does not record when the flight started. Upload it again with start_time set to the flight's UTC start."
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JSON.stringify({ detail }), {
+        status: 422,
+        headers: { 'content-type': 'application/json' },
+      })),
+    )
+    useMapStore.setState({ selectedSessionId: 42 })
+
+    renderGpsSyncTab()
+    selectFlightLog(new File(['time(millisecond)\n'], 'flight.csv', { type: 'text/csv' }))
+
+    const message = await screen.findByText(detail)
+    expect(screen.getAllByText(detail)).toHaveLength(1)
+    const input = screen.getByLabelText('Flight start (UTC)')
+    expect(input.getAttribute('aria-invalid')).toBe('true')
+    expect(input.getAttribute('aria-describedby')?.split(' ')).toContain(message.id)
+
+    // Filling the field in clears the prompt.
+    fireEvent.change(input, { target: { value: '2024-06-15T10:30' } })
+    expect(screen.queryByText(detail)).toBeNull()
   })
 
   it('shows the backend detail when the upload fails', async () => {

@@ -36,9 +36,11 @@ if [ -d frontend ] && command -v npm >/dev/null 2>&1; then
   echo "Starting frontend on http://localhost:5173 ..."
   # Watch the backend from inside the frontend subshell and take npm with it
   # when the backend dies — a dead API must not leave :5173 serving (#862).
+  # The dev frontend talks to the backend directly: without VITE_API_URL
+  # every API call hits the Vite server and the app renders empty (#803).
   (
     cd frontend
-    npm run dev &
+    VITE_API_URL=http://localhost:8000 npm run dev &
     NPM_PID=$!
     while kill -0 "$BACKEND_PID" 2>/dev/null; do
       sleep 1

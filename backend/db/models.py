@@ -75,16 +75,8 @@ class Session(Base):
     reconstructions = relationship(
         "Reconstruction", back_populates="session", cascade="all, delete-orphan"
     )
-    comparisons_as_a = relationship(
-        "SessionComparison",
-        foreign_keys="SessionComparison.session_a_id",
-        cascade="all, delete-orphan",
-    )
-    comparisons_as_b = relationship(
-        "SessionComparison",
-        foreign_keys="SessionComparison.session_b_id",
-        cascade="all, delete-orphan",
-    )
+    # No relationship to SessionComparison: a comparison is never deleted as a side
+    # effect of deleting a session it uses (see SessionComparison).
     frame_selections = relationship(
         "SessionFrameSelection", cascade="all, delete-orphan", passive_deletes=True
     )
@@ -265,8 +257,9 @@ class Reconstruction(Base):
     __tablename__ = "reconstructions"
     id = Column(Integer, primary_key=True, index=True)
     session_id = Column(Integer, ForeignKey("sessions.id"), nullable=False, index=True)
+    # A dense re-run keeps its own artifacts, so deleting its parent only detaches it.
     parent_reconstruction_id = Column(
-        Integer, ForeignKey("reconstructions.id"), nullable=True, index=True
+        Integer, ForeignKey("reconstructions.id", ondelete="SET NULL"), nullable=True, index=True
     )
     status = Column(String, default="pending")
     preset = Column(String, default="quick")
@@ -437,6 +430,13 @@ class SessionFrameSelection(Base):
 
 
 class SessionComparison(Base):
+    """A change-detection diff between two reconstructions.
+
+    Its foreign keys deliberately have no ON DELETE action: deleting a session or a
+    reconstruction a comparison uses is refused (409, listing the comparisons) rather
+    than silently deleting the comparison. DELETE /comparisons/{id} removes it first.
+    """
+
     __tablename__ = "session_comparisons"
     id = Column(Integer, primary_key=True, index=True)
     session_a_id = Column(Integer, ForeignKey("sessions.id"), nullable=False)
@@ -474,11 +474,15 @@ class JobQueueEntry(Base):
 
 
 class AutoImportRecord(Base):
-    """A claimed watch-folder import.  The unique manifest fingerprint survives restarts."""
+    """A claimed watch-folder import.  The unique manifest fingerprint survives restarts.
+
+    It also survives the deletion of its session (``session_id`` becomes NULL), so the
+    watcher does not import a folder again just because its session was deleted.
+    """
 
     __tablename__ = "auto_import_records"
     id = Column(Integer, primary_key=True, index=True)
     fingerprint = Column(String, nullable=False, unique=True, index=True)
     source_path = Column(String, nullable=False)
-    session_id = Column(Integer, ForeignKey("sessions.id"), nullable=False)
+    session_id = Column(Integer, ForeignKey("sessions.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(UtcDateTime, default=lambda: datetime.now(UTC))

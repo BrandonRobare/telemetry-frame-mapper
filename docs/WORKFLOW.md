@@ -31,6 +31,7 @@ drone-video-geotagger \
 
 - `--takeoff-altitude` is the launch point's elevation in **meters above sea level** (find it on a topo map or your flight log). DJI telemetry stores altitude relative to takeoff; the CLI adds the two so the EXIF carries absolute altitude, while DJI XMP relative altitude drives footprint sizing later.
 - The SRT telemetry is extracted from the video automatically. If you already have it, pass `--srt flight.srt`; if you know the extraction rate, pass `--frame-rate 2` (otherwise it is estimated from the telemetry duration).
+- Deleting unwanted frames first (the take-off, say) is fine: each frame is timed from its own number, counted from ffmpeg's first frame number (`--start-number`, default 1), so the others keep their positions. Pass `--frame-rate` in that case, since the rate cannot be estimated from a folder whose first frames are gone. If you extracted with `ffmpeg -start_number 0`, pass `--start-number 0`.
 - After parsing the telemetry the CLI checks for signs of a weak or missing GPS lock — points stuck at (0, 0), coordinates frozen across many consecutive points, implausible position jumps — and prints a `WARNING:` line to stderr for each finding. Tagging still proceeds; treat the warnings as a prompt to inspect `frame_geotags.csv` before importing.
 - Add `--in-place` to tag the original frames instead of writing copies.
 
@@ -58,14 +59,14 @@ The backend creates `data/drone_mapping.db` (SQLite) on first run. Start it from
 2. In the UI, open the import modal and enter the path **relative to `imports/`** — just `2026-06-11-tower-site`. Absolute paths and `..` are rejected by design (path-traversal hardening).
 3. The progress bar polls until done; the session then appears in the sidebar.
 
-During import the backend reads GPS EXIF and DJI XMP (relative altitude, yaw, gimbal pitch), scores each image for sharpness/brightness, computes ground footprints, and generates thumbnails.
+During import the backend reads GPS EXIF and DJI XMP (relative altitude, yaw, gimbal pitch), scores each image for sharpness/brightness, computes ground footprints, and generates thumbnails. Files that cannot be opened or decoded as images (for example a copy cut short) are skipped and recorded as `image_skipped` in the Session Log. A frame whose quality scoring fails is kept with the `unscored` flag and is not usable (`quality_failed` in the log); a missing thumbnail is logged as `thumbnail_failed`.
 
 When the import finishes, the modal shows a Quick QA card. Alongside completeness and blur checks it runs GPS-lock heuristics over the imported coordinates: frames stuck at (0, 0), coordinates frozen across many consecutive frames, and implausible position jumps all produce warnings. It also flags variable lighting when the persisted per-frame brightness scores have a 10th-to-90th percentile spread of 60 or more (with at least five scored frames), which avoids a single outlier while surfacing shadows or changing exposure that may hurt reconstruction consistency. If any appear, re-check the flight's GPS quality (or sync a flight log in the GPS Sync tab) before reconstructing.
 
 ## 5. Review on the map, plan, and flag
 
 - **Map tab** — footprint polygons and the coverage overlay on ESRI satellite imagery. The sidebar shows session stats, coverage %, quality flags, and editable session tags and operator notes; "Run Coverage Analysis" recomputes coverage. The session picker in the top bar can filter by tag and its **Bulk** menu can archive, assign a project, add/replace tags, or delete selected visible sessions. Type `DELETE` to enable a bulk delete.
-- **Review tab** — thumbnail grid; cycle per-image flags (good / blurry / no_gps / dark / bright), and toggle which frames feed reconstruction. After a reconstruction has run, per-frame COLMAP reprojection-error badges appear here — sort by them to find weak frames.
+- **Review tab** — thumbnail grid; cycle per-image flags (good / blurry / no_gps / dark / bright; import sets `unscored` when scoring failed), and toggle which frames feed reconstruction. After a reconstruction has run, per-frame COLMAP reprojection-error badges appear here — sort by them to find weak frames.
 
 ### Dense rerun for weak registration
 
