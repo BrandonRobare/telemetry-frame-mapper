@@ -68,6 +68,17 @@ def test_area_and_level_selection_reports_deselection(suite):
         ),
         (
             "test_quality.py",
+            "import pytest\n@pytest.mark.unit\ndef test_new(client): pass",
+            [], "unit marker conflicts with integration fixtures: client",
+        ),
+        (
+            "test_quality.py",
+            "import pytest\n@pytest.fixture\ndef nested(db_session): return db_session\n"
+            "@pytest.mark.unit\ndef test_new(nested): pass",
+            [], "unit marker conflicts with integration fixtures: db_session, setup_test_db",
+        ),
+        (
+            "test_quality.py",
             "import pytest\n@pytest.mark.area_ingest_import\n"
             "@pytest.mark.area_platform_ops\ndef test_new(): pass",
             [], "multiple area markers",

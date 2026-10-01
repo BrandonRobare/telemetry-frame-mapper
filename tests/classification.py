@@ -141,12 +141,17 @@ def classify(item, root: Path) -> str:
     for kind, markers in (("level", levels), ("area", areas)):
         if len(markers) > 1:
             raise pytest.UsageError(f"{item.nodeid}: multiple {kind} markers: {', '.join(markers)}")
+    integration_fixtures = INTEGRATION_FIXTURES.intersection(item.fixturenames)
+    if levels == ["unit"] and integration_fixtures:
+        raise pytest.UsageError(
+            f"{item.nodeid}: unit marker conflicts with integration fixtures: "
+            f"{', '.join(sorted(integration_fixtures))}"
+        )
     if not levels:
         filename = item.path.relative_to(root / "tests").as_posix()
         level = LEVEL_BY_FILE.get(filename)
         if level is None:
-            uses_integration = INTEGRATION_FIXTURES.intersection(item.fixturenames)
-            level = "integration" if uses_integration else "unit"
+            level = "integration" if integration_fixtures else "unit"
         item.add_marker(level)
     if areas:
         area = areas[0].removeprefix("area_").replace("_", "-")
