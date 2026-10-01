@@ -1,9 +1,14 @@
 version: 2
+# Python and frontend dependencies get security updates only: `open-pull-requests-limit: 0` turns
+# off routine version-bump PRs for an ecosystem, but Dependabot still opens a PR when an alert has a
+# fix (Settings > Code security > Dependabot security updates must stay enabled). The pinned tools,
+# actions and base images below keep monthly version updates so the #956 pins don't go stale.
 updates:
   - package-ecosystem: "uv"
     directory: "/"
     schedule:
       interval: "weekly"
+    open-pull-requests-limit: 0
     groups:
       python-deps:
         patterns: ["*"]
@@ -12,6 +17,7 @@ updates:
     directory: "/frontend"
     schedule:
       interval: "weekly"
+    open-pull-requests-limit: 0
     groups:
       frontend-deps:
         patterns: ["*"]
@@ -25,12 +31,12 @@ updates:
   - package-ecosystem: "npm"
     directory: "/tools/splat-transform"
     schedule:
-      interval: "weekly"
+      interval: "monthly"
 
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
-      interval: "weekly"
+      interval: "monthly"
     groups:
       actions:
         patterns: ["*"]
@@ -40,7 +46,7 @@ updates:
   - package-ecosystem: "docker"
     directory: "/"
     schedule:
-      interval: "weekly"
+      interval: "monthly"
     groups:
       docker-images:
         patterns: ["*"]
