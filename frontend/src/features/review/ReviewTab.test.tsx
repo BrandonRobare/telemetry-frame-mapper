@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
+import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import ReviewTab from './ReviewTab'
 import { useMapStore } from '../../shared/stores/mapStore'
@@ -75,7 +76,7 @@ describe('ReviewTab frame selection clearing', () => {
     renderReviewTab()
     await screen.findByText('1 selected for reconstruction')
 
-    fireEvent.keyDown(document.body, { key: 'Escape' })
+    await userEvent.keyboard('{Escape}')
     expect(fetchMock).not.toHaveBeenCalledWith(
       '/reconstruction/frame-selection',
       expect.objectContaining({ method: 'POST' }),
@@ -85,17 +86,18 @@ describe('ReviewTab frame selection clearing', () => {
     if (!(grid instanceof HTMLDivElement)) throw new Error('Review grid not found')
     grid.focus()
     expect(document.activeElement).toBe(grid)
-    fireEvent.keyDown(grid, { key: 'Escape' })
+    grid.focus()
+    await userEvent.keyboard('{Escape}')
     expect(await screen.findByRole('alertdialog')).toBeTruthy()
     expect(fetchMock).not.toHaveBeenCalledWith(
       '/reconstruction/frame-selection',
       expect.objectContaining({ method: 'POST' }),
     )
 
-    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }))
     expect(screen.queryByRole('alertdialog')).toBeNull()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Clear' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Clear' }))
     expect(screen.getByRole('alertdialog')).toBeTruthy()
     expect(screen.getByText('Clear reconstruction selection?')).toBeTruthy()
     expect(fetchMock).not.toHaveBeenCalledWith(
@@ -103,7 +105,7 @@ describe('ReviewTab frame selection clearing', () => {
       expect.objectContaining({ method: 'POST' }),
     )
 
-    fireEvent.click(screen.getByRole('button', { name: 'Clear selection' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Clear selection' }))
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
       '/reconstruction/frame-selection',
       expect.objectContaining({ method: 'POST', body: JSON.stringify({ session_id: 42, image_ids: [] }) }),
@@ -131,7 +133,7 @@ describe('ReviewTab unscored frames', () => {
 
     expect(await screen.findByRole('button', { name: 'Flag: Unscored, click to cycle' })).toBeTruthy()
     const filter = screen.getByRole('button', { name: /^1\s*Unscored$/ })
-    fireEvent.click(filter)
+    await userEvent.click(filter)
     expect(screen.getByText('1 / 2 frames')).toBeTruthy()
     expect(screen.queryByText('frame-001.jpg')).toBeNull()
     expect(screen.getByText('frame-002.jpg')).toBeTruthy()

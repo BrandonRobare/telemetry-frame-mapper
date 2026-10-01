@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
+import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import SessionSidebar from './SessionSidebar'
 import { ToastStack } from '../../shared/components/ToastStack'
@@ -74,7 +75,7 @@ describe('SessionSidebar — run coverage', () => {
 
     // Target-area selector populates from GET /target-areas/.
     await screen.findByRole('option', { name: 'North Field' })
-    fireEvent.click(screen.getByRole('button', { name: 'Run coverage analysis' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Run coverage analysis' }))
 
     await waitFor(() => expect(calls).toHaveLength(1))
     expect(calls[0].method).toBe('POST')
@@ -87,7 +88,7 @@ describe('SessionSidebar — run coverage', () => {
     renderSidebar()
 
     await screen.findByRole('option', { name: 'North Field' })
-    fireEvent.click(screen.getByRole('button', { name: 'Run coverage analysis' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Run coverage analysis' }))
 
     // The error surfaces as a toast (role="status" live region), not a silent no-op.
     expect(await screen.findByText('target_area_id required')).toBeTruthy()

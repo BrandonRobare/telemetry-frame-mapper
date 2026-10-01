@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
+import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, render, screen } from '@testing-library/react'
 import { ConfirmDialog } from './ConfirmDialog'
 
 afterEach(() => {
@@ -32,7 +33,7 @@ describe('ConfirmDialog', () => {
     expect(dialog.contains(document.activeElement)).toBe(true)
   })
 
-  it('traps Tab focus within the dialog, wrapping at both ends', () => {
+  it('traps Tab focus within the dialog, wrapping at both ends', async () => {
     renderDialog()
     const cancelButton = screen.getByRole('button', { name: 'Cancel' })
     const confirmButton = screen.getByRole('button', { name: 'Delete' })
@@ -40,28 +41,28 @@ describe('ConfirmDialog', () => {
     expect(document.activeElement).toBe(cancelButton)
 
     // Shift+Tab from the first control wraps around to the last.
-    fireEvent.keyDown(cancelButton, { key: 'Tab', shiftKey: true })
+    await userEvent.tab({ shift: true })
     expect(document.activeElement).toBe(confirmButton)
 
     // Tab from the last control wraps back to the first.
-    fireEvent.keyDown(confirmButton, { key: 'Tab' })
+    await userEvent.tab()
     expect(document.activeElement).toBe(cancelButton)
   })
 
-  it('closes on Escape by calling onCancel (and not onConfirm)', () => {
+  it('closes on Escape by calling onCancel (and not onConfirm)', async () => {
     const { onCancel, onConfirm } = renderDialog()
-    fireEvent.keyDown(screen.getByRole('alertdialog'), { key: 'Escape' })
+    await userEvent.keyboard('{Escape}')
     expect(onCancel).toHaveBeenCalledTimes(1)
     expect(onConfirm).not.toHaveBeenCalled()
   })
 
-  it('ignores Escape while a confirmation is pending', () => {
+  it('ignores Escape while a confirmation is pending', async () => {
     const { onCancel } = renderDialog({ loading: true })
-    fireEvent.keyDown(screen.getByRole('alertdialog'), { key: 'Escape' })
+    await userEvent.keyboard('{Escape}')
     expect(onCancel).not.toHaveBeenCalled()
   })
 
-  it('restores focus to the triggering control when it closes', () => {
+  it('restores focus to the triggering control when it closes', async () => {
     function Harness() {
       const [open, setOpen] = useState(false)
       return (
@@ -83,10 +84,10 @@ describe('ConfirmDialog', () => {
     trigger.focus()
     expect(document.activeElement).toBe(trigger)
 
-    fireEvent.click(trigger)
+    await userEvent.click(trigger)
     expect(document.activeElement).not.toBe(trigger)
 
-    fireEvent.keyDown(screen.getByRole('alertdialog'), { key: 'Escape' })
+    await userEvent.keyboard('{Escape}')
     expect(document.activeElement).toBe(trigger)
   })
 

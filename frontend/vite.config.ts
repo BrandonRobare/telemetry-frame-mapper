@@ -13,6 +13,11 @@ const manualChunks = (id: string) => {
   return undefined
 }
 
+const browserHookTests = [
+  'src/features/splat/useViewerCoords.test.ts',
+  'src/features/map/hooks/useSlopeOverlay.test.ts',
+]
+
 // public/sw.js is copied verbatim and can't read the build manifest, so the
 // version is handed to it on its registration URL (#588).
 const version = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')).version
@@ -28,7 +33,9 @@ export default defineConfig({
     },
   },
   test: {
-    environment: 'node',
-    globals: true,
+    projects: [
+      { extends: true, test: { name: 'unit', environment: 'node', globals: true, include: ['src/**/*.test.ts'], exclude: browserHookTests } },
+      { extends: true, test: { name: 'component', environment: 'jsdom', globals: true, include: ['src/**/*.test.tsx', ...browserHookTests] } },
+    ],
   },
 })

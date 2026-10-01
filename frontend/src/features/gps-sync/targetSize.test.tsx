@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import userEvent from '@testing-library/user-event'
 //
 // WCAG 2.2 SC 2.5.8 (#606).
 //
@@ -11,7 +12,7 @@
 // verified in a browser instead, at 320/375/430/desktop.
 import { useState } from 'react'
 import { afterEach, describe, expect, it } from 'vitest'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, render, screen } from '@testing-library/react'
 import { Button } from '../../shared/components/Button'
 import { OffsetStepper } from './GpsSyncTab'
 
@@ -60,12 +61,12 @@ describe('OffsetStepper — the conformant path to the exempt histogram', () => 
     expect(screen.getByRole('group', { name: /step through previewed offsets/i })).toBeTruthy()
   })
 
-  it('steps onto adjacent previewed offsets', () => {
+  it('steps onto adjacent previewed offsets', async () => {
     renderStepper(0)
-    fireEvent.click(screen.getByRole('button', { name: 'Next offset' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Next offset' }))
     expect(screen.getByText('1.0 s')).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: 'Previous offset' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Previous offset' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Previous offset' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Previous offset' }))
     expect(screen.getByText('-1.0 s')).toBeTruthy()
   })
 
@@ -82,9 +83,9 @@ describe('OffsetStepper — the conformant path to the exempt histogram', () => 
     )
   })
 
-  it('snaps an off-grid value onto the nearest previewed offset', () => {
+  it('snaps an off-grid value onto the nearest previewed offset', async () => {
     renderStepper(0.6)
-    fireEvent.click(screen.getByRole('button', { name: 'Next offset' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Next offset' }))
     expect(screen.getByText('1.0 s')).toBeTruthy()
   })
 })

@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
+import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import PlanTab from './PlanTab'
 import { ErrorBoundary } from '../../ErrorBoundary'
@@ -90,9 +91,9 @@ describe('PlanTab malformed lane geometry', () => {
     }))
     renderPlanTab()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Draw area' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Draw area' }))
     await screen.findByText(/Target area saved/)
-    fireEvent.click(screen.getByRole('button', { name: 'Generate Plan' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Generate Plan' }))
 
     expect(await screen.findByText('Plan Summary')).toBeTruthy()
     expect(screen.queryByText('Render error. Check console for details')).toBeNull()
@@ -112,17 +113,17 @@ describe('PlanTab segment downloads', () => {
     vi.stubGlobal('open', open)
     renderPlanTab()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Draw area' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Draw area' }))
     await screen.findByText(/Target area saved/)
-    fireEvent.click(screen.getByRole('button', { name: 'Generate Plan' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Generate Plan' }))
     await screen.findByText('Plan Summary')
-    fireEvent.click(screen.getByRole('button', { name: 'Segments' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Segments' }))
     await screen.findByText('Battery Segments (2)')
 
     const kmlButtons = screen.getAllByRole('button', { name: 'KML ↓' })
     const gpxButtons = screen.getAllByRole('button', { name: 'GPX ↓' })
-    fireEvent.click(kmlButtons[1])
-    fireEvent.click(gpxButtons[2])
+    await userEvent.click(kmlButtons[1])
+    await userEvent.click(gpxButtons[2])
 
     await waitFor(() => {
       expect(open).toHaveBeenCalledWith('/plans/42/segments/0/kml', '_blank')
