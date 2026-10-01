@@ -282,6 +282,7 @@ def test_windows_manifest_rejects_swapped_file_before_read(tmp_path, monkeypatch
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows junction validation")
+@pytest.mark.integration
 def test_windows_manifest_rejects_swapped_directory_junction(tmp_path, monkeypatch):
     safe_root = tmp_path / "safe"
     folder = safe_root / "nested"

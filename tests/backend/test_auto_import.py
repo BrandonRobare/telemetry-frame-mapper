@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
+import pytest
+
 from backend.db.models import AutoImportRecord, Session
 from backend.services.auto_import import AutoImportWatcher
 from tests.conftest import TestSessionLocal
@@ -25,6 +27,7 @@ def _config(root, stable_seconds: int = 5) -> dict:
     }
 
 
+@pytest.mark.usefixtures("db_session")
 def test_waits_for_a_media_directory_to_stabilize_before_import(tmp_path):
     root = tmp_path / "card"
     flight = root / "100MEDIA"
@@ -54,6 +57,7 @@ def test_waits_for_a_media_directory_to_stabilize_before_import(tmp_path):
     assert calls[0][1] == flight.resolve()
 
 
+@pytest.mark.usefixtures("db_session")
 def test_persisted_fingerprint_prevents_reimport_after_watcher_restart(tmp_path):
     root = tmp_path / "card"
     flight = root / "100MEDIA"

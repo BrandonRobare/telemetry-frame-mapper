@@ -8,10 +8,14 @@ import tempfile
 from pathlib import Path
 
 import pytest
+
+from tests.classification import SHARED_DB_FIXTURES, classify, selected_areas
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import NullPool
+
+pytest_plugins = ["pytester"]
 
 TEST_DB_URL_ENV = "PYTEST_DATABASE_URL"
 TEST_DB_URL = os.environ.get(TEST_DB_URL_ENV)
@@ -88,14 +92,12 @@ def db_session(setup_test_db):
 
 @pytest.fixture(autouse=True)
 def clean_tables(request):
-    if "tests/backend" not in request.node.path.as_posix():
+    if not SHARED_DB_FIXTURES.intersection(request.fixturenames):
         yield
         return
 
     request.getfixturevalue("db_session")
-    clear_rec_logs()
     yield
-    clear_rec_logs()
     with TestSessionLocal() as db:
         for table in reversed(Base.metadata.sorted_tables):
             db.execute(table.delete())
@@ -110,3 +112,30 @@ def db_engine():
 @pytest.fixture
 def client():
     return TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def clean_reconstruction_logs():
+    clear_rec_logs()
+    yield
+    clear_rec_logs()
+
+
+def pytest_addoption(parser):
+    parser.addoption("--area", default="", help="comma-separated hyphenated coverage areas")
+
+
+def pytest_configure(config):
+    selected_areas(config.getoption("--area"))
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_collection_modifyitems(config, items):
+    wanted = selected_areas(config.getoption("--area"))
+    keep, deselected = [], []
+    for item in items:
+        area = classify(item, config.rootpath)
+        (keep if not wanted or area in wanted else deselected).append(item)
+    if deselected:
+        config.hook.pytest_deselected(items=deselected)
+        items[:] = keep

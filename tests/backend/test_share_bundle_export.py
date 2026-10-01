@@ -425,6 +425,7 @@ def test_share_bundle_rejects_symlink_artifact(tmp_path):
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX FIFO only")
+@pytest.mark.integration
 def test_share_bundle_fifo_fails_without_blocking(tmp_path):
     """A FIFO in an artifact field must fail rather than block waiting for a writer."""
     import subprocess

@@ -101,6 +101,24 @@ ignore = ["B008"]
 "backend/services/survey_report.py" = ["E501"]
 
 [tool.pytest.ini_options]
-addopts = "-s"
+addopts = "--strict-markers -ra"
 testpaths = ["tests"]
 pythonpath = [".", "src"]
+markers = [
+  "unit: isolated; no DB, network or subprocess",
+  "integration: API, database, filesystem or subprocess integration",
+  "contract: cross-boundary API, schema and packaging agreements",
+  "e2e: complete operator journeys",
+  "perf: scaling and timing budgets",
+  "hardware: requires a real accelerator",
+  "area_geotag_cli: geotag-cli",
+  "area_ingest_import: ingest-import",
+  "area_flight_log_gps: flight-log-gps",
+  "area_coverage_planning: coverage-planning",
+  "area_reconstruction_splat: reconstruction-splat",
+  "area_export_share: export-share",
+  "area_platform_ops: platform-ops",
+  "area_db_migrations: db-migrations",
+  "area_frontend_shared: frontend-shared",
+  "area_packaging_release: packaging-release",
+]

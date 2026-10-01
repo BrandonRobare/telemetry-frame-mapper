@@ -25,6 +25,7 @@ def _noop_progress(step: str, pct: float) -> None:
 _NO_GPU_STACK = {"torch": None, "gsplat": None}
 
 
+@pytest.mark.integration
 def test_module_imports_without_torch():
     # Clean-room subprocess: with the GPU stack blocked before anything else
     # imports, the module must still import — proving its top level never pulls
