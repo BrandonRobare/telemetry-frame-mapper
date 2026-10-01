@@ -47,6 +47,7 @@ def _inputs(tmp_path: Path) -> tuple[AppConfig, Path, Path, Path]:
     )
 
 
+@pytest.mark.integration
 def test_local_backup_is_versioned_checksummed_and_uses_sqlite_snapshot(tmp_path):
     cfg, config, database, target = _inputs(tmp_path)
 
@@ -85,6 +86,7 @@ def test_local_backup_is_versioned_checksummed_and_uses_sqlite_snapshot(tmp_path
     ).hexdigest()
 
 
+@pytest.mark.integration
 def test_verify_backup_accepts_a_fresh_snapshot_and_rejects_every_tampering(tmp_path):
     """A restore must refuse a snapshot that no longer matches its manifest (#610)."""
     cfg, config, database, target = _inputs(tmp_path)
@@ -138,6 +140,7 @@ def test_verify_backup_rejects_a_manifest_that_escapes_the_snapshot(tmp_path):
         verify_backup(snapshot)
 
 
+@pytest.mark.integration
 def test_local_backup_rejects_destination_outside_allowlist(tmp_path):
     cfg, config, database, target = _inputs(tmp_path)
 
@@ -153,6 +156,7 @@ def test_local_backup_rejects_destination_outside_allowlist(tmp_path):
         )
 
 
+@pytest.mark.integration
 def test_local_backup_rejects_sibling_of_approved_destination(tmp_path):
     cfg, config, database, target = _inputs(tmp_path)
 
@@ -168,6 +172,7 @@ def test_local_backup_rejects_sibling_of_approved_destination(tmp_path):
         )
 
 
+@pytest.mark.integration
 def test_local_backup_rejects_destination_inside_selected_artifacts(tmp_path):
     cfg, config, database, _ = _inputs(tmp_path)
     target = Path(cfg.exports_dir) / "backups"
@@ -184,6 +189,7 @@ def test_local_backup_rejects_destination_inside_selected_artifacts(tmp_path):
         )
 
 
+@pytest.mark.integration
 def test_rclone_backup_uses_copy_without_deletion_flags(tmp_path, monkeypatch):
     cfg, config, database, _ = _inputs(tmp_path)
     commands = []
@@ -210,6 +216,7 @@ def test_rclone_backup_uses_copy_without_deletion_flags(tmp_path, monkeypatch):
     assert kwargs == {"check": True, "capture_output": True, "text": True}
 
 
+@pytest.mark.integration
 def test_rclone_failure_does_not_expose_command_output(tmp_path, monkeypatch):
     cfg, config, database, _ = _inputs(tmp_path)
 

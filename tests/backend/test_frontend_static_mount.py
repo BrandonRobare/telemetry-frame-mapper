@@ -6,6 +6,8 @@ from starlette.routing import Mount
 
 import backend.main as main_mod
 
+pytestmark = pytest.mark.usefixtures("db_session")
+
 
 def _mount_frontend(dist_dir):
     """Mirror the module's own mount logic against a patched path."""
