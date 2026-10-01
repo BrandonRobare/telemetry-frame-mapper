@@ -1,10 +1,17 @@
 import type { GeoTransform } from '../../types/api'
-import { worldToGps } from '../splat/useViewerCoords'
+import { metresPerSceneUnit, worldToGps } from './useViewerCoords'
 
 // ---------------------------------------------------------------------------
 // Shared measurement math — pure functions for profile sampling & volume.
-// All surface sampling passes through the same sampling interface so callers
-// can swap between mesh hits, splat query, or flat ground plane.
+//
+// Both tools report surface heights in metres, so they need two things this
+// module refuses to fake (#953):
+//   * a real surface sampler — heights read from the reconstructed surface
+//     (a DSM or point-cloud height query), never a constant ground plane; and
+//   * a georeferenced reconstruction — scene units only become metres once
+//     scaled by geo_transform.scale.
+// surfaceMeasurementGate() says whether both are present; sampleProfile() and
+// computeVolume() throw SurfaceMeasurementUnavailableError when they are not.
 // ---------------------------------------------------------------------------
 
 export interface WorldPoint3 {
@@ -13,22 +20,73 @@ export interface WorldPoint3 {
   z: number
 }
 
+/**
+ * Surface elevation in metres at a scene-space (x, z) position, or null where
+ * the surface has no data. It must read the reconstructed surface: a constant
+ * or ground-plane function is not a surface sampler.
+ */
 export type SurfaceSampler = (x: number, z: number) => number | null
+
+export const NO_SURFACE_SAMPLER_REASON =
+  'Profile and volume are off: the viewer has no surface-height source (DSM or point cloud) ' +
+  'to sample yet.'
+
+export const NOT_GEOREFERENCED_REASON =
+  'Profile and volume are off: this reconstruction is not georeferenced, so heights and ' +
+  'distances cannot be given in metres.'
+
+export class SurfaceMeasurementUnavailableError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'SurfaceMeasurementUnavailableError'
+  }
+}
+
+export type SurfaceMeasurementGate =
+  | { available: true; sampler: SurfaceSampler; geo: GeoTransform; metresPerUnit: number }
+  | { available: false; reason: string }
+
+/** Whether profile and volume can run, and if not, a short reason to show the user. */
+export function surfaceMeasurementGate(
+  sampler: SurfaceSampler | null | undefined,
+  geo: GeoTransform | null | undefined,
+): SurfaceMeasurementGate {
+  if (typeof sampler !== 'function') return { available: false, reason: NO_SURFACE_SAMPLER_REASON }
+  const metresPerUnit = metresPerSceneUnit(geo)
+  if (!geo || metresPerUnit === null) return { available: false, reason: NOT_GEOREFERENCED_REASON }
+  return { available: true, sampler, geo, metresPerUnit }
+}
+
+function requireSurface(
+  sampler: SurfaceSampler | null | undefined,
+  geo: GeoTransform | null | undefined,
+) {
+  const gate = surfaceMeasurementGate(sampler, geo)
+  if (!gate.available) throw new SurfaceMeasurementUnavailableError(gate.reason)
+  return gate
+}
+
+function requirePositive(name: string, value: number): void {
+  // A zero step never advances the sampling loops below.
+  if (!Number.isFinite(value) || value <= 0) {
+    throw new RangeError(`${name} must be a finite value greater than zero`)
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Profile sampling
 // ---------------------------------------------------------------------------
 
 export interface ProfileSample {
-  /** Cumulative distance along the polyline (m) */
+  /** Cumulative distance along the polyline in metres (scene distance × geo scale) */
   distance_m: number
   /** World X */
   x: number
   /** World Z */
   z: number
-  /** Sampled surface elevation Y (null if sampler returned null) */
+  /** Surface elevation in metres from the sampler (null where the surface has no data) */
   elevation: number | null
-  /** GPS lat, if geo-transform available */
+  /** GPS lat from the geo-transform */
   lat: number | null
   /** GPS lon */
   lon: number | null
@@ -36,42 +94,43 @@ export interface ProfileSample {
 
 export function sampleProfile(
   points: readonly WorldPoint3[],
-  sampler: SurfaceSampler,
+  sampler: SurfaceSampler | null | undefined,
+  geo: GeoTransform | null | undefined,
   sampleSpacingM = 0.5,
-  geo?: GeoTransform,
 ): ProfileSample[] {
+  const surface = requireSurface(sampler, geo)
+  requirePositive('sampleSpacingM', sampleSpacingM)
   if (points.length < 2) return []
 
   const samples: ProfileSample[] = []
-  let cumulativeDistance = 0
+  let cumulativeDistanceM = 0
 
   for (let i = 0; i < points.length - 1; i++) {
     const a = points[i]
     const b = points[i + 1]
     const dx = b.x - a.x
+    const dy = b.y - a.y
     const dz = b.z - a.z
-    const segLen = Math.sqrt(dx * dx + dz * dz)
-    const steps = Math.max(1, Math.round(segLen / sampleSpacingM))
+    const segLenM = Math.sqrt(dx * dx + dz * dz) * surface.metresPerUnit
+    const steps = Math.max(1, Math.round(segLenM / sampleSpacingM))
 
     for (let s = i === 0 ? 0 : 1; s <= steps; s++) {
       const t = s / steps
       const wx = a.x + dx * t
       const wz = a.z + dz * t
-      const wy = sampler(wx, wz)
-      const segDist = segLen * t
-      const gps = geo ? worldToGps({ x: wx, y: wy ?? 0, z: wz }, geo) : null
+      const gps = worldToGps({ x: wx, y: a.y + dy * t, z: wz }, surface.geo)
 
       samples.push({
-        distance_m: cumulativeDistance + segDist,
+        distance_m: cumulativeDistanceM + segLenM * t,
         x: wx,
         z: wz,
-        elevation: wy,
+        elevation: surface.sampler(wx, wz),
         lat: gps?.lat ?? null,
         lon: gps?.lon ?? null,
       })
     }
 
-    cumulativeDistance += segLen
+    cumulativeDistanceM += segLenM
   }
 
   return samples
@@ -98,6 +157,8 @@ export interface VolumeResult {
   sampleCount: number
   /** Grid spacing used (m) */
   gridSpacingM: number
+  /** Base elevation the cut and fill are measured from (m) */
+  referenceElevationM: number
 }
 
 const M3_TO_YD3 = 1.3079506193
@@ -107,23 +168,33 @@ const M3_TO_YD3 = 1.3079506193
  *
  * The polygon is defined by its vertices (world-space XZ). Each grid cell is
  * tested for polygon containment; if contained, the sampler is queried at the
- * cell center.  Height difference = surfaceY − referenceElevation.
+ * cell center.  Height difference = surface elevation − referenceElevationM.
  * Positive → cut (above reference), negative → fill (below reference).
  *
  * @param polygon    polygon vertices, assumed planar in XZ
- * @param sampler    surface sampler: (x, z) → y or null
- * @param referenceElevation  flat base elevation (m); extension point for
+ * @param sampler    real surface sampler: (x, z) → elevation (m) or null
+ * @param referenceElevationM  flat base elevation (m); extension point for
  *                            second surface via a different sampler
- * @param gridSpacingM  grid cell size in meters (default 0.5)
+ * @param geo        geo-transform; its scale converts scene units to metres
+ * @param gridSpacingM  grid cell size in metres (default 0.5)
  */
 export function computeVolume(
   polygon: readonly WorldPoint3[],
-  sampler: SurfaceSampler,
-  referenceElevation: number,
+  sampler: SurfaceSampler | null | undefined,
+  referenceElevationM: number,
+  geo: GeoTransform | null | undefined,
   gridSpacingM = 0.5,
 ): VolumeResult {
+  const surface = requireSurface(sampler, geo)
+  requirePositive('gridSpacingM', gridSpacingM)
+  if (!Number.isFinite(referenceElevationM)) {
+    throw new RangeError('referenceElevationM must be a finite value')
+  }
   if (polygon.length < 3) {
-    return { cut_m3: 0, fill_m3: 0, net_m3: 0, cut_yd3: 0, fill_yd3: 0, net_yd3: 0, sampleCount: 0, gridSpacingM }
+    return {
+      cut_m3: 0, fill_m3: 0, net_m3: 0, cut_yd3: 0, fill_yd3: 0, net_yd3: 0,
+      sampleCount: 0, gridSpacingM, referenceElevationM,
+    }
   }
 
   // Bounding box
@@ -160,15 +231,18 @@ export function computeVolume(
   let fill = 0
   let sampleCount = 0
   const cellArea = gridSpacingM * gridSpacingM
+  // The polygon is in scene units; step the grid in scene units that span
+  // gridSpacingM metres so each cell covers cellArea square metres.
+  const step = gridSpacingM / surface.metresPerUnit
 
   // Iterate grid cells using center-point sampling
   // Offset by half grid spacing so samples are cell centers
-  for (let gx = minX + gridSpacingM / 2; gx <= maxX; gx += gridSpacingM) {
-    for (let gz = minZ + gridSpacingM / 2; gz <= maxZ; gz += gridSpacingM) {
+  for (let gx = minX + step / 2; gx <= maxX; gx += step) {
+    for (let gz = minZ + step / 2; gz <= maxZ; gz += step) {
       if (!pointInPolygon(gx, gz)) continue
-      const sy = sampler(gx, gz)
+      const sy = surface.sampler(gx, gz)
       if (sy === null) continue
-      const diff = sy - referenceElevation
+      const diff = sy - referenceElevationM
       if (diff > 0) cut += diff * cellArea
       else fill += -diff * cellArea
       sampleCount++
@@ -184,5 +258,21 @@ export function computeVolume(
     net_yd3: (cut - fill) * M3_TO_YD3,
     sampleCount,
     gridSpacingM,
+    referenceElevationM,
   }
+}
+
+/**
+ * Mean surface elevation (m) at the polygon's vertices — the base plane cut and
+ * fill are measured from — or null when the surface has no height at any vertex.
+ */
+export function boundaryReferenceElevation(
+  polygon: readonly WorldPoint3[],
+  sampler: SurfaceSampler,
+): number | null {
+  const heights = polygon
+    .map((p) => sampler(p.x, p.z))
+    .filter((h): h is number => h !== null)
+  if (heights.length === 0) return null
+  return heights.reduce((sum, h) => sum + h, 0) / heights.length
 }

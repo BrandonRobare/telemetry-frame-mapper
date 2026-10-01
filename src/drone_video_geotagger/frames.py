@@ -8,6 +8,11 @@ from pathlib import Path
 
 from drone_video_geotagger.telemetry import TelemetryPoint, interpolate, resolve_altitudes
 
+# The number ffmpeg's image2 muxer gives the first frame it writes unless it is run with
+# `-start_number` (the documented `ffmpeg -i flight.mp4 -vf fps=8 frame_%05d.jpg` writes
+# frame_00001.jpg first). Frame N was taken (N - start number) / fps seconds into the video.
+DEFAULT_START_NUMBER = 1
+
 
 @dataclass(frozen=True)
 class FrameTag:
@@ -58,11 +63,25 @@ def frame_numbering_gap_summary(frames: list[tuple[Path, int]]) -> str | None:
     return None
 
 
+def check_start_number(frames: list[tuple[Path, int]], start_number: int) -> None:
+    """Reject a start number that ffmpeg could not have numbered these frames from."""
+    if start_number < 0:
+        raise ValueError(f"start number must be zero or greater, got {start_number}")
+    if frames and frames[0][1] < start_number:
+        raise ValueError(
+            f"Cannot time frame {frames[0][1]}: it is numbered below the start number "
+            f"{start_number}. Re-run with --start-number set to the number of the first "
+            "frame ffmpeg wrote (its -start_number, 1 unless you passed one)."
+        )
+
+
 def infer_frame_rate(
     frames: list[tuple[Path, int]],
     telemetry_end_s: float,
     video_duration_s: float | None = None,
+    start_number: int = DEFAULT_START_NUMBER,
 ) -> float:
+    check_start_number(frames, start_number)
     gap_summary = frame_numbering_gap_summary(frames)
     if gap_summary:
         raise ValueError(
@@ -70,8 +89,25 @@ def infer_frame_rate(
             f"({gap_summary}). Re-run with --frame-rate set to the extraction rate."
         )
 
+    # Deleted leading frames (the take-off) are a gap too: counting only the survivors
+    # would under-estimate the rate and misplace every frame.
+    first_index = frames[0][1]
+    if first_index > start_number:
+        missing = first_index - start_number
+        plural = "" if missing == 1 else "s"
+        raise ValueError(
+            "Cannot safely infer frame rate: numbering starts at "
+            f"{start_number} but the first frame is {first_index} (missing {missing} frame "
+            f"number{plural}). Re-run with --frame-rate set to the extraction rate, or with "
+            f"--start-number {first_index} if ffmpeg numbered the frames from {first_index}."
+        )
+
     if telemetry_end_s <= 0:
-        return 8.0
+        raise ValueError(
+            "Cannot infer frame rate: the telemetry reports no duration "
+            f"(it ends at {telemetry_end_s:g} s). Re-run with --frame-rate set to the "
+            "extraction rate."
+        )
 
     rough_rate = len(frames) / telemetry_end_s
     frame_rate = rough_rate
@@ -100,24 +136,28 @@ def build_frame_tags(
     takeoff_altitude_m: float,
     video_start: datetime | None,
     in_place: bool = False,
+    start_number: int = DEFAULT_START_NUMBER,
 ) -> list[FrameTag]:
     if frame_rate <= 0:
         raise ValueError("frame rate must be greater than zero")
+    check_start_number(frames, start_number)
 
     # The only place a launch elevation is known, so the only place an absolute-only
     # altitude can be converted to height above launch.
     telemetry = resolve_altitudes(telemetry, takeoff_altitude_m)
 
     tags: list[FrameTag] = []
-    first_index = frames[0][1]
 
     for source, frame_index in frames:
-        seconds = (frame_index - first_index) / frame_rate
+        # Measured from ffmpeg's start number, never from the first frame that survived:
+        # a frame's time depends only on its own number, so deleting frames moves no other.
+        seconds = (frame_index - start_number) / frame_rate
         if seconds >= telemetry[-1].end_s:
             raise ValueError(
                 f"Cannot geotag frame {frame_index} at {seconds:g}s: telemetry ends at "
                 f"{telemetry[-1].end_s:g}s. Re-run with complete telemetry or exclude frames "
-                "outside its recorded span."
+                "outside its recorded span (or set --start-number if ffmpeg did not number "
+                f"the frames from {start_number})."
             )
         lat, lon, rel_alt_m = interpolate(telemetry, seconds)
         timestamp = video_start + timedelta(seconds=seconds) if video_start else None

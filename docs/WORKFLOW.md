@@ -31,6 +31,7 @@ drone-video-geotagger \
 
 - `--takeoff-altitude` is the launch point's elevation in **meters above sea level** (find it on a topo map or your flight log). DJI telemetry stores altitude relative to takeoff; the CLI adds the two so the EXIF carries absolute altitude, while DJI XMP relative altitude drives footprint sizing later.
 - The SRT telemetry is extracted from the video automatically. If you already have it, pass `--srt flight.srt`; if you know the extraction rate, pass `--frame-rate 2` (otherwise it is estimated from the telemetry duration).
+- Deleting unwanted frames first (the take-off, say) is fine: each frame is timed from its own number, counted from ffmpeg's first frame number (`--start-number`, default 1), so the others keep their positions. Pass `--frame-rate` in that case, since the rate cannot be estimated from a folder whose first frames are gone. If you extracted with `ffmpeg -start_number 0`, pass `--start-number 0`.
 - After parsing the telemetry the CLI checks for signs of a weak or missing GPS lock — points stuck at (0, 0), coordinates frozen across many consecutive points, implausible position jumps — and prints a `WARNING:` line to stderr for each finding. Tagging still proceeds; treat the warnings as a prompt to inspect `frame_geotags.csv` before importing.
 - Add `--in-place` to tag the original frames instead of writing copies.
 

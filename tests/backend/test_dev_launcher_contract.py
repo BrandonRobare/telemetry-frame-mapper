@@ -1,14 +1,17 @@
-"""Development-launcher contract (#858, #873).
+"""Development-launcher contract (#803, #858, #873, #955).
 
 The source-startup launchers are the entry point for the supported Mac
 workflow. These tests pin the sync/install semantics so a future edit
 cannot silently reintroduce dependency removal or lockfile mutation
-without a failing gate here.
+without a failing gate here, and they pin that every launcher points the
+Vite dev server at the backend.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
+
+import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -40,13 +43,35 @@ def test_dev_launchers_install_frontend_from_the_lockfile():
         assert "npm install" not in text, f"{name} must not run npm install"
 
 
-def test_dev_launchers_point_the_frontend_at_the_backend():
-    """The dev frontend must receive VITE_API_URL so API calls reach the
-    backend instead of the Vite SPA shell (#803)."""
-    sh = _script("dev.sh")
-    assert "VITE_API_URL=http://localhost:8000" in sh, "dev.sh must pass VITE_API_URL"
-    bat = _script("dev.bat")
-    assert "VITE_API_URL=http://localhost:8000" in bat, "dev.bat must pass VITE_API_URL"
+def _commands(text: str) -> list[str]:
+    """Script lines without shell (#) or batch (REM, ::) comment lines."""
+    commands = []
+    for line in text.splitlines():
+        stripped = line.strip().lower()
+        if stripped.startswith(("#", "::")) or stripped.split(" ", 1)[0] == "rem":
+            continue
+        commands.append(line)
+    return commands
+
+
+# The exact form #803 used in dev.sh / dev.bat. cmd's `set` keeps everything up
+# to `&&`, so the batch form has no space before it.
+_NPM_DEV_WITH_API_URL = {
+    ".sh": "VITE_API_URL=http://localhost:8000 npm run dev",
+    ".bat": "set VITE_API_URL=http://localhost:8000&& npm run dev",
+}
+
+
+@pytest.mark.parametrize("name", ["dev.sh", "dev.bat", "run.sh", "run.bat"])
+def test_launchers_point_the_frontend_at_the_backend(name):
+    """Every launcher that starts the Vite dev server must hand it VITE_API_URL,
+    or API calls hit the Vite SPA shell and the app renders empty. #803 fixed
+    the dev launchers; #955 extends the same contract to run.sh / run.bat."""
+    npm_dev = [line for line in _commands(_script(name)) if "npm run dev" in line]
+    assert npm_dev, f"{name} must start the frontend dev server"
+    expected = _NPM_DEV_WITH_API_URL[Path(name).suffix]
+    for line in npm_dev:
+        assert expected in line, f"{name} must start npm with {expected!r}: {line.strip()}"
 
 
 def test_run_scripts_do_not_reinstall_or_install_frontend():

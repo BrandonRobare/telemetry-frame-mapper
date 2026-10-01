@@ -9,8 +9,12 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session as DBSession
 
+from ..core.config import get_config
 from ..db.database import get_db
-from ..db.models import SessionComparison
+from ..db.models import JobQueueEntry, SessionComparison
+from ..services.artifact_cleanup import remove_artifacts
+from ..services.delete_guard import commit_delete
+from ..services.job_queue import SESSION_COMPARISON
 from ..services.reconstruction import diff_to_geojson, start_session_comparison
 
 router = APIRouter(prefix="/comparisons", tags=["comparisons"])
@@ -78,6 +82,32 @@ def create_comparison(body: ComparisonIn, db: DBSession = Depends(get_db)):
 @router.get("/{comparison_id}", response_model=ComparisonOut)
 def get_comparison(comparison_id: int, db: DBSession = Depends(get_db)):
     return _comparison_or_404(comparison_id, db)
+
+
+@router.delete("/{comparison_id}")
+def delete_comparison(comparison_id: int, db: DBSession = Depends(get_db)):
+    """Delete a comparison and its diff, which unblocks deleting what it compared (#945)."""
+    comparison = _comparison_or_404(comparison_id, db)
+    live_job = db.query(JobQueueEntry).filter(
+        JobQueueEntry.job_type == SESSION_COMPARISON,
+        JobQueueEntry.target_id == comparison.id,
+        JobQueueEntry.status.in_(("pending", "running")),
+    ).first()
+    if live_job is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Comparison {comparison_id} is still queued or running; delete it once "
+            "it has finished",
+        )
+    cfg = get_config()
+    paths = [Path(cfg.exports_dir) / "comparisons" / str(comparison.id)]
+    if comparison.diff_path:
+        paths.append(Path(comparison.diff_path))
+    db.delete(comparison)
+    # Rows first, files second: a refused commit leaves the diff in place.
+    commit_delete(db, f"Comparison {comparison_id}")
+    remove_artifacts(paths, cfg)
+    return {"ok": True}
 
 
 @router.get("/{comparison_id}/diff")

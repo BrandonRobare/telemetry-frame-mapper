@@ -28,7 +28,12 @@ import { smoothstep } from './smoothstep'
 import { cleanupFlythroughRecording } from './flythroughRecording'
 import MiniLeafletPane from './MiniLeafletPane'
 import { resolveActiveJobId } from './activeJob'
-import { sampleProfile, computeVolume } from './measurementMath'
+import {
+  boundaryReferenceElevation,
+  computeVolume,
+  sampleProfile,
+  surfaceMeasurementGate,
+} from './measurementMath'
 import type { ProfileSample } from './measurementMath'
 import type { VolumeResult } from './measurementMath'
 import ProfilePanel from './ProfilePanel'
@@ -1612,22 +1617,31 @@ interface ViewerToolbarProps {
   geoTransformAvailable: boolean
   hasMeasurePoints: boolean
   onClearMeasure: () => void
+  /** Why profile and volume can't run (no real surface sampler, or not georeferenced); null when they can. */
+  surfaceToolsUnavailableReason: string | null
 }
 
-function ViewerToolbar({
+export function ViewerToolbar({
   activeTool,
   onToolChange,
   geoTransformAvailable,
   hasMeasurePoints,
   onClearMeasure,
+  surfaceToolsUnavailableReason,
 }: ViewerToolbarProps) {
-  function toolBtn(tool: ActiveTool, label: string, title: string, allowSceneUnits = false) {
+  function toolBtn(
+    tool: ActiveTool,
+    label: string,
+    title: string,
+    allowSceneUnits = false,
+    blockedReason: string | null = null,
+  ) {
     const active = activeTool === tool
-    const enabled = geoTransformAvailable || allowSceneUnits
+    const enabled = (geoTransformAvailable || allowSceneUnits) && !blockedReason
     return (
       <button
         key={tool}
-        title={title}
+        title={blockedReason ?? title}
         onClick={() => onToolChange(active ? 'none' : tool)}
         style={{
           padding: '4px 8px', borderRadius: 2, fontSize: 11,
@@ -1651,8 +1665,8 @@ function ViewerToolbar({
       {toolBtn('annotate', '⊕ Annotate', geoTransformAvailable ? 'Place GPS annotation' : noGeoHelp)}
       {toolBtn('measure-dist', '↔ Distance', geoTransformAvailable ? 'Measure distance between two points' : `${noGeoHelp} Measuring in scene units.`, true)}
       {toolBtn('measure-area', '⬡ Area', geoTransformAvailable ? 'Measure polygon area (double-click to close)' : `${noGeoHelp} Measuring in scene units.`, true)}
-      {toolBtn('measure-profile', '〰 Profile', geoTransformAvailable ? 'Draw line for elevation profile (double-click to sample)' : `${noGeoHelp} Sampling in scene units.`, true)}
-      {toolBtn('measure-volume', '◫ Volume', geoTransformAvailable ? 'Draw polygon for cut/fill volume (double-click to compute)' : `${noGeoHelp} Computing in scene units.`, true)}
+      {toolBtn('measure-profile', '〰 Profile', 'Draw line for elevation profile (double-click to sample)', false, surfaceToolsUnavailableReason)}
+      {toolBtn('measure-volume', '◫ Volume', 'Draw polygon for cut/fill volume (double-click to compute)', false, surfaceToolsUnavailableReason)}
       {hasMeasurePoints && (
         <button
           onClick={onClearMeasure}
@@ -1665,6 +1679,11 @@ function ViewerToolbar({
         >
           ✕ Clear
         </button>
+      )}
+      {surfaceToolsUnavailableReason && (
+        <p style={{ flexBasis: '100%', margin: '2px 0 0', fontSize: 9, color: 'var(--text-muted)' }}>
+          {surfaceToolsUnavailableReason}
+        </p>
       )}
     </div>
   )
@@ -1812,6 +1831,10 @@ export default function SplatViewerTab() {
   })
 
   const geoAvailable = !!geoTransform && geoTransform.utm_zone !== 'unknown'
+  // No real surface-height source (DSM or point-cloud height query) is wired into
+  // the viewer yet, so profile and cut/fill volume stay disabled instead of
+  // sampling a flat plane (#953). Pass the sampler here once one exists.
+  const surfaceGate = surfaceMeasurementGate(null, geoTransform)
 
   useEffect(() => {
     if (targetReconstructionId == null) return
@@ -1882,28 +1905,21 @@ export default function SplatViewerTab() {
   }
 
   function handleMeasureClose() {
-    if (measureMode === 'measure-profile' && measurePoints.length >= 2) {
-      // Sample the profile along the polyline using the ground-plane Y
-      const groundY = deriveGroundPlaneY(geoTransform ?? null)
-      const sampler = () => groundY
-      const samples = sampleProfile(
-        measurePoints.map((p) => p.worldPos),
-        sampler,
-        0.5,
-        geoTransform ?? undefined,
-      )
-      setProfileSamples(samples)
-    }
-    if (measureMode === 'measure-volume' && measurePoints.length >= 3) {
-      const groundY = deriveGroundPlaneY(geoTransform ?? null)
-      const sampler = () => groundY
-      const vol = computeVolume(
-        measurePoints.map((p) => p.worldPos),
-        sampler,
-        0, // reference = 0 in world space; extension point for different reference
-        0.5,
-      )
-      setVolumeResult(vol)
+    // Profile and volume only ever read real surface heights; without a surface
+    // sampler the toolbar keeps them disabled and nothing is computed here.
+    if (surfaceGate.available) {
+      const outline = measurePoints.map((p) => p.worldPos)
+      if (measureMode === 'measure-profile' && outline.length >= 2) {
+        setProfileSamples(sampleProfile(outline, surfaceGate.sampler, surfaceGate.geo, 0.5))
+      }
+      if (measureMode === 'measure-volume' && outline.length >= 3) {
+        const reference = boundaryReferenceElevation(outline, surfaceGate.sampler)
+        if (reference !== null) {
+          setVolumeResult(
+            computeVolume(outline, surfaceGate.sampler, reference, surfaceGate.geo, 0.5),
+          )
+        }
+      }
     }
     if (measureMode === 'measure-area') {
       setMeasureMode('measure-area')
@@ -2018,6 +2034,7 @@ export default function SplatViewerTab() {
               geoTransformAvailable={geoAvailable}
               hasMeasurePoints={measurePoints.length > 0}
               onClearMeasure={handleClearMeasure}
+              surfaceToolsUnavailableReason={surfaceGate.available ? null : surfaceGate.reason}
             />
             <button
               onClick={toggleSplitPane}
@@ -2158,7 +2175,7 @@ export default function SplatViewerTab() {
         {volumeResult && (
           <VolumePanel
             volume={volumeResult}
-            referenceElevation={0}
+            referenceElevation={volumeResult.referenceElevationM}
             onClear={handleClearMeasure}
           />
         )}

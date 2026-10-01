@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import datetime
 import json
-import os
 import re
 import shutil
 import threading
@@ -28,6 +27,7 @@ _UPLOADS: dict[str, dict[str, Any]] = {}
 _UPLOAD_LOCKS: dict[str, threading.Lock] = {}
 _UPLOADS_GUARD = threading.Lock()
 _MANIFEST_NAME = ".upload.json"
+_IMPORTED_DIR_NAME = "browser_imports"
 _UPLOAD_ID_RE = re.compile(r"^[0-9a-f]{32}$")
 _MAX_ACTIVE_RESERVATIONS = 8
 
@@ -86,6 +86,24 @@ def _upload_root() -> Path:
     return root
 
 
+def _import_dir(upload_id: str) -> Path:
+    """The folder a completed upload is moved to and its session imports from (#944)."""
+    if not _UPLOAD_ID_RE.fullmatch(upload_id):
+        raise HTTPException(status_code=404, detail="Upload not found")
+    return _safe_child_path(
+        Path(get_config().imports_dir), PurePosixPath(_IMPORTED_DIR_NAME, upload_id)
+    )
+
+
+def _is_in_flight(state: dict[str, Any]) -> bool:
+    """True while an upload still takes chunks, i.e. it has not reached /complete.
+
+    Only an in-flight upload is a reservation, may be cancelled, or may be swept:
+    once /complete has run, its files back a session (#944).
+    """
+    return state.get("status") == "uploading" and state.get("session_id") is None
+
+
 def _dir_size(path: Path) -> int:
     if not path.exists():
         return 0
@@ -102,20 +120,45 @@ def _reserved_bytes(root: Path) -> int:
     """
     total = _dir_size(root)
     for child in root.iterdir():
-        if not child.is_dir() or not _UPLOAD_ID_RE.fullmatch(child.name):
+        if not child.is_dir():
             continue
-        state = _load_state_from_manifest(child.name)
-        if state is None or state.get("status") != "uploading":
+        state = _read_manifest(child)
+        if state is None:
             continue
-        total += max(0, state.get("total_bytes", 0) - state.get("uploaded_bytes", 0))
+        if _is_in_flight(state):
+            total += max(0, state.get("total_bytes", 0) - state.get("uploaded_bytes", 0))
+        else:
+            # Imported in place by an earlier release: session data, not a reservation.
+            total -= _dir_size(child)
     return total
 
 
+def _active_reservations(root: Path) -> int:
+    """Uploads still taking chunks; one that reached /complete is not a slot (#944)."""
+    count = 0
+    for child in root.iterdir():
+        if child.is_dir():
+            state = _read_manifest(child)
+            if state is not None and _is_in_flight(state):
+                count += 1
+    return count
+
+
 def _cleanup_old_uploads(root: Path, cleanup_after_hours: int) -> None:
+    """Remove staging dirs of uploads abandoned before /complete.
+
+    A completed upload is moved out of staging, but one an earlier release imported
+    in place still holds a session's source images, so a dir whose manifest shows
+    the upload reached /complete is never swept (#944).
+    """
     cutoff = datetime.datetime.now(datetime.UTC).timestamp() - cleanup_after_hours * 3600
     for child in root.iterdir():
-        if child.is_dir() and child.stat().st_mtime < cutoff:
-            shutil.rmtree(child, ignore_errors=True)
+        if not child.is_dir() or child.stat().st_mtime >= cutoff:
+            continue
+        state = _read_manifest(child)
+        if state is not None and not _is_in_flight(state):
+            continue
+        shutil.rmtree(child, ignore_errors=True)
 
 
 def _safe_upload_path(raw: str) -> PurePosixPath:
@@ -201,7 +244,9 @@ def _state_for_disk(state: dict[str, Any]) -> dict[str, Any]:
 
 
 def _persist_state(state: dict[str, Any]) -> None:
-    root = _upload_dir(str(state["id"]))
+    # The manifest lives with the files: in staging, or in the import folder once
+    # /complete has moved them there (#944).
+    root = Path(state["root"])
     root.mkdir(parents=True, exist_ok=True)
     manifest = _manifest_path(root)
     tmp = manifest.with_suffix(f"{manifest.suffix}.tmp")
@@ -209,8 +254,10 @@ def _persist_state(state: dict[str, Any]) -> None:
     tmp.replace(manifest)
 
 
-def _load_state_from_manifest(upload_id: str) -> dict[str, Any] | None:
-    root = _upload_dir(upload_id)
+def _read_manifest(root: Path) -> dict[str, Any] | None:
+    """Load the manifest of the upload whose files are in *root*, if it has one."""
+    if not _UPLOAD_ID_RE.fullmatch(root.name):
+        return None
     manifest = _manifest_path(root)
     if not manifest.exists():
         return None
@@ -218,10 +265,35 @@ def _load_state_from_manifest(upload_id: str) -> dict[str, Any] | None:
         raw = json.loads(manifest.read_text())
     except json.JSONDecodeError:
         return None
-    if raw.get("id") != upload_id:
+    if not isinstance(raw, dict) or raw.get("id") != root.name:
         return None
     raw["root"] = root
     return raw
+
+
+def _load_state_from_manifest(upload_id: str) -> dict[str, Any] | None:
+    # A completed upload's manifest moved with its files into the import folder.
+    return _read_manifest(_upload_dir(upload_id)) or _read_manifest(_import_dir(upload_id))
+
+
+def _move_to_import_folder(state: dict[str, Any]) -> Path:
+    """Move a finished upload out of staging into the folder its session imports from.
+
+    Staging is swept and counted against the upload quota, so a session's source
+    images must not live there (#944). One rename moves the files and the manifest
+    together, so the upload is either wholly staged or wholly imported.
+    """
+    src = Path(state["root"])
+    dest = _import_dir(str(state["id"]))
+    if src == dest:
+        return dest  # a /complete retried after the move already happened
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    if dest.exists():
+        raise HTTPException(status_code=409, detail="Upload import folder already exists")
+    # Under the start lock, so a concurrent sweep or quota scan never races the move.
+    with _UPLOADS_GUARD:
+        src.rename(dest)
+    return dest
 
 
 def _lock_for(upload_id: str) -> threading.Lock:
@@ -274,11 +346,10 @@ def start_browser_import_upload(req: StartUploadRequest):
     # tree each time; shard per upload root if a second staging root ever exists.
     with _UPLOADS_GUARD:
         _cleanup_old_uploads(root, limits["cleanup_after_hours"])
-        # Bound concurrent reservations: each manifest dir is one in-flight
-        # browser import, and unbounded starts would let a LAN client exhaust
-        # disk with empty reservations (#864).
-        active_reservations = sum(1 for name in os.listdir(root) if (root / name).is_dir())
-        if active_reservations >= _MAX_ACTIVE_RESERVATIONS:
+        # Bound concurrent reservations: each in-flight manifest is one browser
+        # import, and unbounded starts would let a LAN client exhaust disk with
+        # empty reservations (#864).
+        if _active_reservations(root) >= _MAX_ACTIVE_RESERVATIONS:
             raise HTTPException(
                 status_code=409,
                 detail="Too many concurrent uploads; wait for an import to finish or cancel one",
@@ -368,6 +439,9 @@ def complete_browser_import_upload(upload_id: str, db: DBSession = Depends(get_d
                     status_code=409, detail=f"Upload is incomplete: {incomplete[0]}"
                 )
 
+            # Leave staging before any session points at the files, so neither the
+            # sweep nor the quota ever sees a session's source images (#944).
+            state["root"] = _move_to_import_folder(state)
             state["status"] = "importing"
             session = SessionModel(
                 name=state["name"],
@@ -405,10 +479,18 @@ def complete_browser_import_upload(upload_id: str, db: DBSession = Depends(get_d
 
 @router.post("/{upload_id}/cancel", response_model=UploadProgress)
 def cancel_browser_import_upload(upload_id: str):
-    state = _UPLOADS.get(upload_id) or _load_state_from_manifest(upload_id)
-    if state is None:
+    if _UPLOADS.get(upload_id) is None and _load_state_from_manifest(upload_id) is None:
         raise HTTPException(status_code=404, detail="Upload not found")
     with _lock_for(upload_id):
+        # Re-read under the lock: a /complete holding it may have started the import.
+        state = _UPLOADS.get(upload_id) or _load_state_from_manifest(upload_id)
+        if state is None:
+            raise HTTPException(status_code=404, detail="Upload not found")
+        if not _is_in_flight(state):
+            # The files now back a session; cancelling must leave them alone (#944).
+            raise HTTPException(
+                status_code=409, detail="Upload is already importing and cannot be cancelled"
+            )
         state["status"] = "cancelled"
         progress = _progress(state)
         shutil.rmtree(state["root"], ignore_errors=True)
