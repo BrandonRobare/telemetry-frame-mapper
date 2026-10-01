@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import struct
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -9,11 +10,13 @@ import pytest
 from backend.services.colmap_io import (
     ColmapImage,
     _pick_best_submodel,
+    images_by_workspace_name,
     qvec_to_rotmat,
     read_cameras_bin,
     read_images_bin,
     read_model,
     read_points3d_bin,
+    workspace_image_name,
     world_to_cam_matrix,
 )
 
@@ -332,3 +335,47 @@ def test_qvec_to_rotmat_identity_and_known_rotation():
     np.testing.assert_allclose(viewmat[:3, :3], expected, atol=1e-12)
     np.testing.assert_allclose(viewmat[:3, 3], _TVEC)
     np.testing.assert_allclose(viewmat[3], [0.0, 0.0, 0.0, 1.0])
+
+
+# ---------------------------------------------------------------------------
+# Workspace image names
+# ---------------------------------------------------------------------------
+
+
+def test_workspace_image_name_prefixes_the_session_and_strips_directories():
+    assert workspace_image_name(12, "DJI_0001.JPG") == "12_DJI_0001.JPG"
+    assert workspace_image_name(3, "..\\..\\config.yaml") == "3_config.yaml"
+    assert workspace_image_name(3, "") is None
+    assert workspace_image_name(3, None) is None
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_images_by_workspace_name_resolves_staged_and_unambiguous_legacy_names(reverse):
+    north = SimpleNamespace(session_id=1, filename="DJI_0001.JPG")
+    south = SimpleNamespace(session_id=2, filename="DJI_0001.JPG")
+    solo = SimpleNamespace(session_id=2, filename="DJI_0002.JPG")
+    images = [north, south, solo]
+
+    by_name = images_by_workspace_name(images[::-1] if reverse else images)
+
+    assert by_name["1_DJI_0001.JPG"] is north
+    assert by_name["2_DJI_0001.JPG"] is south
+    assert by_name["2_DJI_0002.JPG"] is solo
+    # Workspaces staged before the session prefix used bare filenames: resolve one
+    # only when exactly one frame in the run could have produced it.
+    assert by_name["DJI_0002.JPG"] is solo
+    assert "DJI_0001.JPG" not in by_name
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_images_by_workspace_name_prefers_the_staged_meaning_of_a_name(reverse):
+    # Session 5 holds a file literally named "12_DJI_0001.JPG", which is also the name
+    # session 12's DJI_0001.JPG stages under. The staged meaning wins.
+    literal = SimpleNamespace(session_id=5, filename="12_DJI_0001.JPG")
+    staged = SimpleNamespace(session_id=12, filename="DJI_0001.JPG")
+    images = [literal, staged]
+
+    by_name = images_by_workspace_name(images[::-1] if reverse else images)
+
+    assert by_name["12_DJI_0001.JPG"] is staged
+    assert by_name["5_12_DJI_0001.JPG"] is literal

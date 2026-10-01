@@ -52,12 +52,17 @@ _lock_fh = None  # OS file lock guaranteeing a single drain worker across proces
 # Configurable caps
 _max_concurrent_gpu: int = 1  # Only one GPU job at a time
 
-_LIVE_RECONSTRUCTION_STATUSES = (
-    "pending",
-    "running_colmap",
-    "running_gsplat",
-    "running_remote",
-    "cancelling",
+# Reconstruction.status values that mean a run is still in flight (queued, local
+# COLMAP/training, on a remote worker, or waiting for a cancel to land). The single
+# source for the reconstruction service's duplicate-run guard and for terminalizing
+# a reconstruction when its queue entry ends.
+LIVE_RECONSTRUCTION_STATUSES = frozenset(
+    {"pending", "running_colmap", "running_gsplat", "running_remote", "cancelling"}
+)
+
+# Recorded when a handler returns while its entry still reads 'running'.
+HANDLER_RETURNED_WITHOUT_TERMINAL_STATE = (
+    "Job handler returned without reaching a terminal state"
 )
 
 
@@ -68,9 +73,11 @@ class JobNonRetryableError(RuntimeError):
 def register_handler(job_type: str, handler: Callable) -> None:
     """Register a callable to execute when a job of ``job_type`` is drained.
 
-    Signature: handler(job_entry: JobQueueEntry, db: Session) -> None
-    The handler must set the target entity's status and mark the job
-    completed/failed before returning.
+    Signature: handler(job_entry: JobQueueEntry, db: Session, cancel: Event) -> None
+    The handler must set the target entity's status and leave the job terminal
+    before returning: mark_complete, raise (failed or retried), or a cancel. An
+    entry still 'running' after the handler returns is marked failed with
+    ``HANDLER_RETURNED_WITHOUT_TERMINAL_STATE``.
     """
     _handlers[job_type] = handler
 
@@ -463,6 +470,9 @@ def _execute_job(
             return
         handler(entry, db, cancel)
     except JobNonRetryableError as exc:
+        # A handler may raise this after a failed flush; the session must be rolled
+        # back before it can record anything.
+        db.rollback()
         _mark_failed(job_id, str(exc)[:5000], db=db)
     except Exception as exc:
         # The handler's session may hold an aborted transaction — roll it back
@@ -495,6 +505,11 @@ def _execute_job(
             logger.exception("Error handling job %s failure", job_id)
         finally:
             db.close()
+    else:
+        try:
+            _fail_if_still_running(job_id, HANDLER_RETURNED_WITHOUT_TERMINAL_STATE, db)
+        except Exception:
+            logger.exception("Error checking job %s for a terminal state", job_id)
     finally:
         _cancel_events.pop(job_id, None)
         with _RUNNING_LOCK:
@@ -526,6 +541,30 @@ def _mark_failed(job_id: int, error: str, *, db=None) -> None:
             db.close()
 
 
+def _fail_if_still_running(job_id: int, error: str, db) -> None:
+    """Fail an entry whose handler returned without completing, failing or cancelling it.
+
+    Without this the row reads 'running' — a phantom job in the Jobs tab, and for a
+    reconstruction a row stuck in a live status — until the next restart's reaper.
+    The conditional UPDATE leaves an entry the handler already finished untouched.
+    """
+    db.rollback()  # drop anything the handler left uncommitted before writing
+    now = datetime.now(UTC)
+    updated = (
+        db.query(JobQueueEntry)
+        .filter(JobQueueEntry.id == job_id, JobQueueEntry.status == "running")
+        .update(
+            {"status": "failed", "error_msg": error, "completed_at": now},
+            synchronize_session=False,
+        )
+    )
+    if updated:
+        logger.warning("JobQueue: job %s handler returned while still running", job_id)
+        entry = db.query(JobQueueEntry).filter(JobQueueEntry.id == job_id).one()
+        _terminalize_reconstruction(entry, "failed", error, now, db)
+    db.commit()
+
+
 def _terminalize_reconstruction(entry, status: str, error: str | None, now: datetime, db) -> None:
     """Finish a live reconstruction when its queue entry reaches a terminal state."""
     if entry.job_type != RECONSTRUCTION:
@@ -534,7 +573,7 @@ def _terminalize_reconstruction(entry, status: str, error: str | None, now: date
 
     db.query(Reconstruction).filter(
         Reconstruction.id == entry.target_id,
-        Reconstruction.status.in_(_LIVE_RECONSTRUCTION_STATUSES),
+        Reconstruction.status.in_(LIVE_RECONSTRUCTION_STATUSES),
     ).update(
         {
             "status": status,

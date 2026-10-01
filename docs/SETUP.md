@@ -163,3 +163,11 @@ The local durable queue saves the returned worker job id and resumes polling it 
 temporary API-side failure does not submit a duplicate reconstruction. The Jobs queue API exposes
 that remote job id for diagnostics. A worker must write artifacts to the shared configured paths;
 artifact transfer and arbitrary worker-supplied local paths are intentionally out of scope.
+
+On `complete` the API records the same artifacts a local run does, at the same locations:
+`exports/<reconstruction_id>/splat.ply` is required (a `complete` without it fails the job), the
+`splat_preview.ply` / `splat_medium.ply` LODs beside it are derived from the splat if the worker
+did not write them, and `processed/thumbs/splat_<reconstruction_id>.jpg` is recorded when present.
+The sparse model in `colmap_dir` is georeferenced by matching its image names to frames: stage
+images as `<session_id>_<filename>`, as a local run does (bare filenames still match when only one
+frame in the run has that name).

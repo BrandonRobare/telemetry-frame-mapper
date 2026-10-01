@@ -13,6 +13,7 @@ import pytest
 from backend.db.models import JobQueueEntry, Reconstruction
 from backend.db.models import Session as SessionModel
 from backend.services.job_queue import (
+    MESH_EXPORT,
     RECONSTRUCTION,
     cancel_job,
     claim_stale_jobs,
@@ -452,8 +453,36 @@ def test_handler_dispatched_by_worker(setup_test_db):
 
 
 # ---------------------------------------------------------------------------
-# No-handler case
+# Handler outcomes — driven synchronously through _execute_job, no worker thread
 # ---------------------------------------------------------------------------
+
+def _claimed_job(db, job_type: str, *, rec_status: str = "running_colmap"):
+    """A reconstruction row plus a queue entry the drain loop has already claimed."""
+    from backend.services import job_queue as jq
+
+    s = _make_session(db)
+    rec = Reconstruction(session_id=s.id, preset="quick", status=rec_status, frames_used=1)
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+    entry = enqueue(job_type, rec.id)
+    assert jq._claim_pending(db, entry.id, datetime.now(UTC)) is True
+    return rec, entry
+
+
+def _execute_with_handler(job_type: str, handler, entry, rec) -> None:
+    from backend.services import job_queue as jq
+
+    orig = jq._handlers.get(job_type)
+    jq.register_handler(job_type, handler)
+    try:
+        jq._execute_job(entry.id, job_type, rec.id, None, threading.Event())
+    finally:
+        if orig is None:
+            jq._handlers.pop(job_type, None)
+        else:
+            jq.register_handler(job_type, orig)
+
 
 def test_no_handler_marks_as_failed(setup_test_db):
     from backend.main import app
@@ -467,19 +496,90 @@ def test_no_handler_marks_as_failed(setup_test_db):
     db.refresh(rec)
 
     entry = enqueue("nonexistent_handler", rec.id)
-    assert entry.status == "pending"
+    assert "nonexistent_handler" not in jq._handlers
 
-    jq._shutdown.clear()
-    start_worker()
-    time.sleep(1.0)
-    shutdown_worker(timeout=1.0)
+    jq._execute_job(entry.id, "nonexistent_handler", rec.id, None, threading.Event())
 
-    # Worker used its own session, so re-read
-    stored = db.query(JobQueueEntry).filter(JobQueueEntry.id == entry.id).first()
-    assert stored is not None
-    assert stored.status in ("failed", "completed")
+    stored = db.query(JobQueueEntry).filter(JobQueueEntry.id == entry.id).one()
+    assert stored.status == "failed"
+    assert stored.error_msg == "No handler for nonexistent_handler"
+    assert stored.completed_at is not None
     db.refresh(rec)
     assert rec.status == "pending", "non-reconstruction jobs must not alter the target"
+
+
+def test_handler_that_raises_marks_entry_and_reconstruction_failed(setup_test_db):
+    from backend.main import app
+
+    db = app.state.test_db_session
+    rec, entry = _claimed_job(db, RECONSTRUCTION)
+
+    def boom(e, db_session, cancel):
+        raise ValueError("feature extraction exploded")
+
+    _execute_with_handler(RECONSTRUCTION, boom, entry, rec)
+
+    stored = db.query(JobQueueEntry).filter(JobQueueEntry.id == entry.id).one()
+    assert stored.status == "failed"
+    assert stored.error_msg == "feature extraction exploded"
+    db.refresh(rec)
+    assert rec.status == "failed"
+    assert rec.error_msg == "feature extraction exploded"
+
+
+@pytest.mark.parametrize(
+    ("job_type", "rec_status", "expected_rec_status"),
+    [
+        # A live reconstruction is terminalized with the same reason as its entry.
+        (RECONSTRUCTION, "running_colmap", "failed"),
+        # Other job types only point at the reconstruction; it must not be touched.
+        (MESH_EXPORT, "complete", "complete"),
+    ],
+)
+def test_handler_that_returns_early_marks_entry_failed_with_reason(
+    setup_test_db, job_type, rec_status, expected_rec_status
+):
+    from backend.main import app
+
+    db = app.state.test_db_session
+    rec, entry = _claimed_job(db, job_type, rec_status=rec_status)
+
+    def returns_early(e, db_session, cancel):
+        return  # e.g. "if rec is None: return" — neither mark_complete nor a raise
+
+    _execute_with_handler(job_type, returns_early, entry, rec)
+
+    stored = db.query(JobQueueEntry).filter(JobQueueEntry.id == entry.id).one()
+    assert stored.status == "failed", "a handler that returns must not leave a phantom 'running'"
+    assert "without reaching a terminal state" in (stored.error_msg or "")
+    assert stored.completed_at is not None
+    db.refresh(rec)
+    assert rec.status == expected_rec_status
+    if expected_rec_status == "failed":
+        assert rec.error_msg == stored.error_msg
+
+
+@pytest.mark.parametrize(
+    ("finish", "expected"),
+    [("complete", "completed"), ("cancel", "cancelled")],
+)
+def test_handler_terminal_state_is_kept_after_it_returns(setup_test_db, finish, expected):
+    from backend.main import app
+
+    db = app.state.test_db_session
+    rec, entry = _claimed_job(db, RECONSTRUCTION)
+
+    def finishes(e, db_session, cancel):
+        if finish == "complete":
+            mark_complete(e.id)
+        else:
+            cancel_job(e.id)
+
+    _execute_with_handler(RECONSTRUCTION, finishes, entry, rec)
+
+    stored = db.query(JobQueueEntry).filter(JobQueueEntry.id == entry.id).one()
+    assert stored.status == expected
+    assert stored.error_msg is None
 
 
 # ---------------------------------------------------------------------------
