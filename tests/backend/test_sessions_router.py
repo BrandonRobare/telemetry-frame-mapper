@@ -292,7 +292,7 @@ def test_bulk_reports_missing_and_failed_archives_without_hiding_successes(clien
 
     assert response.status_code == 200
     outcomes = response.json()["outcomes"]
-    assert outcomes == [
+    assert outcomes[:2] == [
         {
             "session_id": first.id,
             "ok": True,
@@ -300,8 +300,61 @@ def test_bulk_reports_missing_and_failed_archives_without_hiding_successes(clien
             "bundle_path": str(tmp_path / "exports" / f"session_{first.id}_archive.zip"),
         },
         {"session_id": 999999, "ok": False, "error": "Session not found", "bundle_path": None},
-        {"session_id": second.id, "ok": False, "error": "disk full", "bundle_path": None},
     ]
+    assert outcomes[2]["session_id"] == second.id
+    assert outcomes[2]["ok"] is False
+    assert outcomes[2]["bundle_path"] is None
+    assert outcomes[2]["error"].startswith("Bulk archive failed")
+    assert "disk full" not in outcomes[2]["error"]
+
+
+def test_bulk_failure_returns_a_correlation_id_instead_of_exception_text(client, tmp_path):
+    import logging
+    import re
+
+    session = _make_session(client, name="Archive leak")
+    secret_path = str(tmp_path / "private" / "server" / "path.zip")
+
+    def build_archive(zip_path, session, _db):
+        raise PermissionError(f"[Errno 13] Permission denied: '{secret_path}'")
+
+    records: list[logging.LogRecord] = []
+
+    class _Capture(logging.Handler):
+        def emit(self, record):
+            records.append(record)
+
+    capture = _Capture(level=logging.ERROR)
+    router_logger = logging.getLogger("backend.routers.sessions")
+    router_logger.addHandler(capture)
+    cfg = type("Cfg", (), {"exports_dir": str(tmp_path / "exports")})()
+    try:
+        with (
+            patch("backend.routers.sessions.get_config", return_value=cfg),
+            patch(
+                "backend.services.session_bundle.build_session_archive",
+                side_effect=build_archive,
+            ),
+        ):
+            response = client.post(
+                "/sessions/bulk", json={"session_ids": [session.id], "operation": "archive"}
+            )
+    finally:
+        router_logger.removeHandler(capture)
+
+    assert response.status_code == 200
+    [outcome] = response.json()["outcomes"]
+    assert outcome["ok"] is False
+    assert secret_path not in outcome["error"]
+    assert "Permission denied" not in outcome["error"]
+    match = re.search(r"error id ([0-9a-f]{12})", outcome["error"])
+    assert match is not None, outcome["error"]
+
+    # The full detail stays in the server log under the same id.
+    [record] = records
+    assert match.group(1) in record.getMessage()
+    assert record.exc_info is not None
+    assert secret_path in str(record.exc_info[1])
 
 
 def test_bulk_delete_requires_confirmation_and_deletes_each_selected_session(client):

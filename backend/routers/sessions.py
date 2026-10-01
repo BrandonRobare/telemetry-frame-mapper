@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import datetime
 import json
+import logging
 import re
+import uuid
 import zipfile
 from pathlib import Path, PurePosixPath
 from typing import Literal
@@ -22,6 +24,8 @@ from ..services.artifact_cleanup import cleanup_session_artifacts
 from ..services.ingest_orchestrator import get_progress, start_import
 from ..services.preflight_quality import build_quick_report
 from ..services.reconstruction import cancel_reconstruction
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 
@@ -314,9 +318,26 @@ def bulk_sessions(body: BulkSessionRequest, db: DBSession = Depends(get_db)):
                 continue
             db.commit()
             outcomes.append(BulkSessionOutcome(session_id=session_id, ok=True))
-        except Exception as exc:
+        except Exception:
             db.rollback()
-            outcomes.append(BulkSessionOutcome(session_id=session_id, ok=False, error=str(exc)))
+            # Exception text can carry server paths and internals: log it under a
+            # correlation id and give the client only that id.
+            error_id = uuid.uuid4().hex[:12]
+            logger.exception(
+                "Bulk %s failed for session %s (error id %s)",
+                body.operation,
+                session_id,
+                error_id,
+            )
+            outcomes.append(
+                BulkSessionOutcome(
+                    session_id=session_id,
+                    ok=False,
+                    error=(
+                        f"Bulk {body.operation} failed; see the server log for error id {error_id}"
+                    ),
+                )
+            )
     return BulkSessionResponse(operation=body.operation, outcomes=outcomes)
 
 
