@@ -365,6 +365,29 @@ class TestPersistedShareLinks:
         assert "secure" not in cookie  # TestClient uses local HTTP.
         assert client.get(f"/share/token/{token}").status_code == 200
 
+    def test_password_required_is_a_machine_readable_401(self, client):
+        """The share viewer branches on this code, never on the message text (#952)."""
+        from backend.routers.share_links import SHARE_PASSWORD_REQUIRED_CODE
+
+        assert SHARE_PASSWORD_REQUIRED_CODE == "share_password_required"
+        rec = self._completed_reconstruction(client)
+        protected = self._create(client, rec, password="secret")
+        response = client.get(f"/share/token/{protected['share_token']}")
+        assert response.status_code == 401
+        assert response.json() == {
+            "detail": "Share link password required",
+            "code": "share_password_required",
+        }
+
+        # Other refusals carry no password code, so the viewer shows them as errors.
+        revoked = self._create(client, rec)
+        client.post(
+            f"/export/reconstructions/{rec.id}/share-links/{revoked['share_link_id']}/revoke"
+        )
+        gone = client.get(f"/share/token/{revoked['share_token']}")
+        assert gone.status_code == 410
+        assert "code" not in gone.json()
+
     def test_https_proxy_marks_unlock_cookie_secure(self, client):
         rec = self._completed_reconstruction(client)
         created = self._create(client, rec, password="secret")
@@ -599,6 +622,77 @@ class TestPersistedShareLinks:
             )
         finally:
             main.app.state.owns_job_queue = True
+
+
+class TestSigningKeyFile:
+    """The HMAC signing key is a secret: never world-readable, never clobbered."""
+
+    @pytest.fixture
+    def key_path(self, tmp_path, monkeypatch):
+        from backend.core.config import get_config
+
+        monkeypatch.setattr(get_config(), "exports_dir", str(tmp_path / "exports"))
+        return tmp_path / ".share_signing_key"
+
+    def test_key_is_created_exclusively_with_owner_only_mode(self, key_path, monkeypatch):
+        import os
+
+        from backend.services import share_links
+
+        real_open = os.open
+        opened = []
+
+        def recording_open(path, flags, mode=0o777, *args, **kwargs):
+            if os.fspath(path) == os.fspath(key_path):
+                opened.append((flags, mode))
+            return real_open(path, flags, mode, *args, **kwargs)
+
+        monkeypatch.setattr(os, "open", recording_open)
+        key = share_links._signing_key()
+
+        # The file is born 0o600 in a single exclusive create: there is no window in
+        # which it exists with the umask's (usually world-readable) default mode.
+        assert len(opened) == 1
+        flags, mode = opened[0]
+        assert flags & os.O_CREAT and flags & os.O_EXCL
+        assert mode == 0o600
+        assert len(key) == 64
+        assert key_path.read_bytes() == key
+        if os.name == "posix":
+            assert key_path.stat().st_mode & 0o777 == 0o600
+
+    def test_concurrent_create_keeps_the_first_writers_key(self, key_path, monkeypatch):
+        from backend.services import share_links
+
+        theirs = b"t" * 64
+        real_token_bytes = share_links.secrets.token_bytes
+
+        def race_then_generate(n):
+            # Another process wins the create between our existence check and our write.
+            key_path.write_bytes(theirs)
+            return real_token_bytes(n)
+
+        monkeypatch.setattr(share_links.secrets, "token_bytes", race_then_generate)
+        assert share_links._signing_key() == theirs
+        assert key_path.read_bytes() == theirs
+
+    def test_existing_key_is_reused(self, key_path):
+        from backend.services import share_links
+
+        existing = b"e" * 64
+        key_path.write_bytes(existing)
+        assert share_links._signing_key() == existing
+        token = create_share_token(3)
+        assert parse_share_token(token).reconstruction_id == 3
+        assert key_path.read_bytes() == existing
+
+    def test_empty_key_file_is_refused(self, key_path, monkeypatch):
+        from backend.services import share_links
+
+        monkeypatch.setattr(share_links, "_SIGNING_KEY_READ_DELAY_S", 0)
+        key_path.write_bytes(b"")
+        with pytest.raises(RuntimeError, match="empty"):
+            share_links._signing_key()
 
 
 def _db(client):

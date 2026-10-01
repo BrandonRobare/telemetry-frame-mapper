@@ -28,33 +28,58 @@ export function shareUrl(path: string): string {
   return origin ? new URL(relativePath, origin).toString() : relativePath
 }
 
-async function errorMessage(res: Response): Promise<string> {
+/**
+ * A non-2xx API response. `message` is for people; branch on `status` or on
+ * `code`, the machine-readable reason some endpoints send beside `detail`.
+ */
+export class ApiError extends Error {
+  readonly status: number
+  readonly code: string | null
+
+  constructor(message: string, status: number, code: string | null = null) {
+    super(message)
+    this.name = 'ApiError'
+    this.status = status
+    this.code = code
+  }
+}
+
+async function apiError(res: Response): Promise<ApiError> {
   const fallback = `API error ${res.status}`
   const contentType = res.headers.get('content-type') ?? ''
   const body = await res.text()
-  if (!body) return fallback
+  if (!body) return new ApiError(fallback, res.status)
 
   if (contentType.includes('application/json')) {
     try {
-      const parsed = JSON.parse(body) as { detail?: unknown; message?: unknown; error?: unknown }
+      const parsed = JSON.parse(body) as {
+        detail?: unknown
+        message?: unknown
+        error?: unknown
+        code?: unknown
+      }
+      const code = typeof parsed.code === 'string' ? parsed.code : null
       const detail = parsed.detail ?? parsed.message ?? parsed.error
-      if (typeof detail === 'string') return detail
+      if (typeof detail === 'string') return new ApiError(detail, res.status, code)
       if (Array.isArray(detail)) {
-        return detail
+        const message = detail
           .map((entry) => {
             if (typeof entry === 'string') return entry
             if (entry && typeof entry === 'object' && 'msg' in entry) return String(entry.msg)
             return JSON.stringify(entry)
           })
           .join('; ')
+        return new ApiError(message, res.status, code)
       }
-      if (detail && typeof detail === 'object') return JSON.stringify(detail)
+      if (detail && typeof detail === 'object') {
+        return new ApiError(JSON.stringify(detail), res.status, code)
+      }
     } catch {
       // Fall through to the raw body below.
     }
   }
 
-  return `${fallback}: ${body}`
+  return new ApiError(`${fallback}: ${body}`, res.status)
 }
 
 const DEFAULT_TIMEOUT_MS = 120_000
@@ -73,7 +98,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   }
   try {
     const res = await fetch(apiUrl(path), { credentials: 'include', ...init, signal: controller.signal })
-    if (!res.ok) throw new Error(await errorMessage(res))
+    if (!res.ok) throw await apiError(res)
     if (res.status === 204 || res.headers.get('content-length') === '0') return undefined as T
     return res.json() as Promise<T>
   } finally {

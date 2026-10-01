@@ -2713,6 +2713,47 @@ def test_compute_voxel_diff_writes_new_and_removed_cells(tmp_path, monkeypatch):
     assert diff["removed"][0]["type"] == "removed"
 
 
+@pytest.mark.parametrize("ungeoreferenced", ["a", "b"])
+def test_compute_voxel_diff_refuses_reconstruction_without_geo_transform(
+    tmp_path, monkeypatch, ungeoreferenced
+):
+    """A job queued before the request-time check still must not diff COLMAP frames (#950)."""
+    from unittest.mock import MagicMock
+
+    from backend.services.reconstruction import NotGeoreferencedError, _compute_voxel_diff
+
+    monkeypatch.setattr(
+        "backend.services.reconstruction.get_config",
+        lambda: MagicMock(exports_dir=str(tmp_path), data_dir=str(tmp_path / "data")),
+    )
+    a_ply = tmp_path / "a.ply"
+    b_ply = tmp_path / "b.ply"
+    _write_ascii_ply(a_ply, [(0, 0, 0), (1, 0, 0)])
+    _write_ascii_ply(b_ply, [(1, 0, 0), (2, 0, 0)])
+    geo = json.dumps({
+        "scale": 1.0,
+        "rotation": [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
+        "translation": [0, 0, 0],
+        "utm_zone": "17N",
+        "utm_origin": [500000, 3900000],
+    })
+
+    def _rec(rec_id, path, side):
+        return SimpleNamespace(
+            id=rec_id,
+            session_id=rec_id + 10,
+            pointcloud_path=None,
+            splat_path=str(path),
+            colmap_dir=None,
+            geo_transform=None if side == ungeoreferenced else geo,
+        )
+
+    diff_path = tmp_path / "diff.json"
+    with pytest.raises(NotGeoreferencedError, match="not georeferenced"):
+        _compute_voxel_diff(_rec(1, a_ply, "a"), _rec(2, b_ply, "b"), diff_path)
+    assert not diff_path.exists()
+
+
 def test_diff_to_geojson_exports_features():
     from backend.services.reconstruction import diff_to_geojson
 

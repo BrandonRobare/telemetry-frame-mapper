@@ -2,8 +2,8 @@
 
 Pre-v13 logs (.txt binary format) are parsed offline with no external
 dependencies beyond ``pydjirecord``.  v13+ logs are encrypted with
-AES-256-CBC; decryption requires a DJI Developer API key, passed via
-``--api-key`` / ``DJI_API_KEY`` env var.  Without a key, v13+ logs
+AES-256-CBC; decryption requires a DJI Developer API key, passed to
+``djirecord`` through its ``DJI_API_KEY`` env var (never on argv).  Without a key, v13+ logs
 produce header-only output (no frames) and the parser raises a clear error.
 
 Capability detection (``djirecord`` on PATH) is exposed so callers can
@@ -145,7 +145,9 @@ def parse_dji_binary(
     effective_key = api_key or os.environ.get("DJI_API_KEY", "")
 
     if effective_key:
-        argv.extend(["--api-key", effective_key])
+        # djirecord reads DJI_API_KEY when --api-key is absent. The environment is private to
+        # the child process, whereas argv is visible to every local user (ps, /proc/*/cmdline).
+        env["DJI_API_KEY"] = effective_key
 
     # --- shell out -----------------------------------------------------------
     proc = subprocess.run(
@@ -228,8 +230,9 @@ def _raise_parse_error(proc: subprocess.CompletedProcess) -> None:
     stdout = proc.stdout.strip() if proc.stdout else ""
 
     combined = stderr or stdout or "unknown error"
+    lowered = combined.lower()
 
-    if "API key" in combined.lower() or "decrypt" in combined.lower():
+    if "api key" in lowered or "decrypt" in lowered:
         raise RuntimeError(
             "DJI log decryption failed: this v13+ encrypted log requires a DJI "
             "Developer API key.  Set DJI_API_KEY in the environment or provide "

@@ -8,7 +8,12 @@ from typing import TextIO
 
 from drone_video_geotagger.audit import write_audit_csv
 from drone_video_geotagger.exiftool import write_exif
-from drone_video_geotagger.frames import build_frame_tags, collect_frames, infer_frame_rate
+from drone_video_geotagger.frames import (
+    DEFAULT_START_NUMBER,
+    build_frame_tags,
+    collect_frames,
+    infer_frame_rate,
+)
 from drone_video_geotagger.gps_quality import assess_gps_lock, samples_from_telemetry
 from drone_video_geotagger.paths import force_utf8_streams
 from drone_video_geotagger.telemetry import TelemetryPoint, parse_srt
@@ -50,6 +55,16 @@ def build_parser() -> argparse.ArgumentParser:
         "--frame-rate",
         type=float,
         help="Frame extraction rate in frames per second. If omitted, the CLI estimates it.",
+    )
+    parser.add_argument(
+        "--start-number",
+        type=int,
+        default=DEFAULT_START_NUMBER,
+        help=(
+            "Number of the first frame ffmpeg wrote (its -start_number). Frame N is tagged "
+            "at (N - start number) / frame rate seconds, so deleted frames shift no others. "
+            f"Default: {DEFAULT_START_NUMBER}, ffmpeg's own default."
+        ),
     )
     parser.add_argument("--ffmpeg", default="ffmpeg", help="ffmpeg executable path.")
     parser.add_argument("--exiftool", default="exiftool", help="exiftool executable path.")
@@ -97,7 +112,9 @@ def run(args: argparse.Namespace) -> int:
     frames = collect_frames(args.frames)
     if args.frame_rate is None:
         video_duration_s = read_video_duration(args.ffmpeg, args.video)
-        frame_rate = infer_frame_rate(frames, telemetry[-1].end_s, video_duration_s)
+        frame_rate = infer_frame_rate(
+            frames, telemetry[-1].end_s, video_duration_s, start_number=args.start_number
+        )
     else:
         frame_rate = args.frame_rate
     video_start = read_video_start(args.ffmpeg, args.video)
@@ -116,6 +133,7 @@ def run(args: argparse.Namespace) -> int:
         takeoff_altitude_m=args.takeoff_altitude,
         video_start=video_start,
         in_place=args.in_place,
+        start_number=args.start_number,
     )
 
     copy_frames(tags)

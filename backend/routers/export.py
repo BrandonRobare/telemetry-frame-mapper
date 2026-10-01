@@ -416,6 +416,9 @@ def export_webodm_georeferencing_csv(session_id: int, db: DBSession = Depends(ge
     The archive intentionally contains only ``odm_georeferencing.csv`` for
     workflows that need the ODM georeferencing sidecar, not a full image bundle.
     """
+    # The same CSV as the full package, so the names match and the formula guard applies.
+    from ..services.webodm_package import odm_georeferencing_csv, package_image_names
+
     session = db.query(SessionModel).filter(SessionModel.id == session_id).first()
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -428,14 +431,7 @@ def export_webodm_georeferencing_csv(session_id: int, db: DBSession = Depends(ge
     exports_dir.mkdir(parents=True, exist_ok=True)
     zip_path = exports_dir / f"webodm_georeferencing_csv_{int(session.id)}.zip"
     with _atomic_zip(zip_path, exports_dir) as zf:
-        csv_rows = "filename,latitude,longitude,altitude\n"
-        for img in images:
-            # Use explicit None checks — 0.0 is a valid coordinate value
-            lat = "" if img.latitude is None else img.latitude
-            lon = "" if img.longitude is None else img.longitude
-            alt = "" if img.altitude_m is None else img.altitude_m
-            csv_rows += f"{img.filename},{lat},{lon},{alt}\n"
-        zf.writestr("odm_georeferencing.csv", csv_rows)
+        zf.writestr("odm_georeferencing.csv", odm_georeferencing_csv(package_image_names(images)))
     return {
         "zip_path": str(zip_path),
         "image_count": len(images),
@@ -492,6 +488,7 @@ def export_reconstruction_share_bundle(reconstruction_id: int, db: DBSession = D
 def upload_reconstruction_to_cesium_ion(reconstruction_id: int, db: DBSession = Depends(get_db)):
     """Publish the existing Cesium-ready 3D Tiles share bundle to Cesium ion."""
     from ..services.cesium_ion import CesiumIonError, upload_tileset
+    from ..services.reconstruction import _require_geo_transform
     from ..services.share_bundle import build_share_bundle
 
     rec = db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).first()
@@ -500,6 +497,9 @@ def upload_reconstruction_to_cesium_ion(reconstruction_id: int, db: DBSession = 
     exports_dir = Path(get_config().exports_dir)
     bundle = confine_path(exports_dir / f"reconstruction_{rec.id}_share.zip", exports_dir)
     try:
+        # Ion only places the model on the globe: a bundle without a tileset is useless
+        # there, so a non-georeferenced reconstruction is refused (422) up front (#950).
+        _require_geo_transform(rec.geo_transform, "Publishing to Cesium ion", rec.id)
         build_share_bundle(bundle, rec, exports_dir)
         name = f"Reconstruction {rec.id}"
         return upload_tileset(get_cesium_ion_config(), bundle.name, bundle, name)
@@ -784,6 +784,7 @@ def revoke_share_link(reconstruction_id: int, share_link_id: int, db: DBSession 
     return _share_link_owner_payload(link)
 
 
+@router.get("/survey-report")
 @router.post("/survey-report")
 def export_survey_report(
     session_id: int,
@@ -794,6 +795,10 @@ def export_survey_report(
 
     Returns structured JSON by default. Pass ``format=html`` for self-contained
     HTML, or ``format=pdf`` for a PDF when WeasyPrint is installed.
+
+    Building the report only reads the database, so GET serves it as well: the
+    Export tab opens it with a plain link and ``window.open`` (#952). POST is
+    kept for existing API clients.
     """
     from fastapi.responses import HTMLResponse, Response
 
@@ -828,6 +833,40 @@ def export_survey_report(
     if format != "json":
         raise HTTPException(status_code=422, detail="format must be json, html, or pdf")
     return report
+
+
+@router.get("/webodm-georeferencing-csv/download")
+def download_webodm_georeferencing_csv(session_id: int, db: DBSession = Depends(get_db)):
+    """Download the zip that ``POST /export/webodm-georeferencing-csv`` last built.
+
+    Read-only: it never builds the archive, so the POST stays its only writer. The
+    client gets its own snapshot, so a rebuild can replace the durable file mid-download.
+    """
+    session = db.query(SessionModel).filter(SessionModel.id == session_id).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    exports_dir = Path(get_config().exports_dir)
+    zip_path = confine_path(
+        exports_dir / f"webodm_georeferencing_csv_{int(session.id)}.zip",
+        exports_dir,
+        boundary_name="exports directory",
+        reject_aliases=True,
+    )
+    if not zip_path.is_file():
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                "No georeferencing CSV zip for this session yet; build it with "
+                "POST /export/webodm-georeferencing-csv"
+            ),
+        )
+    download_path = _download_snapshot(zip_path)
+    return FileResponse(
+        download_path,
+        media_type="application/zip",
+        filename=zip_path.name,
+        background=BackgroundTask(download_path.unlink, missing_ok=True),
+    )
 
 
 @router.post("/webodm-package")

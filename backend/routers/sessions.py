@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import datetime
 import json
+import logging
 import re
+import uuid
 import zipfile
+from collections.abc import Callable
 from pathlib import Path, PurePosixPath
 from typing import Literal
 
@@ -18,10 +21,13 @@ from ..db.database import SessionLocal, get_db
 from ..db.models import Image, Project, Reconstruction
 from ..db.models import Session as SessionModel
 from ..db.session_search import install_session_search_schema
-from ..services.artifact_cleanup import cleanup_session_artifacts
+from ..services.artifact_cleanup import remove_artifacts, session_artifact_paths
+from ..services.delete_guard import DeleteBlocked, commit_delete, refuse_if_compared
 from ..services.ingest_orchestrator import get_progress, start_import
 from ..services.preflight_quality import build_quick_report
 from ..services.reconstruction import cancel_reconstruction
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 
@@ -254,16 +260,28 @@ def patch_session(session_id: int, body: SessionPatch, db: DBSession = Depends(g
     return s
 
 
-def _delete_session(s: SessionModel, db: DBSession, *, commit: bool = True) -> None:
-    """Delete one session using the same cleanup path as the single-session API."""
+def _stage_session_delete(s: SessionModel, db: DBSession) -> Callable[[], object]:
+    """Stage one session's delete in ``db``; return the file cleanup to run after commit.
+
+    Raises DeleteBlocked, before cancelling or deleting anything, when a comparison
+    uses the session. The caller commits first and removes files second (#945), so a
+    refused commit leaves every row pointing at files that still exist.
+    """
     reconstructions = db.query(Reconstruction).filter(Reconstruction.session_id == s.id).all()
+    refuse_if_compared(
+        db,
+        f"Session {s.id}",
+        session_ids=[s.id],
+        reconstruction_ids=[rec.id for rec in reconstructions],
+    )
     images = db.query(Image).filter(Image.session_id == s.id).all()
+    cfg = get_config()
+    # Read the paths now: the rows are gone, and their attributes with them, after commit.
+    paths = session_artifact_paths(s.id, images, reconstructions, cfg)
     for rec in reconstructions:
         cancel_reconstruction(rec.id)
-    cleanup_session_artifacts(s.id, images, reconstructions, get_config())
     db.delete(s)
-    if commit:
-        db.commit()
+    return lambda: remove_artifacts(paths, cfg)
 
 
 @router.post("/bulk", response_model=BulkSessionResponse)
@@ -309,14 +327,43 @@ def bulk_sessions(body: BulkSessionRequest, db: DBSession = Depends(get_db)):
                 ]
                 s.tags = json.dumps(merged_tags) if merged_tags else None
             elif body.operation == "delete":
-                _delete_session(s, db)
+                remove_files = _stage_session_delete(s, db)
+                commit_delete(db, f"Session {session_id}")
+                remove_files()
                 outcomes.append(BulkSessionOutcome(session_id=session_id, ok=True))
                 continue
             db.commit()
             outcomes.append(BulkSessionOutcome(session_id=session_id, ok=True))
-        except Exception as exc:
+        except HTTPException as exc:
             db.rollback()
-            outcomes.append(BulkSessionOutcome(session_id=session_id, ok=False, error=str(exc)))
+            outcomes.append(
+                BulkSessionOutcome(session_id=session_id, ok=False, error=str(exc.detail))
+            )
+        except DeleteBlocked as blocked:
+            db.rollback()
+            outcomes.append(
+                BulkSessionOutcome(session_id=session_id, ok=False, error=blocked.message)
+            )
+        except Exception:
+            db.rollback()
+            # Exception text can carry server paths and internals: log it under a
+            # correlation id and give the client only that id.
+            error_id = uuid.uuid4().hex[:12]
+            logger.exception(
+                "Bulk %s failed for session %s (error id %s)",
+                body.operation,
+                session_id,
+                error_id,
+            )
+            outcomes.append(
+                BulkSessionOutcome(
+                    session_id=session_id,
+                    ok=False,
+                    error=(
+                        f"Bulk {body.operation} failed; see the server log for error id {error_id}"
+                    ),
+                )
+            )
     return BulkSessionResponse(operation=body.operation, outcomes=outcomes)
 
 
@@ -325,7 +372,12 @@ def delete_session(session_id: int, db: DBSession = Depends(get_db)):
     s = db.query(SessionModel).filter(SessionModel.id == session_id).first()
     if not s:
         raise HTTPException(status_code=404, detail="Session not found")
-    _delete_session(s, db)
+    try:
+        remove_files = _stage_session_delete(s, db)
+    except DeleteBlocked as blocked:
+        return blocked.response()
+    commit_delete(db, f"Session {session_id}")
+    remove_files()
     return {"ok": True}
 
 

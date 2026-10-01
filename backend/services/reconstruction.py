@@ -1225,6 +1225,41 @@ def _world_points_to_utm(points_xyz, geo: dict | None):
     return transformed
 
 
+class NotGeoreferencedError(ValueError):
+    """A product needs map coordinates but the reconstruction has no solved geo-transform."""
+
+
+def _require_geo_transform(
+    geo_transform: str | dict | None,
+    purpose: str,
+    reconstruction_id: int | None = None,
+) -> dict:
+    """Return the solved COLMAP->UTM transform, or refuse *purpose*.
+
+    *geo_transform* is a reconstruction's stored ``geo_transform`` column (JSON text)
+    or the parsed dict. NULL means "not georeferenced": unlike
+    _load_geo_transform_for_reconstruction this never substitutes _LOCAL_FRAME_GEO,
+    so a product that must be in map coordinates is refused instead of being built
+    from COLMAP's arbitrary frame. Raises NotGeoreferencedError (a ValueError).
+    """
+    geo = geo_transform
+    if isinstance(geo, str):
+        try:
+            geo = json.loads(geo) if geo else None
+        except ValueError:
+            geo = None
+    if isinstance(geo, dict) and _utm_epsg(str(geo.get("utm_zone", ""))) is not None:
+        return geo
+    subject = (
+        f"reconstruction {reconstruction_id}" if reconstruction_id is not None
+        else "the reconstruction"
+    )
+    raise NotGeoreferencedError(
+        f"{purpose} requires a georeferenced reconstruction, but {subject} is not "
+        "georeferenced (it has no solved geo-transform)"
+    )
+
+
 def _write_las_laz(las, output_path: Path) -> None:
     """Write *las* as a LAZ-compressed file via an available laspy backend.
 
@@ -1904,7 +1939,9 @@ def _reproject_utm_points(points, source_geo: dict, target_geo: dict):
 
 
 def _load_reconstruction_points_utm(rec: Reconstruction, target_geo: dict | None = None) -> tuple:
-    geo = _load_geo_transform_for_reconstruction(rec)
+    # A voxel diff is only meaningful in a shared map frame: two non-georeferenced
+    # reconstructions sit in unrelated COLMAP frames, so refuse rather than diff them.
+    geo = _require_geo_transform(rec.geo_transform, "Change detection", rec.id)
     if rec.pointcloud_path and Path(rec.pointcloud_path).exists():
         points = _load_las_positions(Path(rec.pointcloud_path))
     elif rec.splat_path and Path(rec.splat_path).exists():
@@ -2046,6 +2083,8 @@ def start_session_comparison(
         raise ValueError("Reconstruction does not belong to the requested session")
     if rec_a.status != "complete" or rec_b.status != "complete":
         raise ValueError("Both reconstructions must be complete before comparison")
+    for rec in (rec_a, rec_b):
+        _require_geo_transform(rec.geo_transform, "Change detection", rec.id)
 
     comparison = SessionComparison(
         session_a_id=session_a_id,

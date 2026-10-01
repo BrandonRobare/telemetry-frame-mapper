@@ -58,7 +58,13 @@ ingest, analysis, planning, reconstruction, and export.
   Parrot fdr-lite (`time`, `latitude`, `longitude`, `altitude`), and ArduPilot
   MAVExplorer POS (`timestamp`, `TimeUS`, `Lat`, `Lng`, `Alt`). CSV uploads with
   missing or unrecognized coordinate headers are rejected; this app does not
-  fabricate a position.
+  fabricate a position. A log whose clock counts from the start of the flight
+  (timestamps before 2000-01-01) is anchored to the start time a DJI binary log
+  records, or to the GPS Sync tab's optional **Flight start (UTC)** field (sent as
+  `start_time`, ISO 8601, UTC unless an offset is given); without one the upload is
+  rejected, with the reason shown at that field, rather than placed in 1970. Points at
+  (0, 0), the receiver's no-fix placeholder, never feed matching, and applying a
+  sync recomputes the footprint of every frame it repositions.
 - **Battery/flight records:** per-session operator field records
   (`/sessions/{id}/flight-entries`) — battery ID, start/end charge %, flight
   duration (derived from flight-log telemetry when omitted), and notes.
@@ -79,15 +85,19 @@ ingest, analysis, planning, reconstruction, and export.
   (GLB/OBJ/MTL), and flythrough video.
 - **Cesium 3D Tiles share bundle:** `POST /export/reconstructions/{id}/share-bundle` writes a real,
   geo-referenced 3D Tiles 1.1 `tileset.json` (loadable directly in CesiumJS) alongside the manifest
-  and viewer page. The root tile's `boundingVolume.region` and ECEF `transform` are computed from
-  the reconstruction's image GPS bounds/centroid; when a mesh GLB is available it's bundled and
-  referenced as tile content, otherwise the tileset still carries a correct region/transform with
-  no content. The mesh is assumed to sit in a local East-North-Up frame centered on that GPS
-  centroid — good enough to place it on the globe, not a substitute for a full similarity-transform
-  fit against ground control.
+  and viewer page. The root tile's ECEF `transform` places the mesh (which stays in COLMAP's frame)
+  through the reconstruction's solved COLMAP→UTM geo-transform; `boundingVolume.region` comes from
+  the image GPS bounds. When a mesh GLB is available it's bundled and referenced as tile content,
+  otherwise the tileset still carries the region/transform with no content. `tileset.json` is
+  included only for a georeferenced reconstruction: for one that is **not georeferenced** the
+  bundle still ships the manifest, viewer page and artifacts, with the manifest's
+  `cesium.tileset_json` set to `null` and a `tileset_omitted_reason`, rather than a model placed at
+  a guessed position. Placement is as good as the GPS fit (`rmse_m` in the geo-transform), not a
+  substitute for ground control.
 - **Cesium ion publishing:** with an explicitly enabled `cesium_ion` configuration and a token held
   only in its named environment variable, `POST /export/reconstructions/{id}/cesium-ion` uploads
-  that existing share bundle and returns the ion asset ID. See [CESIUM-ION.md](CESIUM-ION.md).
+  that existing share bundle and returns the ion asset ID; a reconstruction that is not
+  georeferenced has nothing to place and is refused with `422`. See [CESIUM-ION.md](CESIUM-ION.md).
 - **Session archive/restore:** `POST /sessions/{id}/archive` bundles a session's
   full DB state (images, flight logs, reconstructions with lineage,
   measurements, annotations, defects, etc.) plus its artifact files into one
@@ -126,7 +136,7 @@ ingest, analysis, planning, reconstruction, and export.
 | **Jobs** | Resource monitor (CPU/RAM/GPU) with live job logs; job completion/failure fires an in-app toast (and a desktop notification when the tab is hidden and permission is granted) |
 | **Storage** | Disk usage by category, a file browser, and configured artifact backups |
 | **Splat Viewer** | In-browser gaussian-splat rendering, PSNR/SSIM sparklines, coverage-gap heatmap, GPS-pinned annotations, distance/area measurement, ortho/3D split view, flythrough recording, presentation/narration mode |
-| **Compare** | Voxel change detection between two reconstructions of the same site, plus a selected-project trend table of existing session quality, coverage, and completed-reconstruction metrics. It is read-only: `—` means a metric has not yet been recorded. |
+| **Compare** | Voxel change detection between two reconstructions of the same site (both must be georeferenced; otherwise the request is refused with `422`), plus a selected-project trend table of existing session quality, coverage, and completed-reconstruction metrics. It is read-only: `—` means a metric has not yet been recorded. |
 | **Settings** | App preferences, import/storage paths, mission parameters, reconstruction presets, rendering/export defaults |
 
 Light/dark theme with persistence.
@@ -183,7 +193,7 @@ telemetry.py: parse SRT → TelemetryPoint[]  (time window + lat/lon/rel-alt)
    │          interpolate() linearly between fixes for any time offset
    ▼
 frames.py:   glob *.jpg, read frame index (LAST number in filename),
-   │          time = (index − first_index) / frame_rate,
+   │          time = (index − start_number) / frame_rate,
    │          interpolate GPS, abs_alt = takeoff_alt + rel_alt → FrameTag[]
    ▼
 exiftool.py: build one -Tag=value arg file, write GPS EXIF in a single call
@@ -197,8 +207,13 @@ Key rules:
 - **Frame index = the last number in the filename**, so `frame_00042.jpg` and
   `DJI_0081_frame_42.jpg` both index as frame 42; files with no digits are
   skipped.
+- **Frame time** is measured from `--start-number`, the number ffmpeg gave the
+  first frame it wrote (default 1, ffmpeg's own default), not from whichever
+  frame sorts first. Deleting frames, such as the take-off, moves no other frame.
 - **Frame rate** is taken from `--frame-rate` if given, otherwise estimated from
-  the telemetry duration and frame count (snapping to common rates).
+  the telemetry duration and frame count (snapping to common rates). Estimation
+  refuses gaps in the numbering, including frames missing before the first one,
+  and asks for `--frame-rate` instead; so does telemetry with no duration.
 - **`--takeoff-altitude`** is meters above sea level of the launch point, not
   flight height; the DJI telemetry height is relative and gets added on top.
 
@@ -494,11 +509,15 @@ Public responses distinguish the failure modes:
 
 | Status | Meaning |
 |---|---|
-| `401` | The link is password-protected and not yet unlocked |
+| `401` | The link is password-protected and not yet unlocked; the body carries `"code": "share_password_required"` next to `detail` |
 | `403` | Wrong password, or the token does not match this reconstruction |
 | `410` | Expired or revoked |
 
-Owners can inspect and revoke links:
+The viewer shows its password form on that `code`, not on the message text.
+
+The Export tab lists each reconstruction's links that still work (created and expiry dates, and
+whether a password is set) with a **Revoke** button. Over the API, owners can inspect and revoke
+links:
 
 ```bash
 GET  /export/reconstructions/{id}/share-links
@@ -638,7 +657,9 @@ host-specific secret, so an existing link keeps working until its recorded expir
 The Import dialog defaults to **Browser upload**: pick or drag a folder of frames and the app
 streams it to the backend in chunks, then runs the same import pipeline as any other source. This
 is the easiest route when the images are on your workstation but not already under `imports/`. The
-**Server path** mode remains for folders that already live there.
+**Server path** mode remains for folders that already live there. A finished upload is kept under
+`imports/browser_imports/<upload id>/`, the folder its session imports from; an upload left
+unfinished for `browser_uploads.cleanup_after_hours` (24 h by default) is removed from staging.
 
 **Upload / cloud drive** covers files a desktop client has already synced from OneDrive, Google
 Drive, Dropbox, or similar. The provider's own client and the operating system authorize access;
@@ -703,12 +724,16 @@ curl -O -J "http://127.0.0.1:8000/reconstruction/1/download-bundle"
 
 **Checkpoint validation** — scores a finished reconstruction against independently surveyed points,
 which is the honest way to measure accuracy (points used for registration cannot also validate it).
-Coordinates are in the reconstruction's **local frame**, not lat/lon, and at least one is required.
+Coordinates are **UTM easting/northing in metres** in the reconstruction's zone (the `utm_zone` of
+`GET /reconstruction/{id}/geo-transform`), with `z` in the same height frame as the LAS export; at
+least one is required. The mesh or splat is mapped into that frame through the solved
+geo-transform, so the reconstruction must be georeferenced (otherwise `422`). The response's
+`frame` names the CRS the distances were measured in.
 
 ```bash
 curl -X POST http://127.0.0.1:8000/reconstruction/1/validate-checkpoints \
   -H "Content-Type: application/json" \
-  -d '{"points": [{"label": "CP1", "x": 12.40, "y": -3.15, "z": 0.87}]}'
+  -d '{"points": [{"label": "CP1", "x": 591265.40, "y": 3873518.85, "z": 12.87}]}'
 ```
 
 **GCP list** — converts marked ground control points into a list for downstream tools. Each point

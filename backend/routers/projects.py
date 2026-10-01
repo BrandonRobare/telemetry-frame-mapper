@@ -13,8 +13,9 @@ from ..db.database import SessionLocal, get_db
 from ..db.models import CoverageRun, Reconstruction
 from ..db.models import Project as ProjectModel
 from ..db.models import Session as SessionModel
+from ..services.delete_guard import DeleteBlocked, commit_delete, refuse_if_compared
 from ..services.ingest_orchestrator import start_import
-from .sessions import SessionOut, _delete_session
+from .sessions import SessionOut, _stage_session_delete
 
 router = APIRouter(prefix="/projects", tags=["projects"])
 
@@ -152,20 +153,30 @@ def delete_project(project_id: int, db: DBSession = Depends(get_db)):
     if not p:
         raise HTTPException(status_code=404, detail="Project not found")
     sessions = db.query(SessionModel).filter(SessionModel.project_id == p.id).all()
+    session_ids = [session.id for session in sessions]
+    reconstruction_ids = [
+        rec_id
+        for (rec_id,) in db.query(Reconstruction.id).filter(
+            Reconstruction.session_id.in_(session_ids)
+        )
+    ]
     try:
-        for session in sessions:
-            _delete_session(session, db, commit=False)
-        db.delete(p)
-        db.commit()
-    except Exception as exc:
+        # Check every session before staging any, so a refusal cancels no jobs.
+        refuse_if_compared(
+            db,
+            f"Project {project_id}",
+            session_ids=session_ids,
+            reconstruction_ids=reconstruction_ids,
+        )
+        remove_files = [_stage_session_delete(session, db) for session in sessions]
+    except DeleteBlocked as blocked:
         db.rollback()
-        raise HTTPException(
-            status_code=500,
-            detail=(
-                "Project deletion stopped; database unchanged. Some child jobs may have been "
-                "cancelled or artifacts removed before the failure."
-            ),
-        ) from exc
+        return blocked.response()
+    db.delete(p)
+    # Rows first, files second (#945): a refused commit leaves every file in place.
+    commit_delete(db, f"Project {project_id}")
+    for remove in remove_files:
+        remove()
     return {"ok": True}
 
 

@@ -37,14 +37,81 @@ def enu_to_ecef_transform(lat0_rad: float, lon0_rad: float, h0: float) -> list[f
     ]
 
 
-def build_tileset(images: Iterable, content_uri: str | None) -> dict:
-    """Build a real, geo-referenced 3D Tiles 1.1 tileset from an image GPS bounds.
+# 3D Tiles 1.1 ("glTF transforms"): glTF content is y-up and the runtime rotates it
+# to z-up, (x, y, z) -> (x, -z, y), before applying the tile transform. Row-major.
+_GLTF_Y_UP_TO_Z_UP = (
+    (1.0, 0.0, 0.0, 0.0),
+    (0.0, 0.0, -1.0, 0.0),
+    (0.0, 1.0, 0.0, 0.0),
+    (0.0, 0.0, 0.0, 1.0),
+)
 
-    ponytail: assumes the bundled GLB sits in a local ENU-meters frame centered
-    on the image GPS centroid (COLMAP's arbitrary-scale reconstruction frame is
-    the known ceiling here) — a future similarity-transform fit (e.g. against
-    GCPs) would refine root.transform instead of this centroid approximation.
+
+def georeferenced_root_transform(geo_transform: dict) -> list[float]:
+    """Column-major 4x4 placing COLMAP-frame glTF content at its solved ECEF position.
+
+    The mesh keeps COLMAP's coordinates (the frame mesh_georef.json describes), so the
+    matrix is, applied right to left: undo the runtime's glTF y-up -> z-up rotation;
+    COLMAP -> UTM through reconstruction._world_points_to_utm; UTM -> a local
+    East-North-Up frame at the transform's UTM origin (grid convergence and scale
+    factor, linearised there); ENU -> ECEF. Heights keep the transform's vertical
+    frame, taken as ellipsoidal height. One affine matrix cannot follow the Earth's
+    curvature, so a point d metres from the origin sits about d**2 / 2R too high: under
+    1 cm within 350 m, 3 cm at 600 m.
     """
+    import numpy as np
+    from pyproj import Transformer
+
+    from backend.services.reconstruction import _utm_epsg, _world_points_to_utm
+
+    origin_e, origin_n = (float(v) for v in geo_transform["utm_origin"])
+    to_lonlat = Transformer.from_crs(
+        _utm_epsg(str(geo_transform["utm_zone"])), 4326, always_xy=True
+    )
+    lon0, lat0 = to_lonlat.transform(origin_e, origin_n)
+    lat0_rad, lon0_rad = math.radians(lat0), math.radians(lon0)
+    enu_to_ecef = np.array(enu_to_ecef_transform(lat0_rad, lon0_rad, 0.0)).reshape(4, 4).T
+    anchor = np.array(geodetic_to_ecef(lat0_rad, lon0_rad, 0.0))
+
+    # COLMAP -> UTM, read off the shared helper as an affine map relative to the origin.
+    corners = _world_points_to_utm(np.vstack([np.zeros(3), np.eye(3)]), geo_transform)
+    corners = corners - np.array([origin_e, origin_n, 0.0])
+    colmap_to_utm = np.eye(4)
+    colmap_to_utm[:3, :3] = (corners[1:] - corners[0]).T
+    colmap_to_utm[:3, 3] = corners[0]
+
+    # UTM easting/northing offsets -> local east/north metres, by central differences.
+    def _east_north(de: float, dn: float) -> np.ndarray:
+        lon, lat = to_lonlat.transform(origin_e + de, origin_n + dn)
+        offset = np.array(geodetic_to_ecef(math.radians(lat), math.radians(lon), 0.0)) - anchor
+        return enu_to_ecef[:3, :2].T @ offset
+
+    utm_to_enu = np.eye(4)
+    utm_to_enu[:2, 0] = (_east_north(1.0, 0.0) - _east_north(-1.0, 0.0)) / 2.0
+    utm_to_enu[:2, 1] = (_east_north(0.0, 1.0) - _east_north(0.0, -1.0)) / 2.0
+
+    gltf_to_colmap = np.linalg.inv(np.array(_GLTF_Y_UP_TO_Z_UP))
+    matrix = enu_to_ecef @ utm_to_enu @ colmap_to_utm @ gltf_to_colmap
+    return [float(v) for v in matrix.T.reshape(-1)]
+
+
+def build_tileset(
+    images: Iterable,
+    content_uri: str | None,
+    *,
+    geo_transform: str | dict | None,
+) -> dict:
+    """Build a geo-referenced 3D Tiles 1.1 tileset for a reconstruction.
+
+    ``root.transform`` places the content with the reconstruction's solved
+    COLMAP->UTM ``geo_transform`` (the stored JSON column or its dict); the image
+    GPS bounds only size ``boundingVolume.region``. A NULL ``geo_transform`` means
+    the reconstruction is not georeferenced, so this raises
+    ``reconstruction.NotGeoreferencedError`` (a ValueError) instead of guessing.
+    """
+    from backend.services.reconstruction import _require_geo_transform
+
+    geo = _require_geo_transform(geo_transform, "3D Tiles placement")
     points = [
         (img.latitude, img.longitude, img.altitude_m or 0.0)
         for img in images
@@ -60,8 +127,6 @@ def build_tileset(images: Iterable, content_uri: str | None) -> dict:
     south, north = min(lats), max(lats)
     min_h, max_h = min(alts), max(alts)
     lat0 = sum(lats) / len(lats)
-    lon0 = sum(lons) / len(lons)
-    h0 = sum(alts) / len(alts)
 
     lat_span_m = (north - south) * _METERS_PER_DEGREE_LAT
     lon_span_m = (east - west) * _METERS_PER_DEGREE_LAT * math.cos(math.radians(lat0))
@@ -76,7 +141,7 @@ def build_tileset(images: Iterable, content_uri: str | None) -> dict:
         "boundingVolume": {"region": region},
         "geometricError": geometric_error,
         "refine": "ADD",
-        "transform": enu_to_ecef_transform(math.radians(lat0), math.radians(lon0), h0),
+        "transform": georeferenced_root_transform(geo),
     }
     if content_uri:
         root["content"] = {"uri": content_uri}

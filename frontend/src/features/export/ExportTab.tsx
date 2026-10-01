@@ -1,9 +1,10 @@
-import { useState, type CSSProperties } from 'react'
+import { useRef, useState, type CSSProperties } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { apiUrl, get, post, shareUrl } from '../../shared/api/client'
 import { useMapStore } from '../../shared/stores/mapStore'
 import { useToast } from '../../shared/hooks/useToast'
 import { Button } from '../../shared/components/Button'
+import ConfirmDialog from '../../shared/components/ConfirmDialog'
 import TabHeader from '../../shared/components/TabHeader'
 import EmptyState from '../../shared/components/EmptyState'
 import { useCoverageResult } from '../map/hooks/useCoverageResult'
@@ -60,6 +61,40 @@ function useOrthoStatus(reconstructionId: number) {
   })
 }
 
+/** POST .../share-link response: the only time the bearer token is returned. */
+interface CreatedShareLink {
+  share_token: string
+  share_link_id: number
+  reconstruction_id: number
+  session_id: number
+  expires_at: string
+  password_protected: boolean
+}
+
+/** Owner view of a share link from GET .../share-links; it never holds the token. */
+interface ShareLinkState {
+  id: number
+  reconstruction_id: number
+  expires_at: string
+  password_protected: boolean
+  revoked_at: string | null
+  created_at: string
+}
+
+/** Links a viewer can still open: not revoked and not expired. */
+function selectLiveLinks(links: ShareLinkState[]): ShareLinkState[] {
+  const now = Date.now()
+  return links.filter((link) => link.revoked_at === null && Date.parse(link.expires_at) > now)
+}
+
+function useLiveShareLinks(reconstructionId: number) {
+  return useQuery<ShareLinkState[], Error, ShareLinkState[]>({
+    queryKey: ['share-links', reconstructionId],
+    queryFn: () => get<ShareLinkState[]>(`/export/reconstructions/${reconstructionId}/share-links`),
+    select: selectLiveLinks,
+  })
+}
+
 // ---- helpers ----
 
 function formatDate(iso: string): string {
@@ -72,6 +107,22 @@ function formatDate(iso: string): string {
   } catch {
     return iso
   }
+}
+
+function webodmZipName(sessionId: number): string {
+  return `webodm_georeferencing_csv_${sessionId}.zip`
+}
+
+/** The zip POST /export/webodm-georeferencing-csv built for this session. */
+function webodmZipUrl(sessionId: number): string {
+  return apiUrl(`/export/webodm-georeferencing-csv/download?session_id=${sessionId}`)
+}
+
+function startDownload(url: string, filename: string) {
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  a.click()
 }
 
 function MeshExportCard({ job }: { job: Job }) {
@@ -302,6 +353,160 @@ function OrthoExportCard({ job }: { job: Job }) {
   )
 }
 
+function ShareLinkRow({
+  job,
+  password,
+  onCreated,
+  divider,
+}: {
+  job: Job
+  password: string
+  onCreated: () => void
+  divider: boolean
+}) {
+  const { addToast } = useToast()
+  const qc = useQueryClient()
+  const { data: liveLinks = [] } = useLiveShareLinks(job.id)
+  const [created, setCreated] = useState<CreatedShareLink | null>(null)
+  const [linkToRevoke, setLinkToRevoke] = useState<ShareLinkState | null>(null)
+  // The pending state reaches the button only on the next render, so a fast
+  // double click could still mint two public links without this guard.
+  const creating = useRef(false)
+
+  const createMutation = useMutation({
+    mutationFn: (linkPassword: string) =>
+      post<CreatedShareLink>(`/export/reconstructions/${job.id}/share-link`, {
+        password: linkPassword || undefined,
+      }),
+    onSuccess: (data) => {
+      setCreated(data)
+      onCreated()
+    },
+    onError: (err: Error) => {
+      setCreated(null)
+      addToast(`Share link generation failed: ${err.message}`, 'error')
+    },
+    onSettled: () => {
+      creating.current = false
+      return qc.invalidateQueries({ queryKey: ['share-links', job.id] })
+    },
+  })
+
+  const revokeMutation = useMutation({
+    mutationFn: (linkId: number) =>
+      post<ShareLinkState>(`/export/reconstructions/${job.id}/share-links/${linkId}/revoke`),
+    onSuccess: (revoked) => {
+      qc.setQueryData<ShareLinkState[]>(['share-links', job.id], (links) =>
+        links?.map((link) => (link.id === revoked.id ? revoked : link)),
+      )
+      setCreated((current) => (current?.share_link_id === revoked.id ? null : current))
+      addToast(`Share link #${revoked.id} revoked`, 'success')
+    },
+    onError: (err: Error) => addToast(`Revoking the share link failed: ${err.message}`, 'error'),
+    onSettled: () => {
+      setLinkToRevoke(null)
+      return qc.invalidateQueries({ queryKey: ['share-links', job.id] })
+    },
+  })
+
+  function generate() {
+    if (creating.current) return
+    creating.current = true
+    createMutation.mutate(password)
+  }
+
+  return (
+    <div
+      className="py-3 flex flex-col gap-2"
+      style={{ borderBottom: divider ? '1px solid var(--border)' : 'none' }}
+    >
+      <div className="flex items-center gap-3">
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div className="text-sm" style={{ color: 'var(--text)', fontWeight: 600 }}>
+            Reconstruction #{job.id}
+          </div>
+          <div className="text-xs" style={{ color: 'var(--text-muted)' }}>
+            {job.preset} · {job.frames_used} frames
+          </div>
+        </div>
+        <Button
+          variant="ghost"
+          loading={createMutation.isPending}
+          loadingLabel="Generating…"
+          onClick={generate}
+        >
+          Generate Share Link
+        </Button>
+      </div>
+
+      {created && (
+        <div
+          className="px-3 py-2 text-sm flex flex-col gap-0.5"
+          style={{ background: 'var(--surface-2)', border: '1px solid var(--border)' }}
+        >
+          <span style={{ color: 'var(--success)', fontWeight: 600 }}>
+            Share link #{created.share_link_id} ready (copy it now; it is shown only once):
+          </span>
+          <span
+            className="font-mono text-xs"
+            style={{ color: 'var(--text-muted)', wordBreak: 'break-all', userSelect: 'all' }}
+          >
+            {shareUrl(`/view/share/${created.share_token}`)}
+          </span>
+        </div>
+      )}
+
+      {liveLinks.length > 0 && (
+        <ul
+          aria-label={`Active share links for reconstruction #${job.id}`}
+          className="flex flex-col gap-1"
+          style={{ listStyle: 'none', margin: 0, padding: 0 }}
+        >
+          {liveLinks.map((link) => (
+            <li
+              key={link.id}
+              className="flex items-center gap-3 text-xs"
+              style={{ color: 'var(--text-muted)' }}
+            >
+              <span style={{ flex: 1, minWidth: 0 }}>
+                Link #{link.id} · created {formatDate(link.created_at)} · expires{' '}
+                {formatDate(link.expires_at)}
+                {link.password_protected ? ' · password protected' : ''}
+              </span>
+              <Button
+                variant="danger"
+                size="sm"
+                aria-label={`Revoke share link #${link.id}`}
+                onClick={() => setLinkToRevoke(link)}
+              >
+                Revoke
+              </Button>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <ConfirmDialog
+        open={linkToRevoke !== null}
+        title="Revoke share link?"
+        description={
+          <>
+            Anyone holding link <strong>#{linkToRevoke?.id}</strong> loses access to
+            reconstruction #{job.id} immediately. This cannot be undone.
+          </>
+        }
+        confirmLabel="Revoke link"
+        danger
+        loading={revokeMutation.isPending}
+        onCancel={() => setLinkToRevoke(null)}
+        onConfirm={() => {
+          if (linkToRevoke) revokeMutation.mutate(linkToRevoke.id)
+        }}
+      />
+    </div>
+  )
+}
+
 // ---- main component ----
 
 export default function ExportTab() {
@@ -315,57 +520,31 @@ export default function ExportTab() {
 
   // WebODM georeferencing CSV-only export state
   const [webodmResult, setWebodmResult] = useState<{
-    session_id: number | null
+    session_id: number
     zip_path: string
     image_count: number
   } | null>(null)
   const visibleWebodmResult =
     webodmResult?.session_id === selectedSessionId ? webodmResult : null
 
-  // Share link state
-  const [shareResult, setShareResult] = useState<{
-    reconstruction_id: number
-    session_id: number
-    share_token: string
-    share_link_id: number
-  } | null>(null)
+  // Applies to the next share link generated for any reconstruction.
   const [sharePassword, setSharePassword] = useState('')
 
+  // The POST builds the zip on the server; the browser then downloads it.
   const webodmMutation = useMutation({
-    mutationFn: () =>
+    mutationFn: (sessionId: number) =>
       post<{ zip_path: string; image_count: number }>(
-        `/export/webodm-georeferencing-csv?session_id=${selectedSessionId}`
+        `/export/webodm-georeferencing-csv?session_id=${sessionId}`
       ),
-    onSuccess: (data) => {
-      setWebodmResult({ ...data, session_id: selectedSessionId })
+    onSuccess: (data, sessionId) => {
+      setWebodmResult({ ...data, session_id: sessionId })
+      startDownload(webodmZipUrl(sessionId), webodmZipName(sessionId))
     },
     onError: (err: Error) => {
       setWebodmResult(null)
       addToast(`WebODM georeferencing CSV export failed: ${err.message}`, 'error')
     },
   })
-
-
-  // Share link mutation
-  function handleShareLink(reconstructionId: number) {
-    const fn = async () => {
-      const data = await post<{
-        share_token: string
-        share_link_id: number
-        reconstruction_id: number
-        session_id: number
-      }>(`/export/reconstructions/${reconstructionId}/share-link`, {
-        password: sharePassword || undefined,
-      })
-      setShareResult(data)
-      setSharePassword('')
-      return data
-    }
-    fn().catch((err: Error) => {
-      setShareResult(null)
-      addToast(`Share link generation failed: ${err.message}`, 'error')
-    })
-  }
 
   // GeoJSON export — fetches images on demand then triggers browser download
   const { refetch: fetchImages, isFetching: imagesFetching } = useImages(selectedSessionId)
@@ -542,43 +721,13 @@ export default function ExportTab() {
           {(completedReconstructions ?? []).length > 0 && (
             <div style={{ borderTop: '1px solid var(--border)' }}>
               {(completedReconstructions ?? []).map((job, idx, arr) => (
-                <div
+                <ShareLinkRow
                   key={job.id}
-                  className="py-3 flex items-center gap-3"
-                  style={{ borderBottom: idx < arr.length - 1 ? '1px solid var(--border)' : 'none' }}
-                >
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div className="text-sm" style={{ color: 'var(--text)', fontWeight: 600 }}>
-                      Reconstruction #{job.id}
-                    </div>
-                    <div className="text-xs" style={{ color: 'var(--text-muted)' }}>
-                      {job.preset} · {job.frames_used} frames
-                    </div>
-                  </div>
-                  {shareResult?.reconstruction_id === job.id ? (
-                    <div
-                      className="px-3 py-2 text-sm flex flex-col gap-0.5"
-                      style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', maxWidth: 360 }}
-                    >
-                      <span style={{ color: 'var(--success)', fontWeight: 600 }}>
-                        Share link ready:
-                      </span>
-                      <span
-                        className="font-mono text-xs"
-                        style={{ color: 'var(--text-muted)', wordBreak: 'break-all', userSelect: 'all' }}
-                      >
-                        {shareUrl(`/view/share/${shareResult.share_token}`)}
-                      </span>
-                    </div>
-                  ) : (
-                    <Button
-                      variant="ghost"
-                      onClick={() => handleShareLink(job.id)}
-                    >
-                      Generate Share Link
-                    </Button>
-                  )}
-                </div>
+                  job={job}
+                  password={sharePassword}
+                  onCreated={() => setSharePassword('')}
+                  divider={idx < arr.length - 1}
+                />
               ))}
             </div>
           )}
@@ -660,7 +809,7 @@ export default function ExportTab() {
               disabled={webodmMutation.isPending}
               onClick={() => {
                 setWebodmResult(null)
-                webodmMutation.mutate()
+                webodmMutation.mutate(selectedSessionId)
               }}
             >
               {webodmMutation.isPending ? 'Building…' : 'Download georeferencing CSV zip'}
@@ -668,18 +817,28 @@ export default function ExportTab() {
 
             {visibleWebodmResult && (
               <div
-                className="px-3 py-2 text-sm flex flex-col gap-0.5"
+                className="px-3 py-2 text-sm flex items-center gap-3"
                 style={{ background: 'var(--surface-2)', border: '1px solid var(--border)' }}
               >
-                <span style={{ color: 'var(--success)', fontWeight: 600 }}>
-                  Ready: {visibleWebodmResult.image_count} images
-                </span>
-                <span
-                  className="font-mono text-xs"
-                  style={{ color: 'var(--text-muted)', wordBreak: 'break-all' }}
+                <div className="flex flex-col gap-0.5">
+                  <span style={{ color: 'var(--success)', fontWeight: 600 }}>
+                    Ready: {visibleWebodmResult.image_count} images
+                  </span>
+                  <span
+                    className="font-mono text-xs"
+                    style={{ color: 'var(--text-muted)', wordBreak: 'break-all' }}
+                  >
+                    {zipFilename}
+                  </span>
+                </div>
+                {/* The download starts on its own; this link covers a blocked one. */}
+                <a
+                  href={webodmZipUrl(visibleWebodmResult.session_id)}
+                  download={webodmZipName(visibleWebodmResult.session_id)}
+                  style={downloadLinkStyle}
                 >
-                  {zipFilename}
-                </span>
+                  Download zip
+                </a>
               </div>
             )}
           </div>

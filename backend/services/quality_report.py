@@ -11,6 +11,7 @@ produced by ``backend.services.reconstruction._extract_geo_transform``.
 from __future__ import annotations
 
 import json
+import logging
 import math
 from dataclasses import dataclass
 from pathlib import Path
@@ -19,9 +20,19 @@ from typing import Any
 
 import numpy as np
 
+logger = logging.getLogger(__name__)
+
 # ---------------------------------------------------------------------------
 #  Data classes
 # ---------------------------------------------------------------------------
+
+
+class SurfaceExtractionError(Exception):
+    """A surface artifact exists but its points could not be read.
+
+    Kept distinct from a surface that reads cleanly and holds no points, which
+    the extractors report by returning an empty list.
+    """
 
 
 @dataclass(frozen=True)
@@ -246,33 +257,69 @@ def validate_held_out_checkpoints(
 ) -> dict:
     """Report the nearest-surface distance for each independent checkpoint.
 
-    Preference order: mesh, splat, pointcloud.  Returns 422-eligible detail
-    when no surface source is available.
+    Preference order: mesh, splat, pointcloud.  When the check cannot run the
+    result has ``available: False``, a 422-eligible ``reason`` and a ``status``:
+    ``unavailable`` (no surface artifact on disk), ``failed`` (the artifact could
+    not be read; ``error`` names the parser error) or ``empty`` (the artifact
+    read cleanly but holds no points).
     """
-    source: str | None = None
-    points: list[tuple[float, float, float]] | None = None
-
-    if rec.mesh_glb_path and Path(rec.mesh_glb_path).exists():
-        source = "mesh"
-        points = _extract_mesh_surface_points(rec.mesh_glb_path)
-    elif rec.splat_path and Path(rec.splat_path).exists():
-        source = "splat"
-        points = _extract_splat_surface_points(rec.splat_path)
-    elif rec.pointcloud_path and Path(rec.pointcloud_path).exists():
-        source = "pointcloud"
-        points = _extract_pointcloud_surface_points(rec.pointcloud_path)
-
-    if source is None or points is None or len(points) == 0:
+    candidates = (
+        ("mesh", rec.mesh_glb_path, _extract_mesh_surface_points),
+        ("splat", rec.splat_path, _extract_splat_surface_points),
+        ("pointcloud", rec.pointcloud_path, _extract_pointcloud_surface_points),
+    )
+    selected = next(
+        (entry for entry in candidates if entry[1] and Path(entry[1]).exists()), None
+    )
+    if selected is None:
         return {
             "available": False,
+            "status": "unavailable",
             "reason": (
                 "No surface source (mesh, splat, or point cloud) is available "
                 "for this reconstruction."
             ),
         }
 
+    source, surface_path, extract = selected
+    surface_name = Path(surface_path).name
+    try:
+        points = extract(surface_path)
+    except SurfaceExtractionError as exc:
+        logger.warning(
+            "Checkpoint validation could not read the %s surface at %s",
+            source,
+            surface_path,
+            exc_info=True,
+        )
+        return {
+            "available": False,
+            "status": "failed",
+            "source": source,
+            "error": str(exc),
+            "reason": f"Could not read the {source} surface ({surface_name}): {exc}",
+        }
+    if not points:
+        return {
+            "available": False,
+            "status": "empty",
+            "source": source,
+            "reason": f"The {source} surface ({surface_name}) contains no points.",
+        }
+
     results: list[CheckpointValidation] = []
     np_points = np.array(points, dtype=np.float64)
+    from backend.services.reconstruction import NotGeoreferencedError
+
+    try:
+        np_points, frame = _surface_points_in_checkpoint_frame(rec, source, np_points)
+    except NotGeoreferencedError as exc:
+        return {
+            "available": False,
+            "status": "not_georeferenced",
+            "source": source,
+            "reason": str(exc),
+        }
 
     for sp in survey_points:
         query = np.array([sp.x, sp.y, sp.z], dtype=np.float64)
@@ -294,6 +341,7 @@ def validate_held_out_checkpoints(
     return {
         "available": True,
         "source": source,
+        "frame": frame,
         "point_count": len(survey_points),
         "surface_point_count": len(points),
         "summary": {
@@ -318,11 +366,31 @@ def validate_held_out_checkpoints(
 # ---------------------------------------------------------------------------
 
 
+def _describe_read_error(exc: Exception, path: str) -> str:
+    """Name a surface read failure without the artifact's server-side directory.
+
+    The description ends up in an API response; the full path and traceback go
+    to the log instead.
+    """
+    if isinstance(exc, OSError) and exc.strerror:
+        return exc.strerror
+    message = str(exc) or type(exc).__name__
+    for form in {str(path), str(Path(path))}:
+        message = message.replace(form, Path(path).name)
+    return f"{type(exc).__name__}: {message}"
+
+
 def _extract_splat_surface_points(splat_path: str) -> list[tuple[float, float, float]]:
-    """Extract Gaussian mean positions from a PLY splat file."""
+    """Extract Gaussian mean positions from a PLY splat file.
+
+    Raises :class:`SurfaceExtractionError` when the PLY cannot be read.
+    """
     from backend.services.ply_io import read_3dgs_ply
 
-    cloud = read_3dgs_ply(Path(splat_path))
+    try:
+        cloud = read_3dgs_ply(Path(splat_path))
+    except Exception as exc:
+        raise SurfaceExtractionError(_describe_read_error(exc, splat_path)) from exc
     means = cloud.means  # (N, 3) float32
     if means.shape[0] > 100_000:
         # Down-sample for performance
@@ -334,25 +402,22 @@ def _extract_splat_surface_points(splat_path: str) -> list[tuple[float, float, f
 def _extract_mesh_surface_points(mesh_path: str) -> list[tuple[float, float, float]]:
     """Extract vertex positions from a GLB mesh.
 
-    This is a best-effort extraction that reads the GLB binary layout directly
-    to avoid bringing in a heavy GLTF library.  When the path is not parseable
-    we fall back to the splat, which is the caller's responsibility.
+    Reads the GLB binary layout directly to avoid bringing in a heavy GLTF
+    library.  Raises :class:`SurfaceExtractionError` when the file cannot be
+    read or parsed; returns an empty list only for a well-formed mesh that has
+    no vertex positions.
     """
-    # GLB is a binary GLTF container.  We do a minimal parse to extract
-    # vertex positions from the first POSITION accessor.  This is fragile
-    # but keeps the dependency footprint light.
     try:
-        data = Path(mesh_path).read_bytes()
-        positions = _parse_glb_vertex_positions(data)
-        if not positions:
-            return []
-        # Down-sample to 100k max
-        if len(positions) > 100_000:
-            step = max(1, len(positions) // 100_000)
-            positions = positions[::step]
-        return positions
-    except Exception:
-        return []
+        positions = _parse_glb_vertex_positions(Path(mesh_path).read_bytes())
+    except SurfaceExtractionError:
+        raise
+    except Exception as exc:
+        raise SurfaceExtractionError(_describe_read_error(exc, mesh_path)) from exc
+    # Down-sample to 100k max
+    if len(positions) > 100_000:
+        step = max(1, len(positions) // 100_000)
+        positions = positions[::step]
+    return positions
 
 
 def _extract_pointcloud_surface_points(
@@ -360,45 +425,60 @@ def _extract_pointcloud_surface_points(
 ) -> list[tuple[float, float, float]]:
     """Extract point positions from a LAS point cloud.
 
-    Falls back gracefully when laspy is not installed or the file is corrupt.
+    Raises :class:`SurfaceExtractionError` when laspy is not installed or the
+    file cannot be read; returns an empty list for a readable, empty cloud.
     """
     try:
         import laspy
-
+    except ImportError as exc:
+        raise SurfaceExtractionError(
+            "reading LAS point clouds requires the optional laspy package; install it "
+            "from a source checkout with: uv sync --group backend --group reconstruction"
+        ) from exc
+    try:
         las = laspy.read(pointcloud_path)
         x = las.x
         y = las.y
         z = las.z
-        n = min(len(x), 100_000)
-        indices = np.linspace(0, len(x) - 1, n, dtype=np.int64)
-        return [(float(x[i]), float(y[i]), float(z[i])) for i in indices]
-    except Exception:
+    except Exception as exc:
+        raise SurfaceExtractionError(_describe_read_error(exc, pointcloud_path)) from exc
+    n = min(len(x), 100_000)
+    if n == 0:
         return []
+    indices = np.linspace(0, len(x) - 1, n, dtype=np.int64)
+    return [(float(x[i]), float(y[i]), float(z[i])) for i in indices]
 
 
 def _parse_glb_vertex_positions(data: bytes) -> list[tuple[float, float, float]]:
-    """Minimal GLB parser: extract vertex positions from POSITION accessor."""
+    """Minimal GLB parser: extract vertex positions from the first POSITION accessor.
+
+    Returns an empty list only when the file is well formed and has no vertex
+    positions (no mesh primitive with POSITION, or a zero-count accessor).
+    Anything unreadable raises :class:`SurfaceExtractionError` naming the problem.
+    """
     import struct
 
-    if len(data) < 20 or data[:4] != b"glTF":
-        return []
+    if data[:4] != b"glTF":
+        raise SurfaceExtractionError("not a GLB file (missing glTF magic)")
+    if len(data) < 20:
+        raise SurfaceExtractionError(f"GLB header is truncated ({len(data)} bytes)")
 
     # Skip 12-byte header to get first chunk
     # GLB: magic(4) version(4) length(4) chunkLength(4) chunkType(4)
     json_length = struct.unpack_from("<I", data, 12)[0]
+    if 20 + json_length > len(data):
+        raise SurfaceExtractionError("GLB JSON chunk is truncated")
     json_bytes = data[20 : 20 + json_length]
     try:
         gltf = json.loads(json_bytes)
-    except json.JSONDecodeError:
-        return []
-
-    meshes = gltf.get("meshes", [])
-    if not meshes:
-        return []
+    except ValueError as exc:  # JSONDecodeError or UnicodeDecodeError
+        raise SurfaceExtractionError(f"GLB JSON chunk is not valid JSON: {exc}") from exc
+    if not isinstance(gltf, dict):
+        raise SurfaceExtractionError("GLB JSON chunk is not a glTF object")
 
     # Find first primitive with a POSITION attribute
     position_accessor_idx = None
-    for mesh in meshes:
+    for mesh in gltf.get("meshes", []):
         for primitive in mesh.get("primitives", []):
             attrs = primitive.get("attributes", {})
             if "POSITION" in attrs:
@@ -411,44 +491,59 @@ def _parse_glb_vertex_positions(data: bytes) -> list[tuple[float, float, float]]
         return []
 
     accessors = gltf.get("accessors", [])
-    if position_accessor_idx >= len(accessors):
-        return []
+    if not isinstance(position_accessor_idx, int) or not (
+        0 <= position_accessor_idx < len(accessors)
+    ):
+        raise SurfaceExtractionError(f"POSITION accessor {position_accessor_idx!r} does not exist")
     accessor = accessors[position_accessor_idx]
+
+    count = accessor.get("count", 0)
+    component_type = accessor.get("componentType", 5126)  # FLOAT default
+    type_str = accessor.get("type", "VEC3")
+    if component_type != 5126 or type_str != "VEC3":
+        raise SurfaceExtractionError(
+            f"unsupported POSITION accessor (componentType {component_type}, type {type_str}); "
+            "only float VEC3 positions can be read"
+        )
+    if count == 0:
+        return []
 
     buffer_views = gltf.get("bufferViews", [])
     buffer_view_idx = accessor.get("bufferView")
-    if buffer_view_idx is None or buffer_view_idx >= len(buffer_views):
-        return []
+    if not isinstance(buffer_view_idx, int) or not (0 <= buffer_view_idx < len(buffer_views)):
+        raise SurfaceExtractionError("POSITION accessor has no readable bufferView")
     buffer_view = buffer_views[buffer_view_idx]
 
     # Find binary chunk
     bin_offset = 20 + json_length
     # The binary chunk has: chunkLength(4) chunkType(4) bytes...
     if bin_offset + 8 > len(data):
-        return []
+        raise SurfaceExtractionError("GLB has no BIN chunk holding the vertex data")
     bin_data = data[bin_offset + 8 :]
 
     byte_offset = buffer_view.get("byteOffset", 0)
     byte_length = buffer_view.get("byteLength", 0)
     if byte_offset + byte_length > len(bin_data):
-        return []
-
+        raise SurfaceExtractionError(
+            f"GLB BIN chunk is truncated: the POSITION bufferView needs "
+            f"{byte_offset + byte_length} bytes, the chunk has {len(bin_data)}"
+        )
     view_data = bin_data[byte_offset : byte_offset + byte_length]
-    count = accessor.get("count", 0)
-    component_type = accessor.get("componentType", 5126)  # FLOAT default
-    type_str = accessor.get("type", "VEC3")
 
-    if component_type != 5126 or type_str != "VEC3":
-        return []
+    # Honour the accessor offset and an interleaved (strided) buffer view.
+    start = accessor.get("byteOffset", 0)
+    stride = buffer_view.get("byteStride") or 12
+    needed = start + (count - 1) * stride + 12
+    if needed > len(view_data):
+        raise SurfaceExtractionError(
+            f"GLB vertex data is truncated: {count} positions need {needed} bytes, "
+            f"the bufferView has {len(view_data)}"
+        )
 
     positions: list[tuple[float, float, float]] = []
     fmt = "<3f"
-    stride = 12
     for i in range(count):
-        offset = i * stride
-        if offset + 12 > len(view_data):
-            break
-        x, y, z = struct.unpack_from(fmt, view_data, offset)
+        x, y, z = struct.unpack_from(fmt, view_data, start + i * stride)
         positions.append((float(x), float(y), float(z)))
     return positions
 
@@ -462,6 +557,33 @@ def _rmse(values: list[float]) -> float:
     if not values:
         return 0.0
     return math.sqrt(sum(v * v for v in values) / len(values))
+
+
+def _surface_points_in_checkpoint_frame(
+    rec: Any, source: str, points: np.ndarray
+) -> tuple[np.ndarray, dict]:
+    """Put surface points in the frame checkpoints are surveyed in (#950).
+
+    Checkpoints are absolute UTM easting/northing in the reconstruction's zone, with
+    heights in its geo-transform's vertical frame (as in the LAS export), so every
+    distance is in metres. Mesh and splat vertices are in COLMAP's frame and go
+    through the solved transform; the LAS export is already written in that UTM
+    frame. Returns ``(points, frame)``; raises ``NotGeoreferencedError`` when the
+    reconstruction has no solved transform.
+    """
+    from backend.services.reconstruction import (
+        _require_geo_transform,
+        _utm_epsg,
+        _world_points_to_utm,
+    )
+
+    geo = _require_geo_transform(
+        getattr(rec, "geo_transform", None), "Checkpoint validation", getattr(rec, "id", None)
+    )
+    if source != "pointcloud":
+        points = _world_points_to_utm(points, geo)
+    zone = str(geo["utm_zone"])
+    return points, {"crs": f"EPSG:{_utm_epsg(zone)}", "utm_zone": zone}
 
 
 def parse_surveyed_points_3d(

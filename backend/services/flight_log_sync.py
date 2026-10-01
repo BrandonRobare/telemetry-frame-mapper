@@ -4,8 +4,10 @@ import bisect
 import csv
 import io
 from dataclasses import dataclass
-from datetime import UTC
+from datetime import UTC, datetime
 from typing import Any
+
+from src.drone_video_geotagger.gps_quality import is_null_island
 
 
 @dataclass(frozen=True)
@@ -24,6 +26,21 @@ class FlightLogCSVError(ValueError):
     """Raised when a flight-log CSV does not meet a supported header contract."""
 
 
+class FlightLogClockError(ValueError):
+    """Raised when flight-log timestamps cannot be placed on an absolute UTC clock."""
+
+
+ABSOLUTE_CLOCK_FLOOR_S = 946_684_800.0
+"""2000-01-01T00:00:00Z: the line between relative and absolute flight-log clocks.
+
+Timestamps at or after this instant are Unix times. Anything earlier is a
+relative clock counting from the start of the flight (DJI ``time(millisecond)``,
+Autel ``Time(ms)``, DJI OSD ``timeMs``): no drone log predates 2000, and a clock
+counting from power-on would need ~30 years of uptime to reach it. Stored as-is,
+such offsets place the log in January 1970, where no image timestamp can match.
+"""
+
+
 # Upper bound on rows returned by ``build_offset_preview``. ``window_s`` and ``step_s``
 # are each bounded by the router, but their quotient is not: window_s=300 with
 # step_s=1e-6 would otherwise ask for 600 million iterations. Past this many rows
@@ -32,13 +49,18 @@ _MAX_PREVIEW_STEPS = 1000
 
 
 def parse_dji_csv(content: bytes) -> list[dict]:
-    """Parse DJI flight log CSV. Returns list of {timestamp_s, latitude, longitude, altitude_m}."""
-    reader = csv.DictReader(io.StringIO(content.decode()))
+    """Parse DJI flight log CSV. Returns list of {timestamp_s, latitude, longitude, altitude_m}.
+
+    Decoded as ``utf-8-sig`` like the other vendors: a BOM left on the first
+    header renames ``time(millisecond)``, and every timestamp used to read as 0.
+    """
+    reader = _csv_reader(content, "DJI")
+    _require_headers(reader, "DJI", ("time(millisecond)", "OSD.latitude", "OSD.longitude"))
     points = []
     for row in reader:
         try:
             point = {
-                "timestamp_s": float(row.get("time(millisecond)", 0)) / 1000.0,
+                "timestamp_s": float(row["time(millisecond)"]) / 1000.0,
                 "latitude": float(row["OSD.latitude"]),
                 "longitude": float(row["OSD.longitude"]),
                 "altitude_m": float(row.get("OSD.altitude[m]", 0)),
@@ -176,6 +198,57 @@ def _image_timestamp_s(timestamp: Any) -> float:
     return timestamp.timestamp()
 
 
+def parse_log_start_time(value: str) -> datetime:
+    """Parse an ISO 8601 flight start time; a value without an offset is read as UTC."""
+    try:
+        parsed = datetime.fromisoformat(value.strip())
+    except ValueError as exc:
+        raise FlightLogClockError(
+            "start_time must be an ISO 8601 date-time, e.g. 2024-06-15T10:30:00Z"
+        ) from exc
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    if parsed.timestamp() < ABSOLUTE_CLOCK_FLOOR_S:
+        raise FlightLogClockError("start_time must be on or after 2000-01-01T00:00:00Z")
+    return parsed
+
+
+def anchor_log_timestamps(
+    timestamps_s: list[float],
+    start_time: datetime | None,
+) -> list[float]:
+    """Return ``timestamps_s`` as absolute Unix seconds.
+
+    A log whose timestamps are all at or after :data:`ABSOLUTE_CLOCK_FLOOR_S`
+    already carries Unix times and comes back unchanged; ``start_time`` is not
+    used. A log whose timestamps are all before it runs on a relative clock, and
+    is shifted so that clock's zero lands on ``start_time`` (naive = UTC).
+
+    Raises :class:`FlightLogClockError` for a relative log without a
+    ``start_time``: where it sits in time is unknown, and guessing would sync
+    every image to the wrong position. A log mixing both kinds is also refused.
+    """
+    if not timestamps_s:
+        return []
+    earliest = min(timestamps_s)
+    latest = max(timestamps_s)
+    if earliest >= ABSOLUTE_CLOCK_FLOOR_S:
+        return list(timestamps_s)
+    if latest >= ABSOLUTE_CLOCK_FLOOR_S:
+        raise FlightLogClockError(
+            "Flight log mixes relative and absolute timestamps; export it with a single clock."
+        )
+    if start_time is None:
+        raise FlightLogClockError(
+            f"Flight log timestamps are relative to the start of the flight ({earliest:g} s "
+            f"to {latest:g} s) and the log does not record when the flight started. Upload "
+            "it again with start_time set to the flight's UTC start (ISO 8601, e.g. "
+            "2024-06-15T10:30:00Z), or export the log with absolute timestamps."
+        )
+    start_s = _image_timestamp_s(start_time)
+    return [start_s + t for t in timestamps_s]
+
+
 def _lerp_optional(a: float | None, b: float | None, ratio: float) -> float | None:
     if a is None or b is None:
         return a if ratio <= 0.5 else b
@@ -193,10 +266,11 @@ def interpolate_log_point(
 ) -> InterpolatedLogPoint | None:
     """Interpolate a log point at ``timestamp_s``.
 
-    ``log_points`` MUST already be sorted ascending by ``timestamp_s``; this is
-    called once per image per candidate offset, so sorting here would repeat the
-    same sort thousands of times per request. Use :func:`match_images_to_log`,
-    which sorts once, unless you are sure your points are ordered.
+    ``log_points`` MUST already be sorted ascending by ``timestamp_s`` and free of
+    no-fix placeholders; this is called once per image per candidate offset, so
+    preparing them here would repeat the same work thousands of times per
+    request. Use :func:`match_images_to_log`, which prepares them once, unless
+    you are sure your points are ordered and all carry a real fix.
 
     Points inside the log timeline use linear interpolation. Points just outside
     the timeline are accepted only within ``tolerance_s`` and clamp to the edge
@@ -276,13 +350,34 @@ def match_images_to_log(
     ``offset_s`` is applied to image timestamps before looking up the log point:
     positive values mean the flight log is later than the image clock.
 
-    Sorts ``log_points`` once; callers do not need to pre-sort.
+    Sorts ``log_points`` once and drops no-fix placeholders; callers do not need
+    to pre-sort or pre-filter.
     """
     return _match_sorted_log(
         images,
-        sorted(log_points, key=lambda p: p["timestamp_s"]),
+        _interpolation_points(log_points),
         tolerance_s,
         offset_s,
+    )
+
+
+def _interpolation_points(log_points: list) -> list:
+    """Log points that may feed interpolation, sorted by time.
+
+    Points at Null Island are the receiver reporting "no fix", not a position;
+    interpolating toward them drags images thousands of kilometres off course.
+    Dropping them (and points with no coordinates at all) lets interpolation
+    bridge the outage between the real fixes either side of it.
+    """
+    return sorted(
+        (
+            p
+            for p in log_points
+            if p["latitude"] is not None
+            and p["longitude"] is not None
+            and not is_null_island(p["latitude"], p["longitude"])
+        ),
+        key=lambda p: p["timestamp_s"],
     )
 
 
@@ -339,7 +434,7 @@ def build_offset_preview(
         # answer; a coarser resolution over the full range is a bounded one.
         steps = _MAX_PREVIEW_STEPS
         step_s = (window_s * 2) / steps
-    sorted_points = sorted(log_points, key=lambda p: p["timestamp_s"])
+    sorted_points = _interpolation_points(log_points)
     rows = []
     for i in range(steps + 1):
         offset = center_offset_s - window_s + i * step_s

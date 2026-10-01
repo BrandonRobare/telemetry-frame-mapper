@@ -80,12 +80,17 @@ EXIF tags.
 | `--output` | Folder for the geotagged copies. Defaults to `<frames>_geotagged`. |
 | `--srt` | Existing DJI SRT file. Extracted from the video when omitted. |
 | `--frame-rate` | Frame extraction rate. Estimated from the SRT when omitted. |
+| `--start-number` | Number of the first frame ffmpeg wrote (its `-start_number`). Defaults to 1, ffmpeg's default. |
 | `--ffmpeg` | Path to the ffmpeg binary, if it is not on `PATH`. |
 | `--exiftool` | Path to the exiftool binary, if it is not on `PATH`. |
 | `--in-place` | Write tags into the source folder instead of making copies. |
 
 Frame numbering uses the **last** number in each filename, so `frame_00042.jpg` and
 `DJI_0081_frame_42.jpg` both resolve to frame 42. Files with no digits are skipped.
+
+Frame N is tagged at (N − start number) ÷ frame rate seconds into the video, so deleting frames
+(the take-off, say) never moves the others. The rate cannot be estimated once leading frames are
+gone, so pass `--frame-rate` for a trimmed folder.
 
 Alongside the geotagged images it writes `frame_geotags.csv` — per-frame index, time offset,
 coordinates, altitudes, timestamp — for checking the alignment, plus `exiftool_geotags.args`, the
@@ -164,6 +169,12 @@ docker run --rm -p 127.0.0.1:8000:8000 \
   -v "$PWD/exports:/app/exports" \
   telemetry-frame-mapper
 ```
+
+The API runs as the unprivileged `app` user (UID/GID 1000), so the mounted `data`, `imports`,
+`processed`, and `exports` directories must be writable by UID 1000. Create them before
+`docker run` (Docker creates missing ones owned by root). Directories written by an older image,
+which ran as root, need `sudo chown -R 1000:1000 data imports processed exports` once. If one of
+them is not writable, the backend refuses to start and names the directory and this fix.
 
 Open `http://localhost:8000`. `-p 127.0.0.1:8000:8000` is deliberate: when auth is disabled
 (and you have explicitly set `deployment.allow_unauthenticated_lan: true`), never publish the
