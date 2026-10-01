@@ -24,6 +24,7 @@ Optional, for reconstruction:
 - `gsplat` plus a CUDA-capable GPU: required for Gaussian splat training and optional server-side rendering hooks. Run `uv sync --group backend --group reconstruction --group dev` when validating reconstruction locally. Missing thumbnail renderer support should not break backend import or COLMAP-only setup.
 - SuGaR (`sugar_scene`/`sugar`): required only for mesh export. It is not included in the `reconstruction` dependency group because there is no installable `sugar`/`sugar-scene` PyPI package; install it from the upstream SuGaR project for manual mesh-export smoke.
 - Server-side flythrough rendering is optional; when the gsplat video renderer is unavailable, users can use browser recording.
+- `@playcanvas/splat-transform`: required only for the splat cleanup/compress endpoints. Its exact version is pinned and locked in `tools/splat-transform/`; install it once with `npm ci --prefix tools/splat-transform` (Node.js >= 22). The backend runs it with `npx --no-install` from that directory and never downloads it at run time.
 
 CI mocks every external binary and optional reconstruction library, so no test needs a real ffmpeg, exiftool, COLMAP, or GPU. Before a release, run the CLI once against real `ffmpeg`/`exiftool`; COLMAP, gsplat, SuGaR and video-render checks stay manual.
 
