@@ -24,6 +24,7 @@ from backend.core.config import (
     get_logging_config,
     get_pin_lock_config,
 )
+from backend.core.paths import require_writable_runtime_dirs
 from backend.db.database import init_db
 from backend.services.pin_lock import (
     create_session,
@@ -92,6 +93,17 @@ def _password_protected_share_exists() -> bool:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Before the DB is opened: a non-root container over root-owned bind mounts would
+    # otherwise fail with SQLite's "unable to open database file" or deep in an export.
+    cfg = get_config()
+    require_writable_runtime_dirs(
+        {
+            "data_dir": cfg.data_dir,
+            "imports_dir": cfg.imports_dir,
+            "processed_dir": cfg.processed_dir,
+            "exports_dir": cfg.exports_dir,
+        }
+    )
     configure_application_logging(get_logging_config())
     init_db()
     from backend.services.artifact_backup_schedule import scheduled_backup_from_config
