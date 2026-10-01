@@ -23,10 +23,25 @@ def upgrade() -> None:
     bind = op.get_bind()
     inspector = sa.inspect(bind)
     columns = {c["name"] for c in inspector.get_columns("reconstructions")}
-    if "parent_reconstruction_id" not in columns:
+    if "parent_reconstruction_id" in columns:
+        return
+    if bind.dialect.name == "sqlite":
+        # A plain add_column left upgraded databases without the self-FK that a
+        # fresh schema has (#946). SQLite can add the column with its REFERENCES
+        # clause in one ALTER, without rebuilding reconstructions.
+        op.execute(
+            "ALTER TABLE reconstructions ADD COLUMN parent_reconstruction_id INTEGER "
+            "REFERENCES reconstructions (id)"
+        )
+    else:
         op.add_column(
             "reconstructions",
-            sa.Column("parent_reconstruction_id", sa.Integer(), nullable=True),
+            sa.Column(
+                "parent_reconstruction_id",
+                sa.Integer(),
+                sa.ForeignKey("reconstructions.id"),
+                nullable=True,
+            ),
         )
 
 
@@ -35,10 +50,8 @@ def downgrade() -> None:
     inspector = sa.inspect(bind)
     columns = {c["name"] for c in inspector.get_columns("reconstructions")}
     if "parent_reconstruction_id" in columns:
-        # ponytail: on a genuinely fresh DB, 0001_baseline's create_all path picks up
-        # the self-FK declared in models.py before this migration runs, and SQLite
-        # refuses to DROP a column that carries a real FK constraint. Only affects
-        # downgrading a never-before-migrated DB; on a real incremental upgrade this
-        # column has no physical FK (plain add_column above) and drops cleanly.
-        # Fix if needed: op.batch_alter_table("reconstructions") to recreate the table.
-        op.drop_column("reconstructions", "parent_reconstruction_id")
+        # SQLite refuses to DROP a column that carries a foreign key, so batch
+        # mode rebuilds the table without it (env.py turns off FK enforcement
+        # for that, since other tables reference reconstructions).
+        with op.batch_alter_table("reconstructions") as batch_op:
+            batch_op.drop_column("parent_reconstruction_id")

@@ -6,7 +6,16 @@ from unittest.mock import patch
 import pytest
 from PIL import Image as PILImage
 
-from backend.db.models import CoverageRun, Image, Project, Reconstruction, TargetArea
+from backend.db.models import (
+    CoverageRun,
+    Defect,
+    DefectImage,
+    Image,
+    Project,
+    Reconstruction,
+    SessionComparison,
+    TargetArea,
+)
 from backend.db.models import Session as SessionModel
 
 
@@ -213,26 +222,86 @@ def test_delete_project_cancels_every_child_job_and_removes_artifacts(client, tm
     assert db.query(SessionModel).filter(SessionModel.id.in_(session_ids)).count() == 0
 
 
-def test_delete_project_keeps_database_rows_when_child_cleanup_fails(client):
-    from backend.main import app
-
-    db = app.state.test_db_session
-    project = Project(name="Cleanup failure")
+def _project_session_with_thumb(db, tmp_path, name):
+    project = Project(name=name)
     db.add(project)
     db.commit()
     session = SessionModel(name="Child", folder_path="/tmp/child", project_id=project.id)
     db.add(session)
     db.commit()
+    thumb = tmp_path / "processed" / str(session.id) / "thumbs" / "frame.jpg"
+    thumb.parent.mkdir(parents=True)
+    thumb.write_bytes(b"thumb")
+    image = Image(
+        session_id=session.id, filename="frame.jpg", filepath="/tmp/frame.jpg",
+        thumb_path=str(thumb),
+    )
+    db.add(image)
+    db.commit()
+    cfg = type("Cfg", (), {
+        "processed_dir": str(tmp_path / "processed"),
+        "exports_dir": str(tmp_path / "exports"),
+        "data_dir": str(tmp_path / "data"),
+    })()
+    return project, session, image, thumb, cfg
 
-    with patch(
-        "backend.routers.sessions.cleanup_session_artifacts", side_effect=OSError("disk failed")
-    ):
+
+def test_delete_project_keeps_rows_and_files_when_the_database_refuses_it(client, tmp_path):
+    """Files are removed only after the commit, so a refused delete leaves them (#945)."""
+    from backend.main import app
+
+    db = app.state.test_db_session
+    project, session, image, thumb, cfg = _project_session_with_thumb(
+        db, tmp_path, "Commit failure"
+    )
+    outsider = SessionModel(name="Outside the project", folder_path="/tmp/outside")
+    db.add(outsider)
+    db.commit()
+    defect = Defect(session_id=outsider.id, category="crack")
+    db.add(defect)
+    db.commit()
+    db.add(DefectImage(defect_id=defect.id, image_id=image.id))
+    db.commit()
+
+    with patch("backend.routers.sessions.get_config", return_value=cfg):
         response = client.delete(f"/projects/{project.id}")
 
-    assert response.status_code == 500
-    assert "database unchanged" in response.json()["detail"]
+    assert response.status_code == 409
+    assert "nothing was deleted" in response.json()["detail"]
+    assert thumb.exists()
+    db.expire_all()
     assert db.query(Project).filter(Project.id == project.id).first() is not None
     assert db.query(SessionModel).filter(SessionModel.id == session.id).first() is not None
+
+
+def test_delete_project_refuses_when_a_comparison_uses_one_of_its_sessions(client, tmp_path):
+    from backend.main import app
+
+    db = app.state.test_db_session
+    project, session, _image, thumb, cfg = _project_session_with_thumb(
+        db, tmp_path, "Compared project"
+    )
+    recs = [Reconstruction(session_id=session.id, status="complete") for _ in range(2)]
+    db.add_all(recs)
+    db.commit()
+    comparison = SessionComparison(
+        session_a_id=session.id, session_b_id=session.id,
+        reconstruction_a_id=recs[0].id, reconstruction_b_id=recs[1].id,
+    )
+    db.add(comparison)
+    db.commit()
+
+    with patch("backend.routers.sessions.get_config", return_value=cfg), patch(
+        "backend.routers.sessions.cancel_reconstruction"
+    ) as cancel:
+        response = client.delete(f"/projects/{project.id}")
+
+    assert response.status_code == 409
+    assert [ref["id"] for ref in response.json()["blocking_references"]] == [comparison.id]
+    cancel.assert_not_called()
+    assert thumb.exists()
+    db.expire_all()
+    assert db.query(Project).filter(Project.id == project.id).first() is not None
 
 
 def test_project_import_rejects_unsafe_legacy_project_name_before_path_use(client, tmp_path):

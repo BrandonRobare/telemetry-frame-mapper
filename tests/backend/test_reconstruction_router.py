@@ -11,7 +11,13 @@ from unittest.mock import patch
 
 import pytest
 
-from backend.db.models import Image, JobQueueEntry, Reconstruction, ReconstructionFrame
+from backend.db.models import (
+    Image,
+    JobQueueEntry,
+    Reconstruction,
+    ReconstructionFrame,
+    SessionComparison,
+)
 from backend.db.models import Session as SessionModel
 from backend.routers.reconstruction import _status_sse_payload
 from backend.services.job_queue import RECONSTRUCTION, claim_stale_jobs, enqueue
@@ -266,7 +272,7 @@ def test_delete_reconstruction_rejects_running_jobs_without_cleanup(client, tmp_
     db.commit()
     db.refresh(rec)
 
-    with patch("backend.routers.reconstruction.cleanup_reconstruction_artifacts") as cleanup:
+    with patch("backend.routers.reconstruction.remove_artifacts") as cleanup:
         resp = client.delete(f"/reconstruction/{rec.id}")
     assert resp.status_code == 409
     cleanup.assert_not_called()
@@ -321,6 +327,104 @@ def test_delete_reconstruction_removes_artifacts(client, tmp_path):
     assert not colmap_dir.exists()
     assert not actual_export_dir.exists()
     assert not thumb.exists()
+
+
+# ---- foreign-key-safe deletes (issue #945) ----
+
+
+def _storage(tmp_path):
+    return type("Cfg", (), {
+        "processed_dir": str(tmp_path / "processed"),
+        "exports_dir": str(tmp_path / "exports"),
+        "data_dir": str(tmp_path / "data"),
+    })()
+
+
+def _reconstruction_with_files(db, tmp_path, session_id, **fields):
+    rec = Reconstruction(
+        session_id=session_id, preset="quick", status="complete", frames_used=3, **fields
+    )
+    db.add(rec)
+    db.commit()
+    export_dir = tmp_path / "exports" / str(rec.id)
+    export_dir.mkdir(parents=True)
+    splat = export_dir / "splat.ply"
+    pointcloud = export_dir / "pointcloud.ply"
+    splat.write_bytes(b"splat")
+    pointcloud.write_bytes(b"ply")
+    rec.splat_path = str(splat)
+    rec.pointcloud_path = str(pointcloud)
+    db.commit()
+    return rec, splat, pointcloud
+
+
+def test_deleting_a_compared_reconstruction_returns_409_and_keeps_its_files(client, tmp_path):
+    db = _get_db(client)
+    s = _make_session_with_images(db)
+    rec, splat, pointcloud = _reconstruction_with_files(db, tmp_path, s.id)
+    other, _, _ = _reconstruction_with_files(db, tmp_path, s.id)
+    comparison = SessionComparison(
+        session_a_id=s.id, session_b_id=s.id,
+        reconstruction_a_id=other.id, reconstruction_b_id=rec.id,
+    )
+    db.add(comparison)
+    db.commit()
+
+    with patch("backend.routers.reconstruction.get_config", return_value=_storage(tmp_path)):
+        resp = client.delete(f"/reconstruction/{rec.id}")
+
+    assert resp.status_code == 409
+    body = resp.json()
+    assert f"comparison {comparison.id}" in body["detail"]
+    assert [ref["id"] for ref in body["blocking_references"]] == [comparison.id]
+    assert body["blocking_references"][0]["type"] == "comparison"
+    assert splat.exists()
+    assert pointcloud.exists()
+    db.expire_all()
+    assert db.get(Reconstruction, rec.id) is not None
+    assert db.get(SessionComparison, comparison.id) is not None
+
+
+def test_deleting_a_rerun_parent_keeps_the_child_and_its_files(client, tmp_path):
+    db = _get_db(client)
+    s = _make_session_with_images(db)
+    parent, parent_splat, _ = _reconstruction_with_files(db, tmp_path, s.id)
+    child, child_splat, child_ply = _reconstruction_with_files(
+        db, tmp_path, s.id, parent_reconstruction_id=parent.id
+    )
+    parent_id, child_id = parent.id, child.id
+
+    with patch("backend.routers.reconstruction.get_config", return_value=_storage(tmp_path)):
+        resp = client.delete(f"/reconstruction/{parent_id}")
+
+    assert resp.status_code == 200
+    assert not parent_splat.exists()
+    assert child_splat.exists()
+    assert child_ply.exists()
+    db.expire_all()
+    assert db.get(Reconstruction, parent_id) is None
+    assert db.get(Reconstruction, child_id).parent_reconstruction_id is None
+
+
+def test_reconstruction_delete_keeps_files_when_the_commit_fails(client, tmp_path):
+    from sqlalchemy.exc import IntegrityError
+    from sqlalchemy.orm import Session as OrmSession
+
+    db = _get_db(client)
+    s = _make_session_with_images(db)
+    rec, splat, pointcloud = _reconstruction_with_files(db, tmp_path, s.id)
+    refused = IntegrityError("DELETE", {}, Exception("FOREIGN KEY constraint failed"))
+
+    with patch("backend.routers.reconstruction.get_config", return_value=_storage(tmp_path)), \
+         patch.object(OrmSession, "commit", side_effect=refused):
+        resp = client.delete(f"/reconstruction/{rec.id}")
+
+    assert resp.status_code == 409
+    assert "nothing was deleted" in resp.json()["detail"]
+    assert splat.exists()
+    assert pointcloud.exists()
+    db.expire_all()
+    assert db.get(Reconstruction, rec.id) is not None
 
 
 def test_start_reconstruction_with_target_area(client):

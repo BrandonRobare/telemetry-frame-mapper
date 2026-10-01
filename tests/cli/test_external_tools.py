@@ -140,7 +140,9 @@ def test_cli_run_reads_video_start_from_video_argument(monkeypatch, tmp_path: Pa
 
     monkeypatch.setattr(cli, "parse_srt", lambda path: [TelemetryPoint(0.0, 1.0, 2.0, 3.0, 4.0)])
     monkeypatch.setattr(cli, "collect_frames", lambda path: [(path / "frame_00001.jpg", 1)])
-    monkeypatch.setattr(cli, "infer_frame_rate", lambda frames, end_s, duration_s: 1.0)
+    monkeypatch.setattr(
+        cli, "infer_frame_rate", lambda frames, end_s, duration_s, start_number: 1.0
+    )
     monkeypatch.setattr(cli, "read_video_duration", lambda *_: 1.0)
     monkeypatch.setattr(cli, "read_video_start", fake_read_video_start)
     monkeypatch.setattr(cli, "build_frame_tags", lambda **kwargs: [])
@@ -155,6 +157,7 @@ def test_cli_run_reads_video_start_from_video_argument(monkeypatch, tmp_path: Pa
         output=tmp_path / "out",
         srt=srt,
         frame_rate=None,
+        start_number=1,
         ffmpeg="ffmpeg",
         exiftool="exiftool",
         in_place=False,

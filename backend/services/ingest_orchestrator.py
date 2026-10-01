@@ -13,11 +13,15 @@ from ..core.paths import confine_path
 from ..db.models import Footprint, Image, SessionLogEntry
 from ..db.models import Session as SessionModel
 from .geometry import compute_footprint
-from .ingest import extract_exif, generate_thumbnail
+from .ingest import UnreadableImageError, extract_exif, generate_thumbnail
 from .quality import flag_image, score_brightness, score_sharpness
 from .storage_summary_cache import invalidate_storage_summary_cache
 
 logger = logging.getLogger(__name__)
+
+# Flag of a frame whose quality scoring did not complete. Such a frame is kept
+# for review but is never usable: no measured score backs a 'good' verdict.
+UNSCORED_FLAG = "unscored"
 
 _progress: dict[int, dict] = {}
 _progress_lock = threading.Lock()
@@ -73,6 +77,29 @@ def _unique_filename(path: Path, root: Path, duplicate_basenames: set[str]) -> s
     suffix = path.suffix
     digest = sha256(relative.encode()).hexdigest()[:12]
     return f"{path.stem}__{digest}{suffix}"
+
+
+def _skip_image(
+    db: DBSession, session_id: int, index: int, skipped: int, path: Path, exc: Exception
+) -> None:
+    """Record an image that cannot be imported and move the progress past it."""
+    # An unreadable file is an expected input problem; anything else is a bug
+    # worth a traceback in the application log.
+    logger.warning(
+        "Skipped %s during import: %s",
+        path.name,
+        exc,
+        exc_info=not isinstance(exc, UnreadableImageError),
+    )
+    db.add(SessionLogEntry(
+        session_id=session_id,
+        event_type="image_skipped",
+        message=f"Skipped {path.name}: {exc}",
+    ))
+    with _progress_lock:
+        _progress[session_id]["processed"] = index + 1
+        _progress[session_id]["skipped"] = skipped
+    db.commit()
 
 
 def _run(session_id: int, folder: Path, db_factory) -> None:
@@ -141,16 +168,10 @@ def _run(session_id: int, folder: Path, db_factory) -> None:
                 exif = extract_exif(str(accepted_file))
             except Exception as exc:
                 # One unreadable image must not fail the whole batch: skip it.
+                # extract_exif raises UnreadableImageError for a file that is
+                # not an image at all (#943).
                 skipped += 1
-                db.add(SessionLogEntry(
-                    session_id=session_id,
-                    event_type="image_skipped",
-                    message=f"Skipped {accepted_file.name}: {exc}",
-                ))
-                with _progress_lock:
-                    _progress[session_id]["processed"] = i + 1
-                    _progress[session_id]["skipped"] = skipped
-                db.commit()
+                _skip_image(db, session_id, i, skipped, accepted_file, exc)
                 continue
 
             # filter_zero_gps: skip images where both lat and lon are exactly 0.0.
@@ -190,8 +211,9 @@ def _run(session_id: int, folder: Path, db_factory) -> None:
                 lens_model=exif.get("lens_model"),
                 focal_length_35mm=exif.get("focal_length_35mm"),
                 digital_zoom_ratio=exif.get("digital_zoom_ratio"),
-                flag="good",
-                usable=True,
+                # Only a completed quality score may mark the frame good/usable.
+                flag=UNSCORED_FLAG,
+                usable=False,
             )
             db.add(img)
             db.flush()
@@ -207,8 +229,21 @@ def _run(session_id: int, folder: Path, db_factory) -> None:
                 dest = thumb_dir / f"{img.id}_{filename}"
                 generate_thumbnail(str(accepted_file), str(dest), size=ingest_thumbnail_size)
                 thumb_path = str(dest)
-            except Exception:
-                thumb_path = None
+            except UnreadableImageError as exc:
+                # The header parsed but the pixel data does not decode (e.g. a
+                # copy cut short): drop the uncommitted row and skip the file.
+                db.rollback()
+                skipped += 1
+                _skip_image(db, session_id, i, skipped, accepted_file, exc)
+                continue
+            except Exception as exc:
+                # The frame itself is fine; only its preview is missing.
+                logger.warning("Thumbnail generation failed for %s", filename, exc_info=True)
+                db.add(SessionLogEntry(
+                    session_id=session_id,
+                    event_type="thumbnail_failed",
+                    message=f"Thumbnail generation failed for {filename}: {exc}",
+                ))
             img.thumb_path = thumb_path
 
             try:
@@ -220,8 +255,14 @@ def _run(session_id: int, folder: Path, db_factory) -> None:
                 img.brightness_score = brightness
                 img.flag = flag
                 img.usable = flag == "good"
-            except Exception:
-                pass  # quality scoring is best-effort
+            except Exception as exc:
+                # The frame keeps flag=UNSCORED_FLAG and usable=False.
+                logger.warning("Quality scoring failed for %s", filename, exc_info=True)
+                db.add(SessionLogEntry(
+                    session_id=session_id,
+                    event_type="quality_failed",
+                    message=f"Quality scoring failed for {filename}: {exc}",
+                ))
 
             imported += 1
             if img.usable:

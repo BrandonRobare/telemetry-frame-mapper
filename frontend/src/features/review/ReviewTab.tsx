@@ -86,6 +86,7 @@ const FLAG_BADGE: Record<Image['flag'], { bg: string; text: string; label: strin
   no_gps: { bg: 'var(--tan-soft)',     text: 'var(--tan-text)',  label: 'No GPS' },
   dark:   { bg: 'var(--surface-2)',    text: 'var(--text-muted)', label: 'Dark' },
   bright: { bg: 'var(--surface-2)',    text: 'var(--text-muted)', label: 'Bright' },
+  unscored: { bg: 'var(--danger-soft)', text: 'var(--danger)',   label: 'Unscored' },
 }
 
 // ---- thumb URL helper ----
@@ -114,7 +115,7 @@ interface StatsBarProps {
 
 function StatsBar({ images, activeFlag, onFlagClick, visibleCount, selectedCount, sortBy, onSortChange }: StatsBarProps) {
   const counts: Record<Image['flag'], number> = {
-    good: 0, blurry: 0, no_gps: 0, dark: 0, bright: 0,
+    good: 0, blurry: 0, no_gps: 0, dark: 0, bright: 0, unscored: 0,
   }
   for (const img of images) counts[img.flag]++
   const usableCount = images.filter((img) => img.usable).length
@@ -126,6 +127,10 @@ function StatsBar({ images, activeFlag, onFlagClick, visibleCount, selectedCount
     { label: 'Dark',   flag: 'dark',   count: counts.dark,   color: 'var(--text-faint)' },
     { label: 'Bright', flag: 'bright', count: counts.bright, color: 'var(--text-faint)' },
   ]
+  // Scoring failures are rare, so only offer that filter when there is something to show.
+  if (counts.unscored > 0 || activeFlag === 'unscored') {
+    items.push({ label: 'Unscored', flag: 'unscored', count: counts.unscored, color: 'var(--danger)' })
+  }
 
   return (
     <div
