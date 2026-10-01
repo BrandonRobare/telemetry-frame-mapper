@@ -9,6 +9,7 @@ import sqlalchemy as sa
 from alembic import command
 from alembic.autogenerate import compare_metadata
 from alembic.runtime.migration import MigrationContext
+from alembic.script import ScriptDirectory
 
 from backend.db import database as database_module
 from backend.db.session_search import install_session_search_schema
@@ -466,6 +467,172 @@ def test_init_db_is_idempotent(isolated_engine):
     inspector = sa.inspect(isolated_engine)
     assert "reconstructions" in inspector.get_table_names()
     assert "alembic_version" in inspector.get_table_names()
+
+
+# --- foreign-key rules for deletes (#945) -----------------------------------
+
+V3_0_0_SCHEMA = Path(__file__).parent / "db" / "v3_0_0_schema.sql"
+
+# Rows a v3.0.0 user can have: an auto-imported session, a dense re-run pair, and a
+# comparison, plus every child table that references reconstructions. Reconstruction 11
+# is only a re-run parent, 13 is only compared, and session 3 only holds an import claim,
+# so each new rule can be exercised on its own after the upgrade.
+V3_0_0_ROWS = """
+    INSERT INTO sessions (id, name) VALUES (1, 'watched'), (2, 'surveyed'), (3, 'claim only');
+    INSERT INTO images (id, session_id, filename, filepath) VALUES (1, 2, 'a.jpg', '/a.jpg');
+    INSERT INTO auto_import_records (id, fingerprint, source_path, session_id)
+        VALUES (1, 'fp-1', '/card/1', 1), (2, 'fp-3', '/card/3', 3);
+    INSERT INTO reconstructions (id, session_id, status, splat_path) VALUES
+        (10, 2, 'complete', '/exports/10/splat.ply'),
+        (11, 2, 'complete', '/exports/11/splat.ply'),
+        (13, 2, 'complete', '/exports/13/splat.ply');
+    INSERT INTO reconstructions (id, session_id, parent_reconstruction_id, status)
+        VALUES (12, 2, 11, 'complete');
+    INSERT INTO reconstruction_frames (reconstruction_id, image_id) VALUES (10, 1), (12, 1);
+    INSERT INTO annotations (reconstruction_id, label, lat, lon, alt_m) VALUES (10, 'pin', 1, 2, 3);
+    INSERT INTO measurements (reconstruction_id, kind, points_json) VALUES (12, 'distance', '[]');
+    INSERT INTO share_links (id, reconstruction_id, token_hash, expires_at)
+        VALUES (1, 10, 'hash', '2030-01-01 00:00:00');
+    INSERT INTO share_link_unlock_sessions (share_link_id, token_hash, expires_at)
+        VALUES (1, 'unlock', '2030-01-01 00:00:00');
+    INSERT INTO session_comparisons
+        (id, session_a_id, session_b_id, reconstruction_a_id, reconstruction_b_id, status)
+        VALUES (1, 2, 2, 10, 13, 'complete');
+"""
+
+
+def _enforce_foreign_keys(engine) -> None:
+    """Turn enforcement on for every connection, exactly as the app's own engine does."""
+
+    @sa.event.listens_for(engine, "connect")
+    def _on_connect(dbapi_connection, connection_record):
+        dbapi_connection.execute("PRAGMA foreign_keys=ON")
+
+
+def _seed_v3_0_0(db_path: Path) -> None:
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.executescript(V3_0_0_SCHEMA.read_text(encoding="utf-8"))
+        conn.execute("PRAGMA foreign_keys=ON")
+        conn.executescript(V3_0_0_ROWS)
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _all_rows(db_path: Path) -> dict[str, list[tuple]]:
+    conn = sqlite3.connect(db_path)
+    try:
+        tables = [
+            name
+            for (name,) in conn.execute(
+                "select name from sqlite_master where type = 'table' "
+                "and name not like 'sqlite_%' and name not like 'session_search%' "
+                "and name != 'alembic_version'"
+            )
+        ]
+        return {
+            table: conn.execute(f"select * from {table} order by rowid").fetchall()
+            for table in tables
+        }
+    finally:
+        conn.close()
+
+
+def _reflected_foreign_keys(inspector, table: str) -> list[tuple]:
+    return sorted(
+        (
+            tuple(fk["constrained_columns"]),
+            fk["referred_table"],
+            (fk.get("options") or {}).get("ondelete"),
+        )
+        for fk in inspector.get_foreign_keys(table)
+    )
+
+
+def _model_foreign_keys(table: str) -> list[tuple]:
+    return sorted(
+        (tuple(column.name for column in fk.columns), fk.referred_table.name, fk.ondelete)
+        for fk in database_module.Base.metadata.tables[table].foreign_key_constraints
+    )
+
+
+def test_fk_rule_migration_upgrades_a_v3_0_0_database_without_data_loss(isolated_engine):
+    _enforce_foreign_keys(isolated_engine)
+    db_path = Path(isolated_engine.url.database)
+    _seed_v3_0_0(db_path)
+    before = _all_rows(db_path)
+    indexes_before = {
+        table: _index_names(sa.inspect(isolated_engine), table)
+        for table in ("reconstructions", "auto_import_records")
+    }
+
+    database_module.init_db()
+
+    head = ScriptDirectory.from_config(database_module._alembic_config()).get_current_head()
+    assert _revision(db_path) == head
+    # Every row of every table survives, byte for byte.
+    assert _all_rows(db_path) == before
+    inspector = sa.inspect(isolated_engine)
+    for table in database_module.Base.metadata.tables:
+        assert _reflected_foreign_keys(inspector, table) == _model_foreign_keys(table), table
+    claim_columns = {c["name"]: c for c in inspector.get_columns("auto_import_records")}
+    assert claim_columns["session_id"]["nullable"] is True
+    for table, names in indexes_before.items():
+        assert _index_names(inspector, table) == names, table
+
+    with isolated_engine.connect() as conn:
+        # The rebuild runs with enforcement off; the pooled connection must get it back.
+        assert conn.exec_driver_sql("PRAGMA foreign_keys").scalar() == 1
+        conn.exec_driver_sql("delete from sessions where id = 3")
+        conn.exec_driver_sql("delete from reconstructions where id = 11")
+        assert conn.exec_driver_sql(
+            "select session_id from auto_import_records where id = 2"
+        ).scalar() is None
+        assert conn.exec_driver_sql(
+            "select parent_reconstruction_id from reconstructions where id = 12"
+        ).scalar() is None
+        with pytest.raises(sa.exc.IntegrityError):
+            conn.exec_driver_sql("delete from reconstructions where id = 13")
+        conn.rollback()
+
+
+def test_fk_rule_migration_replays_and_downgrades_cleanly(isolated_engine):
+    _enforce_foreign_keys(isolated_engine)
+    db_path = Path(isolated_engine.url.database)
+    _seed_v3_0_0(db_path)
+    database_module.init_db()
+    upgraded = _all_rows(db_path)
+
+    # Replaying the revision over a database that already has the rules is a no-op.
+    with isolated_engine.begin() as conn:
+        conn.execute(sa.text("update alembic_version set version_num = '0017'"))
+    database_module.init_db()
+    assert _all_rows(db_path) == upgraded
+
+    # A detached import claim cannot satisfy the old NOT NULL column, so downgrading
+    # drops it; every other row is kept.
+    with isolated_engine.begin() as conn:
+        conn.execute(sa.text("delete from sessions where id = 3"))
+    command.downgrade(database_module._alembic_config(), "0017")
+
+    inspector = sa.inspect(isolated_engine)
+    assert _reflected_foreign_keys(inspector, "reconstructions") == sorted([
+        (("parent_reconstruction_id",), "reconstructions", None),
+        (("session_id",), "sessions", None),
+    ])
+    assert _reflected_foreign_keys(inspector, "auto_import_records") == [
+        (("session_id",), "sessions", None)
+    ]
+    rows = _all_rows(db_path)
+    assert [row[0] for row in rows["auto_import_records"]] == [1]
+    assert rows["reconstructions"] == upgraded["reconstructions"]
+    with isolated_engine.connect() as conn:
+        assert conn.exec_driver_sql("PRAGMA foreign_keys").scalar() == 1
+
+    database_module.init_db()
+    head = ScriptDirectory.from_config(database_module._alembic_config()).get_current_head()
+    assert _revision(db_path) == head
 
 
 # --- pre-migration snapshots (#680) -----------------------------------------
