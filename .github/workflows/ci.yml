@@ -71,6 +71,10 @@ jobs:
           uv export --frozen --no-dev --no-emit-project --group backend --group reconstruction --format requirements-txt --output-file /tmp/runtime-requirements.txt
           uv run --frozen --no-sync pip-audit -r /tmp/runtime-requirements.txt
 
+      - name: Audit every locked Python dependency group and platform
+        if: matrix.python-version == '3.12'
+        run: uv run --frozen --no-sync python tools/audit_dependencies.py
+
       - name: Lint
         run: uv run --frozen --no-sync ruff check .
 
@@ -97,6 +101,10 @@ jobs:
       - name: Audit dependencies
         working-directory: frontend
         run: npm audit --audit-level=moderate
+
+      - name: Audit splat-transform dependencies
+        working-directory: tools/splat-transform
+        run: npm audit --package-lock-only --audit-level=moderate
 
       - name: Lint
         working-directory: frontend
