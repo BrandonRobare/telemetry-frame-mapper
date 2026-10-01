@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, screen } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -72,4 +73,35 @@ describe('ShareViewer password prompt', () => {
     expect(screen.getByText('410')).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'Unlock' })).toBeNull()
   })
+})
+
+// level: component; area: export-share
+it('unlocks with the entered password, reloads metadata, and exposes authorized artifact links', async () => {
+  let unlocked = false
+  const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+    if (url === `/share/token/${TOKEN}/unlock` && init?.method === 'POST') {
+      unlocked = true
+      return jsonResponse(200, {})
+    }
+    if (url === `/share/token/${TOKEN}`) return unlocked
+      ? jsonResponse(200, {
+          reconstruction_id: 5, session_id: 7, status: 'complete', frames_used: 12,
+          frames_registered: 10, gaussian_count: 1000, psnr: 28.123, ssim: 0.95,
+          artifacts: { pointcloud: '/share/files/cloud.las', mesh_glb: '/share/files/mesh.glb', mesh_obj: null },
+          legacy_token_required: false, generated_at: 1750000000,
+        })
+      : jsonResponse(401, { detail: 'Password required', code: 'share_password_required' })
+    throw new Error(`Unexpected request: ${url}`)
+  })
+  vi.stubGlobal('fetch', fetchMock)
+  renderViewer()
+  await userEvent.type(await screen.findByLabelText('Password'), 'survey-secret')
+  await userEvent.click(screen.getByRole('button', { name: 'Unlock' }))
+  expect(await screen.findByRole('heading', { name: 'Reconstruction #5' })).toBeTruthy()
+  const unlock = fetchMock.mock.calls.find(([, init]) => init?.method === 'POST')
+  expect(JSON.parse(String(unlock?.[1]?.body))).toEqual({ password: 'survey-secret' })
+  expect(screen.getByRole('link', { name: 'Download Point Cloud (LAS)' }).getAttribute('href')).toBe('/share/files/cloud.las')
+  expect(screen.getByRole('link', { name: 'Download Mesh (GLB)' }).getAttribute('href')).toBe('/share/files/mesh.glb')
+  expect(screen.queryByRole('link', { name: 'Download Mesh (OBJ)' })).toBeNull()
+  expect(screen.getByText('28.12 dB')).toBeTruthy()
 })

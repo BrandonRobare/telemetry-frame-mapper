@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
+import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { AnnotationsList } from './SplatViewerTab'
 import { useToast } from '../../shared/hooks/useToast'
@@ -54,17 +55,17 @@ describe('AnnotationsList delete', () => {
     const deleteCalls = stubFetch(() => new Response(null, { status: 204 }))
     renderList()
 
-    fireEvent.click(screen.getByRole('button', { name: DELETE_BUTTON }))
+    await userEvent.click(screen.getByRole('button', { name: DELETE_BUTTON }))
 
     await screen.findByRole('alertdialog')
     expect(deleteCalls).toEqual([])
 
-    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }))
     expect(deleteCalls).toEqual([])
     expect(screen.queryByRole('alertdialog')).toBeNull()
 
-    fireEvent.click(screen.getByRole('button', { name: DELETE_BUTTON }))
-    fireEvent.click(await screen.findByRole('button', { name: 'Delete annotation' }))
+    await userEvent.click(screen.getByRole('button', { name: DELETE_BUTTON }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Delete annotation' }))
     await waitFor(() => expect(deleteCalls).toEqual([DELETE_PATH]))
   })
 
@@ -75,8 +76,8 @@ describe('AnnotationsList delete', () => {
     }))
     renderList()
 
-    fireEvent.click(screen.getByRole('button', { name: DELETE_BUTTON }))
-    fireEvent.click(await screen.findByRole('button', { name: 'Delete annotation' }))
+    await userEvent.click(screen.getByRole('button', { name: DELETE_BUTTON }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Delete annotation' }))
 
     await waitFor(() => {
       expect(useToast.getState().toasts).toEqual([

@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
+import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import DefectsSection from './DefectsSection'
 import { useToast } from '../../shared/hooks/useToast'
@@ -61,20 +62,20 @@ describe('DefectsSection delete', () => {
     const deleteCalls = stubFetch(() => new Response(null, { status: 204 }))
     renderSection()
 
-    fireEvent.click(await screen.findByRole('button', { name: DELETE_BUTTON }))
+    await userEvent.click(await screen.findByRole('button', { name: DELETE_BUTTON }))
 
     // Dialog is up, nothing sent yet.
     await screen.findByRole('alertdialog')
     expect(deleteCalls).toEqual([])
 
     // Cancelling leaves the defect alone.
-    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }))
     expect(deleteCalls).toEqual([])
     expect(screen.queryByRole('alertdialog')).toBeNull()
 
     // Confirming sends it.
-    fireEvent.click(screen.getByRole('button', { name: DELETE_BUTTON }))
-    fireEvent.click(await screen.findByRole('button', { name: 'Delete defect' }))
+    await userEvent.click(screen.getByRole('button', { name: DELETE_BUTTON }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Delete defect' }))
     await waitFor(() => expect(deleteCalls).toEqual([DELETE_PATH]))
   })
 
@@ -85,8 +86,8 @@ describe('DefectsSection delete', () => {
     }))
     renderSection()
 
-    fireEvent.click(await screen.findByRole('button', { name: DELETE_BUTTON }))
-    fireEvent.click(await screen.findByRole('button', { name: 'Delete defect' }))
+    await userEvent.click(await screen.findByRole('button', { name: DELETE_BUTTON }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Delete defect' }))
 
     await waitFor(() => {
       expect(useToast.getState().toasts).toEqual([

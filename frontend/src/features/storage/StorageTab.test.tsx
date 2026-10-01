@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
+import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import StorageTab from './StorageTab'
 import { useToast } from '../../shared/hooks/useToast'
@@ -54,13 +55,14 @@ describe('StorageTab lifecycle policy', () => {
     renderStorageTab()
     await screen.findByText('Lifecycle Policy')
 
-    fireEvent.click(screen.getByRole('button', { name: 'Dry Run' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Dry Run' }))
     const execute = screen.getByRole('button', { name: 'Execute' }) as HTMLButtonElement
     await waitFor(() => expect(execute.disabled).toBe(false))
 
     const ageInput = screen.getAllByRole('spinbutton').find((input) => !input.hasAttribute('disabled'))
     if (!(ageInput instanceof HTMLInputElement)) throw new Error('Age input not found')
-    fireEvent.change(ageInput, { target: { value: '1' } })
+    await userEvent.clear(ageInput)
+    await userEvent.type(ageInput, '1')
 
     expect(execute.disabled).toBe(true)
   })

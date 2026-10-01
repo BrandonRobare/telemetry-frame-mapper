@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
+import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import App from './App'
 import { useMapStore } from './shared/stores/mapStore'
@@ -69,7 +70,7 @@ describe('App per-tab error boundary', () => {
     renderApp('review')
     await waitFor(() => expect(screen.getByText(INLINE_ERROR)).toBeTruthy())
 
-    fireEvent.click(screen.getByRole('button', { name: 'Overview' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Overview' }))
 
     // A boundary that never resets would strand the operator on the dead panel.
     await waitFor(() => expect(screen.getByText('overview tab content')).toBeTruthy())

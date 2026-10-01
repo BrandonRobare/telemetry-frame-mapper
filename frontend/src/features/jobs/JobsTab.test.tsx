@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
+import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import JobsTab from './JobsTab'
 import { formatEffectiveSplatSettings, formatInstallCommands } from './systemHealth'
@@ -274,7 +275,8 @@ describe('JobsTab history search', () => {
 
   async function search(needle: string) {
     const input = await screen.findByLabelText('Search job history')
-    fireEvent.change(input, { target: { value: needle } })
+    await userEvent.clear(input)
+    await userEvent.type(input, needle)
   }
 
   it('matches a job that is not on the loaded page', async () => {
@@ -297,7 +299,7 @@ describe('JobsTab history search', () => {
 
     // header + 10 jobs
     await waitFor(() => expect(screen.getAllByRole('row')).toHaveLength(11))
-    fireEvent.click(screen.getByRole('button', { name: 'Next' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Next' }))
     expect(await screen.findByText('Page 2')).toBeTruthy()
     // header + the remaining 3
     await waitFor(() => expect(screen.getAllByRole('row')).toHaveLength(4))

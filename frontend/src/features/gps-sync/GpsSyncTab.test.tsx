@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -17,10 +18,10 @@ function renderGpsSyncTab() {
   )
 }
 
-function selectFlightLog(file: File) {
+async function selectFlightLog(file: File) {
   const input = document.querySelector('input[type="file"]')
   if (!(input instanceof HTMLInputElement)) throw new Error('Flight log input not found')
-  fireEvent.change(input, { target: { files: [file] } })
+  await userEvent.upload(input, file)
 }
 
 afterEach(() => {
@@ -42,9 +43,9 @@ describe('GpsSyncTab flight-log upload', () => {
     const file = new File(['time(millisecond),OSD.latitude,OSD.longitude,OSD.altitude[m]\n'], 'flight.csv', {
       type: 'text/csv',
     })
-    selectFlightLog(file)
+    await selectFlightLog(file)
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([url]) => url === '/flight-logs/upload')).toHaveLength(1))
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
     expect(url).toBe('/flight-logs/upload')
     expect(init.method).toBe('POST')
@@ -65,12 +66,13 @@ describe('GpsSyncTab flight-log upload', () => {
     useMapStore.setState({ selectedSessionId: 42 })
 
     renderGpsSyncTab()
+    // user-event does not model the native datetime-local picker.
     fireEvent.change(screen.getByLabelText('Flight start (UTC)'), {
       target: { value: '2024-06-15T10:30:05' },
     })
-    selectFlightLog(new File(['time(millisecond)\n'], 'flight.csv', { type: 'text/csv' }))
+    await selectFlightLog(new File(['time(millisecond)\n'], 'flight.csv', { type: 'text/csv' }))
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([url]) => url === '/flight-logs/upload')).toHaveLength(1))
     const body = fetchMock.mock.calls[0][1]?.body as FormData
     // Read as UTC whatever the browser's zone: 10:30:05 in the field is 10:30:05Z.
     expect(body.get('start_time')).toBe('2024-06-15T10:30:05.000Z')
@@ -90,7 +92,7 @@ describe('GpsSyncTab flight-log upload', () => {
     useMapStore.setState({ selectedSessionId: 42 })
 
     renderGpsSyncTab()
-    selectFlightLog(new File(['time(millisecond)\n'], 'flight.csv', { type: 'text/csv' }))
+    await selectFlightLog(new File(['time(millisecond)\n'], 'flight.csv', { type: 'text/csv' }))
 
     const message = await screen.findByText(detail)
     expect(screen.getAllByText(detail)).toHaveLength(1)
@@ -99,6 +101,7 @@ describe('GpsSyncTab flight-log upload', () => {
     expect(input.getAttribute('aria-describedby')?.split(' ')).toContain(message.id)
 
     // Filling the field in clears the prompt.
+    // user-event does not model the native datetime-local picker.
     fireEvent.change(input, { target: { value: '2024-06-15T10:30' } })
     expect(screen.queryByText(detail)).toBeNull()
   })
@@ -114,7 +117,7 @@ describe('GpsSyncTab flight-log upload', () => {
     useMapStore.setState({ selectedSessionId: 42 })
 
     renderGpsSyncTab()
-    selectFlightLog(new File(['invalid'], 'flight.csv', { type: 'text/csv' }))
+    await selectFlightLog(new File(['invalid'], 'flight.csv', { type: 'text/csv' }))
 
     expect(await screen.findByText('Session is not ready for GPS sync')).toBeTruthy()
   })

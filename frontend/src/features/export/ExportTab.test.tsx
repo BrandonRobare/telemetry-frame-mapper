@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
+import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import ExportTab from './ExportTab'
 import { formatCoveragePct } from './coverageSummary'
@@ -166,11 +167,9 @@ describe('ExportTab share links', () => {
     renderExportTab()
 
     const generate = await screen.findByRole('button', { name: 'Generate Share Link' })
-    // A double click lands before the pending state re-renders the button.
-    fireEvent.click(generate)
-    fireEvent.click(generate)
+    await userEvent.dblClick(generate)
     await waitFor(() => expect((generate as HTMLButtonElement).disabled).toBe(true))
-    fireEvent.click(generate)
+    await userEvent.click(generate)
 
     finishCreate()
     expect(await screen.findByText(/\/view\/share\/tfm_new-token$/)).toBeTruthy()
@@ -197,11 +196,11 @@ describe('ExportTab share links', () => {
     })
     renderExportTab()
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Revoke share link #12' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Revoke share link #12' }))
     // Nothing is revoked until the dialog is confirmed.
     await screen.findByRole('alertdialog')
     expect(calls.some((c) => c.method === 'POST')).toBe(false)
-    fireEvent.click(screen.getByRole('button', { name: 'Revoke link' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Revoke link' }))
 
     await waitFor(() =>
       expect(screen.queryByRole('button', { name: 'Revoke share link #12' })).toBeNull(),
@@ -247,7 +246,7 @@ describe('ExportTab WebODM georeferencing CSV', () => {
     })
     renderExportTab()
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Download georeferencing CSV zip' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Download georeferencing CSV zip' }))
 
     await waitFor(() => expect(clicked).toEqual([{ href: downloadUrl, download: zipName }]))
     expect(calls.filter((c) => c.method === 'POST')).toHaveLength(1)
@@ -256,4 +255,25 @@ describe('ExportTab WebODM georeferencing CSV', () => {
     expect(link.getAttribute('href')).toBe(downloadUrl)
     expect(screen.getByText('Ready: 10 images')).toBeTruthy()
   })
+})
+
+// level: component; area: export-share
+it('guides an operator without a selected session back to Overview', async () => {
+  useMapStore.setState({ selectedSessionId: null })
+  renderExportTab()
+  await userEvent.click(screen.getByRole('button', { name: 'Open Overview' }))
+  expect(useMapStore.getState().requestedTab).toBe('overview')
+})
+
+it('reports a rejected share-link creation and allows another attempt', async () => {
+  stubApi(({ method, url }) => {
+    if (method === 'POST' && url === `/export/reconstructions/${REC_ID}/share-link`) return jsonResponse({ detail: 'Share signing unavailable' }, 503)
+    return undefined
+  })
+  renderExportTab()
+  const generate = await screen.findByRole('button', { name: 'Generate Share Link' })
+  await userEvent.click(generate)
+  await waitFor(() => expect(useToast.getState().toasts.some((toast) => toast.message === 'Share link generation failed: Share signing unavailable')).toBe(true))
+  expect((generate as HTMLButtonElement).disabled).toBe(false)
+  expect(screen.queryByText(/\/view\/share\//)).toBeNull()
 })

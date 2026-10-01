@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
+import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, render, screen } from '@testing-library/react'
 import ProfilePanel from './ProfilePanel'
 import type { ProfileSample } from './measurementMath'
 
@@ -19,7 +20,7 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-function clickSvgDownloadAndCaptureAnchor(): HTMLAnchorElement {
+async function clickSvgDownloadAndCaptureAnchor(): Promise<HTMLAnchorElement> {
   const anchors: HTMLAnchorElement[] = []
   const realCreateElement = document.createElement.bind(document)
   vi.spyOn(document, 'createElement').mockImplementation((tagName: string) => {
@@ -29,7 +30,7 @@ function clickSvgDownloadAndCaptureAnchor(): HTMLAnchorElement {
   })
   vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
 
-  fireEvent.click(screen.getByTitle('Download SVG chart'))
+  await userEvent.click(screen.getByTitle('Download SVG chart'))
 
   const svgAnchor = anchors.find((a) => a.download === 'elevation_profile.svg')
   if (!svgAnchor) throw new Error('SVG export anchor was not created')
@@ -37,7 +38,7 @@ function clickSvgDownloadAndCaptureAnchor(): HTMLAnchorElement {
 }
 
 describe('ProfilePanel SVG export', () => {
-  it('resolves every CSS custom property to a concrete value before serializing', () => {
+  it('resolves every CSS custom property to a concrete value before serializing', async () => {
     // Mirrors real index.css tokens so the resolved colors are checkable.
     document.documentElement.style.setProperty('--accent-strong', '#9A5E32')
     document.documentElement.style.setProperty('--text-muted', '#6B6456')
@@ -46,7 +47,7 @@ describe('ProfilePanel SVG export', () => {
 
     render(<ProfilePanel samples={samples} onClear={() => {}} />)
 
-    const anchor = clickSvgDownloadAndCaptureAnchor()
+    const anchor = await clickSvgDownloadAndCaptureAnchor()
     const svgString = decodeURIComponent(
       anchor.href.replace('data:image/svg+xml;charset=utf-8,', ''),
     )
