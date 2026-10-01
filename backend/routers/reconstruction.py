@@ -27,9 +27,10 @@ from ..db.models import (
     TargetArea,
 )
 from ..db.models import Session as SessionModel
-from ..services.artifact_cleanup import cleanup_reconstruction_artifacts
+from ..services.artifact_cleanup import reconstruction_artifact_paths, remove_artifacts
 from ..services.camera_calibration import build_calibration_drift_report
 from ..services.colmap_io import _pick_best_submodel, read_model
+from ..services.delete_guard import DeleteBlocked, commit_delete, refuse_if_compared
 from ..services.preflight_quality import build_preflight_quality_report
 from ..services.quality_report import (
     build_quality_scorecard,
@@ -37,8 +38,10 @@ from ..services.quality_report import (
     validate_held_out_checkpoints,
 )
 from ..services.reconstruction import (
+    NotGeoreferencedError,
     _export_point_cloud,
     _load_geo_transform_for_reconstruction,
+    _require_geo_transform,
     _write_mesh_georef,
     build_reconstruction_diagnostics,
     cancel_reconstruction,
@@ -410,7 +413,11 @@ class RenderVideoIn(BaseModel):
 
 
 class SurveyedPointIn(BaseModel):
-    """A surveyed checkpoint in local reconstruction coordinates."""
+    """A surveyed checkpoint: UTM easting/northing (m) in the reconstruction's zone.
+
+    ``z`` is height in the reconstruction's geo-transform vertical frame. The zone is
+    the ``utm_zone`` of ``GET /reconstruction/{id}/geo-transform``.
+    """
     label: str | None = None
     x: float
     y: float
@@ -806,9 +813,17 @@ def delete_reconstruction(reconstruction_id: int, db: DBSession = Depends(get_db
                 "before deleting artifacts"
             ),
         )
-    cleanup_reconstruction_artifacts(rec, get_config())
+    try:
+        refuse_if_compared(db, f"Reconstruction {reconstruction_id}", reconstruction_ids=[rec.id])
+    except DeleteBlocked as blocked:
+        return blocked.response()
+    cfg = get_config()
+    paths = reconstruction_artifact_paths(rec, cfg)
+    # Dense re-run children keep their own artifacts; ON DELETE SET NULL detaches them.
     db.delete(rec)
-    db.commit()
+    # Rows first, files second (#945): a refused commit leaves every file in place.
+    commit_delete(db, f"Reconstruction {reconstruction_id}")
+    remove_artifacts(paths, cfg)
     return {"ok": True}
 
 
@@ -1305,7 +1320,16 @@ def cleanup_splat(
             raise HTTPException(status_code=404, detail="Target area not found")
         if not ta.geom_geojson:
             raise HTTPException(status_code=422, detail="Target area has no geometry defined")
+        # The target area is lon/lat; the splat is in this reconstruction's COLMAP
+        # frame, so the crop needs this reconstruction's solved transform (#950).
+        try:
+            geo = _require_geo_transform(
+                rec.geo_transform, "Cropping a splat to a target area", rec.id
+            )
+        except NotGeoreferencedError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
         options["target_area_geojson"] = ta.geom_geojson
+        options["geo_transform"] = geo
     try:
         stats, n_before, n_after = cleanup_ply_file(src, dst, **options)
     except Exception as exc:

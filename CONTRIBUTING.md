@@ -32,13 +32,13 @@ CI mocks every external binary and optional reconstruction library, so no test n
 
 The backend's SQLite schema is managed with Alembic. Migration scripts live in `backend/db/migrations/versions/`, configured via `alembic.ini` at the repo root and `backend/db/migrations/env.py`.
 
-`init_db()` (in `backend/db/database.py`) runs automatically on every app startup and applies migrations for you — there is no manual step for normal use. A genuinely fresh database gets its schema created directly and is stamped as already migrated; an existing database is upgraded to the latest revision. Both paths converge on the same schema because the baseline migration is idempotent.
+`init_db()` (in `backend/db/database.py`) runs automatically on every app startup and applies migrations for you — there is no manual step for normal use. A genuinely fresh database gets its schema created directly and is stamped as already migrated; an existing database is upgraded to the latest revision. Both paths converge on the same schema: the baseline revision `0001` is a frozen copy of the schema that never follows `models.py`, and every later revision applies its change to fresh and existing databases alike. `tests/backend/test_database.py` fails when a fresh `alembic upgrade head`, or an upgrade of a released schema, stops matching the models.
 
 To add a schema change:
 
 1. Update the SQLAlchemy models in `backend/db/models.py`.
-2. Generate a migration: `alembic revision --autogenerate -m "describe the change"`.
-3. Review the generated file under `backend/db/migrations/versions/` — autogenerate is a starting point, not the final word, especially for SQLite (which has limited `ALTER TABLE` support).
+2. Generate a migration: `alembic revision --autogenerate -m "describe the change"`. Never edit `0001_baseline.py` or reuse a shipped revision ID; installs store the ID they reached.
+3. Review the generated file under `backend/db/migrations/versions/` — autogenerate is a starting point, not the final word, especially for SQLite (which has limited `ALTER TABLE` support). Changing the constraints of an existing table, or dropping a constrained column, needs `op.batch_alter_table`, which rebuilds the table; `env.py` turns off SQLite's foreign-key enforcement while migrations run so that rebuild cannot fail on, or cascade into, rows in other tables.
 4. Run the app or test suite locally to confirm `init_db()` applies the new migration cleanly against both a fresh DB and your existing local DB.
 
 ## Test gates

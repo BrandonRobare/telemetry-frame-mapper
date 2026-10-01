@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from unittest.mock import patch
 
 import httpx
@@ -11,6 +12,16 @@ from backend.core.config import get_cesium_ion_config
 from backend.db.models import Image, Reconstruction
 from backend.db.models import Session as SessionModel
 from backend.services.cesium_ion import CesiumIonError, upload_tileset
+
+# The share bundle's tileset is placed with the solved transform; one near the
+# fixture image (2E 1N, UTM 31N).
+_GEO_TRANSFORM = json.dumps({
+    "scale": 1.5,
+    "rotation": [[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]],
+    "translation": [4.0, 2.0, 10.0],
+    "utm_zone": "31N",
+    "utm_origin": [388736.0, 110547.0],
+})
 
 
 def _config(**overrides):
@@ -178,7 +189,9 @@ def test_cesium_route_builds_existing_bundle_and_returns_only_asset_status(
             longitude=2,
         )
     )
-    rec = Reconstruction(session_id=session.id, status="complete", frames_used=1)
+    rec = Reconstruction(
+        session_id=session.id, status="complete", frames_used=1, geo_transform=_GEO_TRANSFORM
+    )
     db.add(rec)
     db.commit()
     db.refresh(rec)
@@ -214,7 +227,9 @@ def test_cesium_route_returns_actionable_safe_error(client, tmp_path, monkeypatc
             longitude=2,
         )
     )
-    rec = Reconstruction(session_id=session.id, status="complete", frames_used=1)
+    rec = Reconstruction(
+        session_id=session.id, status="complete", frames_used=1, geo_transform=_GEO_TRANSFORM
+    )
     db.add(rec)
     db.commit()
     monkeypatch.setattr(
@@ -236,6 +251,41 @@ def test_cesium_route_returns_actionable_safe_error(client, tmp_path, monkeypatc
         response.json()["detail"]
         == "Cesium ion token is missing from environment variable CESIUM_ION_TOKEN"
     )
+
+
+def test_cesium_route_refuses_reconstruction_without_geo_transform(
+    client, tmp_path, monkeypatch
+):
+    """A NULL geo_transform must not be published as a placed tileset (#950)."""
+    db = _db(client)
+    session = SessionModel(name="Mission", folder_path=str(tmp_path))
+    db.add(session)
+    db.commit()
+    db.add(
+        Image(
+            session_id=session.id,
+            filename="a.jpg",
+            filepath=str(tmp_path / "a.jpg"),
+            latitude=1,
+            longitude=2,
+        )
+    )
+    rec = Reconstruction(session_id=session.id, status="complete", frames_used=1)
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+    monkeypatch.setattr(
+        export_router,
+        "get_config",
+        lambda: type("Cfg", (), {"exports_dir": str(tmp_path / "exports")})(),
+    )
+    monkeypatch.setattr(export_router, "get_cesium_ion_config", _config)
+    with patch("backend.services.cesium_ion.upload_tileset") as upload:
+        response = client.post(f"/export/reconstructions/{rec.id}/cesium-ion")
+
+    assert response.status_code == 422
+    assert "not georeferenced" in response.json()["detail"]
+    upload.assert_not_called()
 
 
 @pytest.mark.parametrize(

@@ -1,9 +1,15 @@
 """Tests for splat_cleanup — statistical outlier, opacity, and floater removal."""
 from __future__ import annotations
 
+import json
+import math
+
 import numpy as np
+import pytest
+from pyproj import Transformer
 
 from backend.services.ply_io import GaussianCloud, write_3dgs_ply
+from backend.services.reconstruction import NotGeoreferencedError
 from backend.services.splat_cleanup import cleanup_cloud, cleanup_ply_file
 
 
@@ -232,16 +238,65 @@ def test_all_filter_phases_contribute(tmp_path):
     assert stats["scale_clipped"] > 0
     assert stats["outlier_clipped"] > 0
 
-def test_target_area_crop_removes_points_outside_polygon():
-    cloud = GaussianCloud(
-        means=np.array([[0.5, 0.5, 0.0], [1.5, 0.5, 0.0], [0.5, 1.5, 0.0]], dtype=np.float32),
-        sh0=np.zeros((3, 3), dtype=np.float32),
-        shN=np.zeros((3, 0, 3), dtype=np.float32),
-        opacities=np.ones(3, dtype=np.float32),
-        scales=np.zeros((3, 3), dtype=np.float32),
-        quats=np.zeros((3, 4), dtype=np.float32),
+# ---------------------------------------------------------------------------
+# target-area crop (#950): lon/lat polygon vs COLMAP-frame Gaussian centres
+# ---------------------------------------------------------------------------
+
+
+def _rotation(yaw_deg: float, tilt_deg: float) -> np.ndarray:
+    a, b = math.radians(yaw_deg), math.radians(tilt_deg)
+    rz = np.array([[math.cos(a), -math.sin(a), 0.0], [math.sin(a), math.cos(a), 0.0], [0, 0, 1]])
+    rx = np.array([[1, 0, 0], [0.0, math.cos(b), -math.sin(b)], [0.0, math.sin(b), math.cos(b)]])
+    return rz @ rx
+
+
+# A solved COLMAP->UTM similarity: yawed, tilted, scaled and translated, in zone 33N.
+_GEO = {
+    "scale": 2.5,
+    "rotation": _rotation(40.0, 15.0).tolist(),
+    "translation": [3.0, -7.0, 12.0],
+    "utm_zone": "33N",
+    "utm_origin": [650123.0, 4649776.0],
+}
+_UTM_33N = 32633
+
+
+def _colmap_from_utm_offsets(offsets: np.ndarray) -> np.ndarray:
+    """Invert the similarity: which COLMAP point lands at each (dE, dN, z) offset."""
+    rotation = np.array(_GEO["rotation"])
+    return ((offsets - _GEO["translation"]) / _GEO["scale"]) @ rotation  # R.T applied per row
+
+
+def _lonlat_polygon_around_utm_box(e0: float, e1: float, n0: float, n1: float) -> str:
+    """A GeoJSON lon/lat polygon for an easting/northing box relative to the UTM origin."""
+    to_lonlat = Transformer.from_crs(_UTM_33N, 4326, always_xy=True)
+    oe, on = _GEO["utm_origin"]
+    corners = [(e0, n0), (e1, n0), (e1, n1), (e0, n1), (e0, n0)]
+    ring = [list(to_lonlat.transform(oe + de, on + dn)) for de, dn in corners]
+    return json.dumps({"type": "Polygon", "coordinates": [ring]})
+
+
+def _cloud_at(means: np.ndarray) -> GaussianCloud:
+    n = means.shape[0]
+    return GaussianCloud(
+        means=means.astype(np.float32),
+        sh0=np.zeros((n, 3), dtype=np.float32),
+        shN=np.zeros((n, 0, 3), dtype=np.float32),
+        opacities=np.ones(n, dtype=np.float32),
+        scales=np.zeros((n, 3), dtype=np.float32),
+        quats=np.zeros((n, 4), dtype=np.float32),
     )
-    polygon = '{"type":"Polygon","coordinates":[[[0,0],[1,0],[1,1],[0,1],[0,0]]]}'
+
+
+def test_target_area_crop_keeps_exactly_the_gaussians_inside_a_lonlat_polygon():
+    # A 5x5 grid, 20 m apart on the ground, at varied heights so the tilt matters.
+    grid = [(de, dn) for de in (-40, -20, 0, 20, 40) for dn in (-40, -20, 0, 20, 40)]
+    offsets = np.array([(de, dn, 5.0 * (i % 7) - 10.0) for i, (de, dn) in enumerate(grid)])
+    cloud = _cloud_at(_colmap_from_utm_offsets(offsets))
+    # Box from -30..30 m east and -10..50 m north: every grid point is >= 10 m from an edge.
+    polygon = _lonlat_polygon_around_utm_box(-30.0, 30.0, -10.0, 50.0)
+    inside = [i for i, (de, dn) in enumerate(grid) if -30 < de < 30 and -10 < dn < 50]
+    assert len(inside) == 9
 
     cleaned, stats = cleanup_cloud(
         cloud,
@@ -249,9 +304,42 @@ def test_target_area_crop_removes_points_outside_polygon():
         outlier_k=0,
         scale_std_threshold=1e9,
         target_area_geojson=polygon,
+        geo_transform=_GEO,
     )
 
-    assert cleaned.means.shape[0] == 1
-    assert cleaned.means[0].tolist() == [0.5, 0.5, 0.0]
-    assert stats["target_area_clipped"] == 2
-    assert stats["n_after_outlier"] == 1
+    np.testing.assert_array_equal(cleaned.means, cloud.means[inside])
+    assert stats["target_area_clipped"] == len(grid) - len(inside)
+    assert stats["n_after_outlier"] == len(inside)
+
+
+def test_target_area_crop_accepts_the_stored_json_column():
+    offsets = np.array([(0.0, 0.0, 0.0), (80.0, 0.0, 0.0)])
+    cloud = _cloud_at(_colmap_from_utm_offsets(offsets))
+    polygon = _lonlat_polygon_around_utm_box(-30.0, 30.0, -30.0, 30.0)
+
+    cleaned, stats = cleanup_cloud(
+        cloud,
+        opacity_keep_ratio=1.0,
+        outlier_k=0,
+        target_area_geojson=polygon,
+        geo_transform=json.dumps(_GEO),
+    )
+
+    np.testing.assert_array_equal(cleaned.means, cloud.means[:1])
+    assert stats["target_area_clipped"] == 1
+
+
+@pytest.mark.parametrize("geo_transform", [None, {**_GEO, "utm_zone": "unknown"}])
+def test_target_area_crop_refuses_a_reconstruction_that_is_not_georeferenced(geo_transform):
+    cloud = _cloud_at(np.zeros((3, 3)))
+    polygon = _lonlat_polygon_around_utm_box(-30.0, 30.0, -30.0, 30.0)
+
+    with pytest.raises(NotGeoreferencedError, match="not georeferenced"):
+        cleanup_cloud(cloud, target_area_geojson=polygon, geo_transform=geo_transform)
+
+
+def test_cleanup_without_target_area_needs_no_geo_transform():
+    cloud = _cloud_at(np.zeros((3, 3)))
+    cleaned, stats = cleanup_cloud(cloud, opacity_keep_ratio=1.0, outlier_k=0)
+    assert cleaned.means.shape[0] == 3
+    assert stats["target_area_clipped"] == 0

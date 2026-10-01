@@ -3,16 +3,23 @@ from __future__ import annotations
 import json
 import logging
 import math
+from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from shapely.geometry import shape
+import numpy as np
+import shapely
+from shapely.geometry import mapping, shape
+from shapely.ops import unary_union
 
 from .terrain import TerrainService, get_terrain_service
 
 logger = logging.getLogger(__name__)
 
 _MAX_LANES = 10_000
+# Clipped lane pieces shorter than this (~0.1 mm) are floating-point noise from a sweep
+# grazing a vertex, not something to fly.
+_MIN_LANE_DEG = 1e-9
 
 
 def _usable_elevations(results: list) -> list[float]:
@@ -32,6 +39,10 @@ def generate_lawnmower(
 ) -> dict:
     """Returns lanes_geojson, lane_count, total_distance_m, waypoint_spacing_m.
 
+    Lanes run north-south and are clipped to the target polygon(s), so no waypoint lies
+    outside the drawn area (see ``_clipped_lanes``). *side_overlap* and
+    *forward_overlap* are fractions in [0, 1).
+
     When *terrain_follow* is True, waypoints embed per-point ground elevation
     sampled from *terrain_service* so that the requested AGL is maintained
     across varying terrain.  The lanes GeoJSON includes a 3rd coordinate
@@ -41,13 +52,12 @@ def generate_lawnmower(
     returned ``terrain_degraded`` flag is True: the altitudes are plain AGL above
     the takeoff point and the plan is not really terrain-following.
     """
-    if side_overlap >= 1.0:
-        raise ValueError(f"side_overlap must be < 1.0, got {side_overlap}")
-    if forward_overlap >= 1.0:
-        raise ValueError(f"forward_overlap must be < 1.0, got {forward_overlap}")
+    if not 0.0 <= side_overlap < 1.0:
+        raise ValueError(f"side_overlap must be in [0, 1), got {side_overlap}")
+    if not 0.0 <= forward_overlap < 1.0:
+        raise ValueError(f"forward_overlap must be in [0, 1), got {forward_overlap}")
 
     poly = shape(json.loads(target_geojson))
-    bounds = poly.bounds  # minx, miny, maxx, maxy
     centroid = poly.centroid
 
     altitude_m = altitude_ft * 0.3048
@@ -72,22 +82,10 @@ def generate_lawnmower(
     if not math.isfinite(lane_spacing_deg) or lane_spacing_deg <= 0:
         raise ValueError("Altitude and overlap produce a non-positive lane spacing")
 
-    minx, miny, maxx, maxy = bounds
-    lanes = []
-    x = minx + lane_spacing_deg / 2
-    direction = 1
-    while x <= maxx:
-        if len(lanes) >= _MAX_LANES:
-            raise ValueError(f"Plan would produce too many lanes (maximum {_MAX_LANES})")
-        if direction == 1:
-            lanes.append([[x, miny], [x, maxy]])
-        else:
-            lanes.append([[x, maxy], [x, miny]])
-        x += lane_spacing_deg
-        direction *= -1
+    meters_per_deg_lat = 111_320  # approximately constant per degree latitude
+    lanes = _clipped_lanes(poly, lane_spacing_deg, meters_per_deg_lon, meters_per_deg_lat)
 
     # Total distance: along-lane distances + inter-lane transit legs.
-    meters_per_deg_lat = 111_320  # approximately constant per degree latitude
     along_lane_dist = 0.0
     for ln in lanes:
         dx = (ln[1][0] - ln[0][0]) * meters_per_deg_lon
@@ -134,6 +132,145 @@ def generate_lawnmower(
     }
 
 
+def _as_valid(geom):
+    """*geom*, repaired if its rings self-intersect so GEOS overlay operations cannot raise."""
+    return geom if geom.is_valid else shapely.make_valid(geom)
+
+
+def _parts_of_type(geom, geom_type: str) -> list:
+    """The non-empty *geom_type* members of *geom*, descending into collections."""
+    if geom.is_empty:
+        return []
+    if geom.geom_type == geom_type:
+        return [geom]
+    return [part for sub in getattr(geom, "geoms", ()) for part in _parts_of_type(sub, geom_type)]
+
+
+def _clipped_lanes(
+    area,
+    lane_spacing_deg: float,
+    meters_per_deg_lon: float,
+    meters_per_deg_lat: float,
+) -> list[list[list[float]]]:
+    """North-south lawnmower lanes clipped to *area*, in flying order.
+
+    Each polygon of *area* gets its own sweeps, one lane spacing apart and starting half
+    a spacing in from its western edge. A polygon narrower than one spacing gets a single
+    sweep down its middle, so a thin strip (typically a coverage gap between two flown
+    lanes) is never skipped. Every sweep is intersected with its polygon, so no lane
+    leaves the drawn area; a concave polygon or a hole splits a sweep into several lanes,
+    which ``_sweep_cells`` and ``_route_cells`` put in a serpentine order.
+    """
+    polygons = _parts_of_type(_as_valid(area), "Polygon")
+    if not polygons:
+        raise ValueError("Target area has no polygon to plan lanes over")
+
+    cells: list[list[tuple[float, float, float]]] = []
+    sweep_count = 0
+    for polygon in polygons:
+        minx, miny, maxx, maxy = polygon.bounds
+        xs: list[float] = []
+        x = minx + min(lane_spacing_deg, maxx - minx) / 2
+        while x <= maxx:
+            if sweep_count >= _MAX_LANES:
+                raise ValueError(f"Plan would produce too many lanes (maximum {_MAX_LANES})")
+            xs.append(x)
+            sweep_count += 1
+            x += lane_spacing_deg
+        sweeps = shapely.linestrings([[(sx, miny), (sx, maxy)] for sx in xs])
+        clipped = shapely.intersection(sweeps, polygon)
+        columns = [(sx, _inside_spans(piece)) for sx, piece in zip(xs, clipped, strict=True)]
+        cells.extend(_sweep_cells(columns))
+    return _route_cells(cells, meters_per_deg_lon, meters_per_deg_lat)
+
+
+def _inside_spans(clipped) -> list[tuple[float, float]]:
+    """``(south, north)`` spans of one sweep clipped to a polygon, ordered south to north.
+
+    Pieces that touch (the sweep passed through a vertex) are merged into one; isolated
+    points (the sweep grazed a corner) and sub-millimetre slivers are dropped.
+    """
+    spans: list[tuple[float, float]] = []
+    for piece in sorted(_parts_of_type(clipped, "LineString"), key=lambda p: p.bounds[1]):
+        _, south, _, north = piece.bounds
+        if spans and south <= spans[-1][1]:
+            spans[-1] = (spans[-1][0], max(spans[-1][1], north))
+        else:
+            spans.append((south, north))
+    return [(south, north) for south, north in spans if north - south > _MIN_LANE_DEG]
+
+
+def _sweep_cells(
+    columns: list[tuple[float, list[tuple[float, float]]]],
+) -> list[list[tuple[float, float, float]]]:
+    """Group the spans of consecutive sweeps into cells of ``(x, south, north)`` lanes.
+
+    A span extends the cell of the previous sweep's span it overlaps when that link is
+    one-to-one. Where a concave edge or a hole splits or merges the sweeps the link is
+    ambiguous, so a new cell starts. Flying cell by cell keeps the serpentine inside the
+    area instead of crossing a notch on every lane.
+    """
+    cells: list[list[tuple[float, float, float]]] = []
+    open_cells: list[tuple[int, tuple[float, float]]] = []  # (cell index, its last span)
+    for x, spans in columns:
+        links = [
+            [k for k, (_, prev) in enumerate(open_cells) if prev[0] <= north and south <= prev[1]]
+            for south, north in spans
+        ]
+        fan_out = Counter(k for linked in links for k in linked)
+        next_open: list[tuple[int, tuple[float, float]]] = []
+        for span, linked in zip(spans, links, strict=True):
+            if len(linked) == 1 and fan_out[linked[0]] == 1:
+                cell = open_cells[linked[0]][0]
+            else:
+                cells.append([])
+                cell = len(cells) - 1
+            cells[cell].append((x, *span))
+            next_open.append((cell, span))
+        open_cells = next_open
+    return cells
+
+
+def _route_cells(
+    cells: list[list[tuple[float, float, float]]],
+    meters_per_deg_lon: float,
+    meters_per_deg_lat: float,
+) -> list[list[list[float]]]:
+    """Fly *cells* nearest-first, each as a serpentine, and return the lanes in order.
+
+    The route starts at the south-west-most cell heading north, which for a plain
+    rectangle is the historic lane order. Each later cell is entered at whichever of its
+    four corners (west or east lane, south or north end) is nearest the last lane's end.
+    """
+    if not cells:
+        return []
+    # entries[c, option]: where cell c starts for option 0 (west lane, heading north),
+    # 1 (west, south), 2 (east, north) or 3 (east, south).
+    entries = np.array([
+        [(west[0], west[1]), (west[0], west[2]), (east[0], east[1]), (east[0], east[2])]
+        for west, east in ((cell[0], cell[-1]) for cell in cells)
+    ])
+    scale = np.array([meters_per_deg_lon, meters_per_deg_lat])
+    entries_m = entries * scale
+    flown = np.zeros(len(cells), dtype=bool)
+
+    lanes: list[list[list[float]]] = []
+    cell = min(range(len(cells)), key=lambda c: cells[c][0][:2])
+    option = 0
+    while True:
+        flown[cell] = True
+        heading_north = option % 2 == 0
+        for x, south, north in (reversed(cells[cell]) if option >= 2 else cells[cell]):
+            lanes.append([[x, south], [x, north]] if heading_north else [[x, north], [x, south]])
+            heading_north = not heading_north
+        if flown.all():
+            return lanes
+        offsets = entries_m - np.asarray(lanes[-1][1]) * scale
+        distances = np.hypot(offsets[..., 0], offsets[..., 1])
+        distances[flown] = np.inf
+        cell, option = divmod(int(np.argmin(distances)), 4)
+
+
 def _enrich_lanes_with_terrain(
     lanes: list,
     requested_agl_m: float,
@@ -176,15 +313,29 @@ def _enrich_lanes_with_terrain(
     return enriched, not _usable_elevations(elev_results)
 
 
+def _has_msl_altitudes(coords: list) -> bool:
+    """True when every vertex carries the terrain-following MSL altitude as a 3rd value."""
+    return bool(coords) and all(len(c) >= 3 for c in coords)
+
+
 def write_kml(plan_id: int, lanes_geojson: str, exports_dir: Path, suffix: str = "") -> Path:
-    """Write KML file for the given plan. Returns the file path."""
+    """Write KML file for the given plan. Returns the file path.
+
+    Terrain-following lanes keep each vertex's MSL altitude, written verbatim with
+    ``altitudeMode`` absolute. 2-D lanes have no altitude to export and keep KML's
+    default (clamped to ground) mode, never an absolute altitude of 0.
+    """
     exports_dir.mkdir(parents=True, exist_ok=True)
     kml_path = exports_dir / f"plan_{plan_id}{suffix}.kml"
     geo = json.loads(lanes_geojson)
     placemarks = ""
     for geom in geo.get("geometries", []):
-        coords = " ".join(f"{c[0]},{c[1]},0" for c in geom["coordinates"])
-        inner = f"<coordinates>{coords}</coordinates>"
+        if _has_msl_altitudes(geom["coordinates"]):
+            coords = " ".join(f"{c[0]},{c[1]},{c[2]}" for c in geom["coordinates"])
+            inner = f"<altitudeMode>absolute</altitudeMode><coordinates>{coords}</coordinates>"
+        else:
+            coords = " ".join(f"{c[0]},{c[1]},0" for c in geom["coordinates"])
+            inner = f"<coordinates>{coords}</coordinates>"
         placemarks += f"<Placemark><LineString>{inner}</LineString></Placemark>\n"
     kml_content = f"""<?xml version="1.0" encoding="UTF-8"?>
 <kml xmlns="http://www.opengis.net/kml/2.2">
@@ -195,14 +346,19 @@ def write_kml(plan_id: int, lanes_geojson: str, exports_dir: Path, suffix: str =
 
 
 def write_gpx(plan_id: int, lanes_geojson: str, exports_dir: Path, suffix: str = "") -> Path:
-    """Write GPX file for the given plan. Returns the file path."""
+    """Write GPX file for the given plan. Returns the file path.
+
+    Terrain-following lanes write each vertex's MSL altitude verbatim as ``<ele>``.
+    """
     exports_dir.mkdir(parents=True, exist_ok=True)
     gpx_path = exports_dir / f"plan_{plan_id}{suffix}.gpx"
     geo = json.loads(lanes_geojson)
     trkseg_points = ""
     for geom in geo.get("geometries", []):
+        with_ele = _has_msl_altitudes(geom["coordinates"])
         for c in geom["coordinates"]:
-            trkseg_points += f'<trkpt lat="{c[1]}" lon="{c[0]}"></trkpt>\n'
+            ele = f"<ele>{c[2]}</ele>" if with_ele else ""
+            trkseg_points += f'<trkpt lat="{c[1]}" lon="{c[0]}">{ele}</trkpt>\n'
     gpx_content = f"""<?xml version="1.0" encoding="UTF-8"?>
 <gpx version="1.1" xmlns="http://www.topografix.com/GPX/1/1">
 <trk><trkseg>{trkseg_points}</trkseg></trk>
@@ -585,10 +741,12 @@ def generate_lawnmower_from_gaps(
     fov_h_deg: float = 84.0,
     fov_v_deg: float = 64.0,
 ) -> dict | None:
-    """Generate a lawnmower plan covering only gap polygons.
+    """Generate a lawnmower plan covering every gap polygon, and only the gaps.
 
-    Reuses generate_lawnmower against gap geometry instead of the full
-    TargetArea. Returns None if gap_geojson is empty/null.
+    Reuses generate_lawnmower against the union of the gap polygons instead of
+    the full TargetArea; its lanes are clipped to each gap, so the covered area
+    between gaps is not re-flown. Returns None if gap_geojson is empty/null or
+    holds no polygon.
     """
     if not gap_geojson or gap_geojson.strip() in ("", "null", "{}"):
         return None
@@ -596,30 +754,28 @@ def generate_lawnmower_from_gaps(
     gap = json.loads(gap_geojson)
 
     # gap_geojson may be a FeatureCollection of gap polygons, a single
-    # Polygon/MultiPolygon, or a GeometryCollection. Try to extract the
-    # union bounding box or the first usable polygon.
-    features = []
+    # Polygon/MultiPolygon, or a GeometryCollection.
     if gap.get("type") == "FeatureCollection":
-        features = gap.get("features", [])
+        geometries = [
+            f["geometry"] if isinstance(f, dict) and "geometry" in f else f
+            for f in gap.get("features", [])
+        ]
     elif gap.get("type") == "GeometryCollection":
-        features = gap.get("geometries", [])
-    elif gap.get("type") in ("Polygon", "MultiPolygon"):
-        features = [gap]
-
-    if not features:
-        return None
-
-    # Use the first feature/geometry as the target
-    first = features[0]
-    if isinstance(first, dict) and "geometry" in first:
-        feat_geom = first["geometry"]
+        geometries = gap.get("geometries", [])
     else:
-        feat_geom = first
+        geometries = [gap]
 
-    if feat_geom.get("type") not in ("Polygon", "MultiPolygon"):
+    polygons = [
+        polygon
+        for geom in geometries
+        if isinstance(geom, dict) and geom.get("type") in ("Polygon", "MultiPolygon")
+        for polygon in _parts_of_type(_as_valid(shape(geom)), "Polygon")
+    ]
+    if not polygons:
         return None
 
-    target_geojson = json.dumps(feat_geom)
+    # Union so that overlapping gaps are flown once.
+    target_geojson = json.dumps(mapping(unary_union(polygons)))
 
     result = generate_lawnmower(
         target_geojson=target_geojson,

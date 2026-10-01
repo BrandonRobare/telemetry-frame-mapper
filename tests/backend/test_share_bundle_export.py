@@ -20,6 +20,30 @@ def _db(client):
     return app.state.test_db_session
 
 
+# A solved COLMAP->UTM transform near the fixture images (34N, 20.5E 10.5N): yawed
+# 30 degrees, scaled 2x and translated, so an ignored transform is visibly misplaced.
+_COS30, _SIN30 = math.cos(math.radians(30)), math.sin(math.radians(30))
+_GEO = {
+    "scale": 2.0,
+    "rotation": [[_COS30, -_SIN30, 0.0], [_SIN30, _COS30, 0.0], [0.0, 0.0, 1.0]],
+    "translation": [5.0, -3.0, 20.0],
+    "utm_zone": "34N",
+    "utm_origin": [445287.0, 1160738.0],
+}
+
+
+def _placed_colmap_origin_ecef() -> tuple[float, float, float]:
+    """Where the tileset must put the mesh's (0, 0, 0): through the stored transform."""
+    from pyproj import Transformer
+
+    from backend.services.cesium_tiles import geodetic_to_ecef
+
+    easting = _GEO["utm_origin"][0] + _GEO["translation"][0]
+    northing = _GEO["utm_origin"][1] + _GEO["translation"][1]
+    lon, lat = Transformer.from_crs(32634, 4326, always_xy=True).transform(easting, northing)
+    return geodetic_to_ecef(math.radians(lat), math.radians(lon), _GEO["translation"][2])
+
+
 def _make_session_with_gps_images(db, tmp_path):
     session = SessionModel(name="S", folder_path=str(tmp_path))
     db.add(session)
@@ -61,7 +85,11 @@ def test_share_bundle_contains_viewer_manifest_and_tileset(client, tmp_path, mon
     db = _db(client)
     session = _make_session_with_gps_images(db, tmp_path)
     rec = Reconstruction(
-        session_id=session.id, status="complete", mesh_glb_path=str(mesh), frames_used=1
+        session_id=session.id,
+        status="complete",
+        mesh_glb_path=str(mesh),
+        frames_used=1,
+        geo_transform=json.dumps(_GEO),
     )
     db.add(rec)
     db.commit()
@@ -85,7 +113,67 @@ def test_share_bundle_contains_viewer_manifest_and_tileset(client, tmp_path, mon
     assert region[4] == 100.0  # minHeight
     assert region[5] == 150.0  # maxHeight
     assert len(root["transform"]) == 16
+    # The mesh's COLMAP origin goes where the stored geo_transform says, not to an
+    # image-GPS centroid (#950). The matrix is column-major: [12:15] is the translation.
+    placed = root["transform"][12:15]
+    assert math.dist(placed, _placed_colmap_origin_ecef()) < 0.01
     assert root["content"]["uri"] == "artifacts/mesh.glb"
+
+
+def test_share_bundle_without_geo_transform_omits_only_the_tileset(client, tmp_path, monkeypatch):
+    """NULL geo_transform: still share the artifacts, but place nothing on the globe (#950)."""
+    from backend.services import share_bundle
+
+    exports = tmp_path / "exports"
+    monkeypatch.setattr(
+        export_router,
+        "get_config",
+        lambda: type("Cfg", (), {"exports_dir": str(exports)})(),
+    )
+    exports.mkdir()
+    mesh = exports / "mesh.glb"
+    mesh.write_bytes(b"glb")
+    splat = exports / "splat.ply"
+    splat.write_bytes(b"ply")
+    db = _db(client)
+    session = _make_session_with_gps_images(db, tmp_path)
+    rec = Reconstruction(
+        session_id=session.id,
+        status="complete",
+        mesh_glb_path=str(mesh),
+        splat_path=str(splat),
+        frames_used=1,
+    )
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+
+    with patch.object(share_bundle, "build_tileset") as tileset:
+        resp = client.post(f"/export/reconstructions/{rec.id}/share-bundle")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    tileset.assert_not_called()
+    with zipfile.ZipFile(body["bundle_path"]) as zf:
+        names = set(zf.namelist())
+        manifest = json.loads(zf.read("manifest.json"))
+    assert {"manifest.json", "index.html", "artifacts/mesh.glb", "artifacts/splat.ply"} <= names
+    assert "tileset.json" not in names
+    for cesium in (body["cesium"], manifest["cesium"]):
+        assert cesium["tileset_json"] is None
+        assert f"reconstruction {rec.id} is not georeferenced" in cesium["tileset_omitted_reason"]
+
+
+def test_share_bundle_manifest_names_the_tileset_only_when_georeferenced():
+    from backend.services.share_bundle import build_share_manifest
+
+    placed = build_share_manifest(Reconstruction(id=5, geo_transform=json.dumps(_GEO)))
+    unplaced = build_share_manifest(Reconstruction(id=6))
+
+    assert placed["cesium"]["tileset_json"] == "tileset.json"
+    assert "tileset_omitted_reason" not in placed["cesium"]
+    assert unplaced["cesium"]["tileset_json"] is None
+    assert "not georeferenced" in unplaced["cesium"]["tileset_omitted_reason"]
 
 
 def test_share_bundle_tileset_valid_without_glb(client, tmp_path, monkeypatch):
@@ -97,7 +185,9 @@ def test_share_bundle_tileset_valid_without_glb(client, tmp_path, monkeypatch):
     )
     db = _db(client)
     session = _make_session_with_gps_images(db, tmp_path)
-    rec = Reconstruction(session_id=session.id, status="complete", frames_used=1)
+    rec = Reconstruction(
+        session_id=session.id, status="complete", frames_used=1, geo_transform=json.dumps(_GEO)
+    )
     db.add(rec)
     db.commit()
     db.refresh(rec)
@@ -118,7 +208,11 @@ def _bundle_inputs(client, tmp_path):
     db = _db(client)
     session = _make_session_with_gps_images(db, tmp_path)
     rec = Reconstruction(
-        session_id=session.id, status="complete", mesh_glb_path=str(mesh), frames_used=1
+        session_id=session.id,
+        status="complete",
+        mesh_glb_path=str(mesh),
+        frames_used=1,
+        geo_transform=json.dumps(_GEO),
     )
     db.add(rec)
     db.commit()

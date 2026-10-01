@@ -1,11 +1,22 @@
 from __future__ import annotations
 
+import logging
 import os
 import re
 from datetime import datetime
 
 import piexif
 from PIL import Image
+
+logger = logging.getLogger(__name__)
+
+
+class UnreadableImageError(Exception):
+    """Raised when a file cannot be opened or decoded as an image.
+
+    The import orchestrator skips such files and records an ``image_skipped``
+    session log entry instead of importing them as frames.
+    """
 
 
 def _rational_to_float(rational) -> float | None:
@@ -71,9 +82,14 @@ def extract_exif(filepath: str) -> dict:
     Returns dict with: filename, filepath, timestamp, latitude, longitude,
     altitude_m, gps_source, yaw, gimbal_pitch, width, height, focal_length_mm,
     camera_make, camera_model, lens_model, focal_length_35mm, digital_zoom_ratio.
+
+    Raises UnreadableImageError when the file cannot be opened as an image.
+    A readable image whose EXIF block or capture date cannot be parsed is
+    still returned (without that metadata), and the problem is logged.
     """
+    name = os.path.basename(filepath)
     result = {
-        "filename": os.path.basename(filepath),
+        "filename": name,
         "filepath": os.path.abspath(filepath),
         "timestamp": None,
         "latitude": None,
@@ -96,8 +112,8 @@ def extract_exif(filepath: str) -> dict:
         with Image.open(filepath) as img:
             result["width"], result["height"] = img.size
             exif_bytes = img.info.get("exif")
-    except Exception:
-        return result
+    except Exception as exc:
+        raise UnreadableImageError(f"cannot open image: {exc}") from exc
 
     if not exif_bytes:
         return result
@@ -105,14 +121,15 @@ def extract_exif(filepath: str) -> dict:
     try:
         exif = piexif.load(exif_bytes)
     except Exception:
+        logger.warning("Unparseable EXIF block in %s; continuing without it", name, exc_info=True)
         return result
 
     dt_str = exif.get("Exif", {}).get(piexif.ExifIFD.DateTimeOriginal)
     if dt_str:
         try:
             result["timestamp"] = datetime.strptime(dt_str.decode(), "%Y:%m:%d %H:%M:%S")
-        except Exception:
-            pass
+        except (AttributeError, UnicodeDecodeError, ValueError):
+            logger.warning("Unparseable DateTimeOriginal %r in %s", dt_str, name)
 
     fl = exif.get("Exif", {}).get(piexif.ExifIFD.FocalLength)
     if fl:
@@ -178,7 +195,13 @@ def extract_exif(filepath: str) -> dict:
 
 
 def generate_thumbnail(src_path: str, dest_path: str, size: int = 200) -> None:
-    """Generate a thumbnail JPEG preserving aspect ratio. Max dimension = size px."""
+    """Generate a thumbnail JPEG preserving aspect ratio. Max dimension = size px.
+
+    This is the first step that decodes the pixel data, so a file whose header
+    parses but whose data does not (for example a copy cut short) raises
+    UnreadableImageError here. Failing to write the thumbnail raises the
+    underlying OSError instead: that says nothing about the source image.
+    """
     try:
         from backend.core.config import get_ingest_config
 
@@ -186,6 +209,13 @@ def generate_thumbnail(src_path: str, dest_path: str, size: int = 200) -> None:
     except Exception:  # pragma: no cover
         quality = 75
     os.makedirs(os.path.dirname(dest_path) or ".", exist_ok=True)
-    with Image.open(src_path) as img:
-        img.thumbnail((size, size), Image.LANCZOS)
+    try:
+        img = Image.open(src_path)
+    except Exception as exc:
+        raise UnreadableImageError(f"cannot open image: {exc}") from exc
+    with img:
+        try:
+            img.thumbnail((size, size), Image.LANCZOS)
+        except Exception as exc:
+            raise UnreadableImageError(f"image data does not decode: {exc}") from exc
         img.save(dest_path, "JPEG", quality=quality)

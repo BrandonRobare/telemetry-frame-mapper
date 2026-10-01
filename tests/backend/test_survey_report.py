@@ -197,3 +197,125 @@ def test_survey_report_endpoint_rejects_unknown_format(client):
 
     assert resp.status_code == 422
     assert "format" in resp.json()["detail"].lower()
+
+
+# ---------------------------------------------------------------------------
+#  Empty and partially failed sessions (#951)
+# ---------------------------------------------------------------------------
+
+_EMPTY_FRAME_SUMMARY = {
+    "total": 0,
+    "usable": 0,
+    "quality_breakdown": {},
+    "camera": None,
+    "gps_present": 0,
+}
+
+
+def _make_empty_session(db):
+    session = SessionModel(
+        name="Empty Survey", folder_path="/tmp/empty-survey", photo_count=0, usable_count=0
+    )
+    db.add(session)
+    db.commit()
+    db.refresh(session)
+    return session
+
+
+def test_frame_summary_section_has_the_same_keys_with_zero_frames():
+    from backend.services.survey_report import _frame_summary_section
+
+    populated = _frame_summary_section(
+        [Image(filename="a.jpg", filepath="/tmp/a.jpg", flag="good", usable=True)]
+    )
+    empty = _frame_summary_section([])
+
+    assert set(empty) == set(populated)
+    assert empty == _EMPTY_FRAME_SUMMARY
+
+
+def test_survey_report_endpoint_empty_session_json(client):
+    from backend.main import app
+
+    session = _make_empty_session(app.state.test_db_session)
+
+    resp = client.post(f"/export/survey-report?session_id={session.id}&format=json")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["frame_summary"] == _EMPTY_FRAME_SUMMARY
+    assert data["reconstructions"] == []
+    assert data["annotations"] == []
+    assert "<!DOCTYPE html>" in data["html"]
+
+
+def test_survey_report_endpoint_empty_session_html(client):
+    from backend.main import app
+
+    session = _make_empty_session(app.state.test_db_session)
+
+    resp = client.post(f"/export/survey-report?session_id={session.id}&format=html")
+
+    assert resp.status_code == 200
+    assert resp.headers["content-type"] == "text/html; charset=utf-8"
+    assert "<!DOCTYPE html>" in resp.text
+    assert "<dt>Total frames</dt><dd>0</dd>" in resp.text
+    assert "<dt>GPS frames</dt><dd>0</dd>" in resp.text
+    assert "No frames in this session." in resp.text
+
+
+def test_survey_report_endpoint_empty_session_pdf(client, monkeypatch):
+    import sys
+    import types
+
+    from backend.main import app
+
+    session = _make_empty_session(app.state.test_db_session)
+    rendered: list[str] = []
+
+    class _FakeHTML:
+        def __init__(self, string: str):
+            rendered.append(string)
+
+        def write_pdf(self) -> bytes:
+            return b"%PDF-1.7 fake"
+
+    fake_weasyprint = types.ModuleType("weasyprint")
+    fake_weasyprint.HTML = _FakeHTML
+    monkeypatch.setitem(sys.modules, "weasyprint", fake_weasyprint)
+
+    resp = client.post(f"/export/survey-report?session_id={session.id}&format=pdf")
+
+    assert resp.status_code == 200
+    assert resp.headers["content-type"] == "application/pdf"
+    assert resp.content == b"%PDF-1.7 fake"
+    assert len(rendered) == 1
+    assert "<dt>Total frames</dt><dd>0</dd>" in rendered[0]
+
+
+def test_survey_report_endpoint_survives_unavailable_preflight(client, monkeypatch):
+    from backend.main import app
+
+    db = app.state.test_db_session
+    session = _make_session(db)
+    for i in range(3):
+        _add_image(db, session.id, i)
+
+    def _preflight_fails(_session_id, _db):
+        raise ValueError("Session not found")
+
+    monkeypatch.setattr(
+        "backend.services.survey_report.build_preflight_quality_report", _preflight_fails
+    )
+
+    json_resp = client.post(f"/export/survey-report?session_id={session.id}&format=json")
+    html_resp = client.post(f"/export/survey-report?session_id={session.id}&format=html")
+
+    assert json_resp.status_code == 200
+    data = json_resp.json()
+    assert data["quality_assessment"]["available"] is False
+    assert data["coverage"]["available"] is False
+    assert data["frame_summary"]["total"] == 3
+    assert html_resp.status_code == 200
+    assert "Preflight quality check could not run" in html_resp.text
+    assert "Coverage data is not available" in html_resp.text

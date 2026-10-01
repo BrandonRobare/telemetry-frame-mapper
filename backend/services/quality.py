@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 import cv2
 import numpy as np
 
@@ -23,19 +25,23 @@ def _ingest_thresholds() -> tuple[float, float, float]:
         return BLUR_THRESHOLD, DARK_THRESHOLD, BRIGHT_THRESHOLD
 
 
-def score_sharpness(filepath: str) -> float:
-    """Laplacian variance — higher means sharper. Returns 0.0 on read failure."""
+def _read_grayscale(filepath: str) -> np.ndarray:
     img = cv2.imread(filepath, cv2.IMREAD_GRAYSCALE)
     if img is None:
-        return 0.0
+        # A stand-in score would be flagged as if it were measured (#943).
+        raise ValueError(f"OpenCV could not decode {os.path.basename(filepath)}")
+    return img
+
+
+def score_sharpness(filepath: str) -> float:
+    """Laplacian variance — higher means sharper. Raises ValueError on read failure."""
+    img = _read_grayscale(filepath)
     return float(cv2.Laplacian(img, cv2.CV_64F).var())
 
 
 def score_brightness(filepath: str) -> float:
-    """Mean grayscale pixel value 0–255. Returns 128.0 on read failure."""
-    img = cv2.imread(filepath, cv2.IMREAD_GRAYSCALE)
-    if img is None:
-        return 128.0
+    """Mean grayscale pixel value 0–255. Raises ValueError on read failure."""
+    img = _read_grayscale(filepath)
     return float(np.mean(img))
 
 

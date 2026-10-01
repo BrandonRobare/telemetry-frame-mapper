@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 from backend.db.models import Image
-from backend.services.artifact_cleanup import cleanup_session_artifacts
+from backend.services.artifact_cleanup import remove_artifacts, session_artifact_paths
 
 
-def test_cleanup_session_artifacts_does_not_remove_paths_outside_configured_roots(tmp_path):
+def test_session_artifact_removal_does_not_remove_paths_outside_configured_roots(tmp_path):
     processed_dir = tmp_path / "processed"
     inside = processed_dir / "1" / "thumbs" / "frame.jpg"
     inside.parent.mkdir(parents=True)
@@ -21,7 +21,7 @@ def test_cleanup_session_artifacts_does_not_remove_paths_outside_configured_root
         },
     )()
 
-    removed = cleanup_session_artifacts(
+    paths = session_artifact_paths(
         1,
         [
             Image(
@@ -40,6 +40,7 @@ def test_cleanup_session_artifacts_does_not_remove_paths_outside_configured_root
         [],
         cfg,
     )
+    removed = remove_artifacts(paths, cfg)
 
     assert str(inside.resolve()) in removed
     assert not inside.exists()

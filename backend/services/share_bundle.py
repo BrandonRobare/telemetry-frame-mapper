@@ -40,18 +40,27 @@ def _artifact_sources(rec: Reconstruction) -> dict[str, str]:
 def build_share_manifest(rec: Reconstruction) -> dict:
     """Bundle metadata. ``artifacts`` is filled with bundle-relative paths as files are
     bundled; server filesystem paths never enter a bundle that leaves this machine."""
+    from backend.services.reconstruction import NotGeoreferencedError, _require_geo_transform
+
+    cesium: dict = {
+        "tileset_json": "tileset.json",
+        "note": (
+            "Full 3D Tiles conversion requires an external tiler; "
+            "source artifacts are bundled when present."
+        ),
+    }
+    try:
+        _require_geo_transform(rec.geo_transform, "3D Tiles placement", rec.id)
+    except NotGeoreferencedError as exc:
+        # The bundle is still worth sharing; only the globe placement is left out (#950).
+        cesium["tileset_json"] = None
+        cesium["tileset_omitted_reason"] = str(exc)
     return {
         "export_type": "shareable_reconstruction_bundle",
         "reconstruction_id": rec.id,
         "session_id": rec.session_id,
         "status": rec.status,
-        "cesium": {
-            "tileset_json": "tileset.json",
-            "note": (
-                "Full 3D Tiles conversion requires an external tiler; "
-                "source artifacts are bundled when present."
-            ),
-        },
+        "cesium": cesium,
         "artifacts": {},
     }
 
@@ -214,7 +223,11 @@ def build_share_bundle(zip_path: Path, rec: Reconstruction, exports_dir: Path) -
                     glb = next(
                         (entry["path"] for entry in copied if entry["label"] == "mesh_glb"), None
                     )
-                    zf.writestr("tileset.json", json.dumps(build_tileset(images, glb), indent=2))
+                    # tileset.json only for a georeferenced reconstruction; the
+                    # manifest records why it is missing otherwise.
+                    if manifest.get("cesium", {}).get("tileset_json"):
+                        tileset = build_tileset(images, glb, geo_transform=rec.geo_transform)
+                        zf.writestr("tileset.json", json.dumps(tileset, indent=2))
             os.replace(tmp_name, name, src_dir_fd=parent_fd, dst_dir_fd=parent_fd)
         finally:
             try:
