@@ -36,6 +36,39 @@ def get_progress(session_id: int) -> dict:
         )
 
 
+def build_footprint(img: Image, cfg) -> Footprint | None:
+    """Footprint row for ``img``'s current position, or None without a full position.
+
+    Ingest and flight-log GPS sync both derive footprints here, so a synced
+    image gets exactly the footprint ingest would have given it at that
+    position. ``cfg`` is the loaded app config (camera FOV, target CRS).
+    Errors from ``compute_footprint`` propagate; callers decide how to log them.
+    """
+    if img.latitude is None or img.longitude is None or img.altitude_m is None:
+        return None
+    fp = compute_footprint(
+        lat=img.latitude,
+        lon=img.longitude,
+        altitude_m=img.altitude_m,
+        fov_horizontal_deg=cfg.fov_horizontal_deg,
+        fov_vertical_deg=cfg.fov_vertical_deg,
+        yaw_deg=img.yaw,
+        target_crs=cfg.target_crs,
+        gimbal_pitch=img.gimbal_pitch,
+    )
+    if not fp:
+        return None
+    return Footprint(
+        image_id=img.id,
+        geom_wkt=fp.get("geom_wkt"),
+        geom_geojson=fp.get("geom_geojson"),
+        ground_width_m=fp.get("ground_width_m"),
+        ground_height_m=fp.get("ground_height_m"),
+        heading_estimated=fp.get("heading_estimated", True),
+        pitch_oblique=fp.get("pitch_oblique", False),
+    )
+
+
 def _unique_filename(path: Path, root: Path, duplicate_basenames: set[str]) -> str:
     """Return a collision-free display/storage name for an imported image."""
     if os.path.normcase(path.name) not in duplicate_basenames:
@@ -235,38 +268,16 @@ def _run(session_id: int, folder: Path, db_factory) -> None:
             if img.usable:
                 usable += 1
 
-            if (
-                img.latitude is not None
-                and img.longitude is not None
-                and img.altitude_m is not None
-            ):
-                try:
-                    fp = compute_footprint(
-                        lat=img.latitude,
-                        lon=img.longitude,
-                        altitude_m=img.altitude_m,
-                        fov_horizontal_deg=cfg.fov_horizontal_deg,
-                        fov_vertical_deg=cfg.fov_vertical_deg,
-                        yaw_deg=img.yaw,
-                        target_crs=cfg.target_crs,
-                        gimbal_pitch=exif.get("gimbal_pitch"),
-                    )
-                    if fp:
-                        db.add(Footprint(
-                            image_id=img.id,
-                            geom_wkt=fp.get("geom_wkt"),
-                            geom_geojson=fp.get("geom_geojson"),
-                            ground_width_m=fp.get("ground_width_m"),
-                            ground_height_m=fp.get("ground_height_m"),
-                            heading_estimated=fp.get("heading_estimated", True),
-                            pitch_oblique=fp.get("pitch_oblique", False),
-                        ))
-                except Exception:
-                    # Footprint stays best-effort, but a silent failure reads as
-                    # "no coverage data" in the UI — say so in the log (#640).
-                    logger.warning(
-                        "Footprint computation failed for %s", filename, exc_info=True
-                    )
+            try:
+                footprint = build_footprint(img, cfg)
+                if footprint is not None:
+                    db.add(footprint)
+            except Exception:
+                # Footprint stays best-effort, but a silent failure reads as
+                # "no coverage data" in the UI — say so in the log (#640).
+                logger.warning(
+                    "Footprint computation failed for %s", filename, exc_info=True
+                )
 
             with _progress_lock:
                 _progress[session_id]["processed"] = i + 1
