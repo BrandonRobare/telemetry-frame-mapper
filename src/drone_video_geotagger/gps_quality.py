@@ -60,8 +60,17 @@ def samples_from_telemetry(points: Sequence[TelemetryPoint]) -> list[GpsSample]:
     return [GpsSample(lat=point.lat, lon=point.lon, t_s=point.start_s) for point in points]
 
 
+def is_null_island(lat: float, lon: float) -> bool:
+    """True for a "Null Island" no-fix placeholder: both coordinates near (0, 0).
+
+    Shared by the GPS-lock warnings here and the backend's flight-log sync, so
+    both agree on which points carry no real position.
+    """
+    return abs(lat) <= NEAR_ZERO_DEGREES and abs(lon) <= NEAR_ZERO_DEGREES
+
+
 def _is_near_zero(sample: GpsSample) -> bool:
-    return abs(sample.lat) <= NEAR_ZERO_DEGREES and abs(sample.lon) <= NEAR_ZERO_DEGREES
+    return is_null_island(sample.lat, sample.lon)
 
 
 def _distance_m(a: GpsSample, b: GpsSample) -> float:

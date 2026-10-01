@@ -1,12 +1,21 @@
 from __future__ import annotations
 
+import logging
 from unittest.mock import Mock, patch
 
 import pytest
 from fastapi import HTTPException
 from PIL import Image as PILImage
 
-from backend.db.models import Defect, Image, Reconstruction, SessionLogEntry
+from backend.db.models import (
+    AutoImportRecord,
+    Defect,
+    DefectImage,
+    Image,
+    Reconstruction,
+    SessionComparison,
+    SessionLogEntry,
+)
 from backend.db.models import Session as SessionModel
 from backend.routers.sessions import _ensure_session_search_schema
 
@@ -151,6 +160,202 @@ def test_delete_session_removes_thumbnails_and_reconstruction_artifacts(client, 
     assert client.get(f"/sessions/{s.id}").status_code == 404
 
 
+# ---- foreign-key-safe deletes (issue #945) ----
+
+
+def _storage(tmp_path):
+    return type("Cfg", (), {
+        "processed_dir": str(tmp_path / "processed"),
+        "exports_dir": str(tmp_path / "exports"),
+        "data_dir": str(tmp_path / "data"),
+    })()
+
+
+def _session_with_thumb(db, tmp_path, name):
+    s = SessionModel(name=name, folder_path="/tmp/test", photo_count=1, usable_count=1)
+    db.add(s)
+    db.commit()
+    thumb = tmp_path / "processed" / str(s.id) / "thumbs" / "frame.jpg"
+    thumb.parent.mkdir(parents=True)
+    thumb.write_bytes(b"thumb")
+    image = Image(
+        session_id=s.id, filename="frame.jpg", filepath="/tmp/test/frame.jpg",
+        thumb_path=str(thumb),
+    )
+    db.add(image)
+    db.commit()
+    return s, image, thumb
+
+
+def _complete_reconstruction(db, tmp_path, session_id):
+    rec = Reconstruction(session_id=session_id, status="complete", preset="quick")
+    db.add(rec)
+    db.commit()
+    splat = tmp_path / "exports" / str(rec.id) / "splat.ply"
+    splat.parent.mkdir(parents=True)
+    splat.write_bytes(b"splat")
+    rec.splat_path = str(splat)
+    db.commit()
+    return rec, splat
+
+
+def test_deleting_an_auto_imported_session_detaches_its_import_claim(client, tmp_path):
+    from backend.main import app
+    db = app.state.test_db_session
+    s, _image, thumb = _session_with_thumb(db, tmp_path, "Watch folder import")
+    session_id = s.id
+    db.add(AutoImportRecord(fingerprint="card-1", source_path="/media/card", session_id=s.id))
+    db.commit()
+
+    with patch("backend.routers.sessions.get_config", return_value=_storage(tmp_path)):
+        response = client.delete(f"/sessions/{session_id}")
+
+    assert response.status_code == 200
+    assert not thumb.exists()
+    db.expire_all()
+    assert db.get(SessionModel, session_id) is None
+    # The claim outlives the session so the watcher does not import the folder again.
+    claim = db.query(AutoImportRecord).one()
+    assert (claim.fingerprint, claim.session_id) == ("card-1", None)
+
+
+def test_deleting_a_compared_session_returns_409_and_keeps_everything(client, tmp_path):
+    from backend.main import app
+    db = app.state.test_db_session
+    s, _image, thumb = _session_with_thumb(db, tmp_path, "Compared")
+    other = _make_session(client, name="Other side")
+    rec, splat = _complete_reconstruction(db, tmp_path, s.id)
+    other_rec, _ = _complete_reconstruction(db, tmp_path, other.id)
+    comparison = SessionComparison(
+        session_a_id=s.id, session_b_id=other.id,
+        reconstruction_a_id=rec.id, reconstruction_b_id=other_rec.id,
+    )
+    db.add(comparison)
+    db.commit()
+
+    with patch("backend.routers.sessions.get_config", return_value=_storage(tmp_path)), \
+         patch("backend.routers.sessions.cancel_reconstruction") as cancel:
+        response = client.delete(f"/sessions/{s.id}")
+
+    assert response.status_code == 409
+    body = response.json()
+    assert f"comparison {comparison.id}" in body["detail"]
+    assert body["blocking_references"] == [{
+        "type": "comparison", "id": comparison.id,
+        "session_a_id": s.id, "session_b_id": other.id,
+        "reconstruction_a_id": rec.id, "reconstruction_b_id": other_rec.id,
+    }]
+    cancel.assert_not_called()
+    assert thumb.exists()
+    assert splat.exists()
+    db.expire_all()
+    assert db.get(SessionModel, s.id) is not None
+    assert db.get(SessionComparison, comparison.id) is not None
+
+
+def test_session_delete_keeps_files_when_the_database_refuses_it(client, tmp_path):
+    """A foreign key the pre-checks do not cover must still leave the files in place."""
+    from backend.main import app
+    db = app.state.test_db_session
+    s, image, thumb = _session_with_thumb(db, tmp_path, "Linked from elsewhere")
+    rec, splat = _complete_reconstruction(db, tmp_path, s.id)
+    other = _make_session(client, name="Holds the defect")
+    defect = Defect(session_id=other.id, category="crack")
+    db.add(defect)
+    db.commit()
+    db.add(DefectImage(defect_id=defect.id, image_id=image.id))
+    db.commit()
+
+    with patch("backend.routers.sessions.get_config", return_value=_storage(tmp_path)), \
+         patch("backend.routers.sessions.cancel_reconstruction"):
+        response = client.delete(f"/sessions/{s.id}")
+
+    assert response.status_code == 409
+    assert "nothing was deleted" in response.json()["detail"]
+    assert thumb.exists()
+    assert splat.exists()
+    db.expire_all()
+    assert db.get(SessionModel, s.id) is not None
+    assert db.get(Reconstruction, rec.id) is not None
+
+
+def test_session_delete_removes_files_only_after_the_commit(client, tmp_path):
+    from backend.main import app
+    from backend.services.artifact_cleanup import remove_artifacts
+    from tests.conftest import TestSessionLocal
+    db = app.state.test_db_session
+    s, _image, thumb = _session_with_thumb(db, tmp_path, "Ordered delete")
+    session_id = s.id
+    seen: list[bool] = []
+
+    def cleanup(paths, cfg):
+        with TestSessionLocal() as other:
+            seen.append(other.get(SessionModel, session_id) is None)
+        return remove_artifacts(paths, cfg)
+
+    with patch("backend.routers.sessions.get_config", return_value=_storage(tmp_path)), \
+         patch("backend.routers.sessions.remove_artifacts", side_effect=cleanup):
+        response = client.delete(f"/sessions/{session_id}")
+
+    assert response.status_code == 200
+    assert seen == [True]
+    assert not thumb.exists()
+
+
+def test_session_delete_succeeds_when_file_cleanup_fails_after_the_commit(
+    client, tmp_path, caplog
+):
+    from backend.main import app
+    db = app.state.test_db_session
+    s, _image, thumb = _session_with_thumb(db, tmp_path, "Stubborn files")
+    session_id = s.id
+
+    with patch("backend.routers.sessions.get_config", return_value=_storage(tmp_path)), \
+         patch("backend.services.artifact_cleanup.shutil.rmtree", side_effect=OSError("busy")), \
+         caplog.at_level(logging.WARNING, logger="backend.services.artifact_cleanup"):
+        response = client.delete(f"/sessions/{session_id}")
+
+    assert response.status_code == 200
+    db.expire_all()
+    assert db.get(SessionModel, session_id) is None
+    assert thumb.parent.exists()
+    assert "busy" in caplog.text
+
+
+def test_bulk_delete_reports_a_compared_session_and_deletes_the_rest(client, tmp_path):
+    from backend.main import app
+    db = app.state.test_db_session
+    compared, _image, compared_thumb = _session_with_thumb(db, tmp_path, "Compared")
+    free, _image, free_thumb = _session_with_thumb(db, tmp_path, "Free")
+    rec_a, _ = _complete_reconstruction(db, tmp_path, compared.id)
+    rec_b, _ = _complete_reconstruction(db, tmp_path, compared.id)
+    comparison = SessionComparison(
+        session_a_id=compared.id, session_b_id=compared.id,
+        reconstruction_a_id=rec_a.id, reconstruction_b_id=rec_b.id,
+    )
+    db.add(comparison)
+    db.commit()
+
+    with patch("backend.routers.sessions.get_config", return_value=_storage(tmp_path)), \
+         patch("backend.routers.sessions.cancel_reconstruction"):
+        response = client.post(
+            "/sessions/bulk",
+            json={
+                "session_ids": [compared.id, free.id],
+                "operation": "delete",
+                "confirm": "DELETE",
+            },
+        )
+
+    assert response.status_code == 200
+    blocked, deleted = response.json()["outcomes"]
+    assert blocked["ok"] is False
+    assert f"comparison {comparison.id}" in blocked["error"]
+    assert deleted["ok"] is True
+    assert compared_thumb.exists()
+    assert not free_thumb.exists()
+
+
 # ---- tags + notes (issue #369) ----
 
 
@@ -292,7 +497,7 @@ def test_bulk_reports_missing_and_failed_archives_without_hiding_successes(clien
 
     assert response.status_code == 200
     outcomes = response.json()["outcomes"]
-    assert outcomes == [
+    assert outcomes[:2] == [
         {
             "session_id": first.id,
             "ok": True,
@@ -300,8 +505,61 @@ def test_bulk_reports_missing_and_failed_archives_without_hiding_successes(clien
             "bundle_path": str(tmp_path / "exports" / f"session_{first.id}_archive.zip"),
         },
         {"session_id": 999999, "ok": False, "error": "Session not found", "bundle_path": None},
-        {"session_id": second.id, "ok": False, "error": "disk full", "bundle_path": None},
     ]
+    assert outcomes[2]["session_id"] == second.id
+    assert outcomes[2]["ok"] is False
+    assert outcomes[2]["bundle_path"] is None
+    assert outcomes[2]["error"].startswith("Bulk archive failed")
+    assert "disk full" not in outcomes[2]["error"]
+
+
+def test_bulk_failure_returns_a_correlation_id_instead_of_exception_text(client, tmp_path):
+    import logging
+    import re
+
+    session = _make_session(client, name="Archive leak")
+    secret_path = str(tmp_path / "private" / "server" / "path.zip")
+
+    def build_archive(zip_path, session, _db):
+        raise PermissionError(f"[Errno 13] Permission denied: '{secret_path}'")
+
+    records: list[logging.LogRecord] = []
+
+    class _Capture(logging.Handler):
+        def emit(self, record):
+            records.append(record)
+
+    capture = _Capture(level=logging.ERROR)
+    router_logger = logging.getLogger("backend.routers.sessions")
+    router_logger.addHandler(capture)
+    cfg = type("Cfg", (), {"exports_dir": str(tmp_path / "exports")})()
+    try:
+        with (
+            patch("backend.routers.sessions.get_config", return_value=cfg),
+            patch(
+                "backend.services.session_bundle.build_session_archive",
+                side_effect=build_archive,
+            ),
+        ):
+            response = client.post(
+                "/sessions/bulk", json={"session_ids": [session.id], "operation": "archive"}
+            )
+    finally:
+        router_logger.removeHandler(capture)
+
+    assert response.status_code == 200
+    [outcome] = response.json()["outcomes"]
+    assert outcome["ok"] is False
+    assert secret_path not in outcome["error"]
+    assert "Permission denied" not in outcome["error"]
+    match = re.search(r"error id ([0-9a-f]{12})", outcome["error"])
+    assert match is not None, outcome["error"]
+
+    # The full detail stays in the server log under the same id.
+    [record] = records
+    assert match.group(1) in record.getMessage()
+    assert record.exc_info is not None
+    assert secret_path in str(record.exc_info[1])
 
 
 def test_bulk_delete_requires_confirmation_and_deletes_each_selected_session(client):

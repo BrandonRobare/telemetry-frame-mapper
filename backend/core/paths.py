@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 from pathlib import Path
 
 
@@ -72,3 +73,33 @@ def confine_path(
     if not path_real.startswith(root_prefix):
         raise ValueError(f"Path {path} is outside {boundary_name}")
     return Path(path_real)
+
+
+def require_writable_runtime_dirs(dirs: Mapping[str, str | os.PathLike[str]]) -> None:
+    """Fail fast when a configured runtime directory exists but this process cannot write it.
+
+    The Docker image runs as an unprivileged user, so bind mounts written by an older image
+    that ran as root would otherwise fail later with SQLite's "unable to open database file"
+    or a permission error deep inside an export. Directories that do not exist yet are
+    skipped: the app creates them when it first needs them.
+    """
+    unwritable = [
+        (setting, path)
+        for setting, raw in dirs.items()
+        if (path := Path(raw)).is_dir() and not os.access(path, os.W_OK | os.X_OK)
+    ]
+    if not unwritable:
+        return
+    if hasattr(os, "getuid"):
+        uid, gid = os.getuid(), os.getgid()
+        who = f"the backend's user (UID {uid}, GID {gid})"
+        fixes = "; ".join(f"chown -R {uid}:{gid} {path}" for _, path in unwritable)
+        fix = (
+            f"Fix the ownership: {fixes} (for a Docker bind mount, run it with sudo on the "
+            "host directory mounted there; see the Docker section of the README)."
+        )
+    else:
+        who = "the current user"
+        fix = "Grant the current user write access to it, then restart the backend."
+    named = ", ".join(f"{setting} {path}" for setting, path in unwritable)
+    raise PermissionError(f"Runtime directory not writable by {who}: {named}. {fix}")

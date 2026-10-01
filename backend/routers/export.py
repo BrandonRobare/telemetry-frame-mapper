@@ -416,6 +416,9 @@ def export_webodm_georeferencing_csv(session_id: int, db: DBSession = Depends(ge
     The archive intentionally contains only ``odm_georeferencing.csv`` for
     workflows that need the ODM georeferencing sidecar, not a full image bundle.
     """
+    # The same CSV as the full package, so the names match and the formula guard applies.
+    from ..services.webodm_package import odm_georeferencing_csv, package_image_names
+
     session = db.query(SessionModel).filter(SessionModel.id == session_id).first()
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -428,14 +431,7 @@ def export_webodm_georeferencing_csv(session_id: int, db: DBSession = Depends(ge
     exports_dir.mkdir(parents=True, exist_ok=True)
     zip_path = exports_dir / f"webodm_georeferencing_csv_{int(session.id)}.zip"
     with _atomic_zip(zip_path, exports_dir) as zf:
-        csv_rows = "filename,latitude,longitude,altitude\n"
-        for img in images:
-            # Use explicit None checks — 0.0 is a valid coordinate value
-            lat = "" if img.latitude is None else img.latitude
-            lon = "" if img.longitude is None else img.longitude
-            alt = "" if img.altitude_m is None else img.altitude_m
-            csv_rows += f"{img.filename},{lat},{lon},{alt}\n"
-        zf.writestr("odm_georeferencing.csv", csv_rows)
+        zf.writestr("odm_georeferencing.csv", odm_georeferencing_csv(package_image_names(images)))
     return {
         "zip_path": str(zip_path),
         "image_count": len(images),
@@ -492,6 +488,7 @@ def export_reconstruction_share_bundle(reconstruction_id: int, db: DBSession = D
 def upload_reconstruction_to_cesium_ion(reconstruction_id: int, db: DBSession = Depends(get_db)):
     """Publish the existing Cesium-ready 3D Tiles share bundle to Cesium ion."""
     from ..services.cesium_ion import CesiumIonError, upload_tileset
+    from ..services.reconstruction import _require_geo_transform
     from ..services.share_bundle import build_share_bundle
 
     rec = db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).first()
@@ -500,6 +497,9 @@ def upload_reconstruction_to_cesium_ion(reconstruction_id: int, db: DBSession = 
     exports_dir = Path(get_config().exports_dir)
     bundle = confine_path(exports_dir / f"reconstruction_{rec.id}_share.zip", exports_dir)
     try:
+        # Ion only places the model on the globe: a bundle without a tileset is useless
+        # there, so a non-georeferenced reconstruction is refused (422) up front (#950).
+        _require_geo_transform(rec.geo_transform, "Publishing to Cesium ion", rec.id)
         build_share_bundle(bundle, rec, exports_dir)
         name = f"Reconstruction {rec.id}"
         return upload_tileset(get_cesium_ion_config(), bundle.name, bundle, name)

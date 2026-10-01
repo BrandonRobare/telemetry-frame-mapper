@@ -6,6 +6,7 @@ import base64
 import hashlib
 import hmac
 import json
+import os
 import secrets
 import time
 from dataclasses import dataclass
@@ -19,23 +20,58 @@ UNLOCK_COOKIE_NAME = "tfm_share_unlock"
 PASSWORD_SCRYPT_N = 2**14
 
 
+_SIGNING_KEY_BYTES = 64
+_SIGNING_KEY_MODE = 0o600
+# A concurrent creator writes its key right after its exclusive create; give it that long.
+_SIGNING_KEY_READ_ATTEMPTS = 20
+_SIGNING_KEY_READ_DELAY_S = 0.05
+
+
+def _read_signing_key(key_path: Path) -> bytes:
+    """Read an existing key, waiting briefly if another process has not written it yet."""
+    for attempt in range(_SIGNING_KEY_READ_ATTEMPTS):
+        key = key_path.read_bytes()
+        if key:
+            return key
+        if attempt + 1 < _SIGNING_KEY_READ_ATTEMPTS:
+            time.sleep(_SIGNING_KEY_READ_DELAY_S)
+    raise RuntimeError(
+        f"Share signing key {key_path} is empty; delete it so a new key can be created "
+        "(existing share links will stop working)."
+    )
+
+
 def _signing_key() -> bytes:
     """Derive a stable HMAC key from a random secret stored on disk.
 
     Creates ``.share_signing_key`` in the config directory on first call,
-    similar to how Flask's ``SECRET_KEY`` bootstraps itself.
+    similar to how Flask's ``SECRET_KEY`` bootstraps itself. The file is
+    created exclusively with owner-only permissions, so it is never readable
+    by other users and a process that loses a creation race uses the winner's
+    key instead of overwriting it.
     """
     from backend.core.config import get_config
 
     cfg = get_config()
     key_path = Path(cfg.exports_dir).parent / ".share_signing_key"
-    if key_path.exists():
-        return key_path.read_bytes()
-    raw = secrets.token_bytes(64)
+    try:
+        return _read_signing_key(key_path)
+    except FileNotFoundError:
+        pass
+    raw = secrets.token_bytes(_SIGNING_KEY_BYTES)
     key_path.parent.mkdir(parents=True, exist_ok=True)
-    key_path.write_bytes(raw)
-    # Restrict permissions (owner rw only).
-    key_path.chmod(0o600)
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0)
+    try:
+        fd = os.open(key_path, flags, _SIGNING_KEY_MODE)
+    except FileExistsError:
+        return _read_signing_key(key_path)
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(raw)
+    except BaseException:
+        # Never leave a partial key behind for the next process to sign with.
+        key_path.unlink(missing_ok=True)
+        raise
     return raw
 
 

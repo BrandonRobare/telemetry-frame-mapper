@@ -42,6 +42,8 @@ steps:
     assert step.geotag is not None
     assert step.geotag.video == Path("/tmp/video.MP4")
     assert step.geotag.takeoff_altitude == 200.0
+    # ffmpeg's image2 muxer numbers the first extracted frame 1 unless told otherwise.
+    assert step.geotag.start_number == 1
 
 
 def test_parse_full_pipeline_spec(tmp_path: Path) -> None:
@@ -651,3 +653,74 @@ steps:
 
     assert out.is_dir()
     assert (out / "logs").is_dir()
+
+
+# ── Geotag step: frame time is anchored to the job's start_number (#948) ────
+
+
+def _geotag_job(tmp_path: Path, frame_numbers: range, extra: str = "") -> Path:
+    frames_dir = tmp_path / "frames"
+    frames_dir.mkdir()
+    for index in frame_numbers:
+        (frames_dir / f"frame_{index:05d}.jpg").write_bytes(b"jpg")
+    srt = tmp_path / "flight.srt"
+    srt.write_text(
+        "\n".join(
+            f"{t + 1}\n00:00:{t:02d},000 --> 00:00:{t + 1:02d},000\n"
+            f"GPS ({-81.0 - t * 0.001:.4f}, {41.0 + t * 0.001:.4f}, 24), H {100 + t}.00m\n"
+            for t in range(30)
+        ),
+        encoding="utf-8",
+    )
+    return _write_job(
+        tmp_path,
+        f"""\
+steps:
+  - kind: geotag
+    video: '{tmp_path / "flight.mp4"}'
+    frames: '{frames_dir}'
+    srt: '{srt}'
+    output: '{tmp_path / "geotagged"}'
+    takeoff_altitude: 100
+    frame_rate: 1
+{extra}""",
+    )
+
+
+def _run_geotag_job(monkeypatch: pytest.MonkeyPatch, yaml_file: Path) -> list[dict[str, str]]:
+    import csv
+
+    from drone_video_geotagger import pipeline
+
+    # The two subprocess calls a live geotag step makes: ffprobe-by-ffmpeg and exiftool.
+    monkeypatch.setattr(pipeline, "read_video_start", lambda *_: None)
+    monkeypatch.setattr(pipeline, "write_exif", lambda exiftool, tags, args_path: None)
+
+    result = load_and_run(yaml_file, dry_run=False)
+
+    assert result.success, result.steps[0].error
+    audit_csv = yaml_file.parent / "geotagged" / "frame_geotags.csv"
+    with audit_csv.open(encoding="utf-8") as file:
+        return list(csv.DictReader(file))
+
+
+def test_geotag_step_honours_start_number_from_the_job_spec(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Frames 0..9 were extracted with -start_number 0 and then deleted."""
+    yaml_file = _geotag_job(tmp_path, range(10, 13), extra="    start_number: 0\n")
+
+    assert parse_job_spec(yaml_file).steps[0].geotag.start_number == 0
+    rows = _run_geotag_job(monkeypatch, yaml_file)
+
+    assert [row["seconds"] for row in rows] == ["10.000", "11.000", "12.000"]
+    assert [row["latitude"] for row in rows] == ["41.01000000", "41.01100000", "41.01200000"]
+
+
+def test_geotag_step_defaults_start_number_to_ffmpeg_first_frame(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Without start_number, frame_00021.jpg is 20 s in, even with 1..20 deleted."""
+    rows = _run_geotag_job(monkeypatch, _geotag_job(tmp_path, range(21, 24)))
+
+    assert [row["seconds"] for row in rows] == ["20.000", "21.000", "22.000"]

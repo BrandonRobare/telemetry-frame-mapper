@@ -11,7 +11,13 @@ from unittest.mock import patch
 
 import pytest
 
-from backend.db.models import Image, JobQueueEntry, Reconstruction, ReconstructionFrame
+from backend.db.models import (
+    Image,
+    JobQueueEntry,
+    Reconstruction,
+    ReconstructionFrame,
+    SessionComparison,
+)
 from backend.db.models import Session as SessionModel
 from backend.routers.reconstruction import _status_sse_payload
 from backend.services.job_queue import RECONSTRUCTION, claim_stale_jobs, enqueue
@@ -266,7 +272,7 @@ def test_delete_reconstruction_rejects_running_jobs_without_cleanup(client, tmp_
     db.commit()
     db.refresh(rec)
 
-    with patch("backend.routers.reconstruction.cleanup_reconstruction_artifacts") as cleanup:
+    with patch("backend.routers.reconstruction.remove_artifacts") as cleanup:
         resp = client.delete(f"/reconstruction/{rec.id}")
     assert resp.status_code == 409
     cleanup.assert_not_called()
@@ -321,6 +327,104 @@ def test_delete_reconstruction_removes_artifacts(client, tmp_path):
     assert not colmap_dir.exists()
     assert not actual_export_dir.exists()
     assert not thumb.exists()
+
+
+# ---- foreign-key-safe deletes (issue #945) ----
+
+
+def _storage(tmp_path):
+    return type("Cfg", (), {
+        "processed_dir": str(tmp_path / "processed"),
+        "exports_dir": str(tmp_path / "exports"),
+        "data_dir": str(tmp_path / "data"),
+    })()
+
+
+def _reconstruction_with_files(db, tmp_path, session_id, **fields):
+    rec = Reconstruction(
+        session_id=session_id, preset="quick", status="complete", frames_used=3, **fields
+    )
+    db.add(rec)
+    db.commit()
+    export_dir = tmp_path / "exports" / str(rec.id)
+    export_dir.mkdir(parents=True)
+    splat = export_dir / "splat.ply"
+    pointcloud = export_dir / "pointcloud.ply"
+    splat.write_bytes(b"splat")
+    pointcloud.write_bytes(b"ply")
+    rec.splat_path = str(splat)
+    rec.pointcloud_path = str(pointcloud)
+    db.commit()
+    return rec, splat, pointcloud
+
+
+def test_deleting_a_compared_reconstruction_returns_409_and_keeps_its_files(client, tmp_path):
+    db = _get_db(client)
+    s = _make_session_with_images(db)
+    rec, splat, pointcloud = _reconstruction_with_files(db, tmp_path, s.id)
+    other, _, _ = _reconstruction_with_files(db, tmp_path, s.id)
+    comparison = SessionComparison(
+        session_a_id=s.id, session_b_id=s.id,
+        reconstruction_a_id=other.id, reconstruction_b_id=rec.id,
+    )
+    db.add(comparison)
+    db.commit()
+
+    with patch("backend.routers.reconstruction.get_config", return_value=_storage(tmp_path)):
+        resp = client.delete(f"/reconstruction/{rec.id}")
+
+    assert resp.status_code == 409
+    body = resp.json()
+    assert f"comparison {comparison.id}" in body["detail"]
+    assert [ref["id"] for ref in body["blocking_references"]] == [comparison.id]
+    assert body["blocking_references"][0]["type"] == "comparison"
+    assert splat.exists()
+    assert pointcloud.exists()
+    db.expire_all()
+    assert db.get(Reconstruction, rec.id) is not None
+    assert db.get(SessionComparison, comparison.id) is not None
+
+
+def test_deleting_a_rerun_parent_keeps_the_child_and_its_files(client, tmp_path):
+    db = _get_db(client)
+    s = _make_session_with_images(db)
+    parent, parent_splat, _ = _reconstruction_with_files(db, tmp_path, s.id)
+    child, child_splat, child_ply = _reconstruction_with_files(
+        db, tmp_path, s.id, parent_reconstruction_id=parent.id
+    )
+    parent_id, child_id = parent.id, child.id
+
+    with patch("backend.routers.reconstruction.get_config", return_value=_storage(tmp_path)):
+        resp = client.delete(f"/reconstruction/{parent_id}")
+
+    assert resp.status_code == 200
+    assert not parent_splat.exists()
+    assert child_splat.exists()
+    assert child_ply.exists()
+    db.expire_all()
+    assert db.get(Reconstruction, parent_id) is None
+    assert db.get(Reconstruction, child_id).parent_reconstruction_id is None
+
+
+def test_reconstruction_delete_keeps_files_when_the_commit_fails(client, tmp_path):
+    from sqlalchemy.exc import IntegrityError
+    from sqlalchemy.orm import Session as OrmSession
+
+    db = _get_db(client)
+    s = _make_session_with_images(db)
+    rec, splat, pointcloud = _reconstruction_with_files(db, tmp_path, s.id)
+    refused = IntegrityError("DELETE", {}, Exception("FOREIGN KEY constraint failed"))
+
+    with patch("backend.routers.reconstruction.get_config", return_value=_storage(tmp_path)), \
+         patch.object(OrmSession, "commit", side_effect=refused):
+        resp = client.delete(f"/reconstruction/{rec.id}")
+
+    assert resp.status_code == 409
+    assert "nothing was deleted" in resp.json()["detail"]
+    assert splat.exists()
+    assert pointcloud.exists()
+    db.expire_all()
+    assert db.get(Reconstruction, rec.id) is not None
 
 
 def test_start_reconstruction_with_target_area(client):
@@ -1464,6 +1568,27 @@ def test_cleanup_succeeds(client, tmp_path):
     assert cleaned.means.shape[0] == data["n_after"]
 
 
+# COLMAP->UTM 17N transform for the crop tests: yawed 90 degrees, scaled 4x, shifted.
+_CROP_GEO = {
+    "scale": 4.0,
+    "rotation": [[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]],
+    "translation": [10.0, 20.0, 5.0],
+    "utm_zone": "17N",
+    "utm_origin": [591253.0, 3873500.0],
+}
+
+
+def _crop_polygon_lonlat() -> str:
+    """Lon/lat polygon for easting +5..+12 m, northing +18..+25 m from _CROP_GEO's origin."""
+    from pyproj import Transformer
+
+    to_lonlat = Transformer.from_crs(32617, 4326, always_xy=True)
+    oe, on = _CROP_GEO["utm_origin"]
+    corners = [(5, 18), (12, 18), (12, 25), (5, 25), (5, 18)]
+    ring = [list(to_lonlat.transform(oe + de, on + dn)) for de, dn in corners]
+    return _json.dumps({"type": "Polygon", "coordinates": [ring]})
+
+
 def test_cleanup_with_target_area_crops_splat(client, tmp_path):
     import numpy as np
 
@@ -1472,10 +1597,8 @@ def test_cleanup_with_target_area_crops_splat(client, tmp_path):
 
     db = _get_db(client)
     s = _make_session_with_images(db)
-    target = TargetArea(
-        name="crop",
-        geom_geojson='{"type":"Polygon","coordinates":[[[0,0],[1,0],[1,1],[0,1],[0,0]]]}',
-    )
+    # Lon/lat, as the Plan tab stores target areas.
+    target = TargetArea(name="crop", geom_geojson=_crop_polygon_lonlat())
     db.add(target)
     db.commit()
     db.refresh(target)
@@ -1484,6 +1607,8 @@ def test_cleanup_with_target_area_crops_splat(client, tmp_path):
     rec_dir = exports_dir / "101"
     rec_dir.mkdir(parents=True)
     splat_file = rec_dir / "splat.ply"
+    # Through _CROP_GEO these COLMAP centres land at (+8, +22), (+2, +28) and (+8, +16)
+    # metres from the UTM origin: only the first is inside the target area.
     cloud = GaussianCloud(
         means=np.array([[0.5, 0.5, 0.0], [2.0, 2.0, 0.0], [-1.0, 0.5, 0.0]], dtype=np.float32),
         sh0=np.zeros((3, 3), dtype=np.float32),
@@ -1497,6 +1622,7 @@ def test_cleanup_with_target_area_crops_splat(client, tmp_path):
     rec = Reconstruction(
         id=101, session_id=s.id, preset="quick", status="complete",
         progress_pct=100.0, frames_used=3, splat_path=str(splat_file),
+        geo_transform=_json.dumps(_CROP_GEO),
     )
     db.add(rec)
     db.commit()
@@ -1516,6 +1642,54 @@ def test_cleanup_with_target_area_crops_splat(client, tmp_path):
     cleaned = read_3dgs_ply(exports_dir / "101" / "splat_cleaned.ply")
     assert cleaned.means.shape[0] == 1
     assert cleaned.means[0].tolist() == [0.5, 0.5, 0.0]
+
+
+def test_cleanup_target_area_refuses_reconstruction_without_geo_transform(client, tmp_path):
+    """A lon/lat target area cannot be matched to a splat that is not georeferenced (#950)."""
+    import numpy as np
+
+    from backend.db.models import TargetArea
+    from backend.services.ply_io import GaussianCloud, write_3dgs_ply
+
+    db = _get_db(client)
+    s = _make_session_with_images(db)
+    target = TargetArea(name="crop", geom_geojson=_crop_polygon_lonlat())
+    db.add(target)
+    db.commit()
+    db.refresh(target)
+
+    exports_dir = tmp_path / "exports"
+    rec_dir = exports_dir / "102"
+    rec_dir.mkdir(parents=True)
+    splat_file = rec_dir / "splat.ply"
+    write_3dgs_ply(
+        splat_file,
+        GaussianCloud(
+            means=np.zeros((2, 3), dtype=np.float32),
+            sh0=np.zeros((2, 3), dtype=np.float32),
+            shN=np.zeros((2, 0, 3), dtype=np.float32),
+            opacities=np.ones(2, dtype=np.float32),
+            scales=np.zeros((2, 3), dtype=np.float32),
+            quats=np.zeros((2, 4), dtype=np.float32),
+        ),
+    )
+    rec = Reconstruction(
+        id=102, session_id=s.id, preset="quick", status="complete",
+        progress_pct=100.0, frames_used=3, splat_path=str(splat_file),
+    )
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+
+    with patch("backend.routers.reconstruction.get_config") as mock_cfg:
+        mock_cfg.return_value.exports_dir = str(exports_dir)
+        resp = client.post(
+            f"/reconstruction/{rec.id}/cleanup", json={"target_area_id": target.id}
+        )
+
+    assert resp.status_code == 422
+    assert "not georeferenced" in resp.json()["detail"]
+    assert not (rec_dir / "splat_cleaned.ply").exists()
 
 
 def test_cleanup_target_area_not_found(client, tmp_path):

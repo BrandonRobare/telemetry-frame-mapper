@@ -4,8 +4,15 @@ and held-out checkpoint validation with deterministic math.
 
 from __future__ import annotations
 
+import json
+import logging
 import math
+import struct
+import sys
+import types
+from types import SimpleNamespace
 
+import numpy as np
 import pytest
 
 from backend.services.quality_report import (
@@ -185,6 +192,7 @@ def test_validate_checkpoints_no_surface_available():
     points = [SurveyedPoint("A", 0.0, 0.0, 0.0)]
     result = validate_held_out_checkpoints(_NoArtifacts(), points)
     assert result["available"] is False
+    assert result["status"] == "unavailable"
     assert "reason" in result
 
 
@@ -192,6 +200,11 @@ class _FakeRecWithMesh:
     mesh_glb_path = None
     splat_path = None
     pointcloud_path = None
+    # Georeferenced with the identity similarity, so UTM coordinates equal COLMAP ones.
+    geo_transform = (
+        '{"scale": 1.0, "rotation": [[1, 0, 0], [0, 1, 0], [0, 0, 1]],'
+        ' "translation": [0, 0, 0], "utm_zone": "33N", "utm_origin": [0, 0]}'
+    )
 
     def __init__(self, path):
         self.splat_path = str(path)
@@ -234,6 +247,255 @@ def test_validate_checkpoints_with_splat(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+#  Surface extraction failures (#951)
+# ---------------------------------------------------------------------------
+
+_ORIGIN = [SurveyedPoint("A", 0.0, 0.0, 0.0)]
+_TRIANGLE = [(0.0, 0.0, 0.0), (10.0, 0.0, 0.0), (0.0, 10.0, 0.0)]
+
+
+def _surface_rec(*, mesh=None, splat=None, pointcloud=None):
+    return SimpleNamespace(
+        mesh_glb_path=str(mesh) if mesh else None,
+        splat_path=str(splat) if splat else None,
+        pointcloud_path=str(pointcloud) if pointcloud else None,
+        # Identity georeference, so checkpoint UTM coordinates equal COLMAP ones.
+        geo_transform=_FakeRecWithMesh.geo_transform,
+    )
+
+
+def _glb(gltf: dict | bytes, bin_chunk: bytes | None = None) -> bytes:
+    """Assemble a GLB container from a JSON document and an optional BIN chunk."""
+    json_bytes = gltf if isinstance(gltf, bytes) else json.dumps(gltf).encode()
+    json_bytes += b" " * (-len(json_bytes) % 4)
+    body = struct.pack("<I4s", len(json_bytes), b"JSON") + json_bytes
+    if bin_chunk is not None:
+        bin_chunk += b"\x00" * (-len(bin_chunk) % 4)
+        body += struct.pack("<I4s", len(bin_chunk), b"BIN\x00") + bin_chunk
+    return struct.pack("<4sII", b"glTF", 2, 12 + len(body)) + body
+
+
+def _positions_gltf(
+    count: int,
+    byte_length: int,
+    *,
+    byte_stride: int | None = None,
+    accessor_offset: int = 0,
+    component_type: int = 5126,
+) -> dict:
+    view: dict = {"buffer": 0, "byteOffset": 0, "byteLength": byte_length}
+    if byte_stride is not None:
+        view["byteStride"] = byte_stride
+    return {
+        "asset": {"version": "2.0"},
+        "buffers": [{"byteLength": byte_length}],
+        "bufferViews": [view],
+        "accessors": [
+            {
+                "bufferView": 0,
+                "byteOffset": accessor_offset,
+                "componentType": component_type,
+                "count": count,
+                "type": "VEC3",
+            }
+        ],
+        "meshes": [{"primitives": [{"attributes": {"POSITION": 0}}]}],
+    }
+
+
+def _triangle_glb() -> bytes:
+    vertices = b"".join(struct.pack("<3f", *v) for v in _TRIANGLE)
+    return _glb(_positions_gltf(len(_TRIANGLE), len(vertices)), vertices)
+
+
+@pytest.fixture
+def surface_warnings():
+    """Capture WARNING records from the quality-report logger.
+
+    A handler on the module logger itself keeps the capture independent of how
+    the ``backend`` logger's propagation was left by earlier tests.
+    """
+    records: list[logging.LogRecord] = []
+
+    class _Capture(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            records.append(record)
+
+    handler = _Capture(level=logging.WARNING)
+    logger = logging.getLogger("backend.services.quality_report")
+    logger.addHandler(handler)
+    try:
+        yield records
+    finally:
+        logger.removeHandler(handler)
+
+
+def _assert_failed_check(result: dict, source: str, expected_error: str, tmp_path) -> None:
+    assert result["available"] is False
+    assert result["status"] == "failed"
+    assert result["source"] == source
+    assert expected_error in result["error"]
+    assert result["error"] in result["reason"]
+    assert "No surface source" not in result["reason"]
+    # The reason is returned to API clients: name the file, not its server path.
+    assert str(tmp_path) not in result["reason"]
+
+
+def test_validate_checkpoints_reads_glb_mesh_positions(tmp_path):
+    mesh = tmp_path / "mesh.glb"
+    mesh.write_bytes(_triangle_glb())
+
+    result = validate_held_out_checkpoints(
+        _surface_rec(mesh=mesh), [SurveyedPoint("P", 10.0, 0.0, 1.0)]
+    )
+
+    assert result["available"] is True
+    assert result["source"] == "mesh"
+    assert result["surface_point_count"] == 3
+    assert result["checkpoints"][0]["distance_m"] == pytest.approx(1.0)
+    assert result["checkpoints"][0]["nearest_surface_point"] == "10.0000,0.0000,0.0000"
+
+
+def test_validate_checkpoints_honours_interleaved_glb_positions(tmp_path):
+    # Each vertex is NORMAL then POSITION (24-byte stride); POSITION starts 12 bytes in.
+    data = b"".join(struct.pack("<6f", 0.0, 0.0, 1.0, *v) for v in _TRIANGLE)
+    mesh = tmp_path / "mesh.glb"
+    mesh.write_bytes(
+        _glb(_positions_gltf(3, len(data), byte_stride=24, accessor_offset=12), data)
+    )
+
+    result = validate_held_out_checkpoints(
+        _surface_rec(mesh=mesh), [SurveyedPoint("P", 0.0, 10.0, 0.0)]
+    )
+
+    assert result["available"] is True
+    assert result["surface_point_count"] == 3
+    assert result["checkpoints"][0]["distance_m"] == pytest.approx(0.0, abs=1e-6)
+
+
+@pytest.mark.parametrize(
+    ("payload", "expected_error"),
+    [
+        pytest.param(b"PK\x03\x04 this is a zip, not a mesh", "glTF magic", id="not-glb"),
+        pytest.param(b"glTF\x02\x00\x00\x00", "truncated", id="truncated-header"),
+        pytest.param(_glb(b"{not json"), "JSON", id="corrupt-json-chunk"),
+        pytest.param(_glb(_positions_gltf(3, 36)), "BIN chunk", id="missing-bin-chunk"),
+        pytest.param(
+            _glb(_positions_gltf(3, 36), b"\x00" * 12), "truncated", id="truncated-buffer"
+        ),
+        pytest.param(
+            _glb(_positions_gltf(3, 18, component_type=5123), b"\x00" * 20),
+            "componentType 5123",
+            id="unsupported-accessor",
+        ),
+    ],
+)
+def test_validate_checkpoints_corrupt_glb_fails_with_parser_error(
+    tmp_path, surface_warnings, payload, expected_error
+):
+    mesh = tmp_path / "mesh.glb"
+    mesh.write_bytes(payload)
+
+    result = validate_held_out_checkpoints(_surface_rec(mesh=mesh), _ORIGIN)
+
+    _assert_failed_check(result, "mesh", expected_error, tmp_path)
+    assert "mesh.glb" in result["reason"]
+    assert any(record.exc_info for record in surface_warnings), (
+        "a surface extraction failure must be logged with its traceback"
+    )
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        pytest.param(_glb({"asset": {"version": "2.0"}}), id="no-meshes"),
+        pytest.param(_glb(_positions_gltf(0, 0), b""), id="zero-vertices"),
+    ],
+)
+def test_validate_checkpoints_glb_without_vertices_is_empty_not_failed(
+    tmp_path, surface_warnings, payload
+):
+    mesh = tmp_path / "mesh.glb"
+    mesh.write_bytes(payload)
+
+    result = validate_held_out_checkpoints(_surface_rec(mesh=mesh), _ORIGIN)
+
+    assert result["available"] is False
+    assert result["status"] == "empty"
+    assert result["source"] == "mesh"
+    assert "contains no points" in result["reason"]
+    assert "error" not in result
+    assert not surface_warnings
+
+
+def test_validate_checkpoints_corrupt_splat_fails_with_reader_error(tmp_path, surface_warnings):
+    splat = tmp_path / "splat.ply"
+    splat.write_bytes(b"ply\nformat ascii 1.0\nelement vertex 0\nend_header\n")
+
+    result = validate_held_out_checkpoints(_surface_rec(splat=splat), _ORIGIN)
+
+    _assert_failed_check(result, "splat", "binary_little_endian", tmp_path)
+    assert any(record.exc_info for record in surface_warnings)
+
+
+def test_validate_checkpoints_pointcloud_without_laspy_names_the_install(
+    tmp_path, monkeypatch, surface_warnings
+):
+    cloud = tmp_path / "cloud.las"
+    cloud.write_bytes(b"LASF")
+    monkeypatch.setitem(sys.modules, "laspy", None)  # import laspy -> ImportError
+
+    result = validate_held_out_checkpoints(_surface_rec(pointcloud=cloud), _ORIGIN)
+
+    _assert_failed_check(result, "pointcloud", "laspy", tmp_path)
+    assert "uv sync --group backend --group reconstruction" in result["reason"]
+    assert any(record.exc_info for record in surface_warnings)
+
+
+def _fake_laspy(read) -> types.ModuleType:
+    module = types.ModuleType("laspy")
+    module.read = read
+    return module
+
+
+def test_validate_checkpoints_corrupt_las_fails_with_reader_error(
+    tmp_path, monkeypatch, surface_warnings
+):
+    cloud = tmp_path / "cloud.las"
+    cloud.write_bytes(b"not a las file")
+
+    def _read(path):
+        raise RuntimeError(f"Invalid file signature in {path}")
+
+    monkeypatch.setitem(sys.modules, "laspy", _fake_laspy(_read))
+
+    result = validate_held_out_checkpoints(_surface_rec(pointcloud=cloud), _ORIGIN)
+
+    _assert_failed_check(result, "pointcloud", "Invalid file signature", tmp_path)
+    assert "cloud.las" in result["error"]
+    assert any(record.exc_info for record in surface_warnings)
+
+
+def test_validate_checkpoints_las_with_zero_points_is_empty_not_failed(
+    tmp_path, monkeypatch, surface_warnings
+):
+    cloud = tmp_path / "cloud.las"
+    cloud.write_bytes(b"LASF")
+    empty = np.array([], dtype=np.float64)
+    monkeypatch.setitem(
+        sys.modules, "laspy", _fake_laspy(lambda path: SimpleNamespace(x=empty, y=empty, z=empty))
+    )
+
+    result = validate_held_out_checkpoints(_surface_rec(pointcloud=cloud), _ORIGIN)
+
+    assert result["available"] is False
+    assert result["status"] == "empty"
+    assert result["source"] == "pointcloud"
+    assert "error" not in result
+    assert not surface_warnings
+
+
+# ---------------------------------------------------------------------------
 #  CheckpointValidation dataclass
 # ---------------------------------------------------------------------------
 
@@ -246,3 +508,165 @@ def test_checkpoint_validation_accepts_coordinate_string():
 def test_checkpoint_validation_none_source():
     cv = CheckpointValidation(label="X", distance_m=1.0, surface_point=None)
     assert cv.surface_point is None
+
+
+# ---------------------------------------------------------------------------
+#  Checkpoint frame (#950): surveyed UTM checkpoints vs COLMAP-frame surfaces
+# ---------------------------------------------------------------------------
+
+# COLMAP-frame surface vertices, all exactly representable in float32.
+_SURFACE_COLMAP = [(0.0, 0.0, 0.0), (4.0, -2.0, 1.5), (-6.0, 3.0, 0.25)]
+
+
+def _checkpoint_geo() -> dict:
+    """A solved COLMAP->UTM 33N similarity: yawed, tilted, scaled 2.5x and translated."""
+    import numpy as np
+
+    a, b = math.radians(40.0), math.radians(15.0)
+    rz = [[math.cos(a), -math.sin(a), 0.0], [math.sin(a), math.cos(a), 0.0], [0.0, 0.0, 1.0]]
+    rx = [[1.0, 0.0, 0.0], [0.0, math.cos(b), -math.sin(b)], [0.0, math.sin(b), math.cos(b)]]
+    return {
+        "scale": 2.5,
+        "rotation": (np.array(rz) @ np.array(rx)).tolist(),
+        "translation": [3.0, -7.0, 12.0],
+        "utm_zone": "33N",
+        "utm_origin": [650123.0, 4649776.0],
+    }
+
+
+def _utm_of(geo: dict, point) -> tuple[float, float, float]:
+    """Where a COLMAP point is in absolute UTM, computed without the service."""
+    import numpy as np
+
+    local = geo["scale"] * (np.array(geo["rotation"]) @ np.array(point)) + geo["translation"]
+    return (
+        float(local[0] + geo["utm_origin"][0]),
+        float(local[1] + geo["utm_origin"][1]),
+        float(local[2]),
+    )
+
+
+def _georef_rec(geo: dict | None, **paths):
+    import json
+    from types import SimpleNamespace
+
+    return SimpleNamespace(
+        id=7,
+        geo_transform=json.dumps(geo) if geo is not None else None,
+        mesh_glb_path=str(paths["mesh"]) if paths.get("mesh") else None,
+        splat_path=str(paths["splat"]) if paths.get("splat") else None,
+        pointcloud_path=str(paths["pointcloud"]) if paths.get("pointcloud") else None,
+    )
+
+
+def _write_splat(path, points) -> None:
+    import numpy as np
+
+    from backend.services import ply_io
+
+    n = len(points)
+    ply_io.write_3dgs_ply(
+        path,
+        ply_io.GaussianCloud(
+            means=np.array(points, dtype=np.float32),
+            sh0=np.zeros((n, 3), dtype=np.float32),
+            shN=np.zeros((n, 0, 3), dtype=np.float32),
+            opacities=np.zeros(n, dtype=np.float32),
+            scales=np.zeros((n, 3), dtype=np.float32),
+            quats=np.zeros((n, 4), dtype=np.float32),
+        ),
+    )
+
+
+def _write_glb(path, vertices) -> None:
+    """A minimal single-primitive GLB whose POSITION accessor holds *vertices*."""
+    import json
+    import struct
+
+    bin_chunk = b"".join(struct.pack("<3f", *v) for v in vertices)
+    gltf = {
+        "asset": {"version": "2.0"},
+        "buffers": [{"byteLength": len(bin_chunk)}],
+        "bufferViews": [{"buffer": 0, "byteOffset": 0, "byteLength": len(bin_chunk)}],
+        "accessors": [
+            {"bufferView": 0, "componentType": 5126, "count": len(vertices), "type": "VEC3"}
+        ],
+        "meshes": [{"primitives": [{"attributes": {"POSITION": 0}}]}],
+    }
+    json_bytes = json.dumps(gltf).encode()
+    json_bytes += b" " * (-len(json_bytes) % 4)
+    body = struct.pack("<I4s", len(json_bytes), b"JSON") + json_bytes
+    body += struct.pack("<I4s", len(bin_chunk), b"BIN\x00") + bin_chunk
+    path.write_bytes(struct.pack("<4sII", b"glTF", 2, 12 + len(body)) + body)
+
+
+def _offset(point, dx=0.0, dy=0.0, dz=0.0) -> SurveyedPoint:
+    return SurveyedPoint("CP", point[0] + dx, point[1] + dy, point[2] + dz)
+
+
+@pytest.mark.parametrize("source", ["splat", "mesh"])
+def test_validate_checkpoints_maps_colmap_surfaces_into_the_utm_checkpoint_frame(
+    tmp_path, source
+):
+    geo = _checkpoint_geo()
+    if source == "splat":
+        path = tmp_path / "splat.ply"
+        _write_splat(path, _SURFACE_COLMAP)
+    else:
+        path = tmp_path / "mesh.glb"
+        _write_glb(path, _SURFACE_COLMAP)
+    on_surface = _utm_of(geo, _SURFACE_COLMAP[1])
+    # Checkpoints are surveyed in UTM; 1 m off must read as 1 m whatever COLMAP's scale.
+    checkpoints = [
+        SurveyedPoint("ON", *on_surface),
+        _offset(_utm_of(geo, _SURFACE_COLMAP[2]), dz=1.0),
+        _offset(_utm_of(geo, _SURFACE_COLMAP[0]), dx=0.6, dy=-0.8),
+    ]
+
+    result = validate_held_out_checkpoints(_georef_rec(geo, **{source: path}), checkpoints)
+
+    assert result["available"] is True
+    assert result["source"] == source
+    assert result["frame"]["crs"] == "EPSG:32633"
+    assert result["frame"]["utm_zone"] == "33N"
+    distances = [c["distance_m"] for c in result["checkpoints"]]
+    assert distances == pytest.approx([0.0, 1.0, 1.0], abs=1e-3)
+    easting, northing, height = (
+        float(v) for v in result["checkpoints"][0]["nearest_surface_point"].split(",")
+    )
+    assert (easting, northing, height) == pytest.approx(on_surface, abs=1e-3)
+
+
+def test_validate_checkpoints_uses_the_utm_point_cloud_as_is(tmp_path, monkeypatch):
+    """The LAS export is already written in UTM; mapping it again would misplace it."""
+    from backend.services import quality_report
+
+    geo = _checkpoint_geo()
+    cloud = tmp_path / "pointcloud.las"
+    cloud.write_bytes(b"LASF")
+    utm_points = [_utm_of(geo, p) for p in _SURFACE_COLMAP]
+    monkeypatch.setattr(
+        quality_report, "_extract_pointcloud_surface_points", lambda path: list(utm_points)
+    )
+
+    result = validate_held_out_checkpoints(
+        _georef_rec(geo, pointcloud=cloud), [_offset(utm_points[1], dx=1.0)]
+    )
+
+    assert result["available"] is True
+    assert result["source"] == "pointcloud"
+    assert result["checkpoints"][0]["distance_m"] == pytest.approx(1.0, abs=1e-3)
+
+
+def test_validate_checkpoints_refuses_a_reconstruction_that_is_not_georeferenced(tmp_path):
+    splat = tmp_path / "splat.ply"
+    _write_splat(splat, _SURFACE_COLMAP)
+
+    result = validate_held_out_checkpoints(
+        _georef_rec(None, splat=splat), [SurveyedPoint("CP", 0.0, 0.0, 0.0)]
+    )
+
+    assert result["available"] is False
+    assert result["status"] == "not_georeferenced"
+    assert "not georeferenced" in result["reason"]
+    assert "checkpoints" not in result

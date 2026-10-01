@@ -21,6 +21,12 @@ updates:
       - dependency-name: "typescript"
         update-types: ["version-update:semver-major"]
 
+  # The exact splat-transform pin the backend runs (#956); bumps update package.json and the lock.
+  - package-ecosystem: "npm"
+    directory: "/tools/splat-transform"
+    schedule:
+      interval: "weekly"
+
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
@@ -28,3 +34,16 @@ updates:
     groups:
       actions:
         patterns: ["*"]
+
+  # Dockerfile base images are digest-pinned (#956); this refreshes the digests. Node and Python
+  # stay on the major/minor lines CI and the docs target, so only digest and patch bumps are opened.
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      docker-images:
+        patterns: ["*"]
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]

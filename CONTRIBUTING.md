@@ -24,6 +24,7 @@ Optional, for reconstruction:
 - `gsplat` plus a CUDA-capable GPU: required for Gaussian splat training and optional server-side rendering hooks. Run `uv sync --group backend --group reconstruction --group dev` when validating reconstruction locally. Missing thumbnail renderer support should not break backend import or COLMAP-only setup.
 - SuGaR (`sugar_scene`/`sugar`): required only for mesh export. It is not included in the `reconstruction` dependency group because there is no installable `sugar`/`sugar-scene` PyPI package; install it from the upstream SuGaR project for manual mesh-export smoke.
 - Server-side flythrough rendering is optional; when the gsplat video renderer is unavailable, users can use browser recording.
+- `@playcanvas/splat-transform`: required only for the splat cleanup/compress endpoints. Its exact version is pinned and locked in `tools/splat-transform/`; install it once with `npm ci --prefix tools/splat-transform` (Node.js >= 22). The backend runs it with `npx --no-install` from that directory and never downloads it at run time.
 
 CI mocks every external binary and optional reconstruction library, so no test needs a real ffmpeg, exiftool, COLMAP, or GPU. Before a release, run the CLI once against real `ffmpeg`/`exiftool`; COLMAP, gsplat, SuGaR and video-render checks stay manual.
 
@@ -31,13 +32,13 @@ CI mocks every external binary and optional reconstruction library, so no test n
 
 The backend's SQLite schema is managed with Alembic. Migration scripts live in `backend/db/migrations/versions/`, configured via `alembic.ini` at the repo root and `backend/db/migrations/env.py`.
 
-`init_db()` (in `backend/db/database.py`) runs automatically on every app startup and applies migrations for you — there is no manual step for normal use. A genuinely fresh database gets its schema created directly and is stamped as already migrated; an existing database is upgraded to the latest revision. Both paths converge on the same schema because the baseline migration is idempotent.
+`init_db()` (in `backend/db/database.py`) runs automatically on every app startup and applies migrations for you — there is no manual step for normal use. A genuinely fresh database gets its schema created directly and is stamped as already migrated; an existing database is upgraded to the latest revision. Both paths converge on the same schema: the baseline revision `0001` is a frozen copy of the schema that never follows `models.py`, and every later revision applies its change to fresh and existing databases alike. `tests/backend/test_database.py` fails when a fresh `alembic upgrade head`, or an upgrade of a released schema, stops matching the models.
 
 To add a schema change:
 
 1. Update the SQLAlchemy models in `backend/db/models.py`.
-2. Generate a migration: `alembic revision --autogenerate -m "describe the change"`.
-3. Review the generated file under `backend/db/migrations/versions/` — autogenerate is a starting point, not the final word, especially for SQLite (which has limited `ALTER TABLE` support).
+2. Generate a migration: `alembic revision --autogenerate -m "describe the change"`. Never edit `0001_baseline.py` or reuse a shipped revision ID; installs store the ID they reached.
+3. Review the generated file under `backend/db/migrations/versions/` — autogenerate is a starting point, not the final word, especially for SQLite (which has limited `ALTER TABLE` support). Changing the constraints of an existing table, or dropping a constrained column, needs `op.batch_alter_table`, which rebuilds the table; `env.py` turns off SQLite's foreign-key enforcement while migrations run so that rebuild cannot fail on, or cascade into, rows in other tables.
 4. Run the app or test suite locally to confirm `init_db()` applies the new migration cleanly against both a fresh DB and your existing local DB.
 
 ## Test gates
