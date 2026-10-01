@@ -112,6 +112,71 @@ def test_generate_plan_invalid_forward_overlap(client):
     assert resp.status_code == 422
 
 
+def _make_coverage_run(name="Gap Area") -> CoverageRun:
+    db = app.state.test_db_session
+    target = TargetArea(
+        name=name,
+        geom_geojson=(
+            '{"type":"Polygon","coordinates":[[[-80.5,35.0],[-80.4,35.0],'
+            '[-80.4,35.1],[-80.5,35.1],[-80.5,35.0]]]}'
+        ),
+    )
+    db.add(target)
+    db.commit()
+    db.refresh(target)
+    run = CoverageRun(target_area_id=target.id, session_ids="", gap_geojson=target.geom_geojson)
+    db.add(run)
+    db.commit()
+    db.refresh(run)
+    return run
+
+
+@pytest.mark.parametrize("value", [-0.1, -1, 1.0, 1.5])
+@pytest.mark.parametrize("field", ["side_overlap_pct", "forward_overlap_pct"])
+def test_generate_plan_rejects_overlap_outside_zero_to_one(client, field, value):
+    """A negative overlap spaced lanes wider than the camera footprint, leaving
+    coverage gaps in a plan that still reported success (#949)."""
+    area = _make_target_area(client, name=f"Overlap {field} {value}")
+    body = {
+        "target_area_id": area["id"],
+        "altitude_ft": 200,
+        "side_overlap_pct": 0.7,
+        "forward_overlap_pct": 0.8,
+        field: value,
+    }
+    resp = client.post("/plans/generate", json=body)
+    assert resp.status_code == 422
+
+
+@pytest.mark.parametrize("value", [-0.1, -1, 1.0, 1.5])
+@pytest.mark.parametrize("field", ["side_overlap_pct", "forward_overlap_pct"])
+def test_generate_from_gaps_rejects_overlap_outside_zero_to_one(client, field, value):
+    run = _make_coverage_run(name=f"Gap overlap {field} {value}")
+    body = {
+        "coverage_run_id": run.id,
+        "altitude_ft": 200,
+        "side_overlap_pct": 0.7,
+        "forward_overlap_pct": 0.8,
+        field: value,
+    }
+    resp = client.post("/plans/generate-from-gaps", json=body)
+    assert resp.status_code == 422
+
+
+@pytest.mark.parametrize("field", ["side_overlap_pct", "forward_overlap_pct"])
+def test_generate_plan_accepts_zero_overlap(client, field):
+    area = _make_target_area(client, name=f"Zero {field}")
+    body = {
+        "target_area_id": area["id"],
+        "altitude_ft": 200,
+        "side_overlap_pct": 0.7,
+        "forward_overlap_pct": 0.8,
+        field: 0,
+    }
+    resp = client.post("/plans/generate", json=body)
+    assert resp.status_code == 200
+
+
 @pytest.mark.parametrize("altitude_ft", [0, -1])
 def test_generate_plan_rejects_non_positive_altitude(client, altitude_ft):
     response = client.post(

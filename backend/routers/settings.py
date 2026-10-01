@@ -64,20 +64,27 @@ class GeneralSettings(BaseModel):
 
 
 class MissionSettings(BaseModel):
+    """Mission defaults. Each drives AppConfig's footprint geometry (tan(fov / 2) times
+    altitude) or a mission computation, so values that make those degenerate are refused:
+    a FOV of 0 or 180 degrees, a non-positive or non-finite length, or an overlap/buffer
+    fraction of 1 (zero spacing, or no usable battery range)."""
+
     model_config = {"extra": "forbid"}
 
-    altitude_ft: float | None = None
-    fov_horizontal_deg: float | None = None
-    fov_vertical_deg: float | None = None
-    image_width_px: int | None = None
-    image_height_px: int | None = None
-    desired_side_overlap: float | None = Field(default=None, ge=0, le=1)
-    desired_forward_overlap: float | None = Field(default=None, ge=0, le=1)
-    lane_spacing_ft: float | None = None
+    altitude_ft: float | None = Field(default=None, gt=0, allow_inf_nan=False)
+    fov_horizontal_deg: float | None = Field(default=None, ge=1, le=179)
+    fov_vertical_deg: float | None = Field(default=None, ge=1, le=179)
+    image_width_px: int | None = Field(default=None, gt=0)
+    image_height_px: int | None = Field(default=None, gt=0)
+    desired_side_overlap: float | None = Field(default=None, ge=0, lt=1)
+    desired_forward_overlap: float | None = Field(default=None, ge=0, lt=1)
+    lane_spacing_ft: float | None = Field(default=None, gt=0, allow_inf_nan=False)
     default_video_fps: float | None = Field(default=None, ge=1, le=60)
-    battery_range_m: float | None = None
-    mission_buffer_pct: float | None = Field(default=None, ge=0, le=1)
-    flight_log_match_tolerance_sec: float | None = None
+    battery_range_m: float | None = Field(default=None, gt=0, allow_inf_nan=False)
+    mission_buffer_pct: float | None = Field(default=None, ge=0, lt=1)
+    flight_log_match_tolerance_sec: float | None = Field(
+        default=None, ge=0, allow_inf_nan=False
+    )
 
 
 class IngestSettings(BaseModel):

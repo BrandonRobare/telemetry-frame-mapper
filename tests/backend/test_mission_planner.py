@@ -4,6 +4,9 @@ import json
 import math
 
 import pytest
+from shapely import make_valid
+from shapely.geometry import LineString, Point, shape
+from shapely.ops import transform, unary_union
 
 from backend.services.mission_planner import generate_lawnmower
 
@@ -11,6 +14,48 @@ _POLY = (
     '{"type":"Polygon","coordinates":'
     '[[[-80.5,35.0],[-80.4,35.0],[-80.4,35.1],[-80.5,35.1],[-80.5,35.0]]]}'
 )
+
+# The test square with its north-east quadrant cut away.
+_L_SHAPE = {
+    "type": "Polygon",
+    "coordinates": [[
+        [-80.5, 35.0], [-80.4, 35.0], [-80.4, 35.03], [-80.47, 35.03],
+        [-80.47, 35.1], [-80.5, 35.1], [-80.5, 35.0],
+    ]],
+}
+# A U opening east: every sweep through the two arms is split in two by the notch.
+_U_SHAPE = {
+    "type": "Polygon",
+    "coordinates": [[
+        [-80.5, 35.0], [-80.4, 35.0], [-80.4, 35.03], [-80.47, 35.03],
+        [-80.47, 35.07], [-80.4, 35.07], [-80.4, 35.1], [-80.5, 35.1], [-80.5, 35.0],
+    ]],
+}
+# A square rotated 45 degrees, like a diagonal parcel.
+_DIAMOND = {
+    "type": "Polygon",
+    "coordinates": [[
+        [-80.45, 35.0], [-80.4, 35.05], [-80.45, 35.1], [-80.5, 35.05], [-80.45, 35.0],
+    ]],
+}
+_AREAS = pytest.mark.parametrize(
+    "area", [_L_SHAPE, _U_SHAPE, _DIAMOND], ids=["l-shape", "u-shape", "diamond"]
+)
+
+
+def _to_local_m(geom, lat0: float):
+    """Project lon/lat onto a local flat grid in metres, the planner's own approximation."""
+    m_per_deg_lon = 111_320 * math.cos(math.radians(lat0))
+    return transform(lambda x, y, z=None: (x * m_per_deg_lon, y * 111_320), geom)
+
+
+def _lane_spacing_m(altitude_ft: float, side_overlap: float, fov_h_deg: float = 84.0) -> float:
+    altitude_m = altitude_ft * 0.3048
+    return 2 * altitude_m * math.tan(math.radians(fov_h_deg / 2)) * (1 - side_overlap)
+
+
+def _lanes(result: dict) -> list[list[list[float]]]:
+    return [g["coordinates"] for g in json.loads(result["lanes_geojson"])["geometries"]]
 
 
 def test_waypoint_spacing_present():
@@ -111,6 +156,140 @@ def test_lane_limit_is_enforced_during_generation(monkeypatch):
             side_overlap=0.7,
             forward_overlap=0.8,
         )
+
+
+@pytest.mark.parametrize("overlap", [-0.1, 1.0])
+@pytest.mark.parametrize("name", ["side_overlap", "forward_overlap"])
+def test_overlap_outside_zero_to_one_is_rejected(name, overlap):
+    kwargs = {"side_overlap": 0.7, "forward_overlap": 0.8, name: overlap}
+    with pytest.raises(ValueError, match=name):
+        generate_lawnmower(target_geojson=_POLY, altitude_ft=200, **kwargs)
+
+
+# ---------------------------------------------------------------------------
+# Lanes are clipped to the drawn area (#949)
+# ---------------------------------------------------------------------------
+
+
+@_AREAS
+def test_every_waypoint_lies_inside_the_area_plus_one_lane_spacing(area):
+    """Lanes spanned the polygon's bounding box, so waypoints left the drawn area (#949)."""
+    result = generate_lawnmower(
+        target_geojson=json.dumps(area), altitude_ft=200, side_overlap=0.7, forward_overlap=0.8
+    )
+    polygon = shape(area)
+    lat0 = polygon.centroid.y
+    allowed = _to_local_m(polygon, lat0).buffer(_lane_spacing_m(200, 0.7))
+
+    lanes = _lanes(result)
+    assert lanes
+    for lane in lanes:
+        for lon, lat in lane:
+            assert allowed.contains(_to_local_m(Point(lon, lat), lat0)), (lon, lat)
+
+
+@_AREAS
+def test_no_lane_leaves_the_drawn_area(area):
+    """A lane is flown end to end, so the whole segment has to stay inside (#949)."""
+    result = generate_lawnmower(
+        target_geojson=json.dumps(area), altitude_ft=200, side_overlap=0.7, forward_overlap=0.8
+    )
+    inside = shape(area).buffer(1e-9)
+    for lane in _lanes(result):
+        assert inside.contains(LineString(lane)), lane
+
+
+@_AREAS
+def test_clipped_lanes_still_image_the_whole_area(area):
+    """Clipping must not open coverage holes: every point of the area is within half a
+    camera footprint of some lane."""
+    altitude_ft, fov_h, fov_v = 200, 84.0, 64.0
+    result = generate_lawnmower(
+        target_geojson=json.dumps(area),
+        altitude_ft=altitude_ft,
+        side_overlap=0.7,
+        forward_overlap=0.8,
+        fov_h_deg=fov_h,
+        fov_v_deg=fov_v,
+    )
+    polygon = shape(area)
+    lat0 = polygon.centroid.y
+    altitude_m = altitude_ft * 0.3048
+    half_footprint_m = altitude_m * math.tan(math.radians(min(fov_h, fov_v) / 2))
+    imaged = unary_union(
+        [_to_local_m(LineString(lane), lat0).buffer(half_footprint_m) for lane in _lanes(result)]
+    )
+    area_m = _to_local_m(polygon, lat0)
+    assert area_m.difference(imaged).area / area_m.area < 1e-6
+
+
+def test_split_sweeps_are_flown_cell_by_cell_not_across_the_notch():
+    """Sweeps through a concave area split in two. Zig-zagging between the two pieces on
+    every sweep would cross the notch (outside the area) once per lane; flying one arm
+    and then the other crosses it at most once."""
+    result = generate_lawnmower(
+        target_geojson=json.dumps(_U_SHAPE),
+        altitude_ft=200,
+        side_overlap=0.7,
+        forward_overlap=0.8,
+    )
+    polygon = shape(_U_SHAPE)
+    lat0 = polygon.centroid.y
+    allowed = _to_local_m(polygon, lat0).buffer(_lane_spacing_m(200, 0.7))
+    lanes = _lanes(result)
+
+    crossings = [
+        (prev[-1], nxt[0])
+        for prev, nxt in zip(lanes, lanes[1:], strict=False)
+        if not allowed.contains(_to_local_m(LineString([prev[-1], nxt[0]]), lat0))
+    ]
+    assert len(crossings) <= 1, crossings
+
+
+def test_rectangle_keeps_its_full_height_serpentine():
+    result = generate_lawnmower(
+        target_geojson=_POLY, altitude_ft=200, side_overlap=0.7, forward_overlap=0.8
+    )
+    lanes = _lanes(result)
+    assert result["lane_count"] == len(lanes) > 1
+    for i, ((x0, y0), (x1, y1)) in enumerate(lanes):
+        assert x0 == x1
+        assert {y0, y1} == {35.0, 35.1}
+        assert (y0 < y1) == (i % 2 == 0), "lanes must alternate north and south"
+    xs = [lane[0][0] for lane in lanes]
+    assert xs == sorted(xs)
+
+
+def test_area_narrower_than_one_lane_spacing_still_gets_a_lane():
+    """A strip narrower than half a lane spacing used to produce no lane at all."""
+    strip = {
+        "type": "Polygon",
+        "coordinates": [[
+            [-80.5, 35.0], [-80.4999, 35.0], [-80.4999, 35.01], [-80.5, 35.01], [-80.5, 35.0],
+        ]],
+    }
+    result = generate_lawnmower(
+        target_geojson=json.dumps(strip), altitude_ft=200, side_overlap=0.7, forward_overlap=0.8
+    )
+    lanes = _lanes(result)
+    assert len(lanes) == 1
+    assert shape(strip).buffer(1e-9).contains(LineString(lanes[0]))
+
+
+def test_self_intersecting_area_is_planned_instead_of_crashing():
+    bowtie = {
+        "type": "Polygon",
+        "coordinates": [[
+            [-80.5, 35.0], [-80.4, 35.1], [-80.4, 35.0], [-80.5, 35.1], [-80.5, 35.0],
+        ]],
+    }
+    result = generate_lawnmower(
+        target_geojson=json.dumps(bowtie), altitude_ft=200, side_overlap=0.7, forward_overlap=0.8
+    )
+    assert result["lane_count"] > 0
+    inside = make_valid(shape(bowtie)).buffer(1e-9)
+    for lane in _lanes(result):
+        assert inside.contains(LineString(lane)), lane
 
 
 # ---------------------------------------------------------------------------

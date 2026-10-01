@@ -35,10 +35,12 @@ if defined _VSPATH if exist "%_VSPATH%\VC\Auxiliary\Build\vcvars64.bat" (
 echo Starting backend with config.yaml deployment settings ...
 start "Backend" cmd /k "python -m backend"
 
+REM The dev frontend talks to the backend directly: without VITE_API_URL
+REM every API call hits the Vite server and the app renders empty (#803).
 where npm >nul 2>nul
 if not errorlevel 1 if exist "frontend\" (
     echo Starting frontend on http://localhost:5173 ...
-    start "TFM-Frontend" cmd /k "cd frontend && npm run dev"
+    start "TFM-Frontend" cmd /k "cd frontend && set VITE_API_URL=http://localhost:8000&& npm run dev"
     timeout /t 3 >nul
     start "" "http://localhost:5173"
 ) else if exist "frontend\dist\" (
