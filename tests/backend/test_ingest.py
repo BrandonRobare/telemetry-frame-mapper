@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+import io
 import os
+import random
 import tempfile
+from unittest.mock import patch
 
 import piexif
 import pytest
 from PIL import Image
 
-from backend.services.ingest import extract_exif, generate_thumbnail
+from backend.services.ingest import UnreadableImageError, extract_exif, generate_thumbnail
 
 
 def make_gps_jpeg(
@@ -161,6 +164,75 @@ def test_extract_exif_parses_dji_xmp_calibrated_focal_and_zoom():
     assert data["focal_length_35mm"] == pytest.approx(24.0)
     assert data["digital_zoom_ratio"] == pytest.approx(1.5)
     os.unlink(path)
+
+
+def test_extract_exif_raises_unreadable_image_error_for_random_bytes(tmp_path):
+    """Bytes that are not an image must raise, not come back as an empty-metadata frame."""
+    path = tmp_path / "corrupt.jpg"
+    path.write_bytes(random.Random(943).randbytes(2048))
+
+    with pytest.raises(UnreadableImageError, match="cannot open image"):
+        extract_exif(str(path))
+
+
+def test_extract_exif_raises_unreadable_image_error_for_empty_file(tmp_path):
+    path = tmp_path / "empty.jpg"
+    path.write_bytes(b"")
+
+    with pytest.raises(UnreadableImageError):
+        extract_exif(str(path))
+
+
+def test_extract_exif_logs_unparseable_exif_block(tmp_path):
+    """A readable image with a corrupt EXIF block imports without metadata, and says so."""
+    path = tmp_path / "bad_exif.jpg"
+    Image.new("RGB", (64, 48)).save(path, "JPEG", exif=b"Exif\x00\x00" + b"\x13" * 40)
+
+    with patch("backend.services.ingest.logger") as mock_logger:
+        data = extract_exif(str(path))
+
+    assert (data["width"], data["height"]) == (64, 48)
+    assert data["latitude"] is None
+    mock_logger.warning.assert_called_once()
+    assert "bad_exif.jpg" in mock_logger.warning.call_args.args
+
+
+def test_extract_exif_logs_unparseable_capture_date(tmp_path):
+    path = tmp_path / "bad_date.jpg"
+    exif_bytes = piexif.dump({"Exif": {piexif.ExifIFD.DateTimeOriginal: b"0000:00:00 00:00:00"}})
+    Image.new("RGB", (32, 32)).save(path, "JPEG", exif=exif_bytes)
+
+    with patch("backend.services.ingest.logger") as mock_logger:
+        data = extract_exif(str(path))
+
+    assert data["timestamp"] is None
+    mock_logger.warning.assert_called_once()
+    assert "bad_date.jpg" in mock_logger.warning.call_args.args
+
+
+def test_generate_thumbnail_raises_unreadable_image_error_for_truncated_jpeg(tmp_path):
+    """A cut-short copy parses its header but its pixel data cannot be decoded."""
+    buf = io.BytesIO()
+    Image.effect_noise((400, 300), 64).convert("RGB").save(buf, "JPEG")
+    src = tmp_path / "truncated.jpg"
+    src.write_bytes(buf.getvalue()[: len(buf.getvalue()) // 2])
+    dest = tmp_path / "thumbs" / "truncated.jpg"
+
+    with pytest.raises(UnreadableImageError, match="does not decode"):
+        generate_thumbnail(str(src), str(dest), size=64)
+    assert not dest.exists()
+
+
+def test_generate_thumbnail_write_failure_is_not_an_unreadable_image(tmp_path):
+    """Failing to write the thumbnail says nothing about the source image."""
+    src = tmp_path / "ok.jpg"
+    Image.new("RGB", (100, 100)).save(src, "JPEG")
+    dest = tmp_path / "thumbs" / "ok.jpg"
+
+    with patch.object(Image.Image, "save", side_effect=OSError("No space left on device")):
+        with pytest.raises(OSError, match="No space left") as excinfo:
+            generate_thumbnail(str(src), str(dest), size=64)
+    assert not isinstance(excinfo.value, UnreadableImageError)
 
 
 def test_generate_thumbnail_creates_file():

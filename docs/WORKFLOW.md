@@ -59,14 +59,14 @@ The backend creates `data/drone_mapping.db` (SQLite) on first run. Start it from
 2. In the UI, open the import modal and enter the path **relative to `imports/`** — just `2026-06-11-tower-site`. Absolute paths and `..` are rejected by design (path-traversal hardening).
 3. The progress bar polls until done; the session then appears in the sidebar.
 
-During import the backend reads GPS EXIF and DJI XMP (relative altitude, yaw, gimbal pitch), scores each image for sharpness/brightness, computes ground footprints, and generates thumbnails.
+During import the backend reads GPS EXIF and DJI XMP (relative altitude, yaw, gimbal pitch), scores each image for sharpness/brightness, computes ground footprints, and generates thumbnails. Files that cannot be opened or decoded as images (for example a copy cut short) are skipped and recorded as `image_skipped` in the Session Log. A frame whose quality scoring fails is kept with the `unscored` flag and is not usable (`quality_failed` in the log); a missing thumbnail is logged as `thumbnail_failed`.
 
 When the import finishes, the modal shows a Quick QA card. Alongside completeness and blur checks it runs GPS-lock heuristics over the imported coordinates: frames stuck at (0, 0), coordinates frozen across many consecutive frames, and implausible position jumps all produce warnings. It also flags variable lighting when the persisted per-frame brightness scores have a 10th-to-90th percentile spread of 60 or more (with at least five scored frames), which avoids a single outlier while surfacing shadows or changing exposure that may hurt reconstruction consistency. If any appear, re-check the flight's GPS quality (or sync a flight log in the GPS Sync tab) before reconstructing.
 
 ## 5. Review on the map, plan, and flag
 
 - **Map tab** — footprint polygons and the coverage overlay on ESRI satellite imagery. The sidebar shows session stats, coverage %, quality flags, and editable session tags and operator notes; "Run Coverage Analysis" recomputes coverage. The session picker in the top bar can filter by tag and its **Bulk** menu can archive, assign a project, add/replace tags, or delete selected visible sessions. Type `DELETE` to enable a bulk delete.
-- **Review tab** — thumbnail grid; cycle per-image flags (good / blurry / no_gps / dark / bright), and toggle which frames feed reconstruction. After a reconstruction has run, per-frame COLMAP reprojection-error badges appear here — sort by them to find weak frames.
+- **Review tab** — thumbnail grid; cycle per-image flags (good / blurry / no_gps / dark / bright; import sets `unscored` when scoring failed), and toggle which frames feed reconstruction. After a reconstruction has run, per-frame COLMAP reprojection-error badges appear here — sort by them to find weak frames.
 
 ### Dense rerun for weak registration
 

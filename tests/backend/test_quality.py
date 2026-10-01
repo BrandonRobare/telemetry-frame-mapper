@@ -5,6 +5,7 @@ import tempfile
 
 import cv2
 import numpy as np
+import pytest
 
 from backend.services.quality import flag_image, score_brightness, score_sharpness
 
@@ -46,6 +47,16 @@ def test_brightness_bright_image():
     path = make_temp_jpeg(img)
     assert score_brightness(path) > 210
     os.unlink(path)
+
+
+@pytest.mark.parametrize("scorer", [score_sharpness, score_brightness])
+def test_scoring_an_undecodable_file_raises_instead_of_returning_a_score(tmp_path, scorer):
+    """A made-up score (0.0 sharpness / 128.0 brightness) would be flagged as if it were real."""
+    path = tmp_path / "corrupt.jpg"
+    path.write_bytes(b"\x00not an image" * 64)
+
+    with pytest.raises(ValueError, match="corrupt.jpg"):
+        scorer(str(path))
 
 
 def test_flag_good():

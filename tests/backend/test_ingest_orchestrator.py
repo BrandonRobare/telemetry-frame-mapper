@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import io
+import random
 from pathlib import Path
 from unittest.mock import patch
 
 import piexif
+import pytest
 from PIL import Image as PILImage
 
 
@@ -679,3 +682,175 @@ def test_run_logs_footprint_failure(tmp_path, setup_test_db):
 
     mock_logger.warning.assert_called_once()
     assert "boom.jpg" in mock_logger.warning.call_args.args
+
+
+# ---------------------------------------------------------------------------
+# Issue #943: unreadable images are skipped, and scoring/thumbnail failures
+# are recorded instead of leaving a frame flagged 'good'
+# ---------------------------------------------------------------------------
+
+_DEFAULT_INGEST_CFG = {
+    "accepted_extensions": [".jpg", ".jpeg"],
+    "filter_zero_gps": False,
+    "thumbnail_size_px": 64,
+    "thumbnail_jpeg_quality": 75,
+}
+
+
+def _new_session(name: str, folder: Path):
+    from backend.db.models import Session as SessionModel
+    from backend.main import app
+
+    db = app.state.test_db_session
+    session = SessionModel(name=name, folder_path=str(folder), photo_count=0, usable_count=0)
+    db.add(session)
+    db.commit()
+    db.refresh(session)
+    return db, session
+
+
+def _import_folder(session_id: int, folder: Path) -> None:
+    from backend.services.ingest_orchestrator import _run
+    from tests.conftest import TestSessionLocal
+
+    with patch("backend.core.config.get_ingest_config", return_value=_DEFAULT_INGEST_CFG), \
+         patch("backend.core.config.load_config") as mock_load_cfg:
+        mock_load_cfg.return_value.processed_dir = str(folder / "processed")
+        mock_load_cfg.return_value.thumbnail_size_px = 64
+        mock_load_cfg.return_value.fov_horizontal_deg = 83
+        mock_load_cfg.return_value.fov_vertical_deg = 53
+        mock_load_cfg.return_value.target_crs = "EPSG:32617"
+        _run(session_id, folder, TestSessionLocal)
+
+
+def _log_entries(db, session_id: int, event_type: str) -> list:
+    from backend.db.models import SessionLogEntry
+
+    return db.query(SessionLogEntry).filter(
+        SessionLogEntry.session_id == session_id,
+        SessionLogEntry.event_type == event_type,
+    ).all()
+
+
+def _truncated_jpeg_bytes() -> bytes:
+    """A JPEG cut off halfway, like an interrupted copy: the header parses, the data does not."""
+    buf = io.BytesIO()
+    PILImage.effect_noise((400, 300), 64).convert("RGB").save(buf, "JPEG")
+    data = buf.getvalue()
+    return data[: len(data) // 2]
+
+
+def test_run_skips_corrupt_jpg_and_logs_image_skipped(tmp_path, setup_test_db):
+    """A .jpg holding random bytes is skipped and logged, never imported as a frame."""
+    from backend.db.models import Image as ImageModel
+    from backend.db.models import Session as SessionModel
+    from backend.services.ingest_orchestrator import get_progress
+
+    db, session = _new_session("corrupt-jpg", tmp_path)
+    (tmp_path / "corrupt.jpg").write_bytes(random.Random(943).randbytes(2048))
+    _make_gps_jpg(tmp_path, "valid_1.jpg", lat=35.0, lon=-80.0)
+    _make_gps_jpg(tmp_path, "valid_2.jpg", lat=35.001, lon=-80.001)
+
+    _import_folder(session.id, tmp_path)
+
+    db.expire_all()
+    filenames = {img.filename for img in
+                 db.query(ImageModel).filter(ImageModel.session_id == session.id).all()}
+    assert filenames == {"valid_1.jpg", "valid_2.jpg"}
+    progress = get_progress(session.id)
+    assert progress["status"] == "done"
+    assert progress["skipped"] == 1
+    skip_logs = _log_entries(db, session.id, "image_skipped")
+    assert len(skip_logs) == 1
+    assert "corrupt.jpg" in skip_logs[0].message
+    stored = db.query(SessionModel).filter(SessionModel.id == session.id).one()
+    assert stored.photo_count == 2
+    assert "1 skipped" in _log_entries(db, session.id, "import_complete")[0].message
+
+
+def test_run_skips_truncated_jpg_whose_pixels_do_not_decode(tmp_path, setup_test_db):
+    """A cut-short copy opens (its header is intact) but must still be skipped and logged."""
+    from backend.db.models import Image as ImageModel
+    from backend.db.models import Session as SessionModel
+    from backend.services.ingest_orchestrator import get_progress
+
+    db, session = _new_session("truncated-jpg", tmp_path)
+    (tmp_path / "a_truncated.jpg").write_bytes(_truncated_jpeg_bytes())
+    _make_gps_jpg(tmp_path, "b_valid.jpg", lat=35.0, lon=-80.0)
+
+    _import_folder(session.id, tmp_path)
+
+    db.expire_all()
+    images = db.query(ImageModel).filter(ImageModel.session_id == session.id).all()
+    assert [img.filename for img in images] == ["b_valid.jpg"]
+    assert images[0].thumb_path is not None
+    assert Path(images[0].thumb_path).is_file()
+    assert get_progress(session.id)["skipped"] == 1
+    skip_logs = _log_entries(db, session.id, "image_skipped")
+    assert len(skip_logs) == 1
+    assert "a_truncated.jpg" in skip_logs[0].message
+    stored = db.query(SessionModel).filter(SessionModel.id == session.id).one()
+    assert stored.photo_count == 1
+
+
+@pytest.mark.parametrize("failing_scorer", ["score_sharpness", "score_brightness"])
+def test_run_scoring_failure_stores_frame_unusable_with_quality_failed_entry(
+    tmp_path, setup_test_db, failing_scorer
+):
+    """When scoring raises, the frame is kept but unusable and flagged, never 'good'."""
+    from backend.db.models import Image as ImageModel
+    from backend.db.models import Session as SessionModel
+
+    db, session = _new_session("scoring-fails", tmp_path)
+    _make_gps_jpg(tmp_path, "frame.jpg", lat=35.0, lon=-80.0)
+
+    with patch(
+        f"backend.services.ingest_orchestrator.{failing_scorer}",
+        side_effect=RuntimeError("scorer exploded"),
+    ), patch("backend.services.ingest_orchestrator.logger") as mock_logger:
+        _import_folder(session.id, tmp_path)
+
+    db.expire_all()
+    img = db.query(ImageModel).filter(ImageModel.session_id == session.id).one()
+    assert img.flag != "good"
+    assert img.flag == "unscored"
+    assert img.usable is False
+    assert img.sharpness_score is None
+    assert img.brightness_score is None
+    failed_logs = _log_entries(db, session.id, "quality_failed")
+    assert len(failed_logs) == 1
+    assert "frame.jpg" in failed_logs[0].message
+    assert "scorer exploded" in failed_logs[0].message
+    stored = db.query(SessionModel).filter(SessionModel.id == session.id).one()
+    assert stored.photo_count == 1
+    assert stored.usable_count == 0
+    warning = mock_logger.warning.call_args
+    assert warning is not None
+    assert "frame.jpg" in warning.args
+    assert warning.kwargs.get("exc_info") is True
+
+
+def test_run_logs_thumbnail_failure(tmp_path, setup_test_db):
+    """A thumbnail write failure keeps the frame but is logged, not silently swallowed."""
+    from backend.db.models import Image as ImageModel
+
+    db, session = _new_session("thumbnail-fails", tmp_path)
+    _make_gps_jpg(tmp_path, "frame.jpg", lat=35.0, lon=-80.0)
+
+    with patch(
+        "backend.services.ingest_orchestrator.generate_thumbnail",
+        side_effect=OSError("No space left on device"),
+    ), patch("backend.services.ingest_orchestrator.logger") as mock_logger:
+        _import_folder(session.id, tmp_path)
+
+    db.expire_all()
+    img = db.query(ImageModel).filter(ImageModel.session_id == session.id).one()
+    assert img.thumb_path is None
+    thumb_logs = _log_entries(db, session.id, "thumbnail_failed")
+    assert len(thumb_logs) == 1
+    assert "frame.jpg" in thumb_logs[0].message
+    assert "No space left on device" in thumb_logs[0].message
+    warning = mock_logger.warning.call_args
+    assert warning is not None
+    assert "frame.jpg" in warning.args
+    assert warning.kwargs.get("exc_info") is True
