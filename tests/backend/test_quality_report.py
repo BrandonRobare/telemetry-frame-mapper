@@ -259,6 +259,8 @@ def _surface_rec(*, mesh=None, splat=None, pointcloud=None):
         mesh_glb_path=str(mesh) if mesh else None,
         splat_path=str(splat) if splat else None,
         pointcloud_path=str(pointcloud) if pointcloud else None,
+        # Identity georeference, so checkpoint UTM coordinates equal COLMAP ones.
+        geo_transform=_FakeRecWithMesh.geo_transform,
     )
 
 
