@@ -42,10 +42,13 @@ def cleanup_cloud(
     outlier_k: int = _DEFAULT_OUTLIER_K,
     outlier_std_threshold: float = _DEFAULT_OUTLIER_STD_THRESHOLD,
     target_area_geojson: str | None = None,
+    geo_transform: str | dict | None = None,
 ) -> tuple[GaussianCloud, dict]:
     """Apply low-opacity, floater, and outlier filters; return (result, stats).
 
-    Filters are applied in order:
+    An optional lon/lat *target_area_geojson* crop runs first and needs the
+    reconstruction's solved *geo_transform*; without one it raises
+    ``NotGeoreferencedError``. The other filters are applied in order:
     1. Low-opacity removal: keep the top *opacity_keep_ratio* fraction by raw logit.
     2. Huge-scale floater removal: drop gaussians whose log-scale magnitude
        (L2 norm of the three scale components) exceeds
@@ -69,7 +72,7 @@ def cleanup_cloud(
     # ---- 0. optional target-area crop ---------------------------------------
     result = cloud
     if target_area_geojson:
-        result, target_clipped = _crop_to_target_area(result, target_area_geojson)
+        result, target_clipped = _crop_to_target_area(result, target_area_geojson, geo_transform)
         stats["target_area_clipped"] = target_clipped
 
     n_current = result.means.shape[0]
@@ -128,6 +131,7 @@ def cleanup_ply_file(
     outlier_k: int = _DEFAULT_OUTLIER_K,
     outlier_std_threshold: float = _DEFAULT_OUTLIER_STD_THRESHOLD,
     target_area_geojson: str | None = None,
+    geo_transform: str | dict | None = None,
 ) -> tuple[dict, int, int]:
     """Read *src*, apply cleanup filters, write a cleaned PLY to *dst*.
 
@@ -142,6 +146,7 @@ def cleanup_ply_file(
         outlier_k=outlier_k,
         outlier_std_threshold=outlier_std_threshold,
         target_area_geojson=target_area_geojson,
+        geo_transform=geo_transform,
     )
     write_3dgs_ply(dst, cleaned)
     n_after = cleaned.means.shape[0]
@@ -156,8 +161,22 @@ def cleanup_ply_file(
 def _crop_to_target_area(
     cloud: GaussianCloud,
     target_area_geojson: str,
+    geo_transform: str | dict | None,
 ) -> tuple[GaussianCloud, int]:
-    """Keep only Gaussian centers inside the target-area polygon in x/y space."""
+    """Keep only Gaussian centers whose ground position is inside the target area.
+
+    The target area is lon/lat (WGS84) and the Gaussian centers are in COLMAP's
+    local frame, whose axes are arbitrarily rotated and tilted. Both are compared
+    in the reconstruction's UTM zone: the centers through the solved
+    ``geo_transform``, the polygon through pyproj. A reconstruction that is not
+    georeferenced raises ``NotGeoreferencedError``.
+    """
+    from pyproj import Transformer
+    from shapely.ops import transform
+
+    from .reconstruction import _require_geo_transform, _utm_epsg, _world_points_to_utm
+
+    geo = _require_geo_transform(geo_transform, "Cropping a splat to a target area")
     try:
         polygon = shape(json.loads(target_area_geojson))
     except (TypeError, json.JSONDecodeError, ValueError) as exc:
@@ -165,8 +184,12 @@ def _crop_to_target_area(
     if polygon.is_empty:
         raise ValueError("Target area geometry is empty")
 
+    utm_crs = f"EPSG:{_utm_epsg(str(geo['utm_zone']))}"
+    to_utm = Transformer.from_crs("EPSG:4326", utm_crs, always_xy=True).transform
+    polygon_utm = transform(to_utm, polygon)
+    centers_utm = _world_points_to_utm(cloud.means.astype(np.float64), geo)
     mask = np.array(
-        [polygon.covers(Point(float(x), float(y))) for x, y in cloud.means[:, :2]],
+        [polygon_utm.covers(Point(float(x), float(y))) for x, y in centers_utm[:, :2]],
         dtype=bool,
     )
     kept = int(mask.sum())

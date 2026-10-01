@@ -488,6 +488,7 @@ def export_reconstruction_share_bundle(reconstruction_id: int, db: DBSession = D
 def upload_reconstruction_to_cesium_ion(reconstruction_id: int, db: DBSession = Depends(get_db)):
     """Publish the existing Cesium-ready 3D Tiles share bundle to Cesium ion."""
     from ..services.cesium_ion import CesiumIonError, upload_tileset
+    from ..services.reconstruction import _require_geo_transform
     from ..services.share_bundle import build_share_bundle
 
     rec = db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).first()
@@ -496,6 +497,9 @@ def upload_reconstruction_to_cesium_ion(reconstruction_id: int, db: DBSession = 
     exports_dir = Path(get_config().exports_dir)
     bundle = confine_path(exports_dir / f"reconstruction_{rec.id}_share.zip", exports_dir)
     try:
+        # Ion only places the model on the globe: a bundle without a tileset is useless
+        # there, so a non-georeferenced reconstruction is refused (422) up front (#950).
+        _require_geo_transform(rec.geo_transform, "Publishing to Cesium ion", rec.id)
         build_share_bundle(bundle, rec, exports_dir)
         name = f"Reconstruction {rec.id}"
         return upload_tileset(get_cesium_ion_config(), bundle.name, bundle, name)

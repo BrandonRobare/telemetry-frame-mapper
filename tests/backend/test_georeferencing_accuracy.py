@@ -496,3 +496,44 @@ def test_validate_checkpoints_empty_points_rejected(client):
         json={"points": []},
     )
     assert resp.status_code == 422
+
+
+def test_validate_checkpoints_refuses_reconstruction_without_geo_transform(client, tmp_path):
+    """Surveyed checkpoints cannot be compared with a non-georeferenced surface (#950)."""
+    from backend.services import ply_io
+
+    splat = tmp_path / "splat.ply"
+    ply_io.write_3dgs_ply(
+        splat,
+        ply_io.GaussianCloud(
+            means=np.zeros((2, 3), dtype=np.float32),
+            sh0=np.zeros((2, 3), dtype=np.float32),
+            shN=np.zeros((2, 0, 3), dtype=np.float32),
+            opacities=np.zeros(2, dtype=np.float32),
+            scales=np.zeros((2, 3), dtype=np.float32),
+            quats=np.zeros((2, 4), dtype=np.float32),
+        ),
+    )
+    db = _db(client)
+    session = SessionModel(name="CheckNoGeo", folder_path="/tmp/chknogeo")
+    db.add(session)
+    db.commit()
+    db.refresh(session)
+    rec = Reconstruction(
+        session_id=session.id,
+        status="complete",
+        preset="quick",
+        frames_used=5,
+        splat_path=str(splat),
+    )
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+
+    resp = client.post(
+        f"/reconstruction/{rec.id}/validate-checkpoints",
+        json={"points": [{"x": 0, "y": 0, "z": 0}]},
+    )
+
+    assert resp.status_code == 422
+    assert "not georeferenced" in resp.json()["detail"]
