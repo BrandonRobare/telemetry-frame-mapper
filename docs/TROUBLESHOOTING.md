@@ -17,7 +17,16 @@ The video has no extractable subtitle/telemetry track. Causes: the video wasn't 
 The SRT exists but contains fewer than two GPS fixes — usually an indoor/no-lock flight, or a non-GPS DJI caption format. Open the `.srt` in a text editor; the parser expects `GPS(lon, lat, alt)` patterns with optional `H xxx.xm` relative height.
 
 **Frames get coordinates but they're slightly time-shifted / drift along the path.**
-The frame rate estimate is off. Pass the rate you actually used at extraction explicitly, e.g. `--frame-rate 2` if you extracted with `-vf fps=2`. Also check the filenames: the frame index is read as the **last** number in each filename — names like `DJI_0081_frame_42.jpg` need that convention to hold.
+The frame rate estimate is off. Pass the rate you actually used at extraction explicitly, e.g. `--frame-rate 2` if you extracted with `-vf fps=2`. Also check the filenames: the frame index is read as the **last** number in each filename — names like `DJI_0081_frame_42.jpg` need that convention to hold. If every frame is off by the same time, check `--start-number`: it must be the number ffmpeg gave the first frame it wrote (1 unless you ran ffmpeg with `-start_number`).
+
+**`error: Cannot safely infer frame rate: numbering starts at 1 but the first frame is 21 (missing 20 frame numbers). …`**
+Frames were deleted from the start of the folder (typically the take-off). That is fine, but the rate can no longer be estimated from the frame count: pass the extraction rate, e.g. `--frame-rate 2`. If nothing was deleted and your extraction simply numbered frames from 21, pass `--start-number 21` instead.
+
+**`error: Cannot time frame 0: it is numbered below the start number 1. …`**
+The frames were extracted with `ffmpeg -start_number 0`. Pass `--start-number 0` (or `start_number: 0` in a `dvg-pipeline` job spec).
+
+**`error: Cannot infer frame rate: the telemetry reports no duration (it ends at 0 s). …`**
+The SRT timestamps give no flight length to estimate the rate from. Pass the extraction rate with `--frame-rate`.
 
 **Wrong absolute altitude in EXIF (but positions are right).**
 `--takeoff-altitude` is meters above sea level of the launch point, not flight height. DJI telemetry height is relative to takeoff; the CLI adds the two.

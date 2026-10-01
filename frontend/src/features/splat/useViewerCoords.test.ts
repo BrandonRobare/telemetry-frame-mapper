@@ -2,7 +2,13 @@
 import { useRef } from 'react'
 import { describe, it, expect } from 'vitest'
 import { renderHook } from '@testing-library/react'
-import { deriveGroundPlaneY, worldToGps, gpsToWorld, useRayCast } from './useViewerCoords'
+import {
+  deriveGroundPlaneY,
+  gpsToWorld,
+  metresPerSceneUnit,
+  useRayCast,
+  worldToGps,
+} from './useViewerCoords'
 import type { GeoTransform } from '../../types/api'
 
 const IDENTITY: GeoTransform = {
@@ -98,6 +104,27 @@ describe('deriveGroundPlaneY', () => {
 
   it('falls back to zero when geo-transform metadata is missing', () => {
     expect(deriveGroundPlaneY(undefined)).toBe(0)
+  })
+})
+
+describe('metresPerSceneUnit', () => {
+  it('is the geo-transform scale for a georeferenced reconstruction', () => {
+    expect(metresPerSceneUnit({ ...IDENTITY, scale: 2.5 })).toBe(2.5)
+  })
+
+  it('is null when there is no geo-transform, so nothing is labelled in metres', () => {
+    expect(metresPerSceneUnit(undefined)).toBeNull()
+    expect(metresPerSceneUnit(null)).toBeNull()
+  })
+
+  it("is null for the local-frame placeholder's 'unknown' UTM zone", () => {
+    expect(metresPerSceneUnit({ ...IDENTITY, utm_zone: 'unknown' })).toBeNull()
+  })
+
+  it('is null for a degenerate scale', () => {
+    expect(metresPerSceneUnit({ ...IDENTITY, scale: 0 })).toBeNull()
+    expect(metresPerSceneUnit({ ...IDENTITY, scale: -1 })).toBeNull()
+    expect(metresPerSceneUnit({ ...IDENTITY, scale: Number.NaN })).toBeNull()
   })
 })
 
