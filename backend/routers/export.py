@@ -416,6 +416,9 @@ def export_webodm_georeferencing_csv(session_id: int, db: DBSession = Depends(ge
     The archive intentionally contains only ``odm_georeferencing.csv`` for
     workflows that need the ODM georeferencing sidecar, not a full image bundle.
     """
+    # The same CSV as the full package, so the names match and the formula guard applies.
+    from ..services.webodm_package import odm_georeferencing_csv, package_image_names
+
     session = db.query(SessionModel).filter(SessionModel.id == session_id).first()
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -428,14 +431,7 @@ def export_webodm_georeferencing_csv(session_id: int, db: DBSession = Depends(ge
     exports_dir.mkdir(parents=True, exist_ok=True)
     zip_path = exports_dir / f"webodm_georeferencing_csv_{int(session.id)}.zip"
     with _atomic_zip(zip_path, exports_dir) as zf:
-        csv_rows = "filename,latitude,longitude,altitude\n"
-        for img in images:
-            # Use explicit None checks — 0.0 is a valid coordinate value
-            lat = "" if img.latitude is None else img.latitude
-            lon = "" if img.longitude is None else img.longitude
-            alt = "" if img.altitude_m is None else img.altitude_m
-            csv_rows += f"{img.filename},{lat},{lon},{alt}\n"
-        zf.writestr("odm_georeferencing.csv", csv_rows)
+        zf.writestr("odm_georeferencing.csv", odm_georeferencing_csv(package_image_names(images)))
     return {
         "zip_path": str(zip_path),
         "image_count": len(images),
