@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 from backend.db.models import Image, Reconstruction, ReconstructionFrame
 from backend.db.models import Session as SessionModel
@@ -428,6 +429,49 @@ def test_validate_checkpoints_no_surface_available(client):
     )
     assert resp.status_code == 422
     assert "No surface source" in resp.json()["detail"]
+
+
+@pytest.mark.parametrize(
+    ("column", "filename", "payload", "source"),
+    [
+        ("mesh_glb_path", "mesh.glb", b"glTF\x02\x00\x00\x00truncated", "mesh"),
+        ("splat_path", "splat.ply", b"ply\nformat ascii 1.0\nend_header\n", "splat"),
+    ],
+)
+def test_validate_checkpoints_unreadable_surface_reports_the_reason(
+    client, tmp_path, column, filename, payload, source
+):
+    """A corrupt surface artifact is a 422 naming the read error, not a 500 or 'no source'."""
+    surface = tmp_path / filename
+    surface.write_bytes(payload)
+
+    db = _db(client)
+    session = SessionModel(name="CheckCorrupt", folder_path="/tmp/chkcorrupt")
+    db.add(session)
+    db.commit()
+    db.refresh(session)
+
+    rec = Reconstruction(
+        session_id=session.id,
+        status="complete",
+        preset="quick",
+        frames_used=5,
+        **{column: str(surface)},
+    )
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+
+    resp = client.post(
+        f"/reconstruction/{rec.id}/validate-checkpoints",
+        json={"points": [{"x": 0, "y": 0, "z": 0}]},
+    )
+
+    assert resp.status_code == 422
+    detail = resp.json()["detail"]
+    assert f"Could not read the {source} surface ({filename})" in detail
+    assert "No surface source" not in detail
+    assert str(tmp_path) not in detail
 
 
 def test_validate_checkpoints_empty_points_rejected(client):

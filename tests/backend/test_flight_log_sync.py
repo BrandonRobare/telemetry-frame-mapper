@@ -7,9 +7,12 @@ FlightLogPoint rows with attitude/gimbal/battery fields.
 
 from __future__ import annotations
 
+import codecs
 import json
 import subprocess
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
+
+import pytest
 
 from backend.db.models import FlightLog, FlightLogPoint
 from backend.main import app
@@ -226,7 +229,7 @@ def test_upload_dji_csv_fallback(client):
 
     csv_bytes = (
         b"time(millisecond),OSD.latitude,OSD.longitude,OSD.altitude[m]\n"
-        b"1000,35.0,-80.0,100.0\n"
+        b"1718447401000,35.0,-80.0,100.0\n"
     )
 
     resp = client.post(
@@ -365,3 +368,195 @@ def test_match_images_to_log_sorts_unsorted_points():
     assert len(matches) == 1
     assert matches[0]["latitude"] == 35.001
     assert matches[0]["longitude"] == -80.001
+
+
+# ---------------------------------------------------------------------------
+# BOM, relative clocks and null-island fixes (issue #947)
+# ---------------------------------------------------------------------------
+
+_T0 = datetime(2024, 6, 15, 10, 30, tzinfo=UTC)
+_T0_S = _T0.timestamp()  # 1718447400.0
+
+_DJI_CSV = (
+    b"time(millisecond),OSD.latitude,OSD.longitude,OSD.altitude[m]\n"
+    b"1718447401000,35.0,-80.0,100.0\n"
+    b"1718447402000,35.001,-80.001,101.0\n"
+)
+
+
+def test_parse_dji_csv_bom_prefixed_matches_bomless():
+    """A UTF-8 BOM (Excel, many exporters) must not zero every DJI timestamp."""
+    bomless = flight_log_sync.parse_dji_csv(_DJI_CSV)
+    bom = flight_log_sync.parse_dji_csv(codecs.BOM_UTF8 + _DJI_CSV)
+
+    assert [p["timestamp_s"] for p in bomless] == [1718447401.0, 1718447402.0]
+    assert bom == bomless
+    # The upload entry point detects the format and parses through the same path.
+    assert flight_log_sync.parse_flight_log_csv(codecs.BOM_UTF8 + _DJI_CSV) == ("csv", bomless)
+
+
+def test_relative_clock_log_is_anchored_to_its_start_time():
+    """A log with 0..600000 ms offsets lands at its start time, not in 1970."""
+    content = "time(millisecond),OSD.latitude,OSD.longitude,OSD.altitude[m]\n" + "".join(
+        f"{ms},35.0,-80.0,100.0\n" for ms in range(0, 600_001, 60_000)
+    )
+    _, points = flight_log_sync.parse_flight_log_csv(content.encode())
+    offsets_s = [p["timestamp_s"] for p in points]
+    assert offsets_s[0] == 0.0 and offsets_s[-1] == 600.0
+
+    anchored = flight_log_sync.anchor_log_timestamps(offsets_s, _T0)
+
+    assert anchored[0] == _T0_S
+    assert anchored[-1] == _T0_S + 600.0
+    assert [t - _T0_S for t in anchored] == offsets_s
+
+
+def test_anchor_log_timestamps_reads_naive_start_time_as_utc():
+    assert flight_log_sync.anchor_log_timestamps([0.0, 1.5], _T0.replace(tzinfo=None)) == [
+        _T0_S,
+        _T0_S + 1.5,
+    ]
+
+
+def test_relative_clock_without_start_time_is_rejected():
+    """With no known start time the log cannot be placed in time; refuse, don't guess."""
+    with pytest.raises(flight_log_sync.FlightLogClockError, match="relative"):
+        flight_log_sync.anchor_log_timestamps([0.0, 1.0, 600.0], None)
+
+
+def test_absolute_clock_log_is_left_alone():
+    times = [_T0_S, _T0_S + 1.0]
+    assert flight_log_sync.anchor_log_timestamps(times, None) == times
+    # A supplied start time never shifts a log that already carries absolute times.
+    later = datetime(2030, 1, 1, tzinfo=UTC)
+    assert flight_log_sync.anchor_log_timestamps(times, later) == times
+
+
+def test_mixed_relative_and_absolute_clock_is_rejected():
+    with pytest.raises(flight_log_sync.FlightLogClockError, match="mixes"):
+        flight_log_sync.anchor_log_timestamps([0.0, _T0_S], _T0)
+
+
+def _dji_json(offsets_ms: list[int], start_time: str | None) -> dict:
+    data = json.loads(json.dumps(_V12_JSON))
+    frame = data["frames"][0]
+    data["frames"] = [{**frame, "osd": {**frame["osd"], "timeMs": ms}} for ms in offsets_ms]
+    if start_time is None:
+        del data["header"]["startTime"]
+    else:
+        data["header"]["startTime"] = start_time
+    return data
+
+
+def _fake_djirecord(monkeypatch, payload: dict) -> None:
+    def fake_run(argv, capture_output, text, timeout, env=None):  # noqa: ARG001
+        return _FakeCompletedProcess(0, json.dumps(payload), "")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr("backend.services.dji_log_parser._BINARY", "/fake/djirecord")
+
+
+def _stored_timestamps(log_id: int) -> list[datetime]:
+    db = app.state.test_db_session
+    return [
+        p.timestamp
+        for p in db.query(FlightLogPoint)
+        .filter(FlightLogPoint.flight_log_id == log_id)
+        .order_by(FlightLogPoint.timestamp)
+    ]
+
+
+def test_upload_dji_binary_anchors_relative_clock_to_header_start_time(client, monkeypatch):
+    """DJI OSD timeMs counts from the flight start recorded in the log header."""
+    s = _make_session(client)
+    _fake_djirecord(
+        monkeypatch, _dji_json(list(range(0, 600_001, 60_000)), "2024-06-15T10:30:00Z")
+    )
+
+    resp = client.post(
+        "/flight-logs/upload",
+        files={"file": ("flight.txt", _PRE_V12, "application/octet-stream")},
+        data={"session_id": str(s.id)},
+    )
+
+    assert resp.status_code == 200
+    stamps = _stored_timestamps(resp.json()["id"])
+    assert len(stamps) == 11
+    assert stamps[0] == _T0
+    assert stamps[-1] == _T0 + timedelta(minutes=10)
+
+
+def test_upload_dji_binary_relative_clock_without_start_time_is_rejected(client, monkeypatch):
+    s = _make_session(client)
+    _fake_djirecord(monkeypatch, _dji_json([0, 100], None))
+
+    resp = client.post(
+        "/flight-logs/upload",
+        files={"file": ("flight.txt", _PRE_V12, "application/octet-stream")},
+        data={"session_id": str(s.id)},
+    )
+
+    assert resp.status_code == 422
+    assert "relative" in resp.json()["detail"]
+    db = app.state.test_db_session
+    assert db.query(FlightLog).filter(FlightLog.session_id == s.id).count() == 0
+
+
+def test_upload_dji_binary_relative_clock_uses_supplied_start_time(client, monkeypatch):
+    s = _make_session(client)
+    _fake_djirecord(monkeypatch, _dji_json([0, 1000], None))
+
+    resp = client.post(
+        "/flight-logs/upload",
+        files={"file": ("flight.txt", _PRE_V12, "application/octet-stream")},
+        data={"session_id": str(s.id), "start_time": "2024-06-15T10:30:00Z"},
+    )
+
+    assert resp.status_code == 200
+    assert _stored_timestamps(resp.json()["id"]) == [_T0, _T0 + timedelta(seconds=1)]
+
+
+# Receiver outages recorded as (0, 0), plus a near-zero placeholder inside the
+# shared no-fix threshold. Neither may pull an interpolated position.
+_GAP_LOG = [
+    {"timestamp_s": 0.0, "latitude": 35.0, "longitude": -80.0, "altitude_m": 100.0},
+    {"timestamp_s": 1.0, "latitude": 0.0, "longitude": 0.0, "altitude_m": 0.0},
+    {"timestamp_s": 2.0, "latitude": 35.002, "longitude": -80.002, "altitude_m": 102.0},
+    {"timestamp_s": 3.0, "latitude": 0.0004, "longitude": -0.0003, "altitude_m": 0.0},
+    {"timestamp_s": 4.0, "latitude": 35.004, "longitude": -80.004, "altitude_m": 104.0},
+]
+
+
+def _image_at(image_id: int, seconds: float) -> _FakeImage:
+    return _FakeImage(image_id, datetime(1970, 1, 1) + timedelta(seconds=seconds))
+
+
+def test_null_island_points_never_feed_interpolation():
+    images = [_image_at(1, 1.0), _image_at(2, 2.5), _image_at(3, 3.0)]
+
+    matches = {
+        m["image_id"]: m
+        for m in flight_log_sync.match_images_to_log(images, _GAP_LOG, tolerance_s=0.1)
+    }
+
+    assert set(matches) == {1, 2, 3}
+
+    def position(m):
+        return (m["latitude"], m["longitude"], m["altitude_m"])
+
+    assert position(matches[1]) == pytest.approx((35.001, -80.001, 101.0))
+    assert position(matches[2]) == pytest.approx((35.0025, -80.0025, 102.5))
+    assert position(matches[3]) == pytest.approx((35.003, -80.003, 103.0))
+
+
+def test_log_with_only_null_island_points_matches_nothing():
+    no_fix = [
+        {"timestamp_s": t, "latitude": 0.0, "longitude": 0.0, "altitude_m": 0.0}
+        for t in (0.0, 1.0, 2.0)
+    ]
+
+    assert flight_log_sync.match_images_to_log(_IMAGES, no_fix, tolerance_s=2.0) == []
+    rows = flight_log_sync.build_offset_preview(
+        _IMAGES, no_fix, tolerance_s=2.0, window_s=1.0, step_s=1.0
+    )
+    assert [row["matched"] for row in rows] == [0, 0, 0]

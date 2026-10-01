@@ -85,9 +85,9 @@ def _session_section(session: SessionModel, _images: list[Image]) -> dict:
 
 
 def _frame_summary_section(images: list[Image]) -> dict:
-    if not images:
-        return {"total": 0, "usable": 0, "quality_breakdown": {}}
-
+    # One code path for every session: a session with no frames must return the
+    # same keys (zero counts, no camera) so the JSON, HTML and PDF renderers can
+    # read the section without special-casing it.
     usable = [img for img in images if img.usable]
     flag_counts: dict[str, int] = {}
     for img in images:
@@ -299,6 +299,58 @@ def _render_html(
           <td>{esc(a.get("color", ""))}</td>
         </tr>"""
 
+    # Sections below only index their detailed keys when the data exists, so a
+    # session with no frames, or whose preflight check could not run, still renders.
+    breakdown = frame_s["quality_breakdown"]
+    if breakdown:
+        breakdown_rows = "".join(
+            f"<tr><td>{esc(k)}</td><td>{v}</td></tr>" for k, v in sorted(breakdown.items())
+        )
+        breakdown_html = (
+            f"<table>\n  <tr><th>Flag</th><th>Count</th></tr>\n  {breakdown_rows}\n</table>"
+        )
+    else:
+        breakdown_html = "<p>No frames in this session.</p>"
+
+    if quality_s["available"]:
+        gps_q = quality_s["gps"]
+        ts_q = quality_s["timestamps"]
+        optical_q = quality_s["optical_quality"]
+        preflight_html = f"""<h2>GPS</h2>
+<div class="kv">
+  <dt>Missing</dt><dd>{gps_q["missing_frames"]}</dd>
+  <dt>Completeness</dt><dd>{gps_q["completeness_pct"]}%</dd>
+</div>
+
+<h2>Timestamps</h2>
+<div class="kv">
+  <dt>Missing</dt><dd>{ts_q["missing"]}</dd>
+  <dt>Completeness</dt><dd>{ts_q["completeness_pct"]}%</dd>
+  <dt>Duplicate groups</dt><dd>{ts_q["duplicate_groups"]}</dd>
+  <dt>Gap count</dt><dd>{ts_q["gap_count"]}</dd>
+</div>
+
+<h2>Optical Quality</h2>
+<div class="kv">
+  <dt>Blur</dt><dd>{optical_q["blur_pct"]}%</dd>
+  <dt>Dark</dt><dd>{optical_q["dark_pct"]}%</dd>
+  <dt>Bright</dt><dd>{optical_q["bright_pct"]}%</dd>
+</div>"""
+    else:
+        preflight_html = (
+            "<h2>GPS, Timestamps and Optical Quality</h2>\n"
+            "<p>Preflight quality check could not run.</p>"
+        )
+
+    if coverage_s["available"]:
+        coverage_html = f"""<div class="kv">
+  <dt>Footprint count</dt><dd>{coverage_s["footprint_count"]}</dd>
+  <dt>Coverage %</dt><dd>{coverage_s["coverage_pct"]}%</dd>
+  <dt>Estimated overlap</dt><dd>{coverage_s.get("estimated_overlap_pct") or "—"}%</dd>
+</div>"""
+    else:
+        coverage_html = "<p>Coverage data is not available.</p>"
+
     report_title = f"Survey Report — {esc(session.name or f'Session {session.id}')}"
 
     return f"""<!DOCTYPE html>
@@ -355,38 +407,12 @@ def _render_html(
 </div>
 
 <h2>Frame Quality Breakdown</h2>
-<table>
-  <tr><th>Flag</th><th>Count</th></tr>
-  {"".join(f'<tr><td>{esc(k)}</td><td>{v}</td></tr>' for k,v in sorted(frame_s.get("quality_breakdown", {}).items()))}
-</table>
+{breakdown_html}
 
-<h2>GPS</h2>
-<div class="kv">
-  <dt>Missing</dt><dd>{quality_s["gps"]["missing_frames"]}</dd>
-  <dt>Completeness</dt><dd>{quality_s["gps"]["completeness_pct"]}%</dd>
-</div>
-
-<h2>Timestamps</h2>
-<div class="kv">
-  <dt>Missing</dt><dd>{quality_s["timestamps"]["missing"]}</dd>
-  <dt>Completeness</dt><dd>{quality_s["timestamps"]["completeness_pct"]}%</dd>
-  <dt>Duplicate groups</dt><dd>{quality_s["timestamps"]["duplicate_groups"]}</dd>
-  <dt>Gap count</dt><dd>{quality_s["timestamps"]["gap_count"]}</dd>
-</div>
-
-<h2>Optical Quality</h2>
-<div class="kv">
-  <dt>Blur</dt><dd>{quality_s["optical_quality"]["blur_pct"]}%</dd>
-  <dt>Dark</dt><dd>{quality_s["optical_quality"]["dark_pct"]}%</dd>
-  <dt>Bright</dt><dd>{quality_s["optical_quality"]["bright_pct"]}%</dd>
-</div>
+{preflight_html}
 
 <h2>Coverage</h2>
-<div class="kv">
-  <dt>Footprint count</dt><dd>{coverage_s["footprint_count"]}</dd>
-  <dt>Coverage %</dt><dd>{coverage_s["coverage_pct"]}%</dd>
-  <dt>Estimated overlap</dt><dd>{coverage_s.get("estimated_overlap_pct") or "—"}%</dd>
-</div>
+{coverage_html}
 
 <h2>Reconstructions ({len(recs_s)})</h2>
 {"<table><tr><th>ID</th><th>Preset</th><th>Status</th><th>Frames Used</th><th>Registered</th><th>Gaussians</th><th>PSNR</th><th>SSIM</th><th>Duration</th></tr>" + rec_rows + "</table>" if recs_s else "<p>No reconstructions found.</p>"}

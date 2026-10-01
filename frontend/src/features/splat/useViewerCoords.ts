@@ -86,6 +86,16 @@ export function geoOriginLatLon(
   return utmToLatLon(geo.utm_origin[0], geo.utm_origin[1], parsed.zone, parsed.north)
 }
 
+/** Metres per scene unit (`geo_transform.scale`), or null when the reconstruction
+ * isn't georeferenced: no transform, the local-frame placeholder's 'unknown' UTM
+ * zone, or a degenerate scale. Scene lengths must be multiplied by this before
+ * they are labelled in metres; when it is null, nothing may claim metres.
+ */
+export function metresPerSceneUnit(geo: GeoTransform | null | undefined): number | null {
+  if (!geo || !parseUtmZone(geo.utm_zone)) return null
+  return Number.isFinite(geo.scale) && geo.scale > 0 ? geo.scale : null
+}
+
 export function worldToGps(world: WorldPoint, geo: GeoTransform): GpsPoint | null {
   const parsed = parseUtmZone(geo.utm_zone)
   if (!parsed) return null

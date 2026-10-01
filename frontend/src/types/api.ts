@@ -88,7 +88,8 @@ export interface Image {
   sharpness_score: number | null;
   brightness_score: number | null;
   colmap_error_px: number | null;
-  flag: "good" | "blurry" | "dark" | "bright" | "no_gps";
+  // "unscored": quality scoring failed during import; the frame is never usable.
+  flag: "good" | "blurry" | "dark" | "bright" | "no_gps" | "unscored";
   usable: boolean;
   notes: string | null;
 }

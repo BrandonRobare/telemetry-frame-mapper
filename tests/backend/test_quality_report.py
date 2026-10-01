@@ -4,8 +4,15 @@ and held-out checkpoint validation with deterministic math.
 
 from __future__ import annotations
 
+import json
+import logging
 import math
+import struct
+import sys
+import types
+from types import SimpleNamespace
 
+import numpy as np
 import pytest
 
 from backend.services.quality_report import (
@@ -185,6 +192,7 @@ def test_validate_checkpoints_no_surface_available():
     points = [SurveyedPoint("A", 0.0, 0.0, 0.0)]
     result = validate_held_out_checkpoints(_NoArtifacts(), points)
     assert result["available"] is False
+    assert result["status"] == "unavailable"
     assert "reason" in result
 
 
@@ -236,6 +244,253 @@ def test_validate_checkpoints_with_splat(tmp_path):
     # Q should be close to (10,0,0)
     assert result["checkpoints"][1]["distance_m"] == pytest.approx(0.0, abs=1e-4)
     assert result["summary"]["rmse_m"] == pytest.approx(0.0, abs=1e-4)
+
+
+# ---------------------------------------------------------------------------
+#  Surface extraction failures (#951)
+# ---------------------------------------------------------------------------
+
+_ORIGIN = [SurveyedPoint("A", 0.0, 0.0, 0.0)]
+_TRIANGLE = [(0.0, 0.0, 0.0), (10.0, 0.0, 0.0), (0.0, 10.0, 0.0)]
+
+
+def _surface_rec(*, mesh=None, splat=None, pointcloud=None):
+    return SimpleNamespace(
+        mesh_glb_path=str(mesh) if mesh else None,
+        splat_path=str(splat) if splat else None,
+        pointcloud_path=str(pointcloud) if pointcloud else None,
+    )
+
+
+def _glb(gltf: dict | bytes, bin_chunk: bytes | None = None) -> bytes:
+    """Assemble a GLB container from a JSON document and an optional BIN chunk."""
+    json_bytes = gltf if isinstance(gltf, bytes) else json.dumps(gltf).encode()
+    json_bytes += b" " * (-len(json_bytes) % 4)
+    body = struct.pack("<I4s", len(json_bytes), b"JSON") + json_bytes
+    if bin_chunk is not None:
+        bin_chunk += b"\x00" * (-len(bin_chunk) % 4)
+        body += struct.pack("<I4s", len(bin_chunk), b"BIN\x00") + bin_chunk
+    return struct.pack("<4sII", b"glTF", 2, 12 + len(body)) + body
+
+
+def _positions_gltf(
+    count: int,
+    byte_length: int,
+    *,
+    byte_stride: int | None = None,
+    accessor_offset: int = 0,
+    component_type: int = 5126,
+) -> dict:
+    view: dict = {"buffer": 0, "byteOffset": 0, "byteLength": byte_length}
+    if byte_stride is not None:
+        view["byteStride"] = byte_stride
+    return {
+        "asset": {"version": "2.0"},
+        "buffers": [{"byteLength": byte_length}],
+        "bufferViews": [view],
+        "accessors": [
+            {
+                "bufferView": 0,
+                "byteOffset": accessor_offset,
+                "componentType": component_type,
+                "count": count,
+                "type": "VEC3",
+            }
+        ],
+        "meshes": [{"primitives": [{"attributes": {"POSITION": 0}}]}],
+    }
+
+
+def _triangle_glb() -> bytes:
+    vertices = b"".join(struct.pack("<3f", *v) for v in _TRIANGLE)
+    return _glb(_positions_gltf(len(_TRIANGLE), len(vertices)), vertices)
+
+
+@pytest.fixture
+def surface_warnings():
+    """Capture WARNING records from the quality-report logger.
+
+    A handler on the module logger itself keeps the capture independent of how
+    the ``backend`` logger's propagation was left by earlier tests.
+    """
+    records: list[logging.LogRecord] = []
+
+    class _Capture(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            records.append(record)
+
+    handler = _Capture(level=logging.WARNING)
+    logger = logging.getLogger("backend.services.quality_report")
+    logger.addHandler(handler)
+    try:
+        yield records
+    finally:
+        logger.removeHandler(handler)
+
+
+def _assert_failed_check(result: dict, source: str, expected_error: str, tmp_path) -> None:
+    assert result["available"] is False
+    assert result["status"] == "failed"
+    assert result["source"] == source
+    assert expected_error in result["error"]
+    assert result["error"] in result["reason"]
+    assert "No surface source" not in result["reason"]
+    # The reason is returned to API clients: name the file, not its server path.
+    assert str(tmp_path) not in result["reason"]
+
+
+def test_validate_checkpoints_reads_glb_mesh_positions(tmp_path):
+    mesh = tmp_path / "mesh.glb"
+    mesh.write_bytes(_triangle_glb())
+
+    result = validate_held_out_checkpoints(
+        _surface_rec(mesh=mesh), [SurveyedPoint("P", 10.0, 0.0, 1.0)]
+    )
+
+    assert result["available"] is True
+    assert result["source"] == "mesh"
+    assert result["surface_point_count"] == 3
+    assert result["checkpoints"][0]["distance_m"] == pytest.approx(1.0)
+    assert result["checkpoints"][0]["nearest_surface_point"] == "10.0000,0.0000,0.0000"
+
+
+def test_validate_checkpoints_honours_interleaved_glb_positions(tmp_path):
+    # Each vertex is NORMAL then POSITION (24-byte stride); POSITION starts 12 bytes in.
+    data = b"".join(struct.pack("<6f", 0.0, 0.0, 1.0, *v) for v in _TRIANGLE)
+    mesh = tmp_path / "mesh.glb"
+    mesh.write_bytes(
+        _glb(_positions_gltf(3, len(data), byte_stride=24, accessor_offset=12), data)
+    )
+
+    result = validate_held_out_checkpoints(
+        _surface_rec(mesh=mesh), [SurveyedPoint("P", 0.0, 10.0, 0.0)]
+    )
+
+    assert result["available"] is True
+    assert result["surface_point_count"] == 3
+    assert result["checkpoints"][0]["distance_m"] == pytest.approx(0.0, abs=1e-6)
+
+
+@pytest.mark.parametrize(
+    ("payload", "expected_error"),
+    [
+        pytest.param(b"PK\x03\x04 this is a zip, not a mesh", "glTF magic", id="not-glb"),
+        pytest.param(b"glTF\x02\x00\x00\x00", "truncated", id="truncated-header"),
+        pytest.param(_glb(b"{not json"), "JSON", id="corrupt-json-chunk"),
+        pytest.param(_glb(_positions_gltf(3, 36)), "BIN chunk", id="missing-bin-chunk"),
+        pytest.param(
+            _glb(_positions_gltf(3, 36), b"\x00" * 12), "truncated", id="truncated-buffer"
+        ),
+        pytest.param(
+            _glb(_positions_gltf(3, 18, component_type=5123), b"\x00" * 20),
+            "componentType 5123",
+            id="unsupported-accessor",
+        ),
+    ],
+)
+def test_validate_checkpoints_corrupt_glb_fails_with_parser_error(
+    tmp_path, surface_warnings, payload, expected_error
+):
+    mesh = tmp_path / "mesh.glb"
+    mesh.write_bytes(payload)
+
+    result = validate_held_out_checkpoints(_surface_rec(mesh=mesh), _ORIGIN)
+
+    _assert_failed_check(result, "mesh", expected_error, tmp_path)
+    assert "mesh.glb" in result["reason"]
+    assert any(record.exc_info for record in surface_warnings), (
+        "a surface extraction failure must be logged with its traceback"
+    )
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        pytest.param(_glb({"asset": {"version": "2.0"}}), id="no-meshes"),
+        pytest.param(_glb(_positions_gltf(0, 0), b""), id="zero-vertices"),
+    ],
+)
+def test_validate_checkpoints_glb_without_vertices_is_empty_not_failed(
+    tmp_path, surface_warnings, payload
+):
+    mesh = tmp_path / "mesh.glb"
+    mesh.write_bytes(payload)
+
+    result = validate_held_out_checkpoints(_surface_rec(mesh=mesh), _ORIGIN)
+
+    assert result["available"] is False
+    assert result["status"] == "empty"
+    assert result["source"] == "mesh"
+    assert "contains no points" in result["reason"]
+    assert "error" not in result
+    assert not surface_warnings
+
+
+def test_validate_checkpoints_corrupt_splat_fails_with_reader_error(tmp_path, surface_warnings):
+    splat = tmp_path / "splat.ply"
+    splat.write_bytes(b"ply\nformat ascii 1.0\nelement vertex 0\nend_header\n")
+
+    result = validate_held_out_checkpoints(_surface_rec(splat=splat), _ORIGIN)
+
+    _assert_failed_check(result, "splat", "binary_little_endian", tmp_path)
+    assert any(record.exc_info for record in surface_warnings)
+
+
+def test_validate_checkpoints_pointcloud_without_laspy_names_the_install(
+    tmp_path, monkeypatch, surface_warnings
+):
+    cloud = tmp_path / "cloud.las"
+    cloud.write_bytes(b"LASF")
+    monkeypatch.setitem(sys.modules, "laspy", None)  # import laspy -> ImportError
+
+    result = validate_held_out_checkpoints(_surface_rec(pointcloud=cloud), _ORIGIN)
+
+    _assert_failed_check(result, "pointcloud", "laspy", tmp_path)
+    assert "uv sync --group backend --group reconstruction" in result["reason"]
+    assert any(record.exc_info for record in surface_warnings)
+
+
+def _fake_laspy(read) -> types.ModuleType:
+    module = types.ModuleType("laspy")
+    module.read = read
+    return module
+
+
+def test_validate_checkpoints_corrupt_las_fails_with_reader_error(
+    tmp_path, monkeypatch, surface_warnings
+):
+    cloud = tmp_path / "cloud.las"
+    cloud.write_bytes(b"not a las file")
+
+    def _read(path):
+        raise RuntimeError(f"Invalid file signature in {path}")
+
+    monkeypatch.setitem(sys.modules, "laspy", _fake_laspy(_read))
+
+    result = validate_held_out_checkpoints(_surface_rec(pointcloud=cloud), _ORIGIN)
+
+    _assert_failed_check(result, "pointcloud", "Invalid file signature", tmp_path)
+    assert "cloud.las" in result["error"]
+    assert any(record.exc_info for record in surface_warnings)
+
+
+def test_validate_checkpoints_las_with_zero_points_is_empty_not_failed(
+    tmp_path, monkeypatch, surface_warnings
+):
+    cloud = tmp_path / "cloud.las"
+    cloud.write_bytes(b"LASF")
+    empty = np.array([], dtype=np.float64)
+    monkeypatch.setitem(
+        sys.modules, "laspy", _fake_laspy(lambda path: SimpleNamespace(x=empty, y=empty, z=empty))
+    )
+
+    result = validate_held_out_checkpoints(_surface_rec(pointcloud=cloud), _ORIGIN)
+
+    assert result["available"] is False
+    assert result["status"] == "empty"
+    assert result["source"] == "pointcloud"
+    assert "error" not in result
+    assert not surface_warnings
 
 
 # ---------------------------------------------------------------------------

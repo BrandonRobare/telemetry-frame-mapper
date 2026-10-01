@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useId, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useMapStore } from '../../shared/stores/mapStore'
 import { useApplyFlightSync } from '../../shared/api/mutations'
@@ -24,6 +24,14 @@ interface OffsetPreviewRow {
   matched: number
   total: number
   mean_abs_delta_s: number | null
+}
+
+/* A datetime-local value carries no zone. The field is labelled UTC, so read it
+   as UTC rather than letting Date apply the browser's local offset. */
+function flightStartToUtcIso(value: string): string | null {
+  if (!value) return null
+  const date = new Date(`${value}Z`)
+  return Number.isNaN(date.getTime()) ? null : date.toISOString()
 }
 
 /* The offset histogram's bars are 4-8px targets and exempt from WCAG 2.2
@@ -105,6 +113,11 @@ export default function GpsSyncTab() {
   const applySync = useApplyFlightSync()
 
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const flightStartId = useId()
+  const flightStartHintId = useId()
+  const flightStartErrorId = useId()
+  const [flightStart, setFlightStart] = useState('')
+  const [flightStartError, setFlightStartError] = useState<string | null>(null)
   const [uploading, setUploading] = useState(false)
   const [uploadError, setUploadError] = useState<string | null>(null)
   const [uploadSuccess, setUploadSuccess] = useState(false)
@@ -136,11 +149,14 @@ export default function GpsSyncTab() {
 
     setUploading(true)
     setUploadError(null)
+    setFlightStartError(null)
     setUploadSuccess(false)
 
     const formData = new FormData()
     formData.append('file', file)
     formData.append('session_id', String(selectedSessionId))
+    const startTime = flightStartToUtcIso(flightStart)
+    if (startTime) formData.append('start_time', startTime)
 
     try {
       const res = await fetch(apiUrl('/flight-logs/upload'), {
@@ -156,6 +172,13 @@ export default function GpsSyncTab() {
           if (typeof body.detail === 'string') message = body.detail
         } catch {
           // Keep the text response as the fallback error message.
+        }
+        // The backend names start_time when the log's clock counts from takeoff
+        // (or the value sent is unusable): show it at the field that fixes it.
+        if (res.status === 422 && message.includes('start_time')) {
+          setFlightStartError(message)
+          addToast(message, 'error')
+          return
         }
         throw new Error(message || `Upload failed (${res.status})`)
       }
@@ -208,6 +231,43 @@ export default function GpsSyncTab() {
           <h3 className="text-sm font-medium mb-3" style={{ color: 'var(--text)' }}>
             Flight Log
           </h3>
+          <div className="mb-3 text-xs" style={{ color: 'var(--text-muted)' }}>
+            <label htmlFor={flightStartId}>Flight start (UTC)</label>
+            <input
+              id={flightStartId}
+              type="datetime-local"
+              step={1}
+              value={flightStart}
+              onChange={(e) => {
+                setFlightStart(e.target.value)
+                setFlightStartError(null)
+              }}
+              aria-invalid={flightStartError ? true : undefined}
+              aria-describedby={
+                flightStartError ? `${flightStartHintId} ${flightStartErrorId}` : flightStartHintId
+              }
+              className="mt-1 block px-2 py-1 text-sm"
+              style={{
+                background: 'var(--bg)',
+                color: 'var(--text)',
+                border: `1px solid ${flightStartError ? 'var(--danger)' : 'var(--border)'}`,
+              }}
+            />
+            <span id={flightStartHintId} className="mt-1 block">
+              Optional. Needed when the log&apos;s clock counts from takeoff and the log does not
+              record when the flight started, as with most DJI and Autel CSV exports.
+            </span>
+            {flightStartError && (
+              <span
+                id={flightStartErrorId}
+                role="alert"
+                className="mt-1 block"
+                style={{ color: 'var(--danger)' }}
+              >
+                {flightStartError}
+              </span>
+            )}
+          </div>
           <div className="flex items-center gap-3">
             <Button
               variant="ghost"

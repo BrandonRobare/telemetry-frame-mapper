@@ -27,9 +27,10 @@ from ..db.models import (
     TargetArea,
 )
 from ..db.models import Session as SessionModel
-from ..services.artifact_cleanup import cleanup_reconstruction_artifacts
+from ..services.artifact_cleanup import reconstruction_artifact_paths, remove_artifacts
 from ..services.camera_calibration import build_calibration_drift_report
 from ..services.colmap_io import _pick_best_submodel, read_model
+from ..services.delete_guard import DeleteBlocked, commit_delete, refuse_if_compared
 from ..services.preflight_quality import build_preflight_quality_report
 from ..services.quality_report import (
     build_quality_scorecard,
@@ -812,9 +813,17 @@ def delete_reconstruction(reconstruction_id: int, db: DBSession = Depends(get_db
                 "before deleting artifacts"
             ),
         )
-    cleanup_reconstruction_artifacts(rec, get_config())
+    try:
+        refuse_if_compared(db, f"Reconstruction {reconstruction_id}", reconstruction_ids=[rec.id])
+    except DeleteBlocked as blocked:
+        return blocked.response()
+    cfg = get_config()
+    paths = reconstruction_artifact_paths(rec, cfg)
+    # Dense re-run children keep their own artifacts; ON DELETE SET NULL detaches them.
     db.delete(rec)
-    db.commit()
+    # Rows first, files second (#945): a refused commit leaves every file in place.
+    commit_delete(db, f"Reconstruction {reconstruction_id}")
+    remove_artifacts(paths, cfg)
     return {"ok": True}
 
 

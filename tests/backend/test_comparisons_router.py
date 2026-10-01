@@ -244,3 +244,73 @@ def test_get_diff_still_running_returns_202(client):
 
     resp = client.get(f"/comparisons/{comparison.id}/diff")
     assert resp.status_code == 202
+
+
+# ---- deleting a comparison unblocks its reconstructions (issue #945) ----
+
+
+def _storage(tmp_path):
+    return type("Cfg", (), {
+        "processed_dir": str(tmp_path / "processed"),
+        "exports_dir": str(tmp_path / "exports"),
+        "data_dir": str(tmp_path / "data"),
+    })()
+
+
+def _complete_comparison(db, tmp_path):
+    session_a = _make_session(db, "A")
+    session_b = _make_session(db, "B")
+    rec_a = _make_reconstruction(db, session_a)
+    rec_b = _make_reconstruction(db, session_b)
+    comparison = SessionComparison(
+        session_a_id=session_a.id,
+        session_b_id=session_b.id,
+        reconstruction_a_id=rec_a.id,
+        reconstruction_b_id=rec_b.id,
+        status="complete",
+    )
+    db.add(comparison)
+    db.commit()
+    diff = tmp_path / "exports" / "comparisons" / str(comparison.id) / "diff.json"
+    diff.parent.mkdir(parents=True)
+    diff.write_text("{}", encoding="utf-8")
+    comparison.diff_path = str(diff)
+    db.commit()
+    return comparison, rec_a, diff
+
+
+def test_delete_comparison_removes_the_row_then_its_diff_and_unblocks_its_reconstructions(
+    client, tmp_path
+):
+    db = _get_db(client)
+    comparison, rec_a, diff = _complete_comparison(db, tmp_path)
+
+    with patch("backend.routers.reconstruction.get_config", return_value=_storage(tmp_path)):
+        assert client.delete(f"/reconstruction/{rec_a.id}").status_code == 409
+    with patch("backend.routers.comparisons.get_config", return_value=_storage(tmp_path)):
+        resp = client.delete(f"/comparisons/{comparison.id}")
+
+    assert resp.status_code == 200
+    assert not diff.parent.exists()
+    assert client.get(f"/comparisons/{comparison.id}").status_code == 404
+    with patch("backend.routers.reconstruction.get_config", return_value=_storage(tmp_path)):
+        assert client.delete(f"/reconstruction/{rec_a.id}").status_code == 200
+
+
+def test_delete_comparison_refuses_while_its_job_is_queued(client, tmp_path):
+    from backend.services.job_queue import SESSION_COMPARISON, enqueue
+
+    db = _get_db(client)
+    comparison, _rec_a, diff = _complete_comparison(db, tmp_path)
+    enqueue(SESSION_COMPARISON, comparison.id)
+
+    with patch("backend.routers.comparisons.get_config", return_value=_storage(tmp_path)):
+        resp = client.delete(f"/comparisons/{comparison.id}")
+
+    assert resp.status_code == 409
+    assert diff.exists()
+    assert client.get(f"/comparisons/{comparison.id}").status_code == 200
+
+
+def test_delete_missing_comparison_returns_404(client):
+    assert client.delete("/comparisons/999999").status_code == 404
