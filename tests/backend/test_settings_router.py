@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 import yaml
+from pydantic import ValidationError
 
 import backend.routers.settings as settings_mod
 from backend.core.config import get_config
@@ -557,6 +558,81 @@ def test_patch_invalid_matcher_returns_422(client, tmp_config):
 def test_patch_mission_buffer_above_one_returns_422(client, tmp_config):
     resp = client.patch("/settings", json={"mission": {"mission_buffer_pct": 2.0}})
     assert resp.status_code == 422
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("altitude_ft", 0),
+        ("altitude_ft", -200),
+        ("fov_horizontal_deg", 0),
+        ("fov_horizontal_deg", 180),
+        ("fov_vertical_deg", 0.5),
+        ("fov_vertical_deg", 180),
+        ("image_width_px", 0),
+        ("image_height_px", -3000),
+        ("desired_side_overlap", -0.1),
+        ("desired_side_overlap", 1.0),
+        ("desired_forward_overlap", -0.1),
+        ("desired_forward_overlap", 1.0),
+        ("lane_spacing_ft", 0),
+        ("lane_spacing_ft", -105),
+        ("battery_range_m", 0),
+        ("battery_range_m", -3000),
+        ("mission_buffer_pct", -0.1),
+        ("mission_buffer_pct", 1.0),
+        ("flight_log_match_tolerance_sec", -1),
+    ],
+)
+def test_patch_rejects_out_of_range_mission_geometry(client, tmp_config, field, value):
+    """A 0/180 degree FOV or a non-positive altitude was persisted and then drove
+    every footprint and mission computation (#949)."""
+    before = tmp_config.read_text()
+    resp = client.patch("/settings", json={"mission": {field: value}})
+    assert resp.status_code == 422
+    assert tmp_config.read_text() == before
+
+
+@pytest.mark.parametrize(
+    "field", ["altitude_ft", "lane_spacing_ft", "battery_range_m", "flight_log_match_tolerance_sec"]
+)
+@pytest.mark.parametrize("value", [float("inf"), float("nan")])
+def test_mission_settings_reject_non_finite_lengths(field, value):
+    # Checked on the model: FastAPI's default 422 handler echoes the offending input,
+    # and a non-finite float cannot be encoded back into the JSON error body.
+    with pytest.raises(ValidationError, match="finite"):
+        settings_mod.MissionSettings(**{field: value})
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("altitude_ft", 0.5),
+        ("fov_horizontal_deg", 1),
+        ("fov_horizontal_deg", 179),
+        ("fov_vertical_deg", 1),
+        ("fov_vertical_deg", 179),
+        ("image_width_px", 1),
+        ("desired_side_overlap", 0),
+        ("desired_forward_overlap", 0.95),
+        ("lane_spacing_ft", 0.5),
+        ("mission_buffer_pct", 0),
+        ("flight_log_match_tolerance_sec", 0),
+    ],
+)
+def test_patch_accepts_mission_values_at_the_bounds(client, tmp_config, field, value):
+    resp = client.patch("/settings", json={"mission": {field: value}})
+    assert resp.status_code == 200
+    assert resp.json()["mission"][field] == value
+
+
+def test_patch_accepts_the_mission_section_the_settings_tab_sends_back(client, tmp_config):
+    """The Settings tab PATCHes every mission field on save, so the shipped defaults
+    must all sit inside the new bounds."""
+    mission = client.get("/settings").json()["mission"]
+    resp = client.patch("/settings", json={"mission": mission})
+    assert resp.status_code == 200
+    assert resp.json()["mission"] == mission
 
 
 def test_patch_invalid_camera_model_returns_422(client, tmp_config):

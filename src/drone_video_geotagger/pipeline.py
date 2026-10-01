@@ -18,7 +18,12 @@ import yaml
 
 from drone_video_geotagger.audit import write_audit_csv
 from drone_video_geotagger.exiftool import write_exif
-from drone_video_geotagger.frames import build_frame_tags, collect_frames, infer_frame_rate
+from drone_video_geotagger.frames import (
+    DEFAULT_START_NUMBER,
+    build_frame_tags,
+    collect_frames,
+    infer_frame_rate,
+)
 from drone_video_geotagger.telemetry import parse_srt
 from drone_video_geotagger.video import extract_srt, read_video_start
 
@@ -62,6 +67,8 @@ class GeotagSpec:
     output: Path | None = None
     srt: Path | None = None
     frame_rate: float | None = None
+    # Number of the first frame ffmpeg wrote; frame time is measured from it (#948).
+    start_number: int = DEFAULT_START_NUMBER
     ffmpeg: str = "ffmpeg"
     exiftool: str = "exiftool"
     in_place: bool = False
@@ -181,7 +188,9 @@ def _run_geotag(spec: GeotagSpec, dry_run: bool) -> str:
 
     telemetry = parse_srt(srt_path)
     frames = collect_frames(spec.frames)
-    frame_rate = spec.frame_rate or infer_frame_rate(frames, telemetry[-1].end_s)
+    frame_rate = spec.frame_rate or infer_frame_rate(
+        frames, telemetry[-1].end_s, start_number=spec.start_number
+    )
     video_start = read_video_start(spec.ffmpeg, spec.video)
 
     tags = build_frame_tags(
@@ -192,6 +201,7 @@ def _run_geotag(spec: GeotagSpec, dry_run: bool) -> str:
         takeoff_altitude_m=spec.takeoff_altitude,
         video_start=video_start,
         in_place=spec.in_place,
+        start_number=spec.start_number,
     )
 
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -349,6 +359,7 @@ def _parse_geotag(raw: dict) -> GeotagSpec:
         output=Path(geotag["output"]) if "output" in geotag else None,
         srt=Path(geotag["srt"]) if "srt" in geotag else None,
         frame_rate=float(geotag["frame_rate"]) if "frame_rate" in geotag else None,
+        start_number=int(geotag.get("start_number", DEFAULT_START_NUMBER)),
         ffmpeg=geotag.get("ffmpeg", "ffmpeg"),
         exiftool=geotag.get("exiftool", "exiftool"),
         in_place=bool(geotag.get("in_place", False)),
