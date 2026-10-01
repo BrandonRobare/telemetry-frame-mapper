@@ -2,6 +2,7 @@
 
 import json
 import re
+import runpy
 import tomllib
 from pathlib import Path
 
@@ -136,6 +137,66 @@ def test_msplat_group_is_platform_pinned_locked_and_gated() -> None:
     assert "msplat==1.1.4" in notes
     assert "single-maintainer" in notes
     assert "colmap_only" in notes
+
+
+def test_ci_audits_all_locked_groups_and_platforms_and_both_npm_lockfiles() -> None:
+    ci = CI_WORKFLOW.read_text(encoding="utf-8")
+    audit = re.search(
+        r"      - name: Audit every locked Python dependency group and platform\n"
+        r"(?P<body>.*?)(?=      - name:|\Z)",
+        ci,
+        flags=re.DOTALL,
+    )
+    assert audit is not None
+    body = audit.group("body")
+    assert "uv run --frozen --no-sync python tools/audit_dependencies.py" in body
+    script = (ROOT / "tools/audit_dependencies.py").read_text(encoding="utf-8")
+    for flag in ("--frozen", "--all-groups", "--no-emit-project", "--no-hashes", "--no-annotate"):
+        assert f'"{flag}"' in script
+    for flag in ("--strict", "--no-deps", "--disable-pip"):
+        assert f'"{flag}"' in script
+    assert "check=True" in script
+    assert "continue-on-error" not in body
+    assert "--ignore-vuln" not in body
+    assert "if: matrix.python-version == '3.12'" in body
+    for directory in ("frontend", "tools/splat-transform"):
+        assert re.search(
+            rf"working-directory: {re.escape(directory)}\n"
+            r"        run: npm audit (?:--package-lock-only )?--audit-level=moderate\n",
+            ci,
+        )
+
+
+def test_dependency_audit_preserves_every_platform_and_python_version() -> None:
+    requirement_batches = runpy.run_path(str(ROOT / "tools/audit_dependencies.py"))[
+        "requirement_batches"
+    ]
+
+    batches = requirement_batches("""
+# universal export
+urllib3==2.8.0
+numpy==2.4.6 ; python_full_version < '3.12'
+numpy==2.5.1 ; python_full_version >= '3.12'
+msplat==1.1.4 ; sys_platform == 'darwin'
+pefile==2024.8.26 ; sys_platform == 'win32'
+urllib3==2.8.0
+""")
+    assert batches == [
+        {
+            "urllib3": "urllib3==2.8.0",
+            "numpy": "numpy==2.4.6",
+            "msplat": "msplat==1.1.4",
+            "pefile": "pefile==2024.8.26",
+        },
+        {"numpy": "numpy==2.5.1"},
+    ]
+    for unsupported in ("# empty export", "package>=1", "package @ https://example.com/pkg.whl"):
+        try:
+            requirement_batches(unsupported)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(f"audit must fail instead of skipping {unsupported}")
 
 
 def test_contributing_python_gates_use_uv_on_stock_macos() -> None:
@@ -375,6 +436,8 @@ def test_dependabot_keeps_github_actions_updates_enabled() -> None:
 if __name__ == "__main__":
     test_release_version_declarations_agree()
     test_ci_uses_locked_uv_environment_and_audits_runtime_groups()
+    test_ci_audits_all_locked_groups_and_platforms_and_both_npm_lockfiles()
+    test_dependency_audit_preserves_every_platform_and_python_version()
     test_msplat_group_is_platform_pinned_locked_and_gated()
     test_contributing_python_gates_use_uv_on_stock_macos()
     test_windows_ci_runs_documented_path_and_subprocess_sensitive_pytest_suites()
