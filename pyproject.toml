@@ -52,6 +52,7 @@ backend = [
 ]
 dev = [
   "pytest>=8.0",
+  "pytest-timeout==2.4.0",
   "pytest-asyncio==1.4.0",
   "ruff>=0.4"
 ]
@@ -102,6 +103,7 @@ ignore = ["B008"]
 
 [tool.pytest.ini_options]
 addopts = "--strict-markers -ra"
+timeout = 60
 testpaths = ["tests"]
 pythonpath = [".", "src"]
 markers = [

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 
 import pytest
@@ -36,15 +37,16 @@ def _make_session(db, name="Test", count=3, *, gps=True):
     return s
 
 
-def test_validate_sessions_all_valid(setup_test_db):
+def test_validate_sessions_all_valid(setup_test_db, caplog):
     from backend.main import app
     db = app.state.test_db_session
 
     s1 = _make_session(db, "Session 1", count=3)
     s2 = _make_session(db, "Session 2", count=3)
 
-    # Should not raise
-    validate_sessions_for_merge([s1.id, s2.id], db)
+    with caplog.at_level(logging.INFO):
+        validate_sessions_for_merge([s1.id, s2.id], db)
+    assert "Session merge validated: 2 sessions" in caplog.text
 
 
 def test_validate_sessions_missing(setup_test_db):
@@ -121,13 +123,15 @@ def test_validate_sessions_with_frame_selection(setup_test_db):
     s1 = _make_session(db, "Session 1", count=5)
     s2 = _make_session(db, "Session 2", count=5)
 
-    # Set frame selection: only first image for s1
+    # Select an unusable image while other usable images remain. Validation
+    # must respect the selection instead of falling back to those other frames.
     s1_image = db.query(Image).filter(Image.session_id == s1.id).first()
+    s1_image.usable = False
     db.add(SessionFrameSelection(session_id=s1.id, image_id=s1_image.id))
     db.commit()
 
-    # Should validate OK — frame selection filters but >0 images remain
-    validate_sessions_for_merge([s1.id, s2.id], db)
+    with pytest.raises(SessionMergeError, match="has no usable images"):
+        validate_sessions_for_merge([s1.id, s2.id], db)
 
 
 def test_merge_session_workspace_creates_manifest(setup_test_db, tmp_path):
