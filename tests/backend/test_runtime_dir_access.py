@@ -75,6 +75,8 @@ def test_writable_and_missing_dirs_pass(tmp_path):
     writable.mkdir()
     # Not created yet: the app creates it when it first needs it.
     require_writable_runtime_dirs({"data_dir": writable, "imports_dir": tmp_path / "later"})
+    assert writable.is_dir()
+    assert not (tmp_path / "later").exists()
 
 
 def test_lifespan_checks_runtime_dirs_before_opening_the_database(tmp_path, monkeypatch):

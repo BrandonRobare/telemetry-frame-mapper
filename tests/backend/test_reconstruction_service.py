@@ -1707,6 +1707,9 @@ def test_store_reprojection_errors_missing_dir_is_noop(setup_test_db, tmp_path):
     db = app.state.test_db_session
     # Should not raise even if sparse/0/ is absent
     _store_reprojection_errors(db, 9999, tmp_path)
+    assert db.query(ReconstructionFrame).filter(
+        ReconstructionFrame.reconstruction_id == 9999
+    ).count() == 0
 
 
 # ---------------------------------------------------------------------------
