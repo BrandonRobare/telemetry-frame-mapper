@@ -25,24 +25,11 @@ def upgrade() -> None:
     columns = {c["name"] for c in inspector.get_columns("reconstructions")}
     if "parent_reconstruction_id" in columns:
         return
-    if bind.dialect.name == "sqlite":
-        # A plain add_column left upgraded databases without the self-FK that a
-        # fresh schema has (#946). SQLite can add the column with its REFERENCES
-        # clause in one ALTER, without rebuilding reconstructions.
-        op.execute(
-            "ALTER TABLE reconstructions ADD COLUMN parent_reconstruction_id INTEGER "
-            "REFERENCES reconstructions (id)"
-        )
-    else:
-        op.add_column(
-            "reconstructions",
-            sa.Column(
-                "parent_reconstruction_id",
-                sa.Integer(),
-                sa.ForeignKey("reconstructions.id"),
-                nullable=True,
-            ),
-        )
+    # Add the self-FK in the REFERENCES clause without rebuilding the table.
+    op.execute(
+        "ALTER TABLE reconstructions ADD COLUMN parent_reconstruction_id INTEGER "
+        "REFERENCES reconstructions (id)"
+    )
 
 
 def downgrade() -> None:

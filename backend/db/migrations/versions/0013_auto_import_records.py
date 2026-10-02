@@ -29,7 +29,6 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(), nullable=True),
         sa.ForeignKeyConstraint(["session_id"], ["sessions.id"]),
         sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint("fingerprint"),
     )
     op.create_index(
         op.f("ix_auto_import_records_id"), "auto_import_records", ["id"], unique=False
