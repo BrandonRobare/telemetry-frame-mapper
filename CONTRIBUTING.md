@@ -30,9 +30,9 @@ CI mocks every external binary and optional reconstruction library, so no test n
 
 ## Database migrations
 
-The backend's SQLite schema is managed with Alembic. Migration scripts live in `backend/db/migrations/versions/`, configured via `alembic.ini` at the repo root and `backend/db/migrations/env.py`.
+SQLite is the only supported backend database; non-SQLite `DATABASE_URL` values fail before creating an engine. The SQLite schema is managed with Alembic. Migration scripts live in `backend/db/migrations/versions/`, configured via `alembic.ini` at the repo root and `backend/db/migrations/env.py`.
 
-`init_db()` (in `backend/db/database.py`) runs automatically on every app startup and applies migrations for you — there is no manual step for normal use. A genuinely fresh database gets its schema created directly and is stamped as already migrated; an existing database is upgraded to the latest revision. Both paths converge on the same schema: the baseline revision `0001` is a frozen copy of the schema that never follows `models.py`, and every later revision applies its change to fresh and existing databases alike. `tests/backend/test_database.py` fails when a fresh `alembic upgrade head`, or an upgrade of a released schema, stops matching the models.
+`init_db()` (in `backend/db/database.py`) runs automatically on every app startup and applies migrations for you — there is no manual step for normal use. A genuinely fresh database gets its schema created directly and is stamped as already migrated; an existing database is upgraded to the latest revision. Both paths converge on the same schema: the baseline revision `0001` is a frozen copy of the schema that never follows `models.py`, and every later revision applies its change to fresh and existing databases alike. `tests/backend/test_database.py` checks model metadata, physical SQLite columns/FKs/indexes, populated release upgrades, and a downgrade/upgrade round trip. Frozen fixtures cover v1.0.0, the shared v2.0.0–v2.0.3 schema, the shared v2.0.4–v2.0.5 schema, and v3.0.0. The v2.0.2 tables-only dump is supplemented by index DDL captured from that release, so index regressions are checked too.
 
 To add a schema change:
 
