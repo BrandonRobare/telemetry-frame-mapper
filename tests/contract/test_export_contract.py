@@ -110,6 +110,9 @@ def test_geojson_producers_keep_property_keys_and_geometry_variants(client):
             assert {f["geometry"]["type"] for f in features} == {"Point", "LineString", "Polygon"}
     response = client.get(f"/coverage/{coverage.id}/export")
     assert response.status_code == 200, response.text
+    assert {f["properties"]["kind"] for f in response.json()["features"]} == {
+        "coverage_gap", "coverage_overlap"
+    }
     for feature in response.json()["features"]:
         kind = feature["properties"]["kind"]
         assert sorted(feature["properties"]) == SCHEMAS["geojson"][kind]
@@ -128,6 +131,7 @@ def test_comparison_geojson_keeps_collection_and_each_change_properties():
     }
     result = diff_to_geojson(diff)
     assert sorted(result["properties"]) == SCHEMAS["geojson"]["comparison_collection"]
+    assert {f["properties"]["type"] for f in result["features"]} == {"new", "removed"}
     for feature in result["features"]:
         assert (
             sorted(feature["properties"])

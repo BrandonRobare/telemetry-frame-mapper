@@ -7,6 +7,7 @@ COPY frontend/package*.json ./
 COPY frontend/scripts/api-types/package.json ./scripts/api-types/package.json
 RUN npm ci
 COPY frontend/ ./
+COPY tests/contract/fixtures/export_schemas.json /app/tests/contract/fixtures/export_schemas.json
 RUN npm run build
 
 FROM python:3.12-slim-bookworm@sha256:392307d22300de8b5986851a12d9176dfc0fc073e65bf6523ebd7dcbeb23564e AS runtime
