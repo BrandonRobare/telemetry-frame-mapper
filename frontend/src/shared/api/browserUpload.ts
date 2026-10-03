@@ -1,4 +1,4 @@
-import type { Session } from '../../types/api'
+import type { StartUploadResponse, CompleteUploadResponse } from '../../types/api'
 import { apiUrl } from './client'
 
 export interface BrowserUploadFilePlan {
@@ -14,7 +14,7 @@ export interface BrowserUploadProgress {
 }
 
 export interface BrowserUploadResult {
-  session: Session
+  session: NonNullable<CompleteUploadResponse['session']>
   uploadId: string
 }
 
@@ -23,20 +23,6 @@ export interface BrowserUploadOptions {
   files: BrowserUploadFilePlan[]
   signal?: AbortSignal
   onProgress?: (progress: BrowserUploadProgress) => void
-}
-
-interface StartUploadResponse {
-  upload_id: string
-  chunk_size: number
-  max_file_bytes: number
-  max_total_bytes: number
-  quota_bytes: number
-}
-
-interface CompleteUploadResponse {
-  upload_id: string
-  status: string
-  session: Session
 }
 
 async function readError(res: Response): Promise<string> {
@@ -118,6 +104,7 @@ export async function uploadBrowserImport({ name, files, signal, onProgress }: B
       },
     )
     completed = true
+    if (!completedResponse.session) throw new Error('Imported session is no longer available')
     onProgress?.({ uploadId: start.upload_id, uploadedBytes, totalBytes, status: 'importing' })
     return { session: completedResponse.session, uploadId: completedResponse.upload_id }
   } catch (error) {

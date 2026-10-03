@@ -1,27 +1,10 @@
+import type { ShareViewerPayload } from '../../types/api'
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { ApiError, apiUrl, get, post } from '../../shared/api/client'
 
 /** The `code` GET /share/token/{token} sends with its 401 for a locked link. */
 const SHARE_PASSWORD_REQUIRED = 'share_password_required'
-
-interface ShareViewerPayload {
-  reconstruction_id: number
-  session_id: number
-  status: string
-  frames_used: number
-  frames_registered: number | null
-  gaussian_count: number | null
-  psnr: number | null
-  ssim: number | null
-  artifacts: {
-    pointcloud: string | null
-    mesh_glb: string | null
-    mesh_obj: string | null
-  }
-  legacy_token_required: boolean
-  generated_at: number
-}
 
 function getToken(): string {
   // URL format: /view/share/<token>

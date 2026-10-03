@@ -19,12 +19,10 @@ const coverage: CoverageResult = {
   id: 1,
   target_area_id: 7,
   session_ids: '1',
-  total_area_m2: 100,
   covered_area_m2: 75,
   coverage_pct: 75,
   gap_geojson: '{not valid JSON',
   overlap_geojson: null,
-  run_at: '2026-08-12T00:00:00Z',
 }
 
 afterEach(() => {

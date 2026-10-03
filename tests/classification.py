@@ -62,7 +62,7 @@ AREA_FILES = {
         backend/test_quick_report.py backend/test_reproducibility_manifest.py
         backend/test_share_bundle_export.py backend/test_share_links.py backend/test_splat_export.py
         backend/test_survey_report.py backend/test_usd_export.py backend/test_webodm.py
-        contract/test_frontend_api_contract.py
+        contract/test_frontend_api_contract.py contract/test_export_contract.py
         backend/test_webodm_package_export.py
     """,
     "platform-ops": """
@@ -75,7 +75,7 @@ AREA_FILES = {
         backend/test_metrics.py backend/test_path_confinement.py backend/test_pin_lock.py
         backend/test_projects.py backend/test_runtime_dir_access.py backend/test_settings_router.py
         backend/test_storage.py backend/test_storage_lifecycle.py backend/test_storage_router.py
-        backend/test_system_router.py test_markers_contract.py
+        backend/test_system_router.py contract/test_openapi_types.py test_markers_contract.py
     """,
     "db-migrations": """
         backend/db/test_backup_restore_roundtrip.py backend/db/test_migration_ownership.py
@@ -102,7 +102,8 @@ LEVEL_BY_FILE = {
         backend/test_database.py backend/test_test_db_isolation.py
         backend/test_dev_launcher_contract.py backend/test_macos_packaging.py
         backend/test_windows_packaging.py cli/test_wheel_contract.py
-        contract/test_frontend_api_contract.py test_markers_contract.py
+        contract/test_frontend_api_contract.py contract/test_openapi_types.py
+        contract/test_export_contract.py test_markers_contract.py
         test_supply_chain_configuration.py""".split(),
         "contract",
     ),

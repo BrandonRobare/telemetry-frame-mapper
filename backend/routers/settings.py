@@ -23,6 +23,7 @@ from ..core.config import (
     load_config,
     resolve_reconstruction_preset,
 )
+from ..response_schemas import AppSettings
 from ..services import accelerator
 
 router = APIRouter(prefix="/settings", tags=["settings"])
@@ -398,13 +399,13 @@ def _section_to_dict(section_model: BaseModel) -> dict:
 # ---------------------------------------------------------------------------
 
 
-@router.get("")
+@router.get("", responses={200: {"model": AppSettings}})
 def get_settings() -> dict:
     """Return the current configuration."""
     return _build_full_response()
 
 
-@router.patch("")
+@router.patch("", responses={200: {"model": AppSettings}})
 def patch_settings(body: SettingsPatch) -> dict:
     """Deep-merge the partial body into config.yaml and return the full config."""
 
@@ -458,7 +459,7 @@ def patch_settings(body: SettingsPatch) -> dict:
         return _build_full_response()
 
 
-@router.post("/reset")
+@router.post("/reset", responses={200: {"model": AppSettings}})
 def reset_settings() -> dict:
     """Restore the settings this API manages to their defaults, and return the full config.
 

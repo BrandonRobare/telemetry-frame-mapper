@@ -27,6 +27,18 @@ from ..db.models import (
     TargetArea,
 )
 from ..db.models import Session as SessionModel
+from ..response_schemas import (
+    CheckpointValidationReport,
+    CoverageGapCell,
+    EffectiveSplatSettings,
+    GeoTransform,
+    OrthoStatus,
+    PreflightLighting,
+    QualityScorecard,
+    ReconstructionStatus,
+    SemanticSummary,
+    TrainingMetricPoint,
+)
 from ..services.artifact_cleanup import reconstruction_artifact_paths, remove_artifacts
 from ..services.camera_calibration import build_calibration_drift_report
 from ..services.colmap_io import _pick_best_submodel, read_model
@@ -212,6 +224,14 @@ class ReconstructionOut(BaseModel):
         return None
 
 
+class ReconstructionContract(ReconstructionOut):
+    """Precise wire documentation; ReconstructionOut still controls serialization."""
+
+    status: ReconstructionStatus
+    training_metrics: list[TrainingMetricPoint] | None
+    effective_splat_settings: EffectiveSplatSettings | None
+
+
 class WebODMReconstructionOut(BaseModel):
     """A submitted remote task; poll it through the existing WebODM API."""
 
@@ -287,6 +307,15 @@ class PreflightReportOut(BaseModel):
     score: int
     recommended_action: str
     match_density: dict | None = None
+
+
+class PreflightImageQualityContract(PreflightImageQualityOut):
+    lighting: PreflightLighting
+
+
+class PreflightReportContract(PreflightReportOut):
+    quality: PreflightImageQualityContract
+
 
 class ReconstructionImageDiagnostic(BaseModel):
     id: int
@@ -532,7 +561,10 @@ def _start_webodm_reconstruction(body: StartIn, db: DBSession) -> WebODMReconstr
     )
 
 
-@router.get("/preflight/{session_id}", response_model=PreflightReportOut)
+@router.get(
+    "/preflight/{session_id}", response_model=PreflightReportOut,
+    responses={200: {"model": PreflightReportContract}}
+)
 def get_preflight_report(session_id: int, db: DBSession = Depends(get_db)):
     try:
         return build_preflight_quality_report(session_id, db)
@@ -611,7 +643,10 @@ def start(body: StartIn, db: DBSession = Depends(get_db)):
     return rec
 
 
-@router.get("/{reconstruction_id}/status", response_model=ReconstructionOut)
+@router.get(
+    "/{reconstruction_id}/status", response_model=ReconstructionOut,
+    responses={200: {"model": ReconstructionContract}}
+)
 def get_status(reconstruction_id: int, db: DBSession = Depends(get_db)):
     rec = db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).first()
     if not rec:
@@ -783,7 +818,10 @@ LIVE_RECONSTRUCTION_STATUSES = {
 }
 
 
-@router.post("/{reconstruction_id}/cancel", response_model=ReconstructionOut)
+@router.post(
+    "/{reconstruction_id}/cancel", response_model=ReconstructionOut,
+    responses={200: {"model": ReconstructionContract}}
+)
 def request_cancel(reconstruction_id: int, db: DBSession = Depends(get_db)):
     rec = db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).first()
     if not rec:
@@ -1162,7 +1200,7 @@ def get_semantic_status(reconstruction_id: int, db: DBSession = Depends(get_db))
     return rec
 
 
-@router.get("/{reconstruction_id}/semantic-labels")
+@router.get("/{reconstruction_id}/semantic-labels", responses={200: {"model": SemanticSummary}})
 def get_semantic_labels_summary(
     reconstruction_id: int,
     lod: str = Query("full", pattern="^(full|medium|preview)$"),
@@ -1209,7 +1247,7 @@ def get_semantic_overlay(
     return Response(content=payload, media_type="application/octet-stream")
 
 
-@router.get("/{reconstruction_id}/geo-transform")
+@router.get("/{reconstruction_id}/geo-transform", responses={200: {"model": GeoTransform}})
 def get_geo_transform(reconstruction_id: int, db: DBSession = Depends(get_db)):
     rec = db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).first()
     if not rec:
@@ -1224,7 +1262,7 @@ def get_geo_transform(reconstruction_id: int, db: DBSession = Depends(get_db)):
         ) from exc
 
 
-@router.get("/{reconstruction_id}/ortho/status")
+@router.get("/{reconstruction_id}/ortho/status", responses={200: {"model": OrthoStatus}})
 def get_ortho_status(reconstruction_id: int, db: DBSession = Depends(get_db)):
     rec = db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).first()
     if not rec:
@@ -1344,7 +1382,7 @@ def cleanup_splat(
     )
 
 
-@router.get("/{reconstruction_id}/coverage-gaps")
+@router.get("/{reconstruction_id}/coverage-gaps", responses={200: {"model": list[CoverageGapCell]}})
 def get_coverage_gaps(reconstruction_id: int, db: DBSession = Depends(get_db)):
     rec = db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).first()
     if not rec:
@@ -1400,7 +1438,7 @@ def _load_coverage_gaps_from_disk(rec: Reconstruction) -> list[dict] | None:
     return None
 
 
-@router.get("/{reconstruction_id}/quality-scorecard")
+@router.get("/{reconstruction_id}/quality-scorecard", responses={200: {"model": QualityScorecard}})
 def get_quality_scorecard(reconstruction_id: int, db: DBSession = Depends(get_db)):
     rec = db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).first()
     if not rec:
@@ -1434,7 +1472,10 @@ def get_calibration_drift_report(reconstruction_id: int, db: DBSession = Depends
     return build_calibration_drift_report(cameras)
 
 
-@router.post("/{reconstruction_id}/validate-checkpoints")
+@router.post(
+    "/{reconstruction_id}/validate-checkpoints",
+    responses={200: {"model": CheckpointValidationReport}}
+)
 def validate_checkpoints(
     reconstruction_id: int,
     body: CheckpointValidationIn,

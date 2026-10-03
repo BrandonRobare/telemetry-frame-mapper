@@ -13,6 +13,7 @@ from ..core.config import get_config
 from ..core.paths import confine_path
 from ..db.database import get_db
 from ..db.models import Reconstruction, ShareLink, ShareLinkUnlockSession
+from ..response_schemas import ShareViewerPayload
 from ..services.pin_lock import record_unlock_failure, reset_unlock_attempts, unlock_retry_after
 from ..services.share_links import (
     SHARE_LINK_PREFIX,
@@ -200,7 +201,7 @@ def unlock_share_link(
     _set_unlock_cookie(response, request, link, db)
 
 
-@router.get("/token/{token}")
+@router.get("/token/{token}", responses={200: {"model": ShareViewerPayload}})
 def public_viewer_metadata(
     token: str,
     request: Request,

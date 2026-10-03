@@ -51,7 +51,7 @@ function FitBounds({ footprints, sessionId }: { footprints: Footprint[]; session
     const coords: number[][] = []
     footprints.forEach((fp) => {
       try {
-        const geom: unknown = JSON.parse(fp.geom_geojson)
+        const geom: unknown = JSON.parse(fp.geom_geojson ?? 'null')
         if (isRenderableGeoJSON(geom) && geom.coordinates) {
           const flat = (geom.coordinates as number[][][]).flat(2)
           for (let i = 0; i < flat.length; i += 2) coords.push([flat[i + 1], flat[i]])
@@ -112,7 +112,7 @@ export default function LeafletMapView({ footprints, coverage, isLoading, error,
         >((acc, fp) => {
           if (!fp.geom_geojson) return acc
           try {
-            const geometry: unknown = JSON.parse(fp.geom_geojson)
+            const geometry: unknown = JSON.parse(fp.geom_geojson ?? 'null')
             if (!isRenderableGeoJSON(geometry)) return acc
             acc.push({
               type: 'Feature',

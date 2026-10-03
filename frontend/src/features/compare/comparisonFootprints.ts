@@ -8,7 +8,7 @@ export function comparisonFootprintGeoJson(footprints: Footprint[]) {
         try {
           features.push({
             type: 'Feature',
-            geometry: JSON.parse(footprint.geom_geojson),
+            geometry: JSON.parse(footprint.geom_geojson ?? 'null'),
             properties: { id: footprint.id },
           })
         } catch {

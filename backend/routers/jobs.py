@@ -10,10 +10,12 @@ from backend.db.models import Reconstruction
 from backend.services.job_queue import cancel_job, get_job
 from backend.services.job_queue import list_jobs as list_queue_jobs
 
+from ..response_schemas import Job
+
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 
 
-@router.get("/")
+@router.get("/", responses={200: {"model": list[Job]}})
 def list_jobs(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),

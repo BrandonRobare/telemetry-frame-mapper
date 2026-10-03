@@ -71,16 +71,16 @@ function useBulkPatch(sessionId: number | null) {
 }
 
 // ---- flag cycling ----
-const FLAG_CYCLE: Image['flag'][] = ['good', 'blurry', 'no_gps']
+const FLAG_CYCLE: string[] = ['good', 'blurry', 'no_gps']
 
-function nextFlag(current: Image['flag']): Image['flag'] {
-  const idx = FLAG_CYCLE.indexOf(current)
+function nextFlag(current: Image['flag']): string {
+  const idx = FLAG_CYCLE.indexOf(current ?? '')
   if (idx === -1) return 'good'
   return FLAG_CYCLE[(idx + 1) % FLAG_CYCLE.length]
 }
 
 // ---- badge colour ----
-const FLAG_BADGE: Record<Image['flag'], { bg: string; text: string; label: string }> = {
+const FLAG_BADGE: Record<string, { bg: string; text: string; label: string }> = {
   good:   { bg: 'var(--success-soft)', text: 'var(--success)',   label: 'Good' },
   blurry: { bg: 'var(--warning-soft)', text: 'var(--warning)',   label: 'Blurry' },
   no_gps: { bg: 'var(--tan-soft)',     text: 'var(--tan-text)',  label: 'No GPS' },
@@ -114,10 +114,10 @@ interface StatsBarProps {
 }
 
 function StatsBar({ images, activeFlag, onFlagClick, visibleCount, selectedCount, sortBy, onSortChange }: StatsBarProps) {
-  const counts: Record<Image['flag'], number> = {
+  const counts: Record<string, number> = {
     good: 0, blurry: 0, no_gps: 0, dark: 0, bright: 0, unscored: 0,
   }
-  for (const img of images) counts[img.flag]++
+  for (const img of images) if (img.flag) counts[img.flag] = (counts[img.flag] ?? 0) + 1
   const usableCount = images.filter((img) => img.usable).length
 
   const items: { label: string; flag: Image['flag']; count: number; color: string }[] = [
@@ -268,7 +268,7 @@ function ImageCard({ img, sessionId, isSelected, onSelect }: CardProps) {
     onError: (err: Error) => addToast(err.message, 'error'),
   })
 
-  const badge = FLAG_BADGE[img.flag]
+  const badge = FLAG_BADGE[img.flag ?? ''] ?? { bg: 'var(--surface-2)', text: 'var(--text-muted)', label: img.flag ?? 'Unknown' }
 
   return (
     <div
@@ -317,7 +317,7 @@ function ImageCard({ img, sessionId, isSelected, onSelect }: CardProps) {
       {/* flag badge — top-right, clickable */}
       <button
         onClick={() => {
-          const prev = img.flag
+          const prev = img.flag ?? 'good'
           const next = nextFlag(prev)
           flagMutation.mutate(
             { id: img.id, flag: next },
@@ -392,7 +392,7 @@ function ImageCard({ img, sessionId, isSelected, onSelect }: CardProps) {
       {/* usable toggle */}
       <button
         onClick={() => {
-          const prev = img.usable
+          const prev = img.usable ?? false
           usableMutation.mutate(
             { id: img.id, usable: !prev },
             {
@@ -413,7 +413,7 @@ function ImageCard({ img, sessionId, isSelected, onSelect }: CardProps) {
           opacity: usableMutation.isPending ? 0.6 : 1, fontFamily: 'inherit',
           width: 'calc(100% - 16px)',
         }}
-        aria-pressed={img.usable}
+        aria-pressed={img.usable ?? false}
         title={img.usable ? 'Mark as skip' : 'Mark as usable'}
       >
         {img.usable ? '✓ Usable' : '✗ Skip'}

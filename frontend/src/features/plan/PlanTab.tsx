@@ -1,3 +1,4 @@
+import type { TargetAreaOut, PlanOut, ValidationOut, SegmentOut } from '../../types/api'
 import { useMemo, useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { apiUrl, post, get } from '../../shared/api/client'
@@ -11,46 +12,6 @@ import PlanMap from './PlanMap'
 import { computeCentroid, type CentroidGeometry } from './weatherAdvisor'
 import { parseRenderableGeoJSON } from '../../shared/utils/geojson'
 
-
-interface TargetAreaOut {
-  id: number
-  name: string
-  geom_geojson: string | null
-}
-
-interface PlanOut {
-  id: number
-  target_area_id: number
-  altitude_ft: number | null
-  side_overlap_pct: number | null
-  forward_overlap_pct: number | null
-  lane_count: number | null
-  total_distance_m: number | null
-  batteries_estimated: number | null
-  lanes_geojson: string | null
-  kml_path: string | null
-  gpx_path: string | null
-}
-
-interface ValidationOut {
-  plan_id: number
-  valid: boolean
-  warnings: string[]
-  violations: string[]
-  info: string[]
-}
-
-interface SegmentOut {
-  index: number
-  from_lane: number
-  to_lane: number
-  distance_m: number
-  landing_wpt: number[] | null
-  resume_wpt: number[] | null
-  lanes_geojson: string | null
-  kml_path: string | null
-  gpx_path: string | null
-}
 
 const DEFAULT_SETTINGS: FlightSettings = {
   altitudeFt: 200,
@@ -373,7 +334,7 @@ export default function PlanTab() {
               </div>
             )}
             {validation.warnings.length > 0 && (
-              <div style={{ marginBottom: validation.info.length > 0 ? 8 : 0 }}>
+              <div style={{ marginBottom: (validation.info ?? []).length > 0 ? 8 : 0 }}>
                 <span className="text-xs" style={{ color: 'var(--warning, #d97706)', fontWeight: 600 }}>
                   Warnings:
                 </span>
@@ -384,12 +345,12 @@ export default function PlanTab() {
                 ))}
               </div>
             )}
-            {validation.info.length > 0 && (
+            {(validation.info ?? []).length > 0 && (
               <div>
                 <span className="text-xs" style={{ color: 'var(--text-muted)', fontWeight: 600 }}>
                   Info:
                 </span>
-                {validation.info.map((msg, i) => (
+                {(validation.info ?? []).map((msg, i) => (
                   <div key={i} className="text-xs" style={{ color: 'var(--text-muted)' }}>
                     • {msg}
                   </div>

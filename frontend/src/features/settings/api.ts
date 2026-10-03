@@ -2,88 +2,21 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { get, patch, post } from '../../shared/api/client'
 import { useToast } from '../../shared/hooks/useToast'
 
-// ---------------------------------------------------------------------------
-// TypeScript types for the /settings contract
-// ---------------------------------------------------------------------------
+import type { AppSettings } from '../../types/api'
+import type { components } from '../../types/api.generated'
 
-export interface GeneralSettings {
-  default_basemap: string
-  target_crs: string
-  imports_dir: string
-  processed_dir: string
-  exports_dir: string
-  data_dir: string
-}
+export type { AppSettings } from '../../types/api'
+// Settings form models select editable fields from the full generated read response.
+export type GeneralSettings = Pick<components['schemas']['GeneralSettingsRead'], 'default_basemap' | 'target_crs' | 'imports_dir' | 'processed_dir' | 'exports_dir' | 'data_dir'>
+export type MissionSettings = components['schemas']['MissionSettingsRead']
+export type IngestSettings = Pick<components['schemas']['IngestSettingsRead'], 'thumbnail_size_px' | 'thumbnail_jpeg_quality' | 'accepted_extensions' | 'blur_threshold' | 'dark_threshold' | 'bright_threshold' | 'filter_zero_gps'>
+export type PresetConfig = Pick<components['schemas']['PresetConfigRead'], 'iterations' | 'max_gaussians' | 'sh_degree' | 'downscale_factor'>
+export type ReconstructionSettings = Pick<components['schemas']['ReconstructionSettingsRead'], 'default_preset' | 'colmap_threads' | 'sift_max_features' | 'matcher' | 'camera_model' | 'presets'>
+export type RenderSettings = Pick<components['schemas']['RenderSettingsRead'], 'flythrough_fps' | 'flythrough_width' | 'flythrough_height' | 'thumbnail_size_px' | 'thumbnail_quality' | 'lod_preview_ratio' | 'lod_medium_ratio'>
 
-export interface MissionSettings {
-  altitude_ft: number
-  fov_horizontal_deg: number
-  fov_vertical_deg: number
-  image_width_px: number
-  image_height_px: number
-  desired_side_overlap: number
-  desired_forward_overlap: number
-  lane_spacing_ft: number
-  default_video_fps: number
-  battery_range_m: number
-  mission_buffer_pct: number
-  flight_log_match_tolerance_sec: number
-}
-
-export interface IngestSettings {
-  thumbnail_size_px: number
-  thumbnail_jpeg_quality: number
-  accepted_extensions: string[]
-  blur_threshold: number
-  dark_threshold: number
-  bright_threshold: number
-  filter_zero_gps: boolean
-}
-
-export interface PresetConfig {
-  iterations: number
-  max_gaussians: number
-  sh_degree: number
-  downscale_factor: number
-}
-
-export interface ReconstructionSettings {
-  default_preset: string
-  colmap_threads: number
-  sift_max_features: number
-  matcher: string
-  camera_model: string
-  presets: Record<string, PresetConfig>
-}
-
-export interface RenderSettings {
-  flythrough_fps: number
-  flythrough_width: number
-  flythrough_height: number
-  thumbnail_size_px: number
-  thumbnail_quality: number
-  lod_preview_ratio: number
-  lod_medium_ratio: number
-}
-
-export interface AppSettings {
-  general: GeneralSettings
-  mission: MissionSettings
-  ingest: IngestSettings
-  reconstruction: ReconstructionSettings
-  render: RenderSettings
-}
-
-// PATCH payload for reconstruction: every field optional, and preset fields left
-// untouched must be omittable so the backend doesn't pin them to whatever the
-// accelerator policy last resolved (#820) — only what the operator changed goes out.
-export type ReconstructionSettingsPatch = Partial<Omit<ReconstructionSettings, 'presets'>> & {
-  presets?: Record<string, Partial<PresetConfig>>
-}
-
-export type SettingsPatchBody = Omit<Partial<AppSettings>, 'reconstruction'> & {
-  reconstruction?: ReconstructionSettingsPatch
-}
+// PATCH uses the backend's optional field contract; the form still selects editable fields.
+export type SettingsPatchBody = components['schemas']['SettingsPatch']
+export type ReconstructionSettingsPatch = NonNullable<SettingsPatchBody['reconstruction']>
 
 // ---------------------------------------------------------------------------
 // React Query hooks

@@ -29,7 +29,6 @@ const session: Session = {
   id: SESSION_ID,
   name: 'Bridge survey',
   folder_path: null,
-  import_mode: 'folder',
   imported_at: '2026-09-01T10:00:00+00:00',
   photo_count: 12,
   usable_count: 10,
@@ -41,6 +40,7 @@ const session: Session = {
 const job: Job = {
   id: REC_ID,
   type: 'reconstruction',
+    effective_splat_settings: null,
   session_id: SESSION_ID,
   source_session_ids: null,
   status: 'complete',
@@ -276,4 +276,42 @@ it('reports a rejected share-link creation and allows another attempt', async ()
   await waitFor(() => expect(useToast.getState().toasts.some((toast) => toast.message === 'Share link generation failed: Share signing unavailable')).toBe(true))
   expect((generate as HTMLButtonElement).disabled).toBe(false)
   expect(screen.queryByText(/\/view\/share\//)).toBeNull()
+})
+
+// The contract fixture is shared with the backend's real export producer checks.
+import exportSchemas from '../../../../tests/contract/fixtures/export_schemas.json'
+
+it('exports frame GeoJSON with the public property keys and excludes missing GPS', async () => {
+  const parts: BlobPart[][] = []
+  const NativeBlob = globalThis.Blob
+  vi.stubGlobal('Blob', class extends NativeBlob {
+    constructor(blobParts: BlobPart[] = [], options?: BlobPropertyBag) {
+      super(blobParts, options)
+      parts.push(blobParts)
+    }
+  })
+  const NativeURL = globalThis.URL
+  vi.stubGlobal('URL', class extends NativeURL {
+    static createObjectURL = vi.fn(() => 'blob:frame-contract')
+    static revokeObjectURL = vi.fn()
+  })
+  vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+  stubApi(({ method, url }) => {
+    if (method === 'GET' && url === `/images?session_id=${SESSION_ID}`) {
+      return jsonResponse([
+        { filename: 'frame.jpg', latitude: 1, longitude: 2, altitude_m: null, flag: null, usable: null },
+        { filename: 'no-gps.jpg', latitude: null, longitude: 2, altitude_m: null, flag: 'no_gps', usable: false },
+      ])
+    }
+    return undefined
+  })
+  renderExportTab()
+  await userEvent.click(await screen.findByRole('button', { name: 'Export GeoJSON' }))
+  await waitFor(() => expect(parts).toHaveLength(1))
+  const geojson = JSON.parse(String(parts[0][0]))
+  expect(geojson.type).toBe('FeatureCollection')
+  expect(geojson.features).toHaveLength(1)
+  expect(geojson.features[0].geometry).toEqual({ type: 'Point', coordinates: [2, 1] })
+  expect(Object.keys(geojson.features[0].properties).sort()).toEqual(exportSchemas.geojson.frames)
+  expect(geojson.features[0].properties).toEqual({ filename: 'frame.jpg', altitude_m: null, flag: null, usable: null })
 })

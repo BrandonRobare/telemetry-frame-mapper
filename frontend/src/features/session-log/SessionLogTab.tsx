@@ -1,3 +1,4 @@
+import type { LogEntryOut as SessionLogEntry } from '../../types/api'
 import { useQuery } from '@tanstack/react-query'
 import { get } from '../../shared/api/client'
 import { useMapStore } from '../../shared/stores/mapStore'
@@ -6,16 +7,6 @@ import EmptyState from '../../shared/components/EmptyState'
 import DefectsSection from './DefectsSection'
 import FlightEntriesSection from './FlightEntriesSection'
 import { formatLogTimestamp } from './formatLogTimestamp'
-
-interface SessionLogEntry {
-  id: number
-  session_id: number
-  event_type: string
-  photo_count: number | null
-  coverage_pct: number | null
-  message: string | null
-  timestamp: string | null
-}
 
 function useSessionLog(sessionId: number | null) {
   return useQuery<SessionLogEntry[]>({
@@ -118,7 +109,7 @@ export default function SessionLogTab() {
                 {formatLogTimestamp(entry.timestamp)}
               </td>
               <td style={{ padding: '8px 12px' }}>
-                <EventBadge type={entry.event_type} />
+                <EventBadge type={entry.event_type ?? 'unknown'} />
               </td>
               <td style={{ padding: '8px 12px', textAlign: 'right', color: 'var(--text-muted)' }}>
                 {entry.photo_count ?? '—'}

@@ -20,6 +20,8 @@ except Exception:
     pynvml = None  # type: ignore[assignment]
     _NVML_AVAILABLE = False
 
+from ..response_schemas import SystemResources
+
 router = APIRouter(prefix="/system", tags=["system"])
 
 
@@ -409,7 +411,7 @@ def _workflow_statuses(
     ]
 
 
-@router.get("/resources")
+@router.get("/resources", responses={200: {"model": SystemResources}})
 def get_resources():
     cpu_pct = psutil.cpu_percent(interval=0.1)
     mem = psutil.virtual_memory()

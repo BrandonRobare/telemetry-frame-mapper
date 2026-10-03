@@ -6,6 +6,7 @@ function makeJob(overrides: Partial<Job>): Job {
   return {
     id: 1,
     type: 'reconstruction',
+    effective_splat_settings: null,
     session_id: 1,
     source_session_ids: null,
     status: 'pending',

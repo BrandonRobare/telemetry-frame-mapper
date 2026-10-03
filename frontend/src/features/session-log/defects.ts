@@ -17,8 +17,8 @@ export const SEVERITY_LABELS: Record<DefectSeverity, string> = {
 }
 
 /** Human-readable label for a defect category, tolerant of categories not yet in the map. */
-export function formatCategoryLabel(category: DefectCategory): string {
-  const known = CATEGORY_LABELS[category]
+export function formatCategoryLabel(category: string): string {
+  const known = Object.entries(CATEGORY_LABELS).find(([key]) => key === category)?.[1]
   if (known) return known
   return String(category).replace(/_/g, ' ')
 }
@@ -30,7 +30,7 @@ const SEVERITY_COLOR_VAR: Record<DefectSeverity, string> = {
 }
 
 /** CSS color variable for a severity badge; a neutral fallback covers null/unset severity. */
-export function severityColorVar(severity: DefectSeverity | null): string {
+export function severityColorVar(severity: string | null): string {
   if (severity == null) return 'var(--text-faint)'
-  return SEVERITY_COLOR_VAR[severity] ?? 'var(--text-faint)'
+  return Object.entries(SEVERITY_COLOR_VAR).find(([key]) => key === severity)?.[1] ?? 'var(--text-faint)'
 }

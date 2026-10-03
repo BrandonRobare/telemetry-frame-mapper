@@ -13,7 +13,9 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:unit": "vitest run --project unit",
-    "test:component": "vitest run --project component"
+    "test:component": "vitest run --project component",
+    "api:generate": "npm run generate --workspace @tfm/api-types",
+    "api:check": "npm run check --workspace @tfm/api-types"
   },
   "dependencies": {
     "@mkkellogg/gaussian-splats-3d": "^0.4.7",
@@ -53,5 +55,8 @@
     "typescript-eslint": "^8.70.1",
     "vite": "^8.3.0",
     "vitest": "^5.0.1"
-  }
+  },
+  "workspaces": [
+    "scripts/api-types"
+  ]
 }
