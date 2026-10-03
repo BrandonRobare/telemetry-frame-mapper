@@ -33,6 +33,7 @@ from ..db.models import (
     ShareLink,
 )
 from ..db.models import Session as SessionModel
+from ..response_schemas import CreatedShareLink, ShareLinkState, SurveyReport
 from ..services.geometry_exports import feature_collection, geometry_feature
 
 router = APIRouter(prefix="/export", tags=["export"])
@@ -694,7 +695,10 @@ def _share_link_owner_payload(link: ShareLink) -> dict:
     }
 
 
-@router.post("/reconstructions/{reconstruction_id}/share-link", status_code=201)
+@router.post(
+    "/reconstructions/{reconstruction_id}/share-link", status_code=201,
+    responses={201: {"model": CreatedShareLink}}
+)
 def create_share_link(
     reconstruction_id: int,
     request: Request,
@@ -750,7 +754,10 @@ def create_share_link(
     }
 
 
-@router.get("/reconstructions/{reconstruction_id}/share-links")
+@router.get(
+    "/reconstructions/{reconstruction_id}/share-links",
+    responses={200: {"model": list[ShareLinkState]}}
+)
 def list_share_links(reconstruction_id: int, db: DBSession = Depends(get_db)):
     """List owner-visible share-link lifecycle state without secrets."""
     rec = db.query(Reconstruction).filter(Reconstruction.id == reconstruction_id).first()
@@ -765,7 +772,10 @@ def list_share_links(reconstruction_id: int, db: DBSession = Depends(get_db)):
     return [_share_link_owner_payload(link) for link in links]
 
 
-@router.post("/reconstructions/{reconstruction_id}/share-links/{share_link_id}/revoke")
+@router.post(
+    "/reconstructions/{reconstruction_id}/share-links/{share_link_id}/revoke",
+    responses={200: {"model": ShareLinkState}}
+)
 def revoke_share_link(reconstruction_id: int, share_link_id: int, db: DBSession = Depends(get_db)):
     """Revoke a persisted link and every unlock session attached to it."""
     from ..services.share_links import now_utc
@@ -784,8 +794,14 @@ def revoke_share_link(reconstruction_id: int, share_link_id: int, db: DBSession 
     return _share_link_owner_payload(link)
 
 
-@router.get("/survey-report")
-@router.post("/survey-report")
+@router.get(
+    "/survey-report",
+    responses={200: {"model": SurveyReport, "content": {"text/html": {}, "application/pdf": {}}}}
+)
+@router.post(
+    "/survey-report",
+    responses={200: {"model": SurveyReport, "content": {"text/html": {}, "application/pdf": {}}}}
+)
 def export_survey_report(
     session_id: int,
     format: str = "json",

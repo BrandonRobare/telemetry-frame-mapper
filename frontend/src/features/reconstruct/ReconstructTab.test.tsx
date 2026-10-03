@@ -14,6 +14,7 @@ vi.mock('../../shared/api/reconstructionStatusEvents', async (importOriginal) =>
 const remoteJob: Job = {
   id: 900,
   type: 'reconstruction',
+    effective_splat_settings: null,
   session_id: 42,
   source_session_ids: null,
   status: 'running_remote',

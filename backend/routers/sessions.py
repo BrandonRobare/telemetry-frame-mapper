@@ -21,6 +21,7 @@ from ..db.database import SessionLocal, get_db
 from ..db.models import Image, Project, Reconstruction
 from ..db.models import Session as SessionModel
 from ..db.session_search import install_session_search_schema
+from ..response_schemas import SessionProgress
 from ..services.artifact_cleanup import remove_artifacts, session_artifact_paths
 from ..services.delete_guard import DeleteBlocked, commit_delete, refuse_if_compared
 from ..services.ingest_orchestrator import get_progress, start_import
@@ -420,7 +421,7 @@ def import_session(req: ImportRequest, db: DBSession = Depends(get_db)):
     return s
 
 
-@router.get("/{session_id}/progress")
+@router.get("/{session_id}/progress", responses={200: {"model": SessionProgress}})
 def session_progress(session_id: int):
     return get_progress(session_id)
 

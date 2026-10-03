@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session as DBSession
 from ..core.config import get_config
 from ..db.database import get_db
 from ..db.models import JobQueueEntry, SessionComparison
+from ..response_schemas import ComparisonDiff
 from ..services.artifact_cleanup import remove_artifacts
 from ..services.delete_guard import commit_delete
 from ..services.job_queue import SESSION_COMPARISON
@@ -110,7 +111,7 @@ def delete_comparison(comparison_id: int, db: DBSession = Depends(get_db)):
     return {"ok": True}
 
 
-@router.get("/{comparison_id}/diff")
+@router.get("/{comparison_id}/diff", responses={200: {"model": ComparisonDiff}})
 def get_diff(comparison_id: int, db: DBSession = Depends(get_db)):
     comparison = _comparison_or_404(comparison_id, db)
     return _load_complete_diff(comparison)

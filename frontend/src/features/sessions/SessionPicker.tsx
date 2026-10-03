@@ -68,7 +68,7 @@ export default function SessionPicker({ onImport, projectId }: SessionPickerProp
   return (
     <span className="inline-flex items-center gap-1.5">
       <SessionSearch onSelect={(session) => {
-        setProject(session.project_id)
+        setProject(session.project_id ?? null)
         setSession(session.id)
       }} />
       <select

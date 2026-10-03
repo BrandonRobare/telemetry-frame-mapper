@@ -1,0 +1,13 @@
+{
+  "name": "@tfm/api-types",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "generate": "node index.mjs",
+    "check": "node index.mjs --check"
+  },
+  "devDependencies": {
+    "openapi-typescript": "7.13.0",
+    "typescript": "~5.9.3"
+  }
+}

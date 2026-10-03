@@ -7,7 +7,6 @@ function makeSession(id: number, tags: string[]): Session {
     id,
     name: `s${id}`,
     folder_path: '/tmp',
-    import_mode: 'full',
     imported_at: '2026-07-08T00:00:00Z',
     photo_count: 0,
     usable_count: 0,

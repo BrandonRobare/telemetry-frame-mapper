@@ -1,14 +1,10 @@
 import { useQuery } from '@tanstack/react-query'
 import { get } from './client'
 
-export type SessionProgressStatus = 'pending' | 'running' | 'done' | 'error' | 'unknown'
+import type { SessionProgress } from '../../types/api'
 
-export interface SessionProgress {
-  processed: number
-  total: number
-  status: SessionProgressStatus
-  error?: string
-}
+export type { SessionProgress } from '../../types/api'
+export type SessionProgressStatus = SessionProgress['status']
 
 const LIVE_STATUSES = new Set<SessionProgressStatus>(['pending', 'running'])
 

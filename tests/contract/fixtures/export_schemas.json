@@ -1,0 +1,21 @@
+{
+  "csv": {
+    "measurements": ["id", "kind", "label", "value", "unit", "created_at", "points"],
+    "odm_georeferencing": ["filename", "latitude", "longitude", "altitude"],
+    "control_points": {
+      "pix4d": {"header": false, "columns": ["label", "latitude", "longitude", "altitude_m"]},
+      "dronedeploy": {"header": false, "columns": ["label", "latitude", "longitude", "altitude_m"]}
+    }
+  },
+  "geojson": {
+    "frames": ["altitude_m", "filename", "flag", "usable"],
+    "footprints": ["filename", "footprint_id", "ground_height_m", "ground_width_m", "heading_estimated", "image_id", "name"],
+    "coverage_gap": ["coverage_pct", "coverage_run_id", "covered_area_m2", "kind", "name", "session_ids", "target_area_id"],
+    "coverage_overlap": ["coverage_pct", "coverage_run_id", "covered_area_m2", "kind", "name", "session_ids", "target_area_id"],
+    "annotations": ["color", "created_at", "id", "label"],
+    "measurements": ["created_at", "id", "label", "name", "unit", "value"],
+    "comparison_new": ["size", "type"],
+    "comparison_removed": ["size", "type"],
+    "comparison_collection": ["comparison", "summary"]
+  }
+}

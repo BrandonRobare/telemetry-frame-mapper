@@ -31,6 +31,8 @@ const resources: SystemResources = {
     splat_backend: null,
     splat_backend_available: false,
   },
+  colmap_capabilities: {},
+  splat_transform_available: false,
   colmap_available: false,
   tools: [],
   workflows: [],
@@ -205,6 +207,9 @@ describe('JobsTab reconstruction statuses', () => {
         ssim_lambda: 0.2,
         init_opacity: 0.1,
         sh_warmup_every: 500,
+        benchmark_heldout_split: false,
+        benchmark_test_every: 8,
+        background_color: null,
       },
     }
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {

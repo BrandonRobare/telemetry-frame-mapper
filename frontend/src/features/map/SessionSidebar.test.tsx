@@ -18,7 +18,7 @@ beforeEach(() => {
 })
 
 const SESSION: Session = {
-  id: 1, name: 'Flight 1', folder_path: '/f', import_mode: 'copy',
+  id: 1, name: 'Flight 1', folder_path: '/f',
   imported_at: '2026-01-01T00:00:00Z', photo_count: 10, usable_count: 8,
   notes: null, tags: [], project_id: null,
 }

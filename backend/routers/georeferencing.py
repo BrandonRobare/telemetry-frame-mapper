@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session as DBSession
 from ..db.database import get_db
 from ..db.models import Image, Reconstruction
 from ..db.models import Session as SessionModel
+from ..response_schemas import GcpAccuracyReport
 from ..services.georeferencing_workflows import (
     ControlPoint,
     GcpPoint,
@@ -139,7 +140,10 @@ def export_control_points(body: ControlPointExportIn):
 # ---- GCP accuracy report (issue #287) ----
 
 
-@router.post("/sessions/{session_id}/accuracy-report")
+@router.post(
+    "/sessions/{session_id}/accuracy-report",
+    responses={200: {"model": GcpAccuracyReport}}
+)
 def gcp_accuracy_report(
     session_id: int,
     body: GcpAccuracyRequest,

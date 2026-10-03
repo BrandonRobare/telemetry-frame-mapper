@@ -2,6 +2,7 @@ import type { AppSettings } from '../features/settings/api'
 
 export const settingsFixture: AppSettings = {
   general: {
+    basemap_providers: [],
     default_basemap: 'esri_satellite',
     target_crs: 'EPSG:32617',
     imports_dir: './imports',
@@ -33,6 +34,11 @@ export const settingsFixture: AppSettings = {
     filter_zero_gps: true,
   },
   reconstruction: {
+    mapper: 'incremental',
+    spatial_matcher_min_images: 150,
+    single_camera: true,
+    dense_rerun: {},
+    camera_profiles: [],
     default_preset: 'quick',
     colmap_threads: 8,
     sift_max_features: 8192,

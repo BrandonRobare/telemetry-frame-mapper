@@ -10,6 +10,7 @@ function job(id: number, sessionId: number): Job {
   return {
     id,
     type: 'reconstruction',
+    effective_splat_settings: null,
     session_id: sessionId,
     source_session_ids: null,
     status: 'complete',

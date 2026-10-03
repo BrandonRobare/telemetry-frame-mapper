@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 
 from ..core.config import get_backup_config, get_config
 from ..core.paths import confine_path
+from ..response_schemas import BackupScheduleStatus, PolicyResult, StorageFileList, StorageStats
 from ..services.storage_summary_cache import _cache, invalidate_storage_summary_cache
 
 router = APIRouter(prefix="/storage", tags=["storage"])
@@ -111,7 +112,7 @@ def _validate_filename(filename: str) -> None:
         raise HTTPException(status_code=400, detail="Invalid filename")
 
 
-@router.get("/files")
+@router.get("/files", responses={200: {"model": StorageFileList}})
 def list_files(directory: str = Query("imports")):
     base = _storage_base(directory)
     if not base.exists():
@@ -161,7 +162,7 @@ def delete_file(
     raise HTTPException(status_code=404, detail="File not found")
 
 
-@router.get("/summary")
+@router.get("/summary", responses={200: {"model": StorageStats}})
 def get_storage_summary():
     now = time.monotonic()
     if _cache["data"] is None or now - _cache["ts"] > _CACHE_TTL:
@@ -189,7 +190,7 @@ class BackupRequest(BaseModel):
     )
 
 
-@router.post("/apply-policy")
+@router.post("/apply-policy", responses={200: {"model": PolicyResult}})
 def apply_storage_policy(body: ApplyPolicyRequest):
     """Preview or execute storage lifecycle rules.
 
@@ -236,7 +237,7 @@ def create_artifact_backup(body: BackupRequest):
         raise HTTPException(status_code=502, detail="Backup could not be completed") from exc
 
 
-@router.get("/backup-schedule")
+@router.get("/backup-schedule", responses={200: {"model": BackupScheduleStatus}})
 def get_backup_schedule_status(request: Request):
     """Return the safe operational state of the configured daily backup."""
     scheduler = getattr(request.app.state, "backup_scheduler", None)

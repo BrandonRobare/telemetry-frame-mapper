@@ -1,4 +1,6 @@
-export type ImportProgressStatus = 'pending' | 'running' | 'done' | 'error' | 'unknown'
+import type { SessionProgress } from '../../types/api'
+
+export type ImportProgressStatus = SessionProgress['status']
 
 // Polling policy for the session-import progress query: keep polling (1000 ms) until the
 // import reports a terminal status — done, error, or unknown — including while status is

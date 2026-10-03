@@ -20,6 +20,7 @@ from ..db.models import Session as SessionModel
 from ..services.duplicate_detection import find_duplicate_matches
 from ..services.ingest_orchestrator import start_import
 from ..services.upload_reader import read_upload_with_limit
+from .sessions import SessionOut
 
 router = APIRouter(prefix="/uploads/imports", tags=["uploads"])
 
@@ -63,6 +64,12 @@ class UploadProgress(BaseModel):
 
 class CompleteUploadResponse(UploadProgress):
     session: dict | None = None
+
+
+class CompleteUploadContract(CompleteUploadResponse):
+    """Document the existing six-field session projection without filtering it."""
+
+    session: SessionOut | None = None
 
 
 def _limits() -> dict:
@@ -424,7 +431,10 @@ async def upload_import_chunk(
         return _progress(state)
 
 
-@router.post("/{upload_id}/complete", response_model=CompleteUploadResponse)
+@router.post(
+    "/{upload_id}/complete", response_model=CompleteUploadResponse,
+    responses={200: {"model": CompleteUploadContract}},
+)
 def complete_browser_import_upload(upload_id: str, db: DBSession = Depends(get_db)):
     with _lock_for(upload_id):
         # Read the state under the lock so a concurrent /complete that already imported

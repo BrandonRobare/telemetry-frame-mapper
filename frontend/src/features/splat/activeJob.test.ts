@@ -11,6 +11,7 @@ describe('resolveActiveJobId', () => {
   const job = (id: number, session_id: number, status: Job['status'] = 'complete'): Job => ({
     id,
     type: 'reconstruction',
+    effective_splat_settings: null,
     session_id,
     source_session_ids: null,
     status,

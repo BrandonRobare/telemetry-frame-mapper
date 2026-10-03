@@ -98,6 +98,10 @@ jobs:
         working-directory: frontend
         run: npm ci
 
+      - name: Check generated API contracts
+        working-directory: frontend
+        run: npm run api:check
+
       - name: Audit dependencies
         working-directory: frontend
         run: npm audit --audit-level=moderate

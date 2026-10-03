@@ -169,8 +169,13 @@ def test_get_diff_returns_json(client, tmp_path):
     diff_path = tmp_path / "diff.json"
     diff = {
         "utm_zone": "17N",
-        "summary": {"new_count": 1, "removed_count": 0},
-        "new": [{"x": 500000, "y": 3900000, "z": 0, "size": 1.0}],
+        "voxel_size_m": 1.0,
+        "comparison": {
+            "session_a_id": session_a.id, "session_b_id": session_b.id,
+            "reconstruction_a_id": rec_a.id, "reconstruction_b_id": rec_b.id,
+        },
+        "summary": {"a_cells": 0, "b_cells": 1, "new_count": 1, "removed_count": 0},
+        "new": [{"x": 500000, "y": 3900000, "z": 0, "size": 1.0, "type": "new"}],
         "removed": [],
     }
     diff_path.write_text(json.dumps(diff), encoding="utf-8")

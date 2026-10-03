@@ -1,220 +1,61 @@
-export interface Project {
-  id: number;
-  name: string;
-  description: string | null;
-  created_at: string | null;
-  session_count: number;
-}
+import type { components } from './api.generated'
 
-export interface SiteTrendPoint {
-  session_id: number
-  session_name: string
-  imported_at: string | null
-  photo_count: number
-  usable_count: number
-  usable_pct: number | null
-  coverage_pct: number | null
-  reconstruction_id: number | null
-  frames_registered: number | null
-  psnr: number | null
-  ssim: number | null
-}
-
-export interface SiteTrend {
-  project_id: number
-  points: SiteTrendPoint[]
-}
-
-export interface Session {
-  id: number;
-  name: string;
-  folder_path: string | null;
-  import_mode: string;
-  imported_at: string;
-  photo_count: number;
-  usable_count: number;
-  notes: string | null;
-  tags: string[];
-  project_id: number | null;
-}
-
-export type SessionSearchSource = 'session' | 'log' | 'defect'
-
-export interface SessionSearchMatch {
-  source: SessionSearchSource
-  snippet: string
-}
-
-export interface SessionSearchResult extends Session {
-  matches: SessionSearchMatch[]
-}
-
-export type BulkSessionOperation = 'archive' | 'assign_project' | 'replace_tags' | 'add_tags' | 'delete'
-
-export interface BulkSessionOutcome {
-  session_id: number
-  ok: boolean
-  error: string | null
-  bundle_path: string | null
-}
-
-export interface BulkSessionResponse {
-  operation: BulkSessionOperation
-  outcomes: BulkSessionOutcome[]
-}
-
-export interface Image {
-  id: number;
-  session_id: number;
-  filename: string;
-  filepath: string;
-  thumb_path: string | null;
-  timestamp: string | null;
-  latitude: number | null;
-  longitude: number | null;
-  altitude_m: number | null;
-  original_latitude: number | null;
-  original_longitude: number | null;
-  original_altitude_m: number | null;
-  synced_latitude: number | null;
-  synced_longitude: number | null;
-  synced_altitude_m: number | null;
-  gps_source: string;
-  yaw: number | null;
-  gimbal_pitch: number | null;
-  width: number | null;
-  height: number | null;
-  focal_length_mm: number | null;
-  sharpness_score: number | null;
-  brightness_score: number | null;
-  colmap_error_px: number | null;
-  // "unscored": quality scoring failed during import; the frame is never usable.
-  flag: "good" | "blurry" | "dark" | "bright" | "no_gps" | "unscored";
-  usable: boolean;
-  notes: string | null;
-}
-
-export interface Footprint {
-  id: number;
-  image_id: number;
-  geom_wkt: string;
-  geom_geojson: string;
-  ground_width_m: number;
-  ground_height_m: number;
-  heading_estimated: boolean;
-}
-
-export interface CoverageResult {
-  id: number;
-  target_area_id: number | null;
-  session_ids: string;
-  total_area_m2: number | null;
-  covered_area_m2: number | null;
-  coverage_pct: number | null;
-  gap_geojson: string | null;
-  overlap_geojson: string | null;
-  run_at: string;
-}
-
-export interface TrainingMetricPoint {
-  iter: number;
-  psnr: number;
-  ssim: number;
-}
-
-export interface CoverageGapCell {
-  x: number;
-  y: number;
-  z: number;
-  size: number;
-  level: "sparse" | "thin" | "very_sparse";
-}
-
-export interface EffectiveSplatSettings {
-  preset: string;
-  accelerator_kind: 'cuda' | 'metal' | 'cpu';
-  device: 'cuda' | 'mps' | 'cpu';
-  splat_backend: 'cuda_gsplat' | 'metal_msplat' | null;
-  iterations: number;
-  max_gaussians: number;
-  sh_degree: number;
-  downscale_factor: number;
-  refine_start_iter: number;
-  refine_stop_iter: number;
-  refine_every: number;
-  reset_every: number;
-  eval_every: number;
-  eval_views: number;
-  ssim_lambda: number;
-  init_opacity: number;
-  sh_warmup_every: number;
-}
-
-export interface Reconstruction {
-  id: number;
-  session_id: number;
-  status: "pending" | "running_colmap" | "running_gsplat" | "running_remote" | "cancelling" | "cancelled" | "complete" | "failed";
-  preset: "quick" | "full";
-  progress_pct: number;
-  step: string;
-  frames_used: number;
-  frames_registered: number | null;
-  gaussian_count: number | null;
-  psnr: number | null;
-  ssim: number | null;
-  training_metrics: TrainingMetricPoint[] | null;
-  effective_splat_settings?: EffectiveSplatSettings | null;
-  error_msg: string | null;
-  geo_transform: string | null;
-  splat_path: string | null;
-  pointcloud_path: string | null;
-  mesh_glb_path: string | null;
-  mesh_obj_path: string | null;
-  mesh_mtl_path: string | null;
-  mesh_status: "pending" | "running" | "complete" | "failed" | null;
-  mesh_error: string | null;
-  flythrough_path: string | null;
-  flythrough_status: "pending" | "running" | "complete" | "failed" | null;
-  flythrough_error: string | null;
-  semantic_status: "pending" | "running" | "complete" | "failed" | null;
-  semantic_error: string | null;
-  semantic_labels_path: string | null;
-  coverage_gaps_path: string | null;
-}
-
-export interface MeshStatus {
-  id: number
-  mesh_status: "pending" | "running" | "complete" | "failed" | null
-  mesh_error: string | null
-  mesh_glb_path: string | null
-  mesh_obj_path: string | null
-  mesh_mtl_path: string | null
-}
-
-export interface FlythroughStatus {
-  id: number
-  flythrough_status: "pending" | "running" | "complete" | "failed" | null
-  flythrough_error: string | null
-  flythrough_path: string | null
-}
-
-export type SemanticClassName = 'ground' | 'vegetation' | 'structure' | 'vehicle' | 'water' | 'other'
-
-export interface SemanticStatus {
-  id: number
-  semantic_status: 'pending' | 'running' | 'complete' | 'failed' | null
-  semantic_error: string | null
-  semantic_labels_path: string | null
-}
-
-export interface SemanticSummary {
-  lod: 'full' | 'medium' | 'preview'
-  count: number
-  class_counts: Record<SemanticClassName, number>
-  unlabeled: number
-  confidence_mean: number | null
-  meta: Record<string, unknown>
-}
+export type Project = components['schemas']['ProjectOut']
+export type SiteTrendPoint = components['schemas']['SiteTrendPointOut']
+export type SiteTrend = components['schemas']['SiteTrendOut']
+export type Session = components['schemas']['SessionOut']
+export type SessionSearchSource = SessionSearchMatch['source']
+export type SessionSearchMatch = components['schemas']['SessionSearchMatchOut']
+export type SessionSearchResult = components['schemas']['SessionSearchOut']
+export type BulkSessionOperation = BulkSessionResponse['operation']
+export type BulkSessionOutcome = components['schemas']['BulkSessionOutcome']
+export type BulkSessionResponse = components['schemas']['BulkSessionResponse']
+export type Image = components['schemas']['ImageOut']
+export type Footprint = components['schemas']['FootprintOut']
+export type CoverageResult = components['schemas']['CoverageRunOut']
+export type TrainingMetricPoint = components['schemas']['TrainingMetricPoint']
+export type CoverageGapCell = components['schemas']['CoverageGapCell']
+export type EffectiveSplatSettings = components['schemas']['EffectiveSplatSettings']
+export type Reconstruction = components['schemas']['ReconstructionContract']
+export type MeshStatus = components['schemas']['MeshStatusOut']
+export type FlythroughStatus = components['schemas']['FlythroughStatusOut']
+export type SemanticClassName = keyof SemanticSummary['class_counts']
+export type SemanticStatus = components['schemas']['SemanticStatusOut']
+export type SemanticSummary = components['schemas']['SemanticSummary']
+export type HistogramBin = components['schemas']['HistogramBin']
+export type PreflightQualityReport = components['schemas']['PreflightReportContract']
+export type QuickReport = components['schemas']['QuickReportOut']
+export type Job = components['schemas']['Job']
+export type StorageSessionBreakdown = components['schemas']['StorageSessionBreakdown']
+export type StorageStats = components['schemas']['StorageStats']
+export type BackupScheduleStatus = components['schemas']['BackupScheduleStatus']
+export type SystemAccelerator = components['schemas']['SystemAccelerator']
+export type SystemResources = components['schemas']['SystemResources']
+export type SystemTool = components['schemas']['SystemTool']
+export type WorkflowStatus = components['schemas']['WorkflowStatus']
+export type OrthoStatus = components['schemas']['OrthoStatus']
+export type GeoTransform = components['schemas']['GeoTransform']
+export type StorageFileItem = components['schemas']['StorageFileItem']
+export type StorageFileList = components['schemas']['StorageFileList']
+export type PolicyCandidate = components['schemas']['PolicyCandidate']
+export type PolicySummary = components['schemas']['PolicySummary']
+export type PolicyResult = components['schemas']['PolicyResult']
+export type SurveyReport = components['schemas']['SurveyReport']
+export type Annotation = components['schemas']['AnnotationOut']
+export type FlightEntry = components['schemas']['FlightEntryOut']
+export type DefectCategory = components['schemas']['DefectIn']['category']
+export type DefectSeverity = NonNullable<components['schemas']['DefectIn']['severity']>
+export type DefectImageRef = components['schemas']['DefectImageOut']
+export type Defect = components['schemas']['DefectOut']
+export type SessionComparison = components['schemas']['ComparisonOut']
+export type ComparisonCell = components['schemas']['ComparisonCell']
+export type ComparisonDiff = components['schemas']['ComparisonDiff']
+export type QualityScorecard = components['schemas']['QualityScorecard']
+export type GcpResidual = components['schemas']['GcpResidual']
+export type GcpAccuracyPoint = components['schemas']['SurveyedGcpIn']
+export type GcpAccuracyReport = components['schemas']['GcpAccuracyReport']
+export type CheckpointResult = components['schemas']['CheckpointResult']
+export type CheckpointValidationReport = components['schemas']['CheckpointValidationReport']
 
 export const SEMANTIC_CLASS_COLORS: Record<SemanticClassName, string> = {
   ground: '#8a7a5c',
@@ -225,435 +66,15 @@ export const SEMANTIC_CLASS_COLORS: Record<SemanticClassName, string> = {
   other: '#9ca3af',
 }
 
-export interface HistogramBin {
-  min: number;
-  max: number;
-  count: number;
-}
-
-export interface PreflightQualityReport {
-  session_id: number;
-  total_frames: number;
-  usable_frames: number;
-  gps: {
-    missing: number;
-    completeness_pct: number;
-  };
-  timestamps: {
-    missing: number;
-    completeness_pct: number;
-    duplicate_groups: number;
-    duplicate_frames: number;
-    gap_count: number;
-    max_gap_s: number;
-    typical_gap_s: number | null;
-    gap_threshold_s: number | null;
-  };
-  quality: {
-    blur_threshold: number;
-    dark_threshold: number;
-    bright_threshold: number;
-    blur_count: number;
-    dark_count: number;
-    bright_count: number;
-    blur_pct: number;
-    dark_pct: number;
-    bright_pct: number;
-    flag_counts: Record<string, number>;
-    sharpness_histogram: HistogramBin[];
-    brightness_histogram: HistogramBin[];
-    lighting: {
-      sample_count: number;
-      p10_p90_spread: number | null;
-      threshold: number;
-      inconsistent: boolean;
-    };
-  };
-  coverage: {
-    footprint_count: number;
-    footprint_coverage_pct: number;
-    estimated_overlap_pct: number | null;
-    union_area: number;
-    summed_footprint_area: number;
-    warnings: string[];
-  };
-  warnings: string[];
-  safe_to_reconstruct: "yes" | "caution" | "no";
-  score: number;
-  recommended_action: string;
-}
-
-export interface QuickReport {
-  session_id: number;
-  total_frames: number;
-  usable_frames: number;
-  score: number;
-  safe_to_reconstruct: "yes" | "caution" | "no";
-  recommended_action: string;
-  warnings: string[];
-  gps_completeness_pct: number;
-  timestamp_completeness_pct: number;
-  blur_pct: number;
-  exposure_issue_pct: number;
-  estimated_overlap_pct: number | null;
-  match_density_weak_ratio: number | null;
-  match_density_avg_matches: number | null;
-  lighting_inconsistent: boolean;
-  lighting_p10_p90_spread: number | null;
-}
-
-export interface Job {
-  id: number;
-  type: "reconstruction";
-  session_id: number;
-  source_session_ids: number[] | null;
-  status: "pending" | "running_colmap" | "running_gsplat" | "running_remote" | "cancelling" | "cancelled" | "complete" | "failed";
-  preset: string;
-  progress_pct: number;
-  step: string;
-  frames_used: number;
-  started_at: string | null;
-  completed_at: string | null;
-  error_msg: string | null;
-  effective_splat_settings?: EffectiveSplatSettings | null;
-}
-
-export interface StorageSessionBreakdown {
-  session_id: string;
-  bytes: number;
-}
-
-export interface StorageStats {
-  total_bytes: number;
-  by_type: {
-    imports: number;
-    processed: number;
-    exports: number;
-    data: number;
-  };
-  by_session: StorageSessionBreakdown[];
-}
-
-export interface BackupScheduleStatus {
-  enabled: boolean
-  target: string | null
-  daily_at: string | null
-  running: boolean
-  last_run: string | null
-  next_run: string | null
-  result: { status: 'success' | 'failed' | 'configuration_error'; snapshot_id?: string } | null
-}
-
-export interface SystemAccelerator {
-  kind: 'cuda' | 'metal' | 'cpu'
-  device: 'cuda' | 'mps' | 'cpu'
-  description: string
-  splat_backend: 'cuda_gsplat' | 'metal_msplat' | null
-  splat_backend_available: boolean
-}
-
-export interface SystemResources {
-  cpu_pct: number
-  ram_used_gb: number
-  ram_total_gb: number
-  disk_used_gb: number
-  disk_total_gb: number
-  disk_io_mbps: number | null
-  gpu_pct: number | null
-  vram_used_gb: number | null
-  vram_total_gb: number | null
-  gpu_name: string | null
-  accelerator: SystemAccelerator
-  colmap_available: boolean
-  tools: SystemTool[]
-  workflows: WorkflowStatus[]
-}
-
-export interface SystemTool {
-  key: 'ffmpeg' | 'exiftool' | 'colmap' | 'torch' | 'gsplat' | 'msplat' | 'sugar'
-  label: string
-  available: boolean
-  path: string | null
-  version: string | null
-  install_commands: Record<string, string>
-  install_hint: string | null
-  error: string | null
-}
-
-export interface WorkflowStatus {
-  key: string
-  label: string
-  available: boolean
-  missing: string[]
-}
-
-export interface OrthoStatus {
-  id: number
-  ortho_status: "pending" | "running" | "complete" | "failed" | null
-  ortho_error: string | null
-  ortho_path: string | null
-}
-
-export interface GeoTransform {
-  scale: number
-  rotation: [[number, number, number], [number, number, number], [number, number, number]]
-  translation: [number, number, number]
-  utm_zone: string
-  utm_origin: [number, number]
-  rmse_m?: number
-  trimmed_point_count?: number
-}
-
-export interface StorageFileItem {
-  name: string
-  path: string
-  size_bytes: number
-  modified: number
-}
-
-export interface StorageFileList {
-  directory: string
-  files: StorageFileItem[]
-}
-
-export interface PolicyCandidate {
-  path: string
-  bytes: number
-  reason: string
-  action: string
-  directory: boolean
-}
-
-export interface PolicySummary {
-  total_items: number
-  total_bytes: number
-  actions: Record<string, number>
-  removed_items?: number
-  failed_items?: number
-}
-
-export interface PolicyResult {
-  mode: "dry-run" | "execute"
-  candidates: PolicyCandidate[]
-  summary: PolicySummary
-  executed?: {
-    removed: string[]
-    failed: { path: string; reason: string }[]
-  }
-}
-
-export interface SurveyReport {
-  report_type: string
-  version: string
-  generated_at: string
-  session: {
-    id: number
-    name: string
-    folder_path: string
-    imported_at: string | null
-    photo_count: number
-    usable_count: number
-    notes: string | null
-  }
-  frame_summary: {
-    total: number
-    usable: number
-    quality_breakdown: Record<string, number>
-    camera: Record<string, unknown> | null
-    gps_present: number
-  }
-  quality_assessment: {
-    available: boolean
-    reason?: string
-    score?: number
-    safe_to_reconstruct?: string
-    recommended_action?: string
-    warnings?: string[]
-  }
-  coverage: { available: boolean }
-  reconstructions: unknown[]
-  annotations: unknown[]
-  html: string
-}
-
-export interface Annotation {
-  id: number
-  reconstruction_id: number
-  label: string
-  lat: number
-  lon: number
-  alt_m: number
-  color: string
-  created_at: string
-}
-
-export interface FlightEntry {
-  id: number
-  session_id: number
-  battery_id: string | null
-  start_pct: number | null
-  end_pct: number | null
-  duration_s: number | null
-  notes: string | null
-  created_at: string
-}
-
-export type DefectCategory =
-  | 'crack'
-  | 'corrosion'
-  | 'vegetation'
-  | 'water_damage'
-  | 'missing_material'
-  | 'other'
-
-export type DefectSeverity = 'low' | 'medium' | 'high'
-
-export interface DefectImageRef {
-  id: number
-  filename: string
-  latitude: number | null
-  longitude: number | null
-  thumb_path: string | null
-}
-
-export interface Defect {
-  id: number
-  session_id: number
-  category: DefectCategory
-  severity: DefectSeverity | null
-  note: string | null
-  created_at: string
-  image_ids: number[]
-  images: DefectImageRef[]
-}
-
-export interface SessionComparison {
-  id: number
-  session_a_id: number
-  session_b_id: number
-  reconstruction_a_id: number
-  reconstruction_b_id: number
-  status: "pending" | "running" | "complete" | "failed"
-  diff_path: string | null
-  error_msg: string | null
-  created_at: string
-  completed_at: string | null
-}
-
-export interface ComparisonCell {
-  x: number
-  y: number
-  z: number
-  size: number
-  type: "new" | "removed"
-}
-
-export interface ComparisonDiff {
-  comparison: {
-    session_a_id: number
-    session_b_id: number
-    reconstruction_a_id: number
-    reconstruction_b_id: number
-  }
-  voxel_size_m: number
-  utm_zone: string | null
-  summary: {
-    a_cells: number
-    b_cells: number
-    new_count: number
-    removed_count: number
-  }
-  new: ComparisonCell[]
-  removed: ComparisonCell[]
-}
-
-// ---- Quality reports (issues #287, #292, #294) ----
-
-export interface QualityScorecard {
-  reconstruction_id: number
-  frame_counts: {
-    frames_used: number
-    frames_registered: number
-    registration_completeness_pct: number
-  }
-  density: {
-    gaussian_count: number | null
-  }
-  reprojection_error: {
-    mean_px: number | null
-    std_px: number | null
-    min_px: number | null
-    max_px: number | null
-    frame_count_with_data: number
-  }
-  quality: {
-    psnr_final: number | null
-    ssim_final: number | null
-    training_metric_points: number
-    psnr_trend?: {
-      start: number
-      end: number
-      delta: number
-    }
-    ssim_trend?: {
-      start: number
-      end: number
-      delta: number
-    }
-  }
-  coverage_gaps: {
-    total_gaps: number
-    by_level: Record<string, number>
-    voxel_size_m?: number
-  } | null
-}
-
-export interface GcpResidual {
-  label: string
-  dx_m: number
-  dy_m: number
-  dz_m: number
-  distance_3d_m: number
-}
-
-export interface GcpAccuracyPoint {
-  label?: string
-  x: number
-  y: number
-  z: number
-  reconstructed_x: number
-  reconstructed_y: number
-  reconstructed_z: number
-}
-
-export interface GcpAccuracyReport {
-  geo_transform: GeoTransform
-  point_count: number
-  rmse: {
-    x_m: number | null
-    y_m: number | null
-    z_m: number | null
-    "3d_m": number | null
-  }
-  residuals: GcpResidual[]
-}
-
-export interface CheckpointResult {
-  label: string
-  distance_m: number
-  nearest_surface_point: string
-}
-
-export interface CheckpointValidationReport {
-  available: boolean
-  source?: string
-  point_count?: number
-  surface_point_count?: number
-  summary?: {
-    min_m: number
-    max_m: number
-    mean_m: number
-    rmse_m: number
-  }
-  checkpoints?: CheckpointResult[]
-}
+export type CreatedShareLink = components['schemas']['CreatedShareLink']
+export type ShareLinkState = components['schemas']['ShareLinkState']
+export type AppSettings = components['schemas']['AppSettings']
+export type SessionProgress = components['schemas']['SessionProgress']
+export type ShareViewerPayload = components['schemas']['ShareViewerPayload']
+export type TargetAreaOut = components['schemas']['TargetAreaOut']
+export type PlanOut = components['schemas']['PlanOut']
+export type ValidationOut = components['schemas']['ValidationOut']
+export type SegmentOut = components['schemas']['SegmentOut']
+export type StartUploadResponse = components['schemas']['StartUploadResponse']
+export type CompleteUploadResponse = components['schemas']['CompleteUploadContract']
+export type LogEntryOut = components['schemas']['LogEntryOut']

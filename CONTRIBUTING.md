@@ -51,3 +51,23 @@ cd frontend && npm test -- --run
 ```
 
 Tests must assert clear, actionable failures for missing external tools instead of raw `FileNotFoundError`, traceback-only import failures, or silent hard imports.
+
+## API and export contracts
+
+Backend schemas are the source of frontend wire types. After a public schema change, run
+from the repository root:
+
+```bash
+uv run --frozen --no-sync python -m tools.openapi_snapshot
+npm --prefix frontend run api:generate
+uv run --frozen --no-sync pytest tests/contract
+npm --prefix frontend run api:check
+```
+
+Commit both `frontend/openapi.json` and `frontend/src/types/api.generated.ts`. The Python
+CI lane compares the snapshot with `app.openapi()`; the frontend lane regenerates types
+in memory and compares the checked-in file. Both checks fail on drift without changing files.
+`api.ts` preserves public frontend names as aliases; settings form types select editable
+fields from the generated response types. New dictionary response schemas use FastAPI
+`responses` metadata to preserve existing serialization. CSV column and GeoJSON property
+fixtures live in `tests/contract/fixtures/export_schemas.json`, including browser frame exports.

@@ -21,7 +21,7 @@ import type {
 } from '../../types/api'
 import { apiUrl } from '../../shared/api/client'
 
-interface TargetAreaOption { id: number; name: string }
+type TargetAreaOption = Pick<import('../../types/api').TargetAreaOut, 'id' | 'name'>
 
 // ---- hooks ----
 

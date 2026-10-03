@@ -11,6 +11,7 @@ function makeJob(overrides: Partial<Job> = {}): Job {
   return {
     id: 1,
     type: 'reconstruction',
+    effective_splat_settings: null,
     session_id: 7,
     source_session_ids: null,
     status: 'running_colmap',

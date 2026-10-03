@@ -9,7 +9,7 @@ import TabHeader from '../../shared/components/TabHeader'
 import EmptyState from '../../shared/components/EmptyState'
 import { useCoverageResult } from '../map/hooks/useCoverageResult'
 import { formatCoveragePct } from './coverageSummary'
-import type { Session, Image, Job, MeshStatus, OrthoStatus } from '../../types/api'
+import type { Session, Image, Job, MeshStatus, OrthoStatus, CreatedShareLink, ShareLinkState } from '../../types/api'
 
 
 // ---- inline hooks ----
@@ -59,26 +59,6 @@ function useOrthoStatus(reconstructionId: number) {
       return status === 'pending' || status === 'running' ? 2000 : false
     },
   })
-}
-
-/** POST .../share-link response: the only time the bearer token is returned. */
-interface CreatedShareLink {
-  share_token: string
-  share_link_id: number
-  reconstruction_id: number
-  session_id: number
-  expires_at: string
-  password_protected: boolean
-}
-
-/** Owner view of a share link from GET .../share-links; it never holds the token. */
-interface ShareLinkState {
-  id: number
-  reconstruction_id: number
-  expires_at: string
-  password_protected: boolean
-  revoked_at: string | null
-  created_at: string
 }
 
 /** Links a viewer can still open: not revoked and not expired. */
@@ -663,7 +643,7 @@ export default function ExportTab() {
               <dd style={{ color: 'var(--text)', margin: 0 }}>{session.usable_count}</dd>
 
               <dt style={{ color: 'var(--text-muted)' }}>Imported</dt>
-              <dd style={{ color: 'var(--text)', margin: 0 }}>{formatDate(session.imported_at)}</dd>
+              <dd style={{ color: 'var(--text)', margin: 0 }}>{formatDate(session.imported_at ?? '')}</dd>
 
               <dt style={{ color: 'var(--text-muted)' }}>Coverage</dt>
               <dd style={{ color: coverage?.coverage_pct != null ? 'var(--text)' : 'var(--text-muted)', margin: 0 }}>
