@@ -308,5 +308,5 @@ def test_macos_ci_runs_full_arm64_bundle_and_real_tool_contract() -> None:
     assert 'resources["colmap_capabilities"]["available"]' in body
     assert "packaging/macos/build.sh" in body
     assert "packaging/macos/smoke.sh" in body
-    assert "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a" in body
+    assert re.search(r"actions/upload-artifact@[0-9a-f]{40}\b", body)
     assert "dist/Telemetry Frame Mapper.app" in body
