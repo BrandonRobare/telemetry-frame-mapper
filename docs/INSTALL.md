@@ -119,7 +119,7 @@ From the **repo root** (paths in `config.yaml` resolve relative to it):
 uv run --no-sync python -m backend    # one API process: http://localhost:8000, docs: /docs
 ```
 
-First run creates `data/drone_mapping.db` (SQLite — set `DATABASE_URL` to use PostgreSQL instead). Optional mission parameters (camera FOV, overlap targets, CRS, directories) live in [config.yaml](../config.yaml).
+First run creates `data/drone_mapping.db` (SQLite, the only supported database backend — set `DATABASE_URL=sqlite:///path/to/drone_mapping.db` to choose a different file). Optional mission parameters (camera FOV, overlap targets, CRS, directories) live in [config.yaml](../config.yaml).
 
 ### Optional local PIN lock
 

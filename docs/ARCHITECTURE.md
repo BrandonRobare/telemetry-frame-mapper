@@ -26,7 +26,7 @@ A standalone geotagging tool (`drone-video-geotagger`). Pipeline order inside `c
 
 ### Backend — `backend/`
 
-FastAPI app (`backend.main:app`), SQLite via SQLAlchemy (PostgreSQL-swappable through `DATABASE_URL`), with Alembic migrations in `backend/db/migrations/` for schema upgrades.
+FastAPI app (`backend.main:app`), SQLite via SQLAlchemy (the only supported database backend; `DATABASE_URL` selects a SQLite file), with Alembic migrations in `backend/db/migrations/` for schema upgrades.
 
 - **Routers**: annotations, auto_import, comparisons, coverage, defects, export, flight_entries, flight_log, footprints, georeferencing, images, jobs, measurements, metrics, plans, projects, reconstruction, session_log, sessions, settings, share_links, srt, storage, system, target_areas, tiles, uploads, webodm — self-documented at `/docs`, which is the authoritative list.
 - **Key services:**

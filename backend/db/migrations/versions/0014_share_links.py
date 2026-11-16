@@ -33,7 +33,6 @@ def upgrade() -> None:
             sa.Column("created_at", sa.DateTime(), nullable=True),
             sa.ForeignKeyConstraint(["reconstruction_id"], ["reconstructions.id"]),
             sa.PrimaryKeyConstraint("id"),
-            sa.UniqueConstraint("token_hash"),
         )
         op.create_index(op.f("ix_share_links_id"), "share_links", ["id"], unique=False)
         op.create_index(
@@ -49,7 +48,6 @@ def upgrade() -> None:
             sa.Column("created_at", sa.DateTime(), nullable=True),
             sa.ForeignKeyConstraint(["share_link_id"], ["share_links.id"]),
             sa.PrimaryKeyConstraint("id"),
-            sa.UniqueConstraint("token_hash"),
         )
         op.create_index(
             op.f("ix_share_link_unlock_sessions_id"),

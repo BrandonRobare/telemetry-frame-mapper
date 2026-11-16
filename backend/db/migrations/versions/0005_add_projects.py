@@ -47,20 +47,9 @@ def upgrade() -> None:
     session_cols = {col["name"] for col in inspector.get_columns("sessions")}
     if "project_id" in session_cols:
         return
-    if bind.dialect.name == "sqlite":
-        # SQLite cannot ALTER a constraint onto an existing table, but it can
-        # add a column together with its REFERENCES clause: an enforced foreign
-        # key, without rebuilding a table that half the schema references.
-        op.execute("ALTER TABLE sessions ADD COLUMN project_id INTEGER REFERENCES projects (id)")
-    else:
-        op.add_column("sessions", sa.Column("project_id", sa.Integer(), nullable=True))
-        op.create_foreign_key(
-            "fk_sessions_project_id_projects",
-            "sessions",
-            "projects",
-            ["project_id"],
-            ["id"],
-        )
+    # SQLite can add a column with its REFERENCES clause without rebuilding
+    # a table that half the schema references.
+    op.execute("ALTER TABLE sessions ADD COLUMN project_id INTEGER REFERENCES projects (id)")
 
 
 def downgrade() -> None:

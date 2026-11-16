@@ -12,6 +12,7 @@ from alembic.config import Config
 from alembic.runtime.migration import MigrationContext
 from alembic.script import ScriptDirectory
 from sqlalchemy import create_engine, event, inspect
+from sqlalchemy.engine import make_url
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -35,6 +36,11 @@ def _default_database_url() -> str:
 
 
 DATABASE_URL = os.environ.get("DATABASE_URL", _default_database_url())
+if make_url(DATABASE_URL).get_backend_name() != "sqlite":
+    raise ValueError(
+        "DATABASE_URL must use SQLite; other database backends are unsupported. "
+        "Use sqlite:///path/to/drone_mapping.db."
+    )
 
 engine = create_engine(
     DATABASE_URL,

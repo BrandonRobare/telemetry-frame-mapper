@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import runpy
 import sqlite3
 from pathlib import Path
 
@@ -132,6 +133,12 @@ def _load_schema(engine, snapshot: str) -> None:
     raw_conn = sqlite3.connect(engine.url.database)
     try:
         raw_conn.executescript((DB_FIXTURES / snapshot).read_text(encoding="utf-8"))
+        if snapshot == "v2_0_2_schema.sql":
+            # The original dump omitted all indexes. Restore only captured release
+            # DDL, so new/missing current indexes still fail the schema contracts.
+            raw_conn.executescript(
+                (DB_FIXTURES / "v2_0_2_indexes.sql").read_text(encoding="utf-8")
+            )
         raw_conn.commit()
     finally:
         raw_conn.close()
@@ -199,31 +206,25 @@ def _fresh_schema(tmp_path) -> dict:
         engine.dispose()
 
 
-# Released schemas that must upgrade to head. The flag says whether the dump
-# carries its CREATE INDEX statements: v2.0.2 was captured tables-only, so the
-# indexes create_all() gave that install at creation time are missing from it.
+# v2.0.0–v2.0.3 share the v2.0.2 fresh schema; v2.0.4–v2.0.5
+# share the FK-index schema. v3.0.0 adds effective_splat_settings (0017).
 LEGACY_SNAPSHOTS = [
-    pytest.param("v1_0_0_schema.sql", True, id="v1.0.0-pre-projects"),
-    pytest.param("v2_0_2_schema.sql", False, id="v2.0.2"),
+    pytest.param("v1_0_0_schema.sql", id="v1.0.0-pre-projects"),
+    pytest.param("v2_0_2_schema.sql", id="v2.0.0-through-v2.0.3"),
+    pytest.param("v2_0_4_schema.sql", id="v2.0.4-through-v2.0.5"),
+    pytest.param("v3_0_0_schema.sql", id="v3.0.0"),
 ]
 
 
-@pytest.mark.parametrize(("snapshot", "has_indexes"), LEGACY_SNAPSHOTS)
-def test_legacy_upgrade_covers_every_model_column(isolated_engine, snapshot, has_indexes):
-    """An immutable released schema must upgrade to the complete current model schema."""
+@pytest.mark.parametrize("snapshot", LEGACY_SNAPSHOTS)
+def test_legacy_upgrade_covers_every_model_column(isolated_engine, tmp_path, snapshot):
+    """Each distinct shipped schema converges on the models and physical schema."""
     _load_schema(isolated_engine, snapshot)
 
     database_module.init_db()
 
-    inspector = sa.inspect(isolated_engine)
-    for table in database_module.Base.metadata.sorted_tables:
-        actual_columns = {column["name"] for column in inspector.get_columns(table.name)}
-        assert {column.name for column in table.columns} <= actual_columns
-
-    diff = _model_diff(isolated_engine)
-    if not has_indexes:
-        diff = [change for change in diff if change[0] != "add_index"]
-    assert diff == []
+    assert _model_diff(isolated_engine) == []
+    assert _physical_schema(isolated_engine) == _fresh_schema(tmp_path)
 
 
 class _Captured(logging.Handler):
@@ -277,11 +278,12 @@ def test_upgrade_reports_pre_existing_orphans_and_still_starts(
     assert "images -> sessions: 1" in migration_warnings[0]
 
 
-def test_pre_projects_upgrade_keeps_data_and_matches_a_fresh_install(
-    isolated_engine, tmp_path, migration_warnings
+@pytest.mark.parametrize("snapshot", LEGACY_SNAPSHOTS)
+def test_populated_release_upgrade_keeps_data_and_matches_a_fresh_install(
+    isolated_engine, tmp_path, migration_warnings, snapshot
 ):
-    """v1.0.0 predates projects; 0005 must add sessions.project_id as a real FK."""
-    _load_schema(isolated_engine, "v1_0_0_schema.sql")
+    """Ordinary upgrades preserve rows, counts and references in every release schema."""
+    _load_schema(isolated_engine, snapshot)
     with isolated_engine.begin() as conn:
         conn.exec_driver_sql("INSERT INTO sessions (id, name) VALUES (1, 'roof survey')")
         conn.exec_driver_sql(
@@ -292,13 +294,46 @@ def test_pre_projects_upgrade_keeps_data_and_matches_a_fresh_install(
             "INSERT INTO session_frame_selections (session_id, image_id) VALUES (1, 1)"
         )
         conn.exec_driver_sql("INSERT INTO reconstructions (id, session_id) VALUES (1, 1)")
+        if snapshot != "v1_0_0_schema.sql":
+            conn.exec_driver_sql("INSERT INTO projects (id, name) VALUES (1, 'roof')")
+            conn.exec_driver_sql("UPDATE sessions SET project_id = 1 WHERE id = 1")
+            conn.exec_driver_sql(
+                "INSERT INTO auto_import_records (fingerprint, source_path, session_id) "
+                "VALUES ('roof-fingerprint', '/card/roof', 1)"
+            )
+            conn.exec_driver_sql(
+                "INSERT INTO share_links (id, reconstruction_id, token_hash, expires_at) "
+                "VALUES (1, 1, 'roof-token', '2030-01-01')"
+            )
+            conn.exec_driver_sql(
+                "INSERT INTO share_link_unlock_sessions (share_link_id, token_hash, expires_at) "
+                "VALUES (1, 'roof-unlock', '2030-01-01')"
+            )
+        inspector = sa.inspect(conn)
+        original_columns = {
+            table: ", ".join(column["name"] for column in inspector.get_columns(table))
+            for table in inspector.get_table_names()
+            if table != "alembic_version" and not table.startswith("session_search")
+        }
+        before = {
+            table: conn.exec_driver_sql(f"SELECT {columns} FROM {table} ORDER BY rowid").all()
+            for table, columns in original_columns.items()
+        }
 
     database_module.init_db()
 
     assert migration_warnings == []  # clean data: the foreign-key check stays quiet
     assert _physical_schema(isolated_engine) == _fresh_schema(tmp_path)
+    assert _model_diff(isolated_engine) == []
     with isolated_engine.connect() as conn:
-        assert conn.exec_driver_sql("SELECT id, project_id FROM sessions").all() == [(1, None)]
+        for table, columns in original_columns.items():
+            assert conn.exec_driver_sql(
+                f"SELECT {columns} FROM {table} ORDER BY rowid"
+            ).all() == before[table], table
+        expected_project = None if snapshot == "v1_0_0_schema.sql" else 1
+        assert conn.exec_driver_sql("SELECT id, project_id FROM sessions").all() == [
+            (1, expected_project)
+        ]
         assert conn.exec_driver_sql("SELECT count(*) FROM images").scalar() == 1
         assert conn.exec_driver_sql("SELECT count(*) FROM session_frame_selections").scalar() == 1
         assert conn.exec_driver_sql("SELECT count(*) FROM reconstructions").scalar() == 1
@@ -361,10 +396,8 @@ def test_downgrade_to_0004_and_back_keeps_a_populated_database(isolated_engine, 
     command.upgrade(cfg, "head")
 
     assert _model_diff(isolated_engine) == []
-    fresh, actual = _fresh_schema(tmp_path), _physical_schema(isolated_engine)
-    # The tables 0005 and 0010 rebuild come back exactly as a fresh install has them.
-    for table in ("projects", "sessions", "reconstructions"):
-        assert actual[table] == fresh[table], table
+    # Includes 0013/0014 unique indexes versus redundant UNIQUE constraints.
+    assert _physical_schema(isolated_engine) == _fresh_schema(tmp_path)
     with isolated_engine.connect() as conn:
         assert conn.exec_driver_sql("SELECT id, project_id FROM sessions ORDER BY id").all() == [
             (1, None),
@@ -457,16 +490,22 @@ def test_legacy_upgrade_indexes_foreign_keys_and_replays_cleanly(isolated_engine
 
 
 def test_init_db_is_idempotent(isolated_engine):
+    """Already-stamped installs retain their populated tables and physical schema."""
     database_module.init_db()
-    # Calling init_db() a second time against the same, now-migrated database
-    # must not raise (this is the case most likely to break: re-running the
-    # baseline migration's add_column/create_table calls against a DB that
-    # already has them).
+    with isolated_engine.begin() as conn:
+        conn.exec_driver_sql("INSERT INTO sessions (id, name) VALUES (1, 'already at head')")
+        conn.exec_driver_sql(
+            "INSERT INTO auto_import_records (fingerprint, source_path, session_id) "
+            "VALUES ('existing-claim', '/card/existing', 1)"
+        )
+    before = _all_rows(Path(isolated_engine.url.database))
+    schema = _physical_schema(isolated_engine)
+
     database_module.init_db()
 
-    inspector = sa.inspect(isolated_engine)
-    assert "reconstructions" in inspector.get_table_names()
-    assert "alembic_version" in inspector.get_table_names()
+    assert _all_rows(Path(isolated_engine.url.database)) == before
+    assert _physical_schema(isolated_engine) == schema
+    assert database_module._at_migration_head(database_module._alembic_config())
 
 
 # --- foreign-key rules for deletes (#945) -----------------------------------
@@ -752,3 +791,32 @@ def test_failed_snapshot_blocks_startup_and_leaves_the_database_unmigrated(
     assert "No space left on device" in message
     # The migration must not have run behind the failed snapshot.
     assert _revision(db_path) == "0015"
+
+
+@pytest.mark.parametrize("url", ["sqlite://", "sqlite+pysqlite:///:memory:"])
+def test_database_url_accepts_sqlite(monkeypatch, url):
+    monkeypatch.setenv("DATABASE_URL", url)
+    namespace = runpy.run_path(str(Path(database_module.__file__)))
+    configured_engine = namespace["engine"]
+    try:
+        with configured_engine.connect() as conn:
+            assert conn.exec_driver_sql("PRAGMA foreign_keys").scalar() == 1
+    finally:
+        configured_engine.dispose()
+
+
+@pytest.mark.parametrize("url", [
+    "postgresql://user:secret@localhost/db",
+    "postgresql+psycopg://user:secret@localhost/db",
+    "mysql+pymysql://user:secret@localhost/db",
+])
+def test_database_url_rejects_other_backends_before_loading_drivers(monkeypatch, url):
+    monkeypatch.setenv("DATABASE_URL", url)
+
+    def unexpected_engine(*args, **kwargs):
+        pytest.fail("Non-SQLite configuration must fail before creating an engine")
+
+    monkeypatch.setattr(sa, "create_engine", unexpected_engine)
+    with pytest.raises(ValueError, match="DATABASE_URL.*SQLite") as error:
+        runpy.run_path(str(Path(database_module.__file__)))
+    assert "secret" not in str(error.value)
