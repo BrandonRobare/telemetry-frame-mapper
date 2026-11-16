@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from backend.db.models import CoverageRun, TargetArea
+from backend.db.models import CoverageRun, MissionPlan, TargetArea
 from backend.main import app
 
 
@@ -303,12 +303,17 @@ def test_validate_plan_not_found(client):
 
 
 def test_validate_plan_no_lanes(client):
-    """A plan without lanes_geojson should return 422."""
-    # Use the /target-areas create directly, then insert a plan without lanes via
-    # the generate endpoint (which always sets lanes). Instead we test the 404 path
-    # and verify the existing generate case above covers the positive path.
-    # The no-lanes edge case is covered in the unit tests.
-    pass  # covered by unit tests in test_mission_planner_ext.py
+    area = _make_target_area(client)
+    db = app.state.test_db_session
+    plan = MissionPlan(target_area_id=area["id"], lanes_geojson=None)
+    db.add(plan)
+    db.commit()
+    db.refresh(plan)
+
+    response = client.post(f"/plans/{plan.id}/validate")
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "Plan has no lane geometry"
 
 
 # ---------------------------------------------------------------------------

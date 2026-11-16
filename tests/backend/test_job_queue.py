@@ -9,6 +9,7 @@ import time
 from datetime import UTC, datetime
 
 import pytest
+from sqlalchemy.exc import OperationalError
 
 from backend.db.models import JobQueueEntry, Reconstruction
 from backend.db.models import Session as SessionModel
@@ -422,34 +423,46 @@ def test_handler_dispatched_by_worker(setup_test_db):
 
     handler_called = threading.Event()
     handler_args = {}
+    handler_thread = []
+    handler_name = f"test_dispatch_{id(handler_called)}"
+    original_handler = jq._handlers.get(handler_name)
 
     def test_handler(entry, db_session, cancel):
+        handler_thread.append(threading.current_thread())
         handler_args["entry_id"] = entry.id
         handler_args["target_id"] = entry.target_id
         mark_complete(entry.id)
         handler_called.set()
 
-    handler_name = f"test_dispatch_{id(handler_called)}"
-    register_handler(handler_name, test_handler)
+    try:
+        register_handler(handler_name, test_handler)
+        entry = enqueue(handler_name, rec.id)
+        jq._shutdown.clear()
+        start_worker()
 
-    entry = enqueue(handler_name, rec.id)
+        assert handler_called.wait(timeout=3), "Handler was not dispatched by worker"
+        assert handler_args["entry_id"] == entry.id
+        assert handler_args["target_id"] == rec.id
 
-    jq._shutdown.clear()
-    start_worker()
-
-    called = handler_called.wait(timeout=3)
-    assert called, "Handler was not dispatched by worker"
-    assert handler_args["entry_id"] == entry.id
-    assert handler_args["target_id"] == rec.id
-
-    shutdown_worker(timeout=1.0)
-
-    # Worker used its own session, so re-read.
-    # May be running if shutdown happened mid-job; that's fine —
-    # the key assertion is that the handler was called.
-    stored = db.query(JobQueueEntry).filter(JobQueueEntry.id == entry.id).first()
-    assert stored is not None
-    assert stored.status in ("running", "completed")
+        # Worker used its own session; read the committed terminal state afresh.
+        fresh_db = TestSessionLocal()
+        try:
+            stored = fresh_db.query(JobQueueEntry).filter(
+                JobQueueEntry.id == entry.id
+            ).one()
+            assert stored.status == "completed"
+        finally:
+            fresh_db.close()
+    finally:
+        shutdown_worker(timeout=5.0)
+        if handler_thread:
+            handler_thread[0].join(timeout=5)
+        handler_stopped = not handler_thread or not handler_thread[0].is_alive()
+        if original_handler is None:
+            jq._handlers.pop(handler_name, None)
+        else:
+            register_handler(handler_name, original_handler)
+        assert handler_stopped, "dispatched handler did not stop"
 
 
 # ---------------------------------------------------------------------------
@@ -593,38 +606,33 @@ def test_gpu_concurrency_is_honored(setup_test_db):
     db = app.state.test_db_session
     s = _make_session(db)
 
-    barrier = threading.Barrier(2, timeout=5)
+    release = threading.Event()
     begun = threading.Event()
+    handler_thread = []
+    original_handler = jq._handlers.get(RECONSTRUCTION)
 
     def slow_handler(entry, db_session, cancel):
+        handler_thread.append(threading.current_thread())
         begun.set()
-        try:
-            barrier.wait()
-        except threading.BrokenBarrierError:
-            pass
+        release.wait()
 
-    # Register a handler for RECONSTRUCTION (a GPU type) so concurrency is enforced
-    register_handler(RECONSTRUCTION, slow_handler)
-
+    entry_ids = []
     for _i in range(2):
         rec = Reconstruction(session_id=s.id, preset="quick", status="pending", frames_used=1)
         db.add(rec)
         db.commit()
         db.refresh(rec)
-        enqueue(RECONSTRUCTION, rec.id)
+        entry_ids.append(enqueue(RECONSTRUCTION, rec.id).id)
 
-    # Clean up RECONSTRUCTION handler after concurrency test
-    _orig_handler = None
     try:
-        _orig_handler = jq._handlers.get(RECONSTRUCTION)
         register_handler(RECONSTRUCTION, slow_handler)
         jq._shutdown.clear()
         start_worker()
-        begun.wait(timeout=3)
+        assert begun.wait(timeout=3), "GPU handler did not start"
 
         entries = (
             db.query(JobQueueEntry)
-            .filter(JobQueueEntry.job_type == RECONSTRUCTION)
+            .filter(JobQueueEntry.id.in_(entry_ids))
             .order_by(JobQueueEntry.id)
             .all()
         )
@@ -632,9 +640,17 @@ def test_gpu_concurrency_is_honored(setup_test_db):
         assert "running" in statuses, f"Expected a running job, got {statuses}"
         assert "pending" in statuses, f"Expected a pending job, got {statuses}"
     finally:
-        shutdown_worker(timeout=1.0)
-        if _orig_handler is not None:
-            register_handler(RECONSTRUCTION, _orig_handler)
+        jq._shutdown.set()
+        release.set()
+        shutdown_worker(timeout=5.0)
+        for thread in handler_thread:
+            thread.join(timeout=5)
+        handler_stopped = all(not thread.is_alive() for thread in handler_thread)
+        if original_handler is None:
+            jq._handlers.pop(RECONSTRUCTION, None)
+        else:
+            register_handler(RECONSTRUCTION, original_handler)
+        assert handler_stopped, "GPU handler did not stop"
     for e in entries:
         db.refresh(e)
         if e.status in ("running", "pending"):
@@ -661,26 +677,38 @@ def test_atomic_claim_lets_exactly_one_racer_win(setup_test_db):
 
     now = datetime.now(UTC)
     results: list[bool] = []
+    errors: list[Exception] = []
     results_lock = threading.Lock()
     start = threading.Barrier(6)
 
     def racer():
         start.wait()
-        won = False
+        deadline = time.monotonic() + 5
         # SQLite serialises writers; a loser may transiently see "database is
         # locked" before the winner commits, so retry until we get a verdict.
-        while True:
+        while time.monotonic() < deadline:
             session = TestSessionLocal()
             try:
                 won = jq._claim_pending(session, entry.id, now)
-                break
-            except Exception:
+            except OperationalError as exc:
                 session.rollback()
+                if "locked" not in str(exc).lower():
+                    with results_lock:
+                        errors.append(exc)
+                    return
                 time.sleep(0.01)
+                continue
+            except Exception as exc:
+                with results_lock:
+                    errors.append(exc)
+                return
             finally:
                 session.close()
+            with results_lock:
+                results.append(won)
+            return
         with results_lock:
-            results.append(won)
+            errors.append(TimeoutError("SQLite claim stayed locked past retry deadline"))
 
     threads = [threading.Thread(target=racer) for _ in range(6)]
     for t in threads:
@@ -688,6 +716,8 @@ def test_atomic_claim_lets_exactly_one_racer_win(setup_test_db):
     for t in threads:
         t.join(timeout=5)
 
+    assert all(not t.is_alive() for t in threads), "claim racers did not finish"
+    assert not errors, f"claim racers failed: {errors}"
     assert sum(results) == 1, f"exactly one claim must win, got {sum(results)}"
     stored = db.query(JobQueueEntry).filter(JobQueueEntry.id == entry.id).first()
     assert stored.status == "running"
